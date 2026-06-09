@@ -1,0 +1,4 @@
+cefas-data/
+/tmp/
+*.test
+*.out
