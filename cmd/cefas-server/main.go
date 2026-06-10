@@ -217,6 +217,11 @@ func main() {
 	apiSrv := api.New(db, cat)
 	if raftDB != nil {
 		apiSrv.AttachCluster(raftDB)
+		// Wire the CDC publisher + stream adapter so /v1/Stream
+		// and /v1/admin/snapshots have a source.
+		pub := craft.NewPublisher(2048)
+		raftDB.AttachPublisher(pub)
+		apiSrv.AttachChangeStream(&streamAdapter{raft: raftDB})
 	} else if mgr != nil {
 		// In multi-shard mode the cluster-status surface uses shard
 		// 0's raft handle as a representative; per-shard status is
@@ -275,6 +280,9 @@ func main() {
 		gsrvImpl := api.NewGRPCServer(db, cat, clu)
 		if mgr != nil {
 			gsrvImpl.AttachManager(mgr)
+		}
+		if raftDB != nil {
+			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
 		if *grpcReflection {
@@ -357,6 +365,56 @@ func buildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grp
 // parsePeers parses the "id1=addr1,id2=addr2" form used by both
 // -raft-peers and -raft-http-peers.
 func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
+
+// streamAdapter bridges the raft package's CDC types to the api
+// package's wire-agnostic shape. Lives here so neither package needs
+// to import the other.
+type streamAdapter struct {
+	raft *craft.DB
+}
+
+func (a *streamAdapter) SubscribeChanges(ctx context.Context) (<-chan api.ChangeEvent, func()) {
+	pub := a.raft.Publisher()
+	if pub == nil {
+		out := make(chan api.ChangeEvent)
+		close(out)
+		return out, func() {}
+	}
+	src, cancel := pub.Subscribe(ctx)
+	out := make(chan api.ChangeEvent, 64)
+	go func() {
+		defer close(out)
+		for ev := range src {
+			op := "PUT"
+			if ev.Op == craft.OpDelete {
+				op = "DELETE"
+			}
+			select {
+			case out <- api.ChangeEvent{RaftIndex: ev.RaftIndex, Op: op, Key: ev.Key, Value: ev.Value}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, cancel
+}
+
+func (a *streamAdapter) ListSnapshots() ([]api.SnapshotMetadata, error) {
+	metas, err := a.raft.ListSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.SnapshotMetadata, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, api.SnapshotMetadata{
+			ID:        m.ID,
+			Index:     m.Index,
+			Term:      m.Term,
+			SizeBytes: m.SizeBytes,
+		})
+	}
+	return out, nil
+}
 
 // overlayFlags pushes flag values into the cfg struct. Only non-zero
 // flag values overwrite — the YAML/env layer wins when the operator
