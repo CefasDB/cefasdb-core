@@ -11,7 +11,6 @@ package api
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +24,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -314,38 +314,38 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 
 type putItemRequest struct {
 	Table     string                    `json:"table"`
-	Item      map[string]jsonAttribute  `json:"item"`
+	Item      map[string]ddbjson.Attribute  `json:"item"`
 	Condition string                    `json:"condition,omitempty"`
-	Binds     map[string]jsonAttribute  `json:"binds,omitempty"`
+	Binds     map[string]ddbjson.Attribute  `json:"binds,omitempty"`
 }
 
 type getItemRequest struct {
 	Table       string                   `json:"table"`
-	Key         map[string]jsonAttribute `json:"key"`
+	Key         map[string]ddbjson.Attribute `json:"key"`
 	Consistency string                   `json:"consistency,omitempty"` // "" or "eventual" → local; "strong" → leader + barrier
 }
 
 type deleteItemRequest struct {
 	Table     string                   `json:"table"`
-	Key       map[string]jsonAttribute `json:"key"`
+	Key       map[string]ddbjson.Attribute `json:"key"`
 	Condition string                   `json:"condition,omitempty"`
-	Binds     map[string]jsonAttribute `json:"binds,omitempty"`
+	Binds     map[string]ddbjson.Attribute `json:"binds,omitempty"`
 }
 
 type queryRequest struct {
 	Table       string         `json:"table"`
 	IndexName   string         `json:"indexName,omitempty"`
-	PKValue     jsonAttribute  `json:"pkValue"`
-	SKLow       *jsonAttribute `json:"skLow,omitempty"`
-	SKHigh      *jsonAttribute `json:"skHigh,omitempty"`
+	PKValue     ddbjson.Attribute  `json:"pkValue"`
+	SKLow       *ddbjson.Attribute `json:"skLow,omitempty"`
+	SKHigh      *ddbjson.Attribute `json:"skHigh,omitempty"`
 	Limit       int            `json:"limit,omitempty"`
 	Consistency string         `json:"consistency,omitempty"`
 }
 
 type batchWriteOp struct {
 	Op   string                   `json:"op"` // "put" | "delete"
-	Item map[string]jsonAttribute `json:"item,omitempty"`
-	Key  map[string]jsonAttribute `json:"key,omitempty"`
+	Item map[string]ddbjson.Attribute `json:"item,omitempty"`
+	Key  map[string]ddbjson.Attribute `json:"key,omitempty"`
 }
 
 type batchWriteRequest struct {
@@ -355,7 +355,7 @@ type batchWriteRequest struct {
 
 type batchGetRequest struct {
 	Table string                     `json:"table"`
-	Keys  []map[string]jsonAttribute `json:"keys"`
+	Keys  []map[string]ddbjson.Attribute `json:"keys"`
 }
 
 func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
@@ -378,12 +378,12 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	item, err := decodeItem(req.Item)
+	item, err := ddbjson.DecodeItem(req.Item)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	binds, err := decodeBinds(req.Binds)
+	binds, err := ddbjson.DecodeBinds(req.Binds)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
 		return
@@ -424,7 +424,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	keyAttrs, err := decodeItem(req.Key)
+	keyAttrs, err := ddbjson.DecodeItem(req.Key)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -445,7 +445,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true,
-		"item":  encodeItem(item),
+		"item":  ddbjson.EncodeItem(item),
 	})
 }
 
@@ -469,12 +469,12 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	keyAttrs, err := decodeItem(req.Key)
+	keyAttrs, err := ddbjson.DecodeItem(req.Key)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	binds, err := decodeBinds(req.Binds)
+	binds, err := ddbjson.DecodeBinds(req.Binds)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
 		return
@@ -515,21 +515,21 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	pkVal, err := req.PKValue.toAttr()
+	pkVal, err := req.PKValue.ToAttr()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
 		return
 	}
 	var lo, hi types.AttributeValue
 	if req.SKLow != nil {
-		lo, err = req.SKLow.toAttr()
+		lo, err = req.SKLow.ToAttr()
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("skLow: %w", err))
 			return
 		}
 	}
 	if req.SKHigh != nil {
-		hi, err = req.SKHigh.toAttr()
+		hi, err = req.SKHigh.ToAttr()
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("skHigh: %w", err))
 			return
@@ -559,9 +559,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]map[string]jsonAttribute, 0, len(items))
+	out := make([]map[string]ddbjson.Attribute, 0, len(items))
 	for _, it := range items {
-		out = append(out, encodeItem(it))
+		out = append(out, ddbjson.EncodeItem(it))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -591,14 +591,14 @@ func (s *Server) handleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
 	for i, raw := range req.Ops {
 		switch raw.Op {
 		case "put":
-			item, err := decodeItem(raw.Item)
+			item, err := ddbjson.DecodeItem(raw.Item)
 			if err != nil {
 				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
 				return
 			}
 			ops = append(ops, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
 		case "delete":
-			keyAttrs, err := decodeItem(raw.Key)
+			keyAttrs, err := ddbjson.DecodeItem(raw.Key)
 			if err != nil {
 				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
 				return
@@ -638,7 +638,7 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 	}
 	keys := make([]types.Item, 0, len(req.Keys))
 	for i, raw := range req.Keys {
-		k, err := decodeItem(raw)
+		k, err := ddbjson.DecodeItem(raw)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("key %d: %w", i, err))
 			return
@@ -650,13 +650,13 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	out := make([]map[string]jsonAttribute, len(items))
+	out := make([]map[string]ddbjson.Attribute, len(items))
 	for i, it := range items {
 		if it == nil {
 			out[i] = nil
 			continue
 		}
-		out[i] = encodeItem(it)
+		out[i] = ddbjson.EncodeItem(it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -698,10 +698,10 @@ func (s *Server) handleSql(w http.ResponseWriter, r *http.Request) {
 	}
 	out := struct {
 		AffectedRows int                              `json:"affectedRows"`
-		Rows         []map[string]jsonAttribute       `json:"rows,omitempty"`
+		Rows         []map[string]ddbjson.Attribute       `json:"rows,omitempty"`
 	}{AffectedRows: res.AffectedRows}
 	for _, row := range res.Rows {
-		out.Rows = append(out.Rows, encodeItem(row))
+		out.Rows = append(out.Rows, ddbjson.EncodeItem(row))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -788,10 +788,10 @@ func (s *Server) handlePartiQL(w http.ResponseWriter, r *http.Request) {
 	}
 	out := struct {
 		AffectedRows int                        `json:"affectedRows"`
-		Rows         []map[string]jsonAttribute `json:"rows,omitempty"`
+		Rows         []map[string]ddbjson.Attribute `json:"rows,omitempty"`
 	}{AffectedRows: res.AffectedRows}
 	for _, row := range res.Rows {
-		out.Rows = append(out.Rows, encodeItem(row))
+		out.Rows = append(out.Rows, ddbjson.EncodeItem(row))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -876,9 +876,9 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, status, err)
 		return
 	}
-	out := make([]map[string]jsonAttribute, 0, len(items))
+	out := make([]map[string]ddbjson.Attribute, 0, len(items))
 	for _, it := range items {
-		out = append(out, encodeItem(it))
+		out = append(out, ddbjson.EncodeItem(it))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -1161,21 +1161,6 @@ func pkBytesFromItem(item types.Item, ks types.KeySchema) ([]byte, error) {
 	return storage.AttrCanonicalBytes(pkAttr)
 }
 
-func decodeBinds(in map[string]jsonAttribute) (map[string]types.AttributeValue, error) {
-	if in == nil {
-		return nil, nil
-	}
-	out := make(map[string]types.AttributeValue, len(in))
-	for k, a := range in {
-		v, err := a.toAttr()
-		if err != nil {
-			return nil, fmt.Errorf("bind :%s: %w", k, err)
-		}
-		out[k] = v
-	}
-	return out, nil
-}
-
 // ---------- helpers ----------
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -1230,134 +1215,3 @@ func writeWriteErr(w http.ResponseWriter, r *http.Request, err error) {
 	writeErr(w, mapWriteErr(err), err)
 }
 
-// jsonAttribute is the wire form of an AttributeValue. Exactly one of
-// the tagged fields is set on the wire — mirrors DynamoDB JSON.
-type jsonAttribute struct {
-	S    *string                   `json:"S,omitempty"`
-	N    *string                   `json:"N,omitempty"`
-	B    *string                   `json:"B,omitempty"` // base64
-	BOOL *bool                     `json:"BOOL,omitempty"`
-	NULL *bool                     `json:"NULL,omitempty"`
-	SS   []string                  `json:"SS,omitempty"`
-	NS   []string                  `json:"NS,omitempty"`
-	BS   []string                  `json:"BS,omitempty"` // base64 each
-	L    []jsonAttribute           `json:"L,omitempty"`
-	M    map[string]jsonAttribute  `json:"M,omitempty"`
-}
-
-func (a jsonAttribute) toAttr() (types.AttributeValue, error) {
-	switch {
-	case a.S != nil:
-		return types.AttributeValue{T: types.AttrS, S: *a.S}, nil
-	case a.N != nil:
-		return types.AttributeValue{T: types.AttrN, N: *a.N}, nil
-	case a.B != nil:
-		raw, err := base64.StdEncoding.DecodeString(*a.B)
-		if err != nil {
-			return types.AttributeValue{}, fmt.Errorf("invalid base64 in B: %w", err)
-		}
-		return types.AttributeValue{T: types.AttrB, B: raw}, nil
-	case a.BOOL != nil:
-		return types.AttributeValue{T: types.AttrBOOL, BOOL: *a.BOOL}, nil
-	case a.NULL != nil && *a.NULL:
-		return types.AttributeValue{T: types.AttrNull}, nil
-	case a.SS != nil:
-		return types.AttributeValue{T: types.AttrSS, SS: a.SS}, nil
-	case a.NS != nil:
-		return types.AttributeValue{T: types.AttrNS, NS: a.NS}, nil
-	case a.BS != nil:
-		bs := make([][]byte, len(a.BS))
-		for i, s := range a.BS {
-			raw, err := base64.StdEncoding.DecodeString(s)
-			if err != nil {
-				return types.AttributeValue{}, fmt.Errorf("invalid base64 in BS[%d]: %w", i, err)
-			}
-			bs[i] = raw
-		}
-		return types.AttributeValue{T: types.AttrBS, BS: bs}, nil
-	case a.L != nil:
-		list := make([]types.AttributeValue, len(a.L))
-		for i, av := range a.L {
-			v, err := av.toAttr()
-			if err != nil {
-				return types.AttributeValue{}, fmt.Errorf("L[%d]: %w", i, err)
-			}
-			list[i] = v
-		}
-		return types.AttributeValue{T: types.AttrL, L: list}, nil
-	case a.M != nil:
-		m := make(map[string]types.AttributeValue, len(a.M))
-		for k, av := range a.M {
-			v, err := av.toAttr()
-			if err != nil {
-				return types.AttributeValue{}, fmt.Errorf("M[%q]: %w", k, err)
-			}
-			m[k] = v
-		}
-		return types.AttributeValue{T: types.AttrM, M: m}, nil
-	}
-	return types.AttributeValue{}, fmt.Errorf("attribute value has no field set")
-}
-
-func fromAttr(av types.AttributeValue) jsonAttribute {
-	switch av.T {
-	case types.AttrNull:
-		t := true
-		return jsonAttribute{NULL: &t}
-	case types.AttrS:
-		s := av.S
-		return jsonAttribute{S: &s}
-	case types.AttrN:
-		s := av.N
-		return jsonAttribute{N: &s}
-	case types.AttrB:
-		s := base64.StdEncoding.EncodeToString(av.B)
-		return jsonAttribute{B: &s}
-	case types.AttrBOOL:
-		b := av.BOOL
-		return jsonAttribute{BOOL: &b}
-	case types.AttrSS:
-		return jsonAttribute{SS: av.SS}
-	case types.AttrNS:
-		return jsonAttribute{NS: av.NS}
-	case types.AttrBS:
-		bs := make([]string, len(av.BS))
-		for i, b := range av.BS {
-			bs[i] = base64.StdEncoding.EncodeToString(b)
-		}
-		return jsonAttribute{BS: bs}
-	case types.AttrL:
-		list := make([]jsonAttribute, len(av.L))
-		for i, v := range av.L {
-			list[i] = fromAttr(v)
-		}
-		return jsonAttribute{L: list}
-	case types.AttrM:
-		m := make(map[string]jsonAttribute, len(av.M))
-		for k, v := range av.M {
-			m[k] = fromAttr(v)
-		}
-		return jsonAttribute{M: m}
-	}
-	return jsonAttribute{}
-}
-
-func decodeItem(in map[string]jsonAttribute) (types.Item, error) {
-	out := make(types.Item, len(in))
-	for k, a := range in {
-		v, err := a.toAttr()
-		if err != nil {
-			return nil, fmt.Errorf("attribute %q: %w", k, err)
-		}
-		out[k] = v
-	}
-	return out, nil
-}
-
-func encodeItem(in types.Item) map[string]jsonAttribute {
-	out := make(map[string]jsonAttribute, len(in))
-	for k, v := range in {
-		out[k] = fromAttr(v)
-	}
-	return out
-}
