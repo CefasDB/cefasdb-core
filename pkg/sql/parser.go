@@ -231,7 +231,37 @@ func (p *parser) parseInsert() (*InsertStmt, error) {
 	if len(stmt.Values) != len(stmt.Columns) {
 		return nil, fmt.Errorf("INSERT column/value count mismatch: %d cols vs %d values", len(stmt.Columns), len(stmt.Values))
 	}
+	if cond, err := p.parseIfTail(); err != nil {
+		return nil, err
+	} else if cond != nil {
+		stmt.If = cond
+	}
 	return stmt, nil
+}
+
+// parseIfTail accepts an optional `IF <expr>` suffix on DML
+// statements. Returns nil, nil when the keyword is absent so the
+// caller can pass nil through to the storage condition.
+func (p *parser) parseIfTail() (Expr, error) {
+	if p.peek().Kind != tIf {
+		return nil, nil
+	}
+	p.consume()
+	// Special case: "IF NOT EXISTS" shortcut for
+	// attribute_not_exists(<pk>). The planner refines which column
+	// it means when it has the table descriptor in hand.
+	if p.peek().Kind == tNot {
+		p.consume()
+		if _, err := p.expect(tExists, "EXISTS"); err != nil {
+			return nil, err
+		}
+		return &FuncCall{Name: "ATTRIBUTE_NOT_EXISTS", Args: []Expr{&ColumnRef{Name: "*"}}}, nil
+	}
+	if p.peek().Kind == tExists {
+		p.consume()
+		return &FuncCall{Name: "ATTRIBUTE_EXISTS", Args: []Expr{&ColumnRef{Name: "*"}}}, nil
+	}
+	return p.parseExpr()
 }
 
 // ---------- UPDATE ----------
@@ -242,23 +272,64 @@ func (p *parser) parseUpdate() (*UpdateStmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := p.expect(tSet, "SET"); err != nil {
-		return nil, err
-	}
 	stmt := &UpdateStmt{Table: tn.Lit}
 	for {
-		col, err := p.expect(tIdent, "column name")
-		if err != nil {
-			return nil, err
+		switch p.peek().Kind {
+		case tRemove:
+			p.consume()
+			for {
+				col, err := p.expect(tIdent, "column name after REMOVE")
+				if err != nil {
+					return nil, err
+				}
+				stmt.Assignments = append(stmt.Assignments, Assignment{Kind: AssignRemove, Column: col.Lit})
+				if p.peek().Kind == tComma {
+					p.consume()
+					continue
+				}
+				break
+			}
+		case tAdd:
+			p.consume()
+			col, err := p.expect(tIdent, "column name after ADD")
+			if err != nil {
+				return nil, err
+			}
+			v, err := p.parseValue()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Assignments = append(stmt.Assignments, Assignment{Kind: AssignAdd, Column: col.Lit, Value: v})
+		case tDelete:
+			p.consume()
+			col, err := p.expect(tIdent, "column name after DELETE")
+			if err != nil {
+				return nil, err
+			}
+			v, err := p.parseValue()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Assignments = append(stmt.Assignments, Assignment{Kind: AssignDelete, Column: col.Lit, Value: v})
+		default:
+			// SET <col> = <expr>. SET keyword is optional — DynamoDB
+			// drops it after the first action and we follow suit.
+			if p.peek().Kind == tSet {
+				p.consume()
+			}
+			col, err := p.expect(tIdent, "column name")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(tEq, "="); err != nil {
+				return nil, err
+			}
+			v, err := p.parseAssignValue(col.Lit)
+			if err != nil {
+				return nil, err
+			}
+			stmt.Assignments = append(stmt.Assignments, Assignment{Kind: AssignSet, Column: col.Lit, Value: v})
 		}
-		if _, err := p.expect(tEq, "="); err != nil {
-			return nil, err
-		}
-		v, err := p.parseValue()
-		if err != nil {
-			return nil, err
-		}
-		stmt.Assignments = append(stmt.Assignments, Assignment{Column: col.Lit, Value: v})
 		if p.peek().Kind == tComma {
 			p.consume()
 			continue
@@ -274,7 +345,48 @@ func (p *parser) parseUpdate() (*UpdateStmt, error) {
 		return nil, err
 	}
 	stmt.Where = w
+	if cond, err := p.parseIfTail(); err != nil {
+		return nil, err
+	} else if cond != nil {
+		stmt.If = cond
+	}
 	return stmt, nil
+}
+
+// parseAssignValue reads the right-hand side of a SET assignment.
+// Beyond plain literals + function calls (inherited from
+// parseValue), it accepts `col + N` / `col - N` arithmetic so the
+// caller can write `SET score = score + 1` straight off DynamoDB
+// PartiQL. The first token has already been consumed by the parent
+// statement parser; we only emit the additional grammar here.
+func (p *parser) parseAssignValue(targetCol string) (Expr, error) {
+	v, err := p.parseValue()
+	if err != nil {
+		return nil, err
+	}
+	// `col + value` arithmetic only kicks in when the left operand is
+	// a bare column reference. Anything else stays a plain Set value.
+	if _, isCol := v.(*ColumnRef); !isCol {
+		return v, nil
+	}
+	switch p.peek().Kind {
+	case tPlus:
+		p.consume()
+		rhs, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		return &ArithExpr{Op: ArithAdd, Left: v, Right: rhs}, nil
+	case tMinus:
+		p.consume()
+		rhs, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		return &ArithExpr{Op: ArithSub, Left: v, Right: rhs}, nil
+	}
+	_ = targetCol
+	return v, nil
 }
 
 // ---------- DELETE ----------
@@ -296,7 +408,13 @@ func (p *parser) parseDelete() (*DeleteStmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DeleteStmt{Table: tn.Lit, Where: w}, nil
+	stmt := &DeleteStmt{Table: tn.Lit, Where: w}
+	if cond, err := p.parseIfTail(); err != nil {
+		return nil, err
+	} else if cond != nil {
+		stmt.If = cond
+	}
+	return stmt, nil
 }
 
 // ---------- CREATE TABLE ----------

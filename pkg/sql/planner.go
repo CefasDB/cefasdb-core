@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	_ "unsafe" // for go:linkname placeholder; kept inert today
+
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -68,7 +70,23 @@ func planInsert(s *InsertStmt, cat Catalog) (*PlanPutItem, error) {
 			return nil, fmt.Errorf("INSERT missing SK column %q", td.KeySchema.SK)
 		}
 	}
-	return &PlanPutItem{Table: s.Table, Item: item, Descriptor: td}, nil
+	// Refine IF NOT EXISTS — the parser stamped ColumnRef "*" because
+	// it hadn't seen the schema yet; the planner picks the PK column
+	// so attribute_not_exists evaluates correctly on the snapshot
+	// prior item.
+	cond := refinePKShortcut(s.If, td.KeySchema.PK)
+	return &PlanPutItem{Table: s.Table, Item: item, Descriptor: td, If: cond}, nil
+}
+
+// refinePKShortcut replaces the placeholder ColumnRef "*" in an
+// "IF NOT EXISTS" / "IF EXISTS" shortcut with the table's PK column.
+func refinePKShortcut(e Expr, pk string) Expr {
+	if fn, ok := e.(*FuncCall); ok && len(fn.Args) == 1 {
+		if cr, isCol := fn.Args[0].(*ColumnRef); isCol && cr.Name == "*" {
+			cr.Name = pk
+		}
+	}
+	return e
 }
 
 func planUpdate(s *UpdateStmt, cat Catalog) (*PlanUpdate, error) {
@@ -80,18 +98,13 @@ func planUpdate(s *UpdateStmt, cat Catalog) (*PlanUpdate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("UPDATE: %w", err)
 	}
-	assigns := make(map[string]types.AttributeValue, len(s.Assignments))
 	for _, a := range s.Assignments {
 		if a.Column == td.KeySchema.PK || a.Column == td.KeySchema.SK {
 			return nil, fmt.Errorf("UPDATE cannot modify key column %q", a.Column)
 		}
-		v, err := evalLiteral(a.Value)
-		if err != nil {
-			return nil, fmt.Errorf("UPDATE SET %q: %w", a.Column, err)
-		}
-		assigns[a.Column] = v
 	}
-	return &PlanUpdate{Table: s.Table, Key: key, Assignments: assigns, Descriptor: td}, nil
+	cond := refinePKShortcut(s.If, td.KeySchema.PK)
+	return &PlanUpdate{Table: s.Table, Key: key, Actions: s.Assignments, Descriptor: td, If: cond}, nil
 }
 
 func planDelete(s *DeleteStmt, cat Catalog) (*PlanDelete, error) {
@@ -103,7 +116,8 @@ func planDelete(s *DeleteStmt, cat Catalog) (*PlanDelete, error) {
 	if err != nil {
 		return nil, fmt.Errorf("DELETE: %w", err)
 	}
-	return &PlanDelete{Table: s.Table, Key: key, Descriptor: td}, nil
+	cond := refinePKShortcut(s.If, td.KeySchema.PK)
+	return &PlanDelete{Table: s.Table, Key: key, Descriptor: td, If: cond}, nil
 }
 
 // planSelect picks among GetItem, Query (primary or GSI), and
@@ -139,15 +153,15 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		skAttr = gsi.KeySchema.SK
 	}
 
-	pkVal, skLow, skHigh, hasExactSK, err := extractAccessPath(s.Where, pkAttr, skAttr)
+	pkVal, skLow, skHigh, hasExactSK, postFilter, err := extractAccessPath(s.Where, pkAttr, skAttr)
 	if err != nil {
 		return nil, err
 	}
 
-	// Single-row GetItem when PK + exact SK and no other constraints.
-	if s.IndexName == "" && hasExactSK && s.Limit == 0 && s.OrderBy == "" {
+	// Single-row GetItem when PK + exact SK and no post-filter / no
+	// LIMIT / no ORDER BY / no GSI.
+	if s.IndexName == "" && hasExactSK && s.Limit == 0 && s.OrderBy == "" && postFilter == nil {
 		key := types.Item{pkAttr: pkVal, skAttr: skLow}
-		// Verify nothing else in WHERE that we don't model.
 		if isMinimalRowPredicate(s.Where, pkAttr, skAttr) {
 			return &PlanGetItem{Table: s.Table, Key: key}, nil
 		}
@@ -167,25 +181,32 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		Project:    s.Columns,
 		OrderDesc:  s.OrderDesc,
 		Descriptor: td,
+		PostFilter: postFilter,
 	}, nil
 }
 
 // ---------- WHERE-clause analysis ----------
 
-// extractAccessPath walks the WHERE tree and extracts:
-//   - pkVal: required equality on the PK attribute
-//   - skLow / skHigh: optional SK range (closed lower / open upper),
-//     or both equal to the same value when SK is also pinned
-//   - hasExactSK: true when the predicate was sk = literal
+// extractAccessPath walks the WHERE tree, peels off predicates the
+// storage layer can consume (PK equality + SK range), and returns the
+// remainder as a post-filter expression the executor evaluates on
+// each candidate row.
 //
-// Anything beyond `pk = lit [AND sk <op> lit]` is rejected — the
-// executor doesn't run client-side filters in v1.
-func extractAccessPath(where Expr, pkAttr, skAttr string) (pkVal, skLow, skHigh types.AttributeValue, hasExactSK bool, err error) {
+//   - pkVal: required equality on the PK attribute
+//   - skLow / skHigh: optional SK range
+//   - hasExactSK: true when the predicate was sk = literal
+//   - postFilter: AND of every clause we couldn't push down (nil if all
+//     clauses were consumed)
+//
+// begins_with(sk, 'pref') is pushed down to a SK prefix range when it
+// is the sole SK predicate; otherwise it stays in the post-filter.
+func extractAccessPath(where Expr, pkAttr, skAttr string) (pkVal, skLow, skHigh types.AttributeValue, hasExactSK bool, postFilter Expr, err error) {
 	if where == nil {
-		return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-			errors.New("SELECT without WHERE would scan the whole table; refusing")
+		err = errors.New("SELECT without WHERE would scan the whole table; refusing")
+		return
 	}
 	clauses := flattenAnd(where)
+	var residual []Expr
 	for _, c := range clauses {
 		switch e := c.(type) {
 		case *BinaryExpr:
@@ -194,11 +215,11 @@ func extractAccessPath(where Expr, pkAttr, skAttr string) (pkVal, skLow, skHigh 
 				pkVal = lit
 				continue
 			}
-			// SK comparison.
 			if col == skAttr && skAttr != "" {
-				v, err := evalLiteral(litFromOperand(e, col))
-				if err != nil {
-					return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false, err
+				v, errLit := evalLiteral(litFromOperand(e, col))
+				if errLit != nil {
+					err = errLit
+					return
 				}
 				switch e.Op {
 				case BinEq:
@@ -212,39 +233,58 @@ func extractAccessPath(where Expr, pkAttr, skAttr string) (pkVal, skLow, skHigh 
 				case BinLt:
 					skHigh = v
 				default:
-					return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-						fmt.Errorf("unsupported SK operator")
+					residual = append(residual, c)
 				}
 				continue
 			}
-			return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-				fmt.Errorf("WHERE references unsupported column %q for table key (%s, %s)", col, pkAttr, skAttr)
+			// Non-key column predicate: keep as post-filter.
+			residual = append(residual, c)
 		case *BetweenExpr:
 			cr, isCol := e.Value.(*ColumnRef)
-			if !isCol || cr.Name != skAttr {
-				return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-					fmt.Errorf("BETWEEN only supported on SK column")
+			if isCol && cr.Name == skAttr {
+				lo, errLit := evalLiteral(e.Lo)
+				if errLit != nil {
+					err = errLit
+					return
+				}
+				hi, errLit := evalLiteral(e.Hi)
+				if errLit != nil {
+					err = errLit
+					return
+				}
+				skLow = lo
+				skHigh = nextLex(hi)
+				continue
 			}
-			lo, err := evalLiteral(e.Lo)
-			if err != nil {
-				return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false, err
+			residual = append(residual, c)
+		case *FuncCall:
+			// begins_with(<sk>, '<pref>') as the only SK predicate
+			// pushes down. Other functions become post-filters.
+			if strings.EqualFold(e.Name, "BEGINS_WITH") && len(e.Args) == 2 {
+				if cr, isCol := e.Args[0].(*ColumnRef); isCol && cr.Name == skAttr {
+					if lit, isLit := e.Args[1].(*Literal); isLit && lit.Kind == LitString {
+						skLow = types.AttributeValue{T: types.AttrS, S: lit.Value}
+						skHigh = types.AttributeValue{T: types.AttrS, S: lit.Value + "\xff"}
+						continue
+					}
+				}
 			}
-			hi, err := evalLiteral(e.Hi)
-			if err != nil {
-				return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false, err
-			}
-			skLow = lo
-			skHigh = nextLex(hi) // inclusive on both ends per SQL convention
+			residual = append(residual, c)
 		default:
-			return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-				fmt.Errorf("unsupported predicate clause %T", c)
+			residual = append(residual, c)
 		}
 	}
 	if pkVal.T == types.AttrNull {
-		return types.AttributeValue{}, types.AttributeValue{}, types.AttributeValue{}, false,
-			fmt.Errorf("WHERE must equate %q to a value", pkAttr)
+		err = fmt.Errorf("WHERE must equate %q to a value", pkAttr)
+		return
 	}
-	return pkVal, skLow, skHigh, hasExactSK, nil
+	if len(residual) > 0 {
+		postFilter = residual[0]
+		for i := 1; i < len(residual); i++ {
+			postFilter = &BinaryExpr{Op: BinAnd, Left: postFilter, Right: residual[i]}
+		}
+	}
+	return
 }
 
 func extractColEqLit(e *BinaryExpr, pkAttr string) (col string, val types.AttributeValue, ok bool) {

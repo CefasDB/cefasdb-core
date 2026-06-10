@@ -40,6 +40,11 @@ type PlanQuery struct {
 	Project    []string // nil → all attributes
 	OrderDesc  bool
 	Descriptor types.TableDescriptor // resolved by planner so executor doesn't reread it
+	// PostFilter, when non-nil, is evaluated against each row the
+	// iterator yields. Used for predicates the planner can't push
+	// into the storage range scan (begins_with on non-key cols,
+	// contains, attribute_*, size).
+	PostFilter Expr
 }
 
 // PlanSpatial is a geohash / Z-order / radius scan.
@@ -51,29 +56,32 @@ type PlanSpatial struct {
 	Descriptor types.TableDescriptor
 }
 
-// PlanPutItem is INSERT INTO ... VALUES (...).
+// PlanPutItem is INSERT INTO ... VALUES (...) [IF expr].
 type PlanPutItem struct {
 	Table      string
 	Item       types.Item
 	Descriptor types.TableDescriptor
+	If         Expr // optional; nil for unconditional
 }
 
-// PlanUpdate is the single-item UPDATE path. The planner resolves the
-// item identity from the WHERE clause and packages the assignment
-// delta — the executor reads the prior row and merges the changes
-// inside a single storage.PutItemWith call.
+// PlanUpdate is the single-item UPDATE path. The executor reads the
+// prior row, applies each Action in order, and writes the merged
+// result back through storage.PutItemWith so GSI + LSI + spatial +
+// TTL maintenance stay atomic.
 type PlanUpdate struct {
-	Table       string
-	Key         types.Item            // PK [+ SK] of the row to update
-	Assignments map[string]types.AttributeValue
-	Descriptor  types.TableDescriptor
+	Table      string
+	Key        types.Item // PK [+ SK] of the row to update
+	Actions    []Assignment
+	Descriptor types.TableDescriptor
+	If         Expr
 }
 
-// PlanDelete is DELETE WHERE pk = ... [AND sk = ...].
+// PlanDelete is DELETE WHERE pk = ... [AND sk = ...] [IF expr].
 type PlanDelete struct {
 	Table      string
 	Key        types.Item
 	Descriptor types.TableDescriptor
+	If         Expr
 }
 
 func (*PlanCreateTable) plan() {}
