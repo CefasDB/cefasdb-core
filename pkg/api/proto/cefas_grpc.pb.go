@@ -47,6 +47,8 @@ const (
 	Cefas_RemoveServer_FullMethodName       = "/cefas.v1.Cefas/RemoveServer"
 	Cefas_StreamChanges_FullMethodName      = "/cefas.v1.Cefas/StreamChanges"
 	Cefas_ListSnapshots_FullMethodName      = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_CreateBackup_FullMethodName       = "/cefas.v1.Cefas/CreateBackup"
+	Cefas_ListBackups_FullMethodName        = "/cefas.v1.Cefas/ListBackups"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -89,6 +91,10 @@ type CefasClient interface {
 	StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error)
 	// Snapshot administration (PITR foundation).
 	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
+	// Admin-named backups (pebble.Checkpoint of the live keyspace,
+	// catalogued under cefas/admin/backups/<name>).
+	CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error)
+	ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error)
 }
 
 type cefasClient struct {
@@ -345,6 +351,26 @@ func (c *cefasClient) ListSnapshots(ctx context.Context, in *ListSnapshotsReques
 	return out, nil
 }
 
+func (c *cefasClient) CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateBackupResponse)
+	err := c.cc.Invoke(ctx, Cefas_CreateBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBackupsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListBackups_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -385,6 +411,10 @@ type CefasServer interface {
 	StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error
 	// Snapshot administration (PITR foundation).
 	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
+	// Admin-named backups (pebble.Checkpoint of the live keyspace,
+	// catalogued under cefas/admin/backups/<name>).
+	CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error)
+	ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -457,6 +487,12 @@ func (UnimplementedCefasServer) StreamChanges(*StreamChangesRequest, grpc.Server
 }
 func (UnimplementedCefasServer) ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSnapshots not implemented")
+}
+func (UnimplementedCefasServer) CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateBackup not implemented")
+}
+func (UnimplementedCefasServer) ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBackups not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -829,6 +865,42 @@ func _Cefas_ListSnapshots_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_CreateBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateBackupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CreateBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CreateBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CreateBackup(ctx, req.(*CreateBackupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ListBackups_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBackupsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListBackups(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListBackups_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListBackups(ctx, req.(*ListBackupsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -903,6 +975,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSnapshots",
 			Handler:    _Cefas_ListSnapshots_Handler,
+		},
+		{
+			MethodName: "CreateBackup",
+			Handler:    _Cefas_CreateBackup_Handler,
+		},
+		{
+			MethodName: "ListBackups",
+			Handler:    _Cefas_ListBackups_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

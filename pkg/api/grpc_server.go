@@ -706,6 +706,47 @@ func (s *GRPCServer) StreamChanges(req *cefaspb.StreamChangesRequest, stream cef
 	}
 }
 
+func (s *GRPCServer) CreateBackup(ctx context.Context, req *cefaspb.CreateBackupRequest) (*cefaspb.CreateBackupResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	tables := req.GetTables()
+	if len(tables) == 0 {
+		for _, td := range s.cat.List() {
+			tables = append(tables, td.Name)
+		}
+	}
+	meta, err := s.db.CreateBackup(req.GetName(), tables)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.CreateBackupResponse{Backup: backupMetaToPB(meta)}, nil
+}
+
+func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequest) (*cefaspb.ListBackupsResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	metas, err := s.db.ListBackups()
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	out := make([]*cefaspb.BackupDescriptor, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, backupMetaToPB(m))
+	}
+	return &cefaspb.ListBackupsResponse{Backups: out}, nil
+}
+
+func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
+	return &cefaspb.BackupDescriptor{
+		Name:           m.Name,
+		CreatedAtUnix:  m.CreatedAt,
+		Tables:         m.Tables,
+		CheckpointPath: m.CheckpointAt,
+	}
+}
+
 func (s *GRPCServer) ListSnapshots(ctx context.Context, _ *cefaspb.ListSnapshotsRequest) (*cefaspb.ListSnapshotsResponse, error) {
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
