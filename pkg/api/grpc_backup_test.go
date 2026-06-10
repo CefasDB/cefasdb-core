@@ -1,0 +1,66 @@
+package api_test
+
+import (
+	"context"
+	"testing"
+
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+)
+
+func TestCreateAndListBackups(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	createTable(t, stub, "T1")
+	createTable(t, stub, "T2")
+
+	// Empty list before any backups.
+	lst, err := stub.ListBackups(ctx, &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	if len(lst.GetBackups()) != 0 {
+		t.Fatalf("initial backups = %d, want 0", len(lst.GetBackups()))
+	}
+
+	// Default scope: every catalog table.
+	got, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "all"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if got.GetBackup().GetName() != "all" {
+		t.Fatalf("name = %q", got.GetBackup().GetName())
+	}
+	if len(got.GetBackup().GetTables()) != 2 {
+		t.Fatalf("tables = %v, want 2", got.GetBackup().GetTables())
+	}
+
+	// Scoped backup.
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "just-t1", Tables: []string{"T1"}}); err != nil {
+		t.Fatalf("create scoped: %v", err)
+	}
+
+	lst, err = stub.ListBackups(ctx, &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(lst.GetBackups()) != 2 {
+		t.Fatalf("backups = %d, want 2", len(lst.GetBackups()))
+	}
+	// Sorted by name: "all", "just-t1".
+	if lst.GetBackups()[0].GetName() != "all" || lst.GetBackups()[1].GetName() != "just-t1" {
+		t.Fatalf("order: %v", lst.GetBackups())
+	}
+}
+
+func TestCreateBackupRejectsDuplicate(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "x"}); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "x"}); err == nil {
+		t.Fatal("expected duplicate-name error")
+	}
+}

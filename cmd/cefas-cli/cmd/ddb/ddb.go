@@ -23,4 +23,6 @@ func Register(root *cobra.Command) {
 	registerDescribeTimeToLive(root)
 	registerScan(root)
 	registerUpdateItem(root)
+	registerCreateBackup(root)
+	registerListBackups(root)
 }

@@ -587,6 +587,53 @@ func (c *Client) Sql(ctx context.Context, query string) (*SqlResult, error) {
 	return out, nil
 }
 
+// ---------- backups ----------
+
+// BackupDescriptor mirrors the wire shape — name + creation time +
+// table list + on-disk path.
+type BackupDescriptor struct {
+	Name          string
+	CreatedAt     int64
+	Tables        []string
+	CheckpointAt  string
+}
+
+// CreateBackup snapshots the live keyspace into a pebble checkpoint
+// and records metadata under cefas/admin/backups/<name>. Pass nil for
+// tables to back up every table the catalog currently knows.
+func (c *Client) CreateBackup(ctx context.Context, name string, tables []string) (BackupDescriptor, error) {
+	resp, err := c.stub.CreateBackup(c.withAuth(ctx), &cefaspb.CreateBackupRequest{Name: name, Tables: tables})
+	if err != nil {
+		return BackupDescriptor{}, err
+	}
+	return backupFromPB(resp.GetBackup()), nil
+}
+
+// ListBackups returns every admin-named backup the server knows about.
+func (c *Client) ListBackups(ctx context.Context) ([]BackupDescriptor, error) {
+	resp, err := c.stub.ListBackups(c.withAuth(ctx), &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BackupDescriptor, 0, len(resp.GetBackups()))
+	for _, b := range resp.GetBackups() {
+		out = append(out, backupFromPB(b))
+	}
+	return out, nil
+}
+
+func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
+	if b == nil {
+		return BackupDescriptor{}
+	}
+	return BackupDescriptor{
+		Name:         b.GetName(),
+		CreatedAt:    b.GetCreatedAtUnix(),
+		Tables:       b.GetTables(),
+		CheckpointAt: b.GetCheckpointPath(),
+	}
+}
+
 // ---------- cluster ----------
 
 // ClusterStatus returns membership and leadership info.

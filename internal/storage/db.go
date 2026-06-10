@@ -58,6 +58,7 @@ type Options struct {
 // for Raft mode. Same architecture as codeq.
 type DB struct {
 	db       *pebbledb.DB
+	path     string
 	commitCh chan *commitReq
 	stopCh   chan struct{}
 	stopped  chan struct{}
@@ -99,6 +100,7 @@ func Open(opts Options) (*DB, error) {
 
 	wrapper := &DB{
 		db:       d,
+		path:     opts.Path,
 		commitCh: make(chan *commitReq, commitChanBuf),
 		stopCh:   make(chan struct{}),
 		stopped:  make(chan struct{}),
