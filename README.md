@@ -47,16 +47,14 @@ Workloads cefas is designed for:
 
 ## Docs
 
-User and operator documentation is maintained alongside the source.
+User and operator documentation lives in the GitHub Wiki:
 
-- **User Guide** — getting started, data modeling, query reference, transactional
-  guarantees.
-- **Operations Guide** — deployment, configuration, backup and restore, observability,
-  capacity planning.
-- **API Reference** — HTTP and gRPC surface, attribute types, error codes.
-- **SQL Reference** — supported syntax and spatial extensions.
-- **Architecture Guide** — internals: storage layout, consensus, sharding,
-  request lifecycle.
+- **Wiki Home** — <https://github.com/osvaldoandrade/cefas/wiki>
+- **Get Started** — <https://github.com/osvaldoandrade/cefas/wiki/Get-Started-Overview>
+- **Concepts and Architecture** — <https://github.com/osvaldoandrade/cefas/wiki/Concepts-Overview>
+- **Plugins and Extensions** — <https://github.com/osvaldoandrade/cefas/wiki/Plugins-Overview>
+- **Interfaces** — <https://github.com/osvaldoandrade/cefas/wiki/Interfaces-Overview>
+- **Operations** — <https://github.com/osvaldoandrade/cefas/wiki/Operations-Overview>
 
 ## Getting Started
 
