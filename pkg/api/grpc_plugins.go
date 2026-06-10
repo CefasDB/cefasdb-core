@@ -99,6 +99,8 @@ func pluginStatusToPB(s plugin.Status) *cefaspb.PluginDescriptor {
 	return &cefaspb.PluginDescriptor{
 		Name:           s.Name,
 		Kind:           s.Kind,
+		Version:        s.Version,
+		Description:    s.Description,
 		State:          s.State,
 		LastError:      s.LastError,
 		LastErrorUnix:  s.LastErrorAtUnix,
