@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -409,6 +410,76 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	for _, it := range items {
 		if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanServer) error {
+	ctx := stream.Context()
+	if err := requireAnyScope(ctx,
+		auth.TableScope(auth.ScopeScan, req.GetTable()),
+		auth.WildcardScope(auth.ScopeScan)); err != nil {
+		return err
+	}
+	if req.GetConsistency() == cefaspb.Consistency_CONSISTENCY_STRONG {
+		if err := s.strongReadGate(); err != nil {
+			return err
+		}
+	}
+	if _, err := s.cat.Describe(req.GetTable()); err != nil {
+		return mapStorageErr(err)
+	}
+	cond, err := storage.ParseCondition(req.GetFilterExpression())
+	if err != nil {
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("filter_expression: %v", err))
+	}
+	rawBinds, err := pbToItem(req.GetBinds())
+	if err != nil {
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("binds: %v", err))
+	}
+	// Wire keeps the `:name` prefix; the condition evaluator expects
+	// the bare name. Strip here so callers pass the AWS-shaped map.
+	binds := make(map[string]types.AttributeValue, len(rawBinds))
+	for k, v := range rawBinds {
+		binds[strings.TrimPrefix(k, ":")] = v
+	}
+	limit := int(req.GetLimit())
+
+	dbs := []*storage.DB{s.db}
+	if s.manager != nil {
+		dbs = dbs[:0]
+		for _, sh := range s.manager.Shards() {
+			dbs = append(dbs, sh.Storage)
+		}
+	}
+
+	sent := 0
+	for _, db := range dbs {
+		// Pull every primary item; filter + cap on the way out so a
+		// permissive filter doesn't materialise the full shard in
+		// memory before stopping.
+		items, err := db.ScanTable(req.GetTable(), 0)
+		if err != nil {
+			return mapStorageErr(err)
+		}
+		for _, it := range items {
+			if !cond.IsZero() {
+				ok, err := cond.Evaluate(it, binds)
+				if err != nil {
+					return status.Error(codes.InvalidArgument, fmt.Sprintf("evaluate filter: %v", err))
+				}
+				if !ok {
+					continue
+				}
+			}
+			if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
+				return err
+			}
+			sent++
+			if limit > 0 && sent >= limit {
+				return nil
+			}
 		}
 	}
 	return nil

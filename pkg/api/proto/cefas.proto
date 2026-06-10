@@ -35,6 +35,7 @@ service Cefas {
   // Query and scan stream rows so the server never materialises an
   // unbounded result set in memory.
   rpc Query(QueryRequest) returns (stream Item);
+  rpc Scan(ScanRequest) returns (stream Item);
   rpc SpatialQuery(SpatialQueryRequest) returns (stream Item);
 
   // SQL surface — single statement per call. Affected_rows is set for
@@ -266,6 +267,20 @@ message QueryRequest {
   AttributeValue sk_high      = 5;
   int32          limit        = 6;
   Consistency    consistency  = 7;
+}
+
+// ScanRequest streams every primary item in `table`. FilterExpression
+// is evaluated server-side using the same grammar as ConditionExpression
+// on PutItem / DeleteItem (cefas DDB-condition subset, with `:bind`
+// placeholders resolved from `binds`). Multi-shard deployments scatter
+// the scan across every shard and merge the streams in arrival order
+// (no global ordering guarantee).
+message ScanRequest {
+  string                       table             = 1;
+  string                       filter_expression = 2;
+  map<string, AttributeValue>  binds             = 3;
+  int32                        limit             = 4;
+  Consistency                  consistency       = 5;
 }
 
 // ---------- spatial ----------

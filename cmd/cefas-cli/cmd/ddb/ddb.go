@@ -21,4 +21,5 @@ func Register(root *cobra.Command) {
 	registerExecuteStatement(root)
 	registerUpdateTimeToLive(root)
 	registerDescribeTimeToLive(root)
+	registerScan(root)
 }

@@ -38,6 +38,7 @@ const (
 	Cefas_BatchWriteItem_FullMethodName     = "/cefas.v1.Cefas/BatchWriteItem"
 	Cefas_BatchGetItem_FullMethodName       = "/cefas.v1.Cefas/BatchGetItem"
 	Cefas_Query_FullMethodName              = "/cefas.v1.Cefas/Query"
+	Cefas_Scan_FullMethodName               = "/cefas.v1.Cefas/Scan"
 	Cefas_SpatialQuery_FullMethodName       = "/cefas.v1.Cefas/SpatialQuery"
 	Cefas_Sql_FullMethodName                = "/cefas.v1.Cefas/Sql"
 	Cefas_ClusterStatus_FullMethodName      = "/cefas.v1.Cefas/ClusterStatus"
@@ -70,6 +71,7 @@ type CefasClient interface {
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+	Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
 	SpatialQuery(ctx context.Context, in *SpatialQueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
 	// SQL surface — single statement per call. Affected_rows is set for
 	// DDL/DML; rows is set for SELECT.
@@ -224,9 +226,28 @@ func (c *cefasClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_QueryClient = grpc.ServerStreamingClient[Item]
 
+func (c *cefasClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[1], Cefas_Scan_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ScanRequest, Item]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_ScanClient = grpc.ServerStreamingClient[Item]
+
 func (c *cefasClient) SpatialQuery(ctx context.Context, in *SpatialQueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[1], Cefas_SpatialQuery_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[2], Cefas_SpatialQuery_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +306,7 @@ func (c *cefasClient) RemoveServer(ctx context.Context, in *RemoveServerRequest,
 
 func (c *cefasClient) StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[2], Cefas_StreamChanges_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[3], Cefas_StreamChanges_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +356,7 @@ type CefasServer interface {
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error
+	Scan(*ScanRequest, grpc.ServerStreamingServer[Item]) error
 	SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error
 	// SQL surface — single statement per call. Affected_rows is set for
 	// DDL/DML; rows is set for SELECT.
@@ -395,6 +417,9 @@ func (UnimplementedCefasServer) BatchGetItem(context.Context, *BatchGetItemReque
 }
 func (UnimplementedCefasServer) Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method Query not implemented")
+}
+func (UnimplementedCefasServer) Scan(*ScanRequest, grpc.ServerStreamingServer[Item]) error {
+	return status.Errorf(codes.Unimplemented, "method Scan not implemented")
 }
 func (UnimplementedCefasServer) SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method SpatialQuery not implemented")
@@ -647,6 +672,17 @@ func _Cefas_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_QueryServer = grpc.ServerStreamingServer[Item]
 
+func _Cefas_Scan_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ScanRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CefasServer).Scan(m, &grpc.GenericServerStream[ScanRequest, Item]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_ScanServer = grpc.ServerStreamingServer[Item]
+
 func _Cefas_SpatialQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(SpatialQueryRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -835,6 +871,11 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Query",
 			Handler:       _Cefas_Query_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Scan",
+			Handler:       _Cefas_Scan_Handler,
 			ServerStreams: true,
 		},
 		{
