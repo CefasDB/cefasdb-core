@@ -15,4 +15,8 @@ func Register(root *cobra.Command) {
 	registerGetItem(root)
 	registerPutItem(root)
 	registerDeleteItem(root)
+	registerQuery(root)
+	registerBatchGetItem(root)
+	registerBatchWriteItem(root)
+	registerExecuteStatement(root)
 }
