@@ -32,10 +32,20 @@ service Cefas {
   rpc Query(QueryRequest) returns (stream Item);
   rpc SpatialQuery(SpatialQueryRequest) returns (stream Item);
 
+  // SQL surface — single statement per call. Affected_rows is set for
+  // DDL/DML; rows is set for SELECT.
+  rpc Sql(SqlRequest) returns (SqlResponse);
+
   // Cluster surface (no-ops in single-node mode).
   rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
   rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
+}
+
+message SqlRequest  { string query = 1; }
+message SqlResponse {
+  int64         affected_rows = 1;
+  repeated Item rows          = 2;
 }
 
 // ---------- attribute model ----------

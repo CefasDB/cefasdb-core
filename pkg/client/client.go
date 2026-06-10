@@ -418,6 +418,28 @@ func (c *Client) runSpatial(ctx context.Context, req *cefaspb.SpatialQueryReques
 	}
 }
 
+// ---------- sql ----------
+
+// SqlResult mirrors the executor's Result for SDK consumers.
+type SqlResult struct {
+	AffectedRows int
+	Rows         []types.Item
+}
+
+// Sql runs a single SQL statement against the server. The exact subset
+// supported is documented in pkg/sql/lexer.go.
+func (c *Client) Sql(ctx context.Context, query string) (*SqlResult, error) {
+	resp, err := c.stub.Sql(c.withAuth(ctx), &cefaspb.SqlRequest{Query: query})
+	if err != nil {
+		return nil, err
+	}
+	out := &SqlResult{AffectedRows: int(resp.GetAffectedRows())}
+	for _, row := range resp.GetRows() {
+		out.Rows = append(out.Rows, itemFromPB(row.GetAttributes()))
+	}
+	return out, nil
+}
+
 // ---------- cluster ----------
 
 // ClusterStatus returns membership and leadership info.

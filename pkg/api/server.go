@@ -21,6 +21,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -84,6 +85,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/BatchWriteItem", s.handleBatchWriteItem)
 	register("/v1/BatchGetItem", s.handleBatchGetItem)
 	register("/v1/SpatialQuery", s.handleSpatialQuery)
+	register("/v1/Sql", s.handleSql)
 	register("/v1/Health", s.handleHealth)
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
@@ -497,6 +499,87 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 		out[i] = encodeItem(it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+type sqlRequest struct {
+	Query string `json:"query"`
+}
+
+func (s *Server) handleSql(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req sqlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	// Parse first so we can enforce the right scope per statement
+	// type before the executor touches storage.
+	stmt, err := cefassql.Parse(req.Query)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !sqlEnforceScope(w, r, stmt) {
+		return
+	}
+	plan, err := cefassql.PlanStmt(stmt, s.cat)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
+	res, err := ex.Execute(plan)
+	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	out := struct {
+		AffectedRows int                              `json:"affectedRows"`
+		Rows         []map[string]jsonAttribute       `json:"rows,omitempty"`
+	}{AffectedRows: res.AffectedRows}
+	for _, row := range res.Rows {
+		out.Rows = append(out.Rows, encodeItem(row))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sqlEnforceScope routes per-statement scope checks. SELECT requires
+// the read or query scope on the affected table; DML requires write.
+// CREATE/DROP follow the table-level scopes. Returns false when the
+// response is already written.
+func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt) bool {
+	switch s := stmt.(type) {
+	case *cefassql.SelectStmt:
+		return auth.RequireAnyScope(w, r,
+			auth.TableScope(auth.ScopeQuery, s.Table),
+			auth.WildcardScope(auth.ScopeQuery),
+			auth.TableScope(auth.ScopeItemRead, s.Table),
+			auth.WildcardScope(auth.ScopeItemRead),
+		)
+	case *cefassql.InsertStmt:
+		return auth.RequireAnyScope(w, r,
+			auth.TableScope(auth.ScopeItemWrite, s.Table),
+			auth.WildcardScope(auth.ScopeItemWrite),
+		)
+	case *cefassql.UpdateStmt:
+		return auth.RequireAnyScope(w, r,
+			auth.TableScope(auth.ScopeItemWrite, s.Table),
+			auth.WildcardScope(auth.ScopeItemWrite),
+		)
+	case *cefassql.DeleteStmt:
+		return auth.RequireAnyScope(w, r,
+			auth.TableScope(auth.ScopeItemDelete, s.Table),
+			auth.WildcardScope(auth.ScopeItemDelete),
+		)
+	case *cefassql.CreateTableStmt:
+		return auth.RequireAnyScope(w, r, auth.ScopeTableCreate)
+	case *cefassql.DropTableStmt:
+		return auth.RequireAnyScope(w, r, auth.ScopeTableDrop)
+	}
+	return true
 }
 
 type spatialQueryRequest struct {

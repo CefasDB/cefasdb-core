@@ -37,6 +37,7 @@ const (
 	Cefas_BatchGetItem_FullMethodName   = "/cefas.v1.Cefas/BatchGetItem"
 	Cefas_Query_FullMethodName          = "/cefas.v1.Cefas/Query"
 	Cefas_SpatialQuery_FullMethodName   = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName            = "/cefas.v1.Cefas/Sql"
 	Cefas_ClusterStatus_FullMethodName  = "/cefas.v1.Cefas/ClusterStatus"
 	Cefas_AddVoter_FullMethodName       = "/cefas.v1.Cefas/AddVoter"
 	Cefas_RemoveServer_FullMethodName   = "/cefas.v1.Cefas/RemoveServer"
@@ -62,6 +63,9 @@ type CefasClient interface {
 	// unbounded result set in memory.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
 	SpatialQuery(ctx context.Context, in *SpatialQueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+	// SQL surface — single statement per call. Affected_rows is set for
+	// DDL/DML; rows is set for SELECT.
+	Sql(ctx context.Context, in *SqlRequest, opts ...grpc.CallOption) (*SqlResponse, error)
 	// Cluster surface (no-ops in single-node mode).
 	ClusterStatus(ctx context.Context, in *ClusterStatusRequest, opts ...grpc.CallOption) (*ClusterStatusResponse, error)
 	AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error)
@@ -204,6 +208,16 @@ func (c *cefasClient) SpatialQuery(ctx context.Context, in *SpatialQueryRequest,
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_SpatialQueryClient = grpc.ServerStreamingClient[Item]
 
+func (c *cefasClient) Sql(ctx context.Context, in *SqlRequest, opts ...grpc.CallOption) (*SqlResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SqlResponse)
+	err := c.cc.Invoke(ctx, Cefas_Sql_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) ClusterStatus(ctx context.Context, in *ClusterStatusRequest, opts ...grpc.CallOption) (*ClusterStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClusterStatusResponse)
@@ -254,6 +268,9 @@ type CefasServer interface {
 	// unbounded result set in memory.
 	Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error
 	SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error
+	// SQL surface — single statement per call. Affected_rows is set for
+	// DDL/DML; rows is set for SELECT.
+	Sql(context.Context, *SqlRequest) (*SqlResponse, error)
 	// Cluster surface (no-ops in single-node mode).
 	ClusterStatus(context.Context, *ClusterStatusRequest) (*ClusterStatusResponse, error)
 	AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error)
@@ -300,6 +317,9 @@ func (UnimplementedCefasServer) Query(*QueryRequest, grpc.ServerStreamingServer[
 }
 func (UnimplementedCefasServer) SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method SpatialQuery not implemented")
+}
+func (UnimplementedCefasServer) Sql(context.Context, *SqlRequest) (*SqlResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Sql not implemented")
 }
 func (UnimplementedCefasServer) ClusterStatus(context.Context, *ClusterStatusRequest) (*ClusterStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClusterStatus not implemented")
@@ -515,6 +535,24 @@ func _Cefas_SpatialQuery_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_SpatialQueryServer = grpc.ServerStreamingServer[Item]
 
+func _Cefas_Sql_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SqlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Sql(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Sql_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Sql(ctx, req.(*SqlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_ClusterStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ClusterStatusRequest)
 	if err := dec(in); err != nil {
@@ -611,6 +649,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchGetItem",
 			Handler:    _Cefas_BatchGetItem_Handler,
+		},
+		{
+			MethodName: "Sql",
+			Handler:    _Cefas_Sql_Handler,
 		},
 		{
 			MethodName: "ClusterStatus",
