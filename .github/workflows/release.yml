@@ -98,7 +98,7 @@ jobs:
           cd npm
           npm version --no-git-tag-version "$VERSION"
           npm pack --dry-run --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
-          npm publish --access public --provenance --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
+          npm publish --access public --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
 
       - name: Smoke test npm install
         shell: bash
