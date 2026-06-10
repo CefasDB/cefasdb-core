@@ -1,0 +1,49 @@
+{
+  "title": "cefas overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ops / sec",
+      "targets": [
+        {"expr": "sum(rate(cefas_op_total[1m]))", "refId": "A"}
+      ],
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p50/p95/p99 (s)",
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p50", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p95", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p99", "legendFormat": "p99"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors / sec by outcome",
+      "targets": [
+        {"expr": "sum by (outcome) (rate(cefas_op_total{outcome!=\"ok\"}[1m]))", "refId": "A", "legendFormat": "{{outcome}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5}
+    },
+    {
+      "type": "timeseries",
+      "title": "Raft leader by shard",
+      "targets": [
+        {"expr": "cefas_raft_is_leader", "refId": "A", "legendFormat": "shard {{shard}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5}
+    },
+    {
+      "type": "timeseries",
+      "title": "Auth rejections / sec",
+      "targets": [
+        {"expr": "sum by (reason) (rate(cefas_auth_rejected_total[1m]))", "refId": "A", "legendFormat": "{{reason}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13}
+    }
+  ]
+}

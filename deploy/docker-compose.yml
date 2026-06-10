@@ -1,0 +1,59 @@
+# Single-node demo stack: one cefas-server + Prometheus + Grafana.
+# `docker compose -f deploy/docker-compose.yml up --build` brings the
+# whole thing up. cefas exposes:
+#   - HTTP / SQL on :8080
+#   - gRPC on :9090
+#   - /metrics on :8080
+# Grafana on :3000 (admin/admin), pre-provisioned with a Prometheus
+# datasource and the cefas dashboard.
+
+services:
+  cefas:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - cefas-data:/var/lib/cefas
+    command:
+      - "-data"
+      - "/var/lib/cefas"
+      - "-http"
+      - ":8080"
+      - "-grpc"
+      - ":9090"
+      - "-grpc-reflection"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cefas-server", "-help"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - cefas
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  cefas-data:

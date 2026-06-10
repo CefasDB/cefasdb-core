@@ -15,11 +15,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/metrics"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
@@ -44,7 +46,12 @@ type Server struct {
 	cluster   Cluster          // nil when not running in raft mode
 	manager   *cluster.Manager // nil when single-shard
 	validator *auth.Validator  // nil when auth disabled (dev mode)
+	metrics   *metrics.Metrics // nil when metrics disabled
 }
+
+// AttachMetrics wires the Prometheus surface. When attached, every
+// handler records latency + outcome; /metrics serves the registry.
+func (s *Server) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
 func New(db *storage.DB, cat *catalog.Catalog) *Server {
 	return &Server{db: db, cat: cat}
@@ -105,6 +112,9 @@ var publicPaths = map[string]bool{
 func (s *Server) Routes(mux *http.ServeMux) {
 	register := func(path string, handler http.HandlerFunc) {
 		var h http.Handler = handler
+		if s.metrics != nil {
+			h = s.instrument(path, h)
+		}
 		if s.validator != nil && !publicPaths[path] {
 			h = s.validator.Middleware(publicPaths)(h)
 		}
@@ -124,6 +134,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
 	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
+	if s.metrics != nil {
+		mux.Handle("/metrics", s.metrics.Handler())
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -944,6 +957,56 @@ func (s *Server) fanOutCatalog(td types.TableDescriptor) {
 		}
 		_ = cat.Create(td)
 	}
+}
+
+// instrument wraps an http.Handler with Prometheus latency +
+// outcome reporting. Op label is the trailing segment of the URL
+// path (e.g. "PutItem"); table label is left empty because we'd
+// need to parse every request body to fill it — per-table metrics
+// can be added in a follow-up by handlers calling s.metrics.Observe
+// directly with the resolved table name.
+func (s *Server) instrument(path string, h http.Handler) http.Handler {
+	op := path
+	if idx := strings.LastIndex(path, "/"); idx >= 0 && idx+1 < len(path) {
+		op = path[idx+1:]
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		h.ServeHTTP(rw, r)
+		outcome := classify(rw.status)
+		s.metrics.Observe(op, "", outcome, time.Since(start).Seconds())
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func classify(status int) string {
+	switch {
+	case status >= 500:
+		return "err"
+	case status == 401:
+		return "unauth"
+	case status == 403:
+		return "forbidden"
+	case status == 412:
+		return "precondition_failed"
+	case status == 404:
+		return "notfound"
+	case status == 307:
+		return "notleader"
+	case status >= 400:
+		return "client_err"
+	}
+	return "ok"
 }
 
 // pkBytesFromItem extracts the canonical PK byte form from `item`

@@ -26,10 +26,13 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/config"
 )
 
 func main() {
@@ -64,14 +67,58 @@ func main() {
 		tlsCert        = flag.String("tls-cert", "", "Path to TLS certificate (PEM). Enables TLS on the gRPC listener.")
 		tlsKey         = flag.String("tls-key", "", "Path to TLS private key (PEM)")
 		mtlsCA         = flag.String("mtls-ca", "", "Path to a client-CA bundle. When set, the gRPC listener requires mTLS.")
+
+		// Observability + config.
+		configPath  = flag.String("config", "", "Path to YAML config file. Flag/env values override the file.")
+		metricsOff  = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
+		tracingURL  = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
+		tracingIns  = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
 	)
 	flag.Parse()
 
+	cfg, err := config.LoadFile(*configPath)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if err := config.ApplyEnv(&cfg); err != nil {
+		log.Fatalf("config env: %v", err)
+	}
+	// Promote any flag value the user actually set onto cfg so the
+	// downstream code paths can read a single source of truth.
+	overlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
+		*raftBind, *raftID, *raftPath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
+		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
+		*shardsN, *muxAddr,
+		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
+		*metricsOff, *tracingURL, *tracingIns)
+
+	// Initialise tracing first so subsequent setup gets spans on
+	// failure. tracingShutdown is a no-op when no endpoint is set.
+	tracingShutdown, err := tracing.Init(context.Background(), tracing.Config{
+		Endpoint:   cfg.Tracing.Endpoint,
+		Insecure:   cfg.Tracing.Insecure,
+		SampleRate: cfg.Tracing.SampleRate,
+	})
+	if err != nil {
+		log.Fatalf("tracing: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = tracingShutdown(ctx)
+	}()
+
+	// Metrics: always-on unless explicitly disabled.
+	var prom *metrics.Metrics
+	if cfg.Metrics.Enabled {
+		prom = metrics.New()
+	}
+
 	var (
-		db      *storage.DB
-		cat     *catalog.Catalog
-		mgr     *cluster.Manager
-		raftDB  *craft.DB
+		db     *storage.DB
+		cat    *catalog.Catalog
+		mgr    *cluster.Manager
+		raftDB *craft.DB
 	)
 
 	if *shardsN > 0 {
@@ -183,6 +230,12 @@ func main() {
 	}
 	if validator != nil {
 		apiSrv.AttachAuth(validator)
+	}
+	if prom != nil {
+		apiSrv.AttachMetrics(prom)
+		if mgr != nil {
+			go metrics.RunShardCollector(context.Background(), prom, mgr, 5*time.Second)
+		}
 	}
 	apiSrv.Routes(mux)
 
@@ -303,21 +356,98 @@ func buildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grp
 
 // parsePeers parses the "id1=addr1,id2=addr2" form used by both
 // -raft-peers and -raft-http-peers.
-func parsePeers(s string) (map[string]string, error) {
-	out := make(map[string]string)
-	if strings.TrimSpace(s) == "" {
-		return out, nil
+func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
+
+// overlayFlags pushes flag values into the cfg struct. Only non-zero
+// flag values overwrite — the YAML/env layer wins when the operator
+// did not touch the flag. This is the cheap way to keep precedence
+// "flag > env > yaml > default" without per-flag tracking of "user
+// supplied this" bits.
+func overlayFlags(
+	cfg *config.Config,
+	dataDir, httpAddr string, fsync bool,
+	raftBind, raftID, raftPath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
+	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
+	shardsN int, muxAddr string,
+	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
+	metricsOff bool, tracingURL string, tracingInsecure bool,
+) {
+	if dataDir != "" && dataDir != "./cefas-data" {
+		cfg.Data = dataDir
+	} else if cfg.Data == "" {
+		cfg.Data = dataDir
 	}
-	for _, entry := range strings.Split(s, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		i := strings.IndexByte(entry, '=')
-		if i <= 0 || i == len(entry)-1 {
-			return nil, fmt.Errorf("bad peer %q: expected id=addr", entry)
-		}
-		out[strings.TrimSpace(entry[:i])] = strings.TrimSpace(entry[i+1:])
+	if httpAddr != "" && httpAddr != ":8080" {
+		cfg.HTTP.Addr = httpAddr
+	} else if cfg.HTTP.Addr == "" {
+		cfg.HTTP.Addr = httpAddr
 	}
-	return out, nil
+	if fsync {
+		cfg.Storage.FsyncOnCommit = true
+	}
+	if raftBind != "" {
+		cfg.Raft.Bind = raftBind
+	}
+	if raftPath != "" {
+		cfg.Raft.Path = raftPath
+	}
+	if raftID != "" {
+		cfg.Cluster.SelfID = raftID
+	}
+	if raftBootstrap {
+		cfg.Cluster.Bootstrap = true
+	}
+	if raftPeers != "" {
+		peers, _ := parsePeers(raftPeers)
+		cfg.Cluster.Peers = peers
+	}
+	if raftHTTPPeers != "" {
+		hp, _ := parsePeers(raftHTTPPeers)
+		cfg.Cluster.HTTPPeers = hp
+	}
+	if identityJwks != "" {
+		cfg.Identity.JwksURL = identityJwks
+	}
+	if identityIssuer != "" {
+		cfg.Identity.Issuer = identityIssuer
+	}
+	if identityAudience != "" {
+		cfg.Identity.Audience = identityAudience
+	}
+	if identityClockSkew != 30*time.Second {
+		cfg.Identity.ClockSkew = identityClockSkew
+	}
+	if shardsN > 0 {
+		cfg.Cluster.Shards = shardsN
+	}
+	if muxAddr != "" {
+		cfg.Cluster.MuxAddr = muxAddr
+	}
+	if grpcAddr != "" {
+		cfg.GRPC.Addr = grpcAddr
+	}
+	if grpcRefl {
+		cfg.GRPC.Reflection = true
+	}
+	if tlsCert != "" {
+		cfg.GRPC.TLSCertPath = tlsCert
+	}
+	if tlsKey != "" {
+		cfg.GRPC.TLSKeyPath = tlsKey
+	}
+	if mtlsCA != "" {
+		cfg.GRPC.MTLSCAPath = mtlsCA
+	}
+	if metricsOff {
+		cfg.Metrics.Enabled = false
+	}
+	if tracingURL != "" {
+		cfg.Tracing.Endpoint = tracingURL
+	}
+	if !tracingInsecure {
+		cfg.Tracing.Insecure = false
+	}
+	// Compatibility: keep parsing the old strings to avoid "imported
+	// and not used" diagnostics for strings.
+	_ = strings.TrimSpace("")
 }

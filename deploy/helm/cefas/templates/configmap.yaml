@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cefas.fullname" . }}-config
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+data:
+  cefas.yaml: |
+    data: /var/lib/cefas
+    http:
+      addr: ":{{ .Values.service.http }}"
+    grpc:
+      addr: ":{{ .Values.service.grpc }}"
+      reflection: true
+    storage:
+      fsyncOnCommit: {{ .Values.cluster.fsyncOnCommit }}
+    cluster:
+      shards: {{ .Values.cluster.shards }}
+      muxAddr: ":{{ .Values.service.mux }}"
+      bootstrap: {{ .Values.cluster.bootstrap }}
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+    identity:
+      jwksUrl: {{ .Values.identity.jwksUrl | quote }}
+      issuer: {{ .Values.identity.issuer | quote }}
+      audience: {{ .Values.identity.audience | quote }}
+    tracing:
+      endpoint: {{ .Values.tracing.endpoint | quote }}
+      insecure: {{ .Values.tracing.insecure }}
+      sampleRate: {{ .Values.tracing.sampleRate }}
