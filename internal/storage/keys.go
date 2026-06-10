@@ -240,6 +240,73 @@ func EncodeGSIPointer(primaryPK, primarySK []byte) []byte {
 	return out
 }
 
+// ---------- spatial keys ----------
+//
+// Layouts:
+//
+//	cefas/t/<table>/geo/<idx>/<geohash_chars><pk_hash8>
+//	cefas/t/<table>/zorder/<idx>/<morton_bytes><pk_hash8>
+//
+// Pointer value uses the same EncodeGSIPointer codec so the reader
+// only needs to know how to resolve a (primary_pk, primary_sk) ref.
+// The 8-byte pk_hash8 suffix mirrors the GSI disambiguator — two
+// items whose coordinates round to the same cell produce distinct
+// keys and remain individually addressable.
+
+// KeyGeo builds a geohash-index entry key.
+func KeyGeo(table, idxName, geohash string, primaryPK, primarySK []byte) []byte {
+	base := tableBase(table) + segGeo + idxName + "/"
+	suffix := primaryDisambiguator(primaryPK, primarySK)
+	k := make([]byte, 0, len(base)+len(geohash)+8)
+	k = append(k, base...)
+	k = append(k, geohash...)
+	k = append(k, suffix...)
+	return k
+}
+
+// PrefixGeoCell returns [lower, upper) covering every entry whose
+// geohash starts with `cellPrefix`. Used by the cover-set scan.
+func PrefixGeoCell(table, idxName, cellPrefix string) (lower, upper []byte) {
+	base := tableBase(table) + segGeo + idxName + "/"
+	p := make([]byte, 0, len(base)+len(cellPrefix))
+	p = append(p, base...)
+	p = append(p, cellPrefix...)
+	return p, prefixUpper(p)
+}
+
+// KeyZorder builds a Z-order-index entry key. mortonBytes is the
+// fixed-width interleaved key produced by spatial.EncodeMorton.
+func KeyZorder(table, idxName string, mortonBytes []byte, primaryPK, primarySK []byte) []byte {
+	base := tableBase(table) + segZorder + idxName + "/"
+	suffix := primaryDisambiguator(primaryPK, primarySK)
+	k := make([]byte, 0, len(base)+len(mortonBytes)+8)
+	k = append(k, base...)
+	k = append(k, mortonBytes...)
+	k = append(k, suffix...)
+	return k
+}
+
+// RangeZorder returns [lower, upper) for a Morton range scan from
+// `low` (inclusive) to `high` (inclusive). The caller produced low /
+// high via spatial.MortonRange.
+func RangeZorder(table, idxName string, low, high []byte) (lower, upper []byte) {
+	base := tableBase(table) + segZorder + idxName + "/"
+	lower = make([]byte, 0, len(base)+len(low))
+	lower = append(lower, base...)
+	lower = append(lower, low...)
+
+	// Inclusive upper: append a 0xff disambiguator suffix so any
+	// concrete entry whose Morton equals `high` sorts before upper.
+	upper = make([]byte, 0, len(base)+len(high)+8)
+	upper = append(upper, base...)
+	upper = append(upper, high...)
+	upper = append(upper, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}...)
+	// Strictly speaking we need one byte past the largest valid
+	// disambiguator — use prefixUpper of (high + 0xff*8).
+	upper = prefixUpper(upper)
+	return lower, upper
+}
+
 // DecodeGSIPointer reverses EncodeGSIPointer. Returns the primary PK
 // and SK byte forms used to compute the primary item key.
 func DecodeGSIPointer(data []byte) (primaryPK, primarySK []byte, err error) {

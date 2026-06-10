@@ -72,8 +72,20 @@ type SpatialIndexDescriptor struct {
 	// Attributes that feed the index. For geohash: [lat, lon]. For
 	// zorder: any number of numeric attributes (typically 2-4).
 	Attributes []string `json:"attributes"`
-	// Precision: geohash char length (1-12) or Z-order bits-per-dim.
-	Precision int `json:"precision"`
+	// Precision: geohash char length (1-12). Ignored for zorder
+	// (always 32 bits per dim).
+	Precision int `json:"precision,omitempty"`
+	// Ranges, when set, declare the [lo, hi] bounds of each Z-order
+	// dimension in attribute order. Required for "zorder" kind;
+	// ignored for geohash. Values outside the range get clamped at
+	// encode time.
+	Ranges []NumRange `json:"ranges,omitempty"`
+}
+
+// NumRange bounds a single numeric dimension for Z-order encoding.
+type NumRange struct {
+	Lo float64 `json:"lo"`
+	Hi float64 `json:"hi"`
 }
 
 // TableDescriptor is the persisted schema. Stored under cefas/catalog/<name>.
@@ -92,4 +104,6 @@ var (
 	ErrItemNotFound       = errors.New("cefas: item not found")
 	ErrMissingKey         = errors.New("cefas: item missing key attribute")
 	ErrInvalidKeyType     = errors.New("cefas: key attribute must be S, N, or B")
+	ErrSpatialNotFound    = errors.New("cefas: spatial index not found")
+	ErrInvalidSpatial     = errors.New("cefas: invalid spatial index descriptor")
 )

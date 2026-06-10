@@ -131,9 +131,13 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		}
 	}
 
-	ops, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, item)
+	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, item)
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
+	}
+	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, item)
+	if err != nil {
+		return fmt.Errorf("plan spatial: %w", err)
 	}
 
 	b := d.Batch()
@@ -141,7 +145,10 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := b.Set(KeyPrimary(td.Name, pk, sk), encoded, nil); err != nil {
 		return fmt.Errorf("batch set primary: %w", err)
 	}
-	if err := applyIndexOps(b, ops); err != nil {
+	if err := applyIndexOps(b, gsiOps); err != nil {
+		return err
+	}
+	if err := applyIndexOps(b, spatialOps); err != nil {
 		return err
 	}
 	return d.CommitBatch(b)
@@ -187,10 +194,14 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 		}
 	}
 
-	// Plan GSI delta from priorItem → nil.
-	ops, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
+	// Plan GSI + spatial deltas from priorItem → nil.
+	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
+	}
+	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
+	if err != nil {
+		return fmt.Errorf("plan spatial: %w", err)
 	}
 
 	b := d.Batch()
@@ -198,7 +209,10 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := b.Delete(KeyPrimary(td.Name, pk, sk), nil); err != nil {
 		return fmt.Errorf("batch delete primary: %w", err)
 	}
-	if err := applyIndexOps(b, ops); err != nil {
+	if err := applyIndexOps(b, gsiOps); err != nil {
+		return err
+	}
+	if err := applyIndexOps(b, spatialOps); err != nil {
 		return err
 	}
 	return d.CommitBatch(b)
@@ -437,10 +451,17 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
+			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, op.Item)
+			if err != nil {
+				return fmt.Errorf("op %d spatial: %w", i, err)
+			}
 			if err := b.Set(primaryKey, enc, nil); err != nil {
 				return err
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
+			if err := applyIndexOps(b, spatialOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
 		case BatchOpDelete:
@@ -457,10 +478,17 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
+			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
+			if err != nil {
+				return fmt.Errorf("op %d spatial: %w", i, err)
+			}
 			if err := b.Delete(primaryKey, nil); err != nil {
 				return err
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
+			if err := applyIndexOps(b, spatialOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
 		default:

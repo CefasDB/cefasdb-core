@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -41,6 +42,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/Query", s.handleQuery)
 	mux.HandleFunc("/v1/BatchWriteItem", s.handleBatchWriteItem)
 	mux.HandleFunc("/v1/BatchGetItem", s.handleBatchGetItem)
+	mux.HandleFunc("/v1/SpatialQuery", s.handleSpatialQuery)
 	mux.HandleFunc("/v1/Health", s.handleHealth)
 }
 
@@ -55,9 +57,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // ---------- table management ----------
 
 type createTableRequest struct {
-	Name      string               `json:"name"`
-	KeySchema jsonKeySchema        `json:"keySchema"`
-	GSIs      []types.GSIDescriptor `json:"gsis,omitempty"`
+	Name           string                          `json:"name"`
+	KeySchema      jsonKeySchema                   `json:"keySchema"`
+	GSIs           []types.GSIDescriptor           `json:"gsis,omitempty"`
+	SpatialIndexes []types.SpatialIndexDescriptor  `json:"spatialIndexes,omitempty"`
 }
 
 type jsonKeySchema struct {
@@ -74,9 +77,10 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		td := types.TableDescriptor{
-			Name:      req.Name,
-			KeySchema: types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
-			GSIs:      req.GSIs,
+			Name:           req.Name,
+			KeySchema:      types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
+			GSIs:           req.GSIs,
+			SpatialIndexes: req.SpatialIndexes,
 		}
 		if err := s.cat.Create(td); err != nil {
 			status := http.StatusBadRequest
@@ -400,6 +404,88 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out[i] = encodeItem(it)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+type spatialQueryRequest struct {
+	Table     string         `json:"table"`
+	IndexName string         `json:"indexName"`
+	BBox      *bboxJSON      `json:"bbox,omitempty"`
+	Radius    *radiusJSON    `json:"radius,omitempty"`
+	Z         *zboxJSON      `json:"z,omitempty"`
+	Limit     int            `json:"limit,omitempty"`
+}
+
+type bboxJSON struct {
+	MinLat float64 `json:"minLat"`
+	MinLon float64 `json:"minLon"`
+	MaxLat float64 `json:"maxLat"`
+	MaxLon float64 `json:"maxLon"`
+}
+
+type radiusJSON struct {
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	Meters float64 `json:"meters"`
+}
+
+type zboxJSON struct {
+	Lo []uint32 `json:"lo"`
+	Hi []uint32 `json:"hi"`
+}
+
+func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req spatialQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	td, err := s.cat.Describe(req.Table)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	q := storage.SpatialQuery{Limit: req.Limit}
+	switch {
+	case req.BBox != nil:
+		b := spatial.BBox{
+			MinLat: req.BBox.MinLat,
+			MinLon: req.BBox.MinLon,
+			MaxLat: req.BBox.MaxLat,
+			MaxLon: req.BBox.MaxLon,
+		}
+		q.BBox = &b
+	case req.Radius != nil:
+		q.Radius = &storage.RadiusQuery{
+			Lat:    req.Radius.Lat,
+			Lon:    req.Radius.Lon,
+			Meters: req.Radius.Meters,
+		}
+	case req.Z != nil:
+		q.Z = &spatial.ZBBox{Lo: req.Z.Lo, Hi: req.Z.Hi}
+	default:
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("one of bbox/radius/z required"))
+		return
+	}
+	items, err := s.db.SpatialQueryItems(td, req.IndexName, q)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, types.ErrSpatialNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, types.ErrInvalidSpatial) {
+			status = http.StatusBadRequest
+		}
+		writeErr(w, status, err)
+		return
+	}
+	out := make([]map[string]jsonAttribute, 0, len(items))
+	for _, it := range items {
+		out = append(out, encodeItem(it))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
