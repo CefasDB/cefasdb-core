@@ -120,6 +120,32 @@ func (c *Catalog) List() []types.TableDescriptor {
 	return out
 }
 
+// UpdateTable persists an in-place mutation of an existing
+// descriptor (TTL, future tags, etc.). Returns ErrTableNotFound when
+// the name is unknown. The replacement keeps td.Name, KeySchema, and
+// indexes — callers are responsible for not mutating fields the
+// storage layer treats as immutable. Mirrors Create's pebble write so
+// followers pick the change up through Reload on their next read.
+func (c *Catalog) UpdateTable(td types.TableDescriptor) error {
+	if td.Name == "" {
+		return fmt.Errorf("table name required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.tables[td.Name]; !ok {
+		return types.ErrTableNotFound
+	}
+	b, err := json.Marshal(td)
+	if err != nil {
+		return fmt.Errorf("marshal descriptor: %w", err)
+	}
+	if err := c.db.Set(storage.KeyCatalog(td.Name), b); err != nil {
+		return fmt.Errorf("persist descriptor: %w", err)
+	}
+	c.tables[td.Name] = td
+	return nil
+}
+
 // Drop removes a table descriptor. Items under the table are NOT erased
 // here — call storage.DropTableItems separately if needed (Phase 2).
 func (c *Catalog) Drop(name string) error {

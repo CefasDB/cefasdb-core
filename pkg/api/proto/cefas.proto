@@ -18,6 +18,11 @@ service Cefas {
   rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
 
+  // TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+  // these RPCs only mutate the catalog entry.
+  rpc UpdateTimeToLive(UpdateTimeToLiveRequest) returns (UpdateTimeToLiveResponse);
+  rpc DescribeTimeToLive(DescribeTimeToLiveRequest) returns (DescribeTimeToLiveResponse);
+
   // Item operations.
   rpc PutItem(PutItemRequest) returns (PutItemResponse);
   rpc GetItem(GetItemRequest) returns (GetItemResponse);
@@ -161,6 +166,27 @@ message ListTablesResponse { repeated TableDescriptor tables = 1; }
 
 message DropTableRequest  { string name = 1; }
 message DropTableResponse {}
+
+// TTL specification mirrors aws dynamodb update-time-to-live.
+message TimeToLiveSpecification {
+  bool   enabled        = 1;
+  string attribute_name = 2; // ignored when enabled = false
+}
+
+message UpdateTimeToLiveRequest {
+  string                  table_name                 = 1;
+  TimeToLiveSpecification time_to_live_specification = 2;
+}
+message UpdateTimeToLiveResponse {
+  TimeToLiveSpecification time_to_live_specification = 1;
+}
+
+message DescribeTimeToLiveRequest  { string table_name = 1; }
+message DescribeTimeToLiveResponse {
+  // status mirrors aws dynamodb: "ENABLED" | "DISABLED".
+  string status         = 1;
+  string attribute_name = 2;
+}
 
 // ---------- item rpcs ----------
 

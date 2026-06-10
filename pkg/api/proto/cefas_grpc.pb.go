@@ -26,23 +26,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Cefas_CreateTable_FullMethodName    = "/cefas.v1.Cefas/CreateTable"
-	Cefas_DescribeTable_FullMethodName  = "/cefas.v1.Cefas/DescribeTable"
-	Cefas_ListTables_FullMethodName     = "/cefas.v1.Cefas/ListTables"
-	Cefas_DropTable_FullMethodName      = "/cefas.v1.Cefas/DropTable"
-	Cefas_PutItem_FullMethodName        = "/cefas.v1.Cefas/PutItem"
-	Cefas_GetItem_FullMethodName        = "/cefas.v1.Cefas/GetItem"
-	Cefas_DeleteItem_FullMethodName     = "/cefas.v1.Cefas/DeleteItem"
-	Cefas_BatchWriteItem_FullMethodName = "/cefas.v1.Cefas/BatchWriteItem"
-	Cefas_BatchGetItem_FullMethodName   = "/cefas.v1.Cefas/BatchGetItem"
-	Cefas_Query_FullMethodName          = "/cefas.v1.Cefas/Query"
-	Cefas_SpatialQuery_FullMethodName   = "/cefas.v1.Cefas/SpatialQuery"
-	Cefas_Sql_FullMethodName            = "/cefas.v1.Cefas/Sql"
-	Cefas_ClusterStatus_FullMethodName  = "/cefas.v1.Cefas/ClusterStatus"
-	Cefas_AddVoter_FullMethodName       = "/cefas.v1.Cefas/AddVoter"
-	Cefas_RemoveServer_FullMethodName   = "/cefas.v1.Cefas/RemoveServer"
-	Cefas_StreamChanges_FullMethodName  = "/cefas.v1.Cefas/StreamChanges"
-	Cefas_ListSnapshots_FullMethodName  = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_CreateTable_FullMethodName        = "/cefas.v1.Cefas/CreateTable"
+	Cefas_DescribeTable_FullMethodName      = "/cefas.v1.Cefas/DescribeTable"
+	Cefas_ListTables_FullMethodName         = "/cefas.v1.Cefas/ListTables"
+	Cefas_DropTable_FullMethodName          = "/cefas.v1.Cefas/DropTable"
+	Cefas_UpdateTimeToLive_FullMethodName   = "/cefas.v1.Cefas/UpdateTimeToLive"
+	Cefas_DescribeTimeToLive_FullMethodName = "/cefas.v1.Cefas/DescribeTimeToLive"
+	Cefas_PutItem_FullMethodName            = "/cefas.v1.Cefas/PutItem"
+	Cefas_GetItem_FullMethodName            = "/cefas.v1.Cefas/GetItem"
+	Cefas_DeleteItem_FullMethodName         = "/cefas.v1.Cefas/DeleteItem"
+	Cefas_BatchWriteItem_FullMethodName     = "/cefas.v1.Cefas/BatchWriteItem"
+	Cefas_BatchGetItem_FullMethodName       = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_Query_FullMethodName              = "/cefas.v1.Cefas/Query"
+	Cefas_SpatialQuery_FullMethodName       = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName                = "/cefas.v1.Cefas/Sql"
+	Cefas_ClusterStatus_FullMethodName      = "/cefas.v1.Cefas/ClusterStatus"
+	Cefas_AddVoter_FullMethodName           = "/cefas.v1.Cefas/AddVoter"
+	Cefas_RemoveServer_FullMethodName       = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_StreamChanges_FullMethodName      = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName      = "/cefas.v1.Cefas/ListSnapshots"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -54,6 +56,10 @@ type CefasClient interface {
 	DescribeTable(ctx context.Context, in *DescribeTableRequest, opts ...grpc.CallOption) (*DescribeTableResponse, error)
 	ListTables(ctx context.Context, in *ListTablesRequest, opts ...grpc.CallOption) (*ListTablesResponse, error)
 	DropTable(ctx context.Context, in *DropTableRequest, opts ...grpc.CallOption) (*DropTableResponse, error)
+	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+	// these RPCs only mutate the catalog entry.
+	UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error)
+	DescribeTimeToLive(ctx context.Context, in *DescribeTimeToLiveRequest, opts ...grpc.CallOption) (*DescribeTimeToLiveResponse, error)
 	// Item operations.
 	PutItem(ctx context.Context, in *PutItemRequest, opts ...grpc.CallOption) (*PutItemResponse, error)
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
@@ -123,6 +129,26 @@ func (c *cefasClient) DropTable(ctx context.Context, in *DropTableRequest, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DropTableResponse)
 	err := c.cc.Invoke(ctx, Cefas_DropTable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTimeToLiveResponse)
+	err := c.cc.Invoke(ctx, Cefas_UpdateTimeToLive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribeTimeToLive(ctx context.Context, in *DescribeTimeToLiveRequest, opts ...grpc.CallOption) (*DescribeTimeToLiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeTimeToLiveResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribeTimeToLive_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +321,10 @@ type CefasServer interface {
 	DescribeTable(context.Context, *DescribeTableRequest) (*DescribeTableResponse, error)
 	ListTables(context.Context, *ListTablesRequest) (*ListTablesResponse, error)
 	DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error)
+	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+	// these RPCs only mutate the catalog entry.
+	UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error)
+	DescribeTimeToLive(context.Context, *DescribeTimeToLiveRequest) (*DescribeTimeToLiveResponse, error)
 	// Item operations.
 	PutItem(context.Context, *PutItemRequest) (*PutItemResponse, error)
 	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
@@ -341,6 +371,12 @@ func (UnimplementedCefasServer) ListTables(context.Context, *ListTablesRequest) 
 }
 func (UnimplementedCefasServer) DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropTable not implemented")
+}
+func (UnimplementedCefasServer) UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTimeToLive not implemented")
+}
+func (UnimplementedCefasServer) DescribeTimeToLive(context.Context, *DescribeTimeToLiveRequest) (*DescribeTimeToLiveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeTimeToLive not implemented")
 }
 func (UnimplementedCefasServer) PutItem(context.Context, *PutItemRequest) (*PutItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PutItem not implemented")
@@ -470,6 +506,42 @@ func _Cefas_DropTable_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).DropTable(ctx, req.(*DropTableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_UpdateTimeToLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTimeToLiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).UpdateTimeToLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_UpdateTimeToLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).UpdateTimeToLive(ctx, req.(*UpdateTimeToLiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribeTimeToLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeTimeToLiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribeTimeToLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribeTimeToLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribeTimeToLive(ctx, req.(*DescribeTimeToLiveRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -709,6 +781,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropTable",
 			Handler:    _Cefas_DropTable_Handler,
+		},
+		{
+			MethodName: "UpdateTimeToLive",
+			Handler:    _Cefas_UpdateTimeToLive_Handler,
+		},
+		{
+			MethodName: "DescribeTimeToLive",
+			Handler:    _Cefas_DescribeTimeToLive_Handler,
 		},
 		{
 			MethodName: "PutItem",
