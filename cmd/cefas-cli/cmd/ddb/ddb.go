@@ -1,0 +1,12 @@
+// Package ddb hosts the DynamoDB-style subcommands. The Register
+// function wires every implemented command onto the supplied root.
+package ddb
+
+import "github.com/spf13/cobra"
+
+// Register installs every implemented DDB-style subcommand.
+// PRs 3 + 4 add table-management, item, query, batch and PartiQL
+// commands here.
+func Register(root *cobra.Command) {
+	registerListTables(root)
+}
