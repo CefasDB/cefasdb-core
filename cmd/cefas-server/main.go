@@ -33,6 +33,9 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/config"
+	// Side-effect import: every built-in plugin registers against
+	// plugin.Default before the server exposes ListPlugins.
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
 )
 
 func main() {

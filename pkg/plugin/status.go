@@ -29,13 +29,15 @@ func (s State) String() string {
 
 // Status is the snapshot the engine + CLI surface for a single plugin.
 type Status struct {
-	Name              string    `json:"name"`
-	Kind              string    `json:"kind"`
-	State             string    `json:"state"`
-	LastError         string    `json:"lastError,omitempty"`
-	LastErrorAtUnix   int64     `json:"lastErrorAtUnix,omitempty"`
-	ItemsIndexed      int64     `json:"itemsIndexed,omitempty"`
-	StartedAtUnix     int64     `json:"startedAtUnix,omitempty"`
+	Name              string `json:"name"`
+	Kind              string `json:"kind"`
+	Version           string `json:"version,omitempty"`
+	Description       string `json:"description,omitempty"`
+	State             string `json:"state"`
+	LastError         string `json:"lastError,omitempty"`
+	LastErrorAtUnix   int64  `json:"lastErrorAtUnix,omitempty"`
+	ItemsIndexed      int64  `json:"itemsIndexed,omitempty"`
+	StartedAtUnix     int64  `json:"startedAtUnix,omitempty"`
 }
 
 // StatusProvider is an optional interface plugins implement when they
@@ -57,6 +59,15 @@ func Snapshot(r *Registry, state func(name string) State, lastErr func(name stri
 		s := Status{Name: m.Name, Kind: m.Kind.String()}
 		if sp, ok := p.(StatusProvider); ok {
 			s = sp.Status()
+		}
+		// Manifest data (Version, Description) is authoritative —
+		// merge it after a plugin-supplied Status so we don't lose it
+		// when StatusProvider only fills counters.
+		if s.Version == "" {
+			s.Version = m.Version
+		}
+		if s.Description == "" {
+			s.Description = m.Description
 		}
 		if state != nil {
 			s.State = state(m.Name).String()
