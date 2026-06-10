@@ -135,9 +135,17 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
 	}
+	lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, item)
+	if err != nil {
+		return fmt.Errorf("plan lsi: %w", err)
+	}
 	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, item)
 	if err != nil {
 		return fmt.Errorf("plan spatial: %w", err)
+	}
+	ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, item)
+	if err != nil {
+		return fmt.Errorf("plan ttl: %w", err)
 	}
 
 	b := d.Batch()
@@ -148,7 +156,13 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := applyIndexOps(b, gsiOps); err != nil {
 		return err
 	}
+	if err := applyIndexOps(b, lsiOps); err != nil {
+		return err
+	}
 	if err := applyIndexOps(b, spatialOps); err != nil {
+		return err
+	}
+	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
 	return d.CommitBatch(b)
@@ -194,14 +208,22 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 		}
 	}
 
-	// Plan GSI + spatial deltas from priorItem → nil.
+	// Plan every secondary delta from priorItem → nil.
 	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
 	}
+	lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
+	if err != nil {
+		return fmt.Errorf("plan lsi: %w", err)
+	}
 	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
 	if err != nil {
 		return fmt.Errorf("plan spatial: %w", err)
+	}
+	ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, nil)
+	if err != nil {
+		return fmt.Errorf("plan ttl: %w", err)
 	}
 
 	b := d.Batch()
@@ -212,7 +234,13 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := applyIndexOps(b, gsiOps); err != nil {
 		return err
 	}
+	if err := applyIndexOps(b, lsiOps); err != nil {
+		return err
+	}
 	if err := applyIndexOps(b, spatialOps); err != nil {
+		return err
+	}
+	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
 	return d.CommitBatch(b)
@@ -307,6 +335,102 @@ func (d *DB) QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skH
 	return d.scanItems(lower, upper, limit)
 }
 
+// QueryByLSI iterates a local-secondary-index partition, resolves
+// pointers, and returns the underlying items. The supplied primaryPKVal
+// pins the partition; the LSI's own SK supplies ordering.
+func (d *DB) QueryByLSI(td types.TableDescriptor, idxName string, primaryPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
+	var descriptor types.LSIDescriptor
+	found := false
+	for _, l := range td.LSIs {
+		if l.Name == idxName {
+			descriptor = l
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("table %q has no LSI named %q", td.Name, idxName)
+	}
+	pkBytes, err := AttrCanonicalBytes(primaryPKVal)
+	if err != nil {
+		return nil, fmt.Errorf("primary PK: %w", err)
+	}
+	var lower, upper []byte
+	if opts.SKLow.T == types.AttrNull && opts.SKHigh.T == types.AttrNull {
+		lower, upper = PrefixLSIByPK(td.Name, idxName, pkBytes)
+	} else {
+		var lo, hi []byte
+		if opts.SKLow.T != types.AttrNull {
+			lo, err = AttrCanonicalBytes(opts.SKLow)
+			if err != nil {
+				return nil, fmt.Errorf("lsi SK low: %w", err)
+			}
+		}
+		if opts.SKHigh.T != types.AttrNull {
+			hi, err = AttrCanonicalBytes(opts.SKHigh)
+			if err != nil {
+				return nil, fmt.Errorf("lsi SK high: %w", err)
+			}
+		}
+		lower, upper = RangeLSIBySK(td.Name, idxName, pkBytes, lo, hi)
+	}
+	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
+}
+
+// iterateIndex walks an index keyspace and resolves each pointer
+// according to the supplied projection mode. INCLUDE / ALL pointers
+// avoid the dereference Get by carrying the projected payload in the
+// value blob.
+func (d *DB) iterateIndex(td types.TableDescriptor, lower, upper []byte, projection types.IndexProjection, limit int) ([]types.Item, error) {
+	it, err := d.Iter(lower, upper)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	var out []types.Item
+	for valid := it.First(); valid; valid = it.Next() {
+		v := it.Value()
+		ptrCopy := make([]byte, len(v))
+		copy(ptrCopy, v)
+		pk, sk, projectedBytes, mode, err := DecodeProjectedPointer(ptrCopy)
+		if err != nil {
+			return nil, fmt.Errorf("decode pointer: %w", err)
+		}
+		switch mode {
+		case "ALL":
+			item, err := DecodeItem(projectedBytes)
+			if err != nil {
+				return nil, fmt.Errorf("decode ALL item: %w", err)
+			}
+			out = append(out, item)
+		case "INCLUDE":
+			item, err := DecodeItem(projectedBytes)
+			if err != nil {
+				return nil, fmt.Errorf("decode INCLUDE item: %w", err)
+			}
+			out = append(out, item)
+		default:
+			raw, err := d.Get(KeyPrimary(td.Name, pk, sk))
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			item, err := DecodeItem(raw)
+			if err != nil {
+				return nil, fmt.Errorf("decode item: %w", err)
+			}
+			out = append(out, item)
+		}
+		_ = projection
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, it.Error()
+}
+
 // QueryByGSI iterates a GSI partition, resolves pointers, and returns
 // the underlying items in the order the index produces them.
 func (d *DB) QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
@@ -340,43 +464,7 @@ func (d *DB) QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types
 		}
 		lower, upper = RangeGSIBySK(td.Name, idxName, gsiPK, lo, hi)
 	}
-
-	it, err := d.Iter(lower, upper)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	var out []types.Item
-	for valid := it.First(); valid; valid = it.Next() {
-		v := it.Value()
-		ptrCopy := make([]byte, len(v))
-		copy(ptrCopy, v)
-		primaryPK, primarySK, err := DecodeGSIPointer(ptrCopy)
-		if err != nil {
-			return nil, fmt.Errorf("decode pointer: %w", err)
-		}
-		raw, err := d.Get(KeyPrimary(td.Name, primaryPK, primarySK))
-		if errors.Is(err, ErrNotFound) {
-			// Pointer dangles (would happen mid-rebuild on a Raft
-			// follower if it ever de-coupled, but is otherwise an
-			// invariant violation). Skip rather than fail the whole
-			// query.
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		item, err := DecodeItem(raw)
-		if err != nil {
-			return nil, fmt.Errorf("decode item: %w", err)
-		}
-		out = append(out, item)
-		if opts.Limit > 0 && len(out) >= opts.Limit {
-			break
-		}
-	}
-	return out, it.Error()
+	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
 }
 
 func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) {
@@ -451,9 +539,17 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
+			lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, op.Item)
+			if err != nil {
+				return fmt.Errorf("op %d lsi: %w", i, err)
+			}
 			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, op.Item)
 			if err != nil {
 				return fmt.Errorf("op %d spatial: %w", i, err)
+			}
+			ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, op.Item)
+			if err != nil {
+				return fmt.Errorf("op %d ttl: %w", i, err)
 			}
 			if err := b.Set(primaryKey, enc, nil); err != nil {
 				return err
@@ -461,7 +557,13 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
+			if err := applyIndexOps(b, lsiOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
 			if err := applyIndexOps(b, spatialOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
+			if err := applyIndexOps(b, ttlOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
 		case BatchOpDelete:
@@ -478,9 +580,17 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
+			lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
+			if err != nil {
+				return fmt.Errorf("op %d lsi: %w", i, err)
+			}
 			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
 			if err != nil {
 				return fmt.Errorf("op %d spatial: %w", i, err)
+			}
+			ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, nil)
+			if err != nil {
+				return fmt.Errorf("op %d ttl: %w", i, err)
 			}
 			if err := b.Delete(primaryKey, nil); err != nil {
 				return err
@@ -488,7 +598,13 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
+			if err := applyIndexOps(b, lsiOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
 			if err := applyIndexOps(b, spatialOps); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
+			if err := applyIndexOps(b, ttlOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
 		default:
