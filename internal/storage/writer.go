@@ -476,6 +476,15 @@ func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) 
 	return types.GSIDescriptor{}, false
 }
 
+// ScanTable streams every primary item in `table`, capped by limit
+// (limit ≤ 0 means "no limit"). Decoding happens here so the caller
+// never sees raw pebble bytes. Multi-shard mode requires the caller
+// to scatter the call across each shard's DB.
+func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
+	lower, upper := PrefixPrimaryAll(table)
+	return d.scanItems(lower, upper, limit)
+}
+
 func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 	it, err := d.Iter(lower, upper)
 	if err != nil {

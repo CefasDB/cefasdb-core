@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -111,6 +112,63 @@ func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableReques
 	return &cefaspb.DropTableResponse{}, nil
 }
 
+func (s *GRPCServer) UpdateTimeToLive(ctx context.Context, req *cefaspb.UpdateTimeToLiveRequest) (*cefaspb.UpdateTimeToLiveResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	spec := req.GetTimeToLiveSpecification()
+	if spec == nil {
+		return nil, status.Error(codes.InvalidArgument, "TimeToLiveSpecification required")
+	}
+	td, err := s.cat.Describe(req.GetTableName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	if spec.GetEnabled() {
+		if spec.GetAttributeName() == "" {
+			return nil, status.Error(codes.InvalidArgument, "attribute_name required when enabling TTL")
+		}
+		td.TTLAttribute = spec.GetAttributeName()
+	} else {
+		td.TTLAttribute = ""
+	}
+	if err := s.cat.UpdateTable(td); err != nil {
+		return nil, mapStorageErr(err)
+	}
+	if s.manager != nil {
+		for i, sh := range s.manager.Shards() {
+			if i == 0 {
+				continue
+			}
+			if cat, cerr := catalog.New(sh.Storage); cerr == nil {
+				_ = cat.UpdateTable(td)
+			}
+		}
+	}
+	return &cefaspb.UpdateTimeToLiveResponse{
+		TimeToLiveSpecification: &cefaspb.TimeToLiveSpecification{
+			Enabled:       td.TTLAttribute != "",
+			AttributeName: td.TTLAttribute,
+		},
+	}, nil
+}
+
+func (s *GRPCServer) DescribeTimeToLive(ctx context.Context, req *cefaspb.DescribeTimeToLiveRequest) (*cefaspb.DescribeTimeToLiveResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	td, err := s.cat.Describe(req.GetTableName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	resp := &cefaspb.DescribeTimeToLiveResponse{Status: "DISABLED"}
+	if td.TTLAttribute != "" {
+		resp.Status = "ENABLED"
+		resp.AttributeName = td.TTLAttribute
+	}
+	return resp, nil
+}
+
 // ---------- item ----------
 
 func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (*cefaspb.PutItemResponse, error) {
@@ -172,6 +230,76 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.GetItemResponse{Found: true, Item: itemToPB(item)}, nil
+}
+
+func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequest) (*cefaspb.UpdateItemResponse, error) {
+	if err := requireAnyScope(ctx,
+		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
+		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
+		return nil, err
+	}
+	td, err := s.cat.Describe(req.GetTable())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	key, err := pbToItem(req.GetKey())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	values, err := pbToItem(req.GetExpressionAttributeValues())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("expression_attribute_values: %v", err))
+	}
+	sql, wantImage, err := translateUpdateItem(
+		req.GetTable(),
+		key,
+		td.KeySchema,
+		req.GetUpdateExpression(),
+		req.GetConditionExpression(),
+		req.GetExpressionAttributeNames(),
+		values,
+		returnValuesName(req.GetReturnValues()),
+	)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	stmt, err := cefassql.Parse(sql)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("translate: %v", err))
+	}
+	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	db := s.storageFor(pkBytes)
+	plan, err := cefassql.PlanStmt(stmt, s.cat)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("plan: %v", err))
+	}
+	ex := &cefassql.Executor{Storage: db, Catalog: s.cat}
+	res, err := ex.Execute(plan)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	resp := &cefaspb.UpdateItemResponse{}
+	if wantImage != "" && len(res.Rows) > 0 {
+		resp.Attributes = itemToPB(res.Rows[0])
+	}
+	return resp, nil
+}
+
+func returnValuesName(v cefaspb.ReturnValues) string {
+	switch v {
+	case cefaspb.ReturnValues_RETURN_VALUES_ALL_NEW:
+		return "ALL_NEW"
+	case cefaspb.ReturnValues_RETURN_VALUES_ALL_OLD:
+		return "ALL_OLD"
+	case cefaspb.ReturnValues_RETURN_VALUES_UPDATED_NEW:
+		return "UPDATED_NEW"
+	case cefaspb.ReturnValues_RETURN_VALUES_UPDATED_OLD:
+		return "UPDATED_OLD"
+	}
+	return "NONE"
 }
 
 func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequest) (*cefaspb.DeleteItemResponse, error) {
@@ -357,6 +485,76 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	return nil
 }
 
+func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanServer) error {
+	ctx := stream.Context()
+	if err := requireAnyScope(ctx,
+		auth.TableScope(auth.ScopeScan, req.GetTable()),
+		auth.WildcardScope(auth.ScopeScan)); err != nil {
+		return err
+	}
+	if req.GetConsistency() == cefaspb.Consistency_CONSISTENCY_STRONG {
+		if err := s.strongReadGate(); err != nil {
+			return err
+		}
+	}
+	if _, err := s.cat.Describe(req.GetTable()); err != nil {
+		return mapStorageErr(err)
+	}
+	cond, err := storage.ParseCondition(req.GetFilterExpression())
+	if err != nil {
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("filter_expression: %v", err))
+	}
+	rawBinds, err := pbToItem(req.GetBinds())
+	if err != nil {
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("binds: %v", err))
+	}
+	// Wire keeps the `:name` prefix; the condition evaluator expects
+	// the bare name. Strip here so callers pass the AWS-shaped map.
+	binds := make(map[string]types.AttributeValue, len(rawBinds))
+	for k, v := range rawBinds {
+		binds[strings.TrimPrefix(k, ":")] = v
+	}
+	limit := int(req.GetLimit())
+
+	dbs := []*storage.DB{s.db}
+	if s.manager != nil {
+		dbs = dbs[:0]
+		for _, sh := range s.manager.Shards() {
+			dbs = append(dbs, sh.Storage)
+		}
+	}
+
+	sent := 0
+	for _, db := range dbs {
+		// Pull every primary item; filter + cap on the way out so a
+		// permissive filter doesn't materialise the full shard in
+		// memory before stopping.
+		items, err := db.ScanTable(req.GetTable(), 0)
+		if err != nil {
+			return mapStorageErr(err)
+		}
+		for _, it := range items {
+			if !cond.IsZero() {
+				ok, err := cond.Evaluate(it, binds)
+				if err != nil {
+					return status.Error(codes.InvalidArgument, fmt.Sprintf("evaluate filter: %v", err))
+				}
+				if !ok {
+					continue
+				}
+			}
+			if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
+				return err
+			}
+			sent++
+			if limit > 0 && sent >= limit {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefaspb.Cefas_SpatialQueryServer) error {
 	ctx := stream.Context()
 	if err := requireAnyScope(ctx,
@@ -505,6 +703,82 @@ func (s *GRPCServer) StreamChanges(req *cefaspb.StreamChangesRequest, stream cef
 				return err
 			}
 		}
+	}
+}
+
+func (s *GRPCServer) CreateBackup(ctx context.Context, req *cefaspb.CreateBackupRequest) (*cefaspb.CreateBackupResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	tables := req.GetTables()
+	if len(tables) == 0 {
+		for _, td := range s.cat.List() {
+			tables = append(tables, td.Name)
+		}
+	}
+	meta, err := s.db.CreateBackup(req.GetName(), tables)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.CreateBackupResponse{Backup: backupMetaToPB(meta)}, nil
+}
+
+func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequest) (*cefaspb.ListBackupsResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	metas, err := s.db.ListBackups()
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	out := make([]*cefaspb.BackupDescriptor, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, backupMetaToPB(m))
+	}
+	return &cefaspb.ListBackupsResponse{Backups: out}, nil
+}
+
+func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.RestoreTableFromBackupRequest) (*cefaspb.RestoreTableFromBackupResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	register := func(td types.TableDescriptor) error {
+		if err := s.cat.Create(td); err != nil {
+			return err
+		}
+		if s.manager != nil {
+			for i, sh := range s.manager.Shards() {
+				if i == 0 {
+					continue
+				}
+				if cat, cerr := catalog.New(sh.Storage); cerr == nil {
+					_ = cat.Create(td)
+				}
+			}
+		}
+		return nil
+	}
+	res, err := s.db.RestoreTableFromBackup(
+		req.GetBackupName(),
+		req.GetSourceTableName(),
+		req.GetTargetTableName(),
+		register,
+	)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.RestoreTableFromBackupResponse{
+		TargetTableName: res.TargetTable.Name,
+		RowsCopied:      int64(res.RowsCopied),
+	}, nil
+}
+
+func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
+	return &cefaspb.BackupDescriptor{
+		Name:           m.Name,
+		CreatedAtUnix:  m.CreatedAt,
+		Tables:         m.Tables,
+		CheckpointPath: m.CheckpointAt,
 	}
 }
 

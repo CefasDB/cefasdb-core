@@ -18,18 +18,31 @@ service Cefas {
   rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
 
+  // TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+  // these RPCs only mutate the catalog entry.
+  rpc UpdateTimeToLive(UpdateTimeToLiveRequest) returns (UpdateTimeToLiveResponse);
+  rpc DescribeTimeToLive(DescribeTimeToLiveRequest) returns (DescribeTimeToLiveResponse);
+
   // Item operations.
   rpc PutItem(PutItemRequest) returns (PutItemResponse);
   rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
   rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse);
 
   // Bulk operations.
   rpc BatchWriteItem(BatchWriteItemRequest) returns (BatchWriteItemResponse);
   rpc BatchGetItem(BatchGetItemRequest) returns (BatchGetItemResponse);
 
+  // Atomic multi-item transactions. v1 ships single-shard, single-table
+  // atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+  // out of scope.
+  rpc TransactWriteItems(TransactWriteItemsRequest) returns (TransactWriteItemsResponse);
+  rpc TransactGetItems(TransactGetItemsRequest) returns (TransactGetItemsResponse);
+
   // Query and scan stream rows so the server never materialises an
   // unbounded result set in memory.
   rpc Query(QueryRequest) returns (stream Item);
+  rpc Scan(ScanRequest) returns (stream Item);
   rpc SpatialQuery(SpatialQueryRequest) returns (stream Item);
 
   // SQL surface — single statement per call. Affected_rows is set for
@@ -49,6 +62,12 @@ service Cefas {
 
   // Snapshot administration (PITR foundation).
   rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+
+  // Admin-named backups (pebble.Checkpoint of the live keyspace,
+  // catalogued under cefas/admin/backups/<name>).
+  rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc RestoreTableFromBackup(RestoreTableFromBackupRequest) returns (RestoreTableFromBackupResponse);
 }
 
 message StreamChangesRequest {
@@ -81,6 +100,39 @@ message SnapshotMetadata {
   uint64 raft_term     = 3;
   int64  unix_seconds  = 4;
   int64  size_bytes    = 5;
+}
+
+message BackupDescriptor {
+  string          name             = 1;
+  int64           created_at_unix  = 2;
+  repeated string tables           = 3;
+  // Server-local on-disk path; clients use it only for diagnostics.
+  string          checkpoint_path  = 4;
+}
+
+message CreateBackupRequest {
+  string          name   = 1;
+  // Optional: when empty the backup covers every table the catalog
+  // knows about at creation time.
+  repeated string tables = 2;
+}
+message CreateBackupResponse {
+  BackupDescriptor backup = 1;
+}
+
+message ListBackupsRequest {}
+message ListBackupsResponse {
+  repeated BackupDescriptor backups = 1;
+}
+
+message RestoreTableFromBackupRequest {
+  string backup_name        = 1;
+  string source_table_name  = 2;
+  string target_table_name  = 3;
+}
+message RestoreTableFromBackupResponse {
+  string target_table_name = 1;
+  int64  rows_copied       = 2;
 }
 
 message SqlRequest  { string query = 1; }
@@ -162,6 +214,27 @@ message ListTablesResponse { repeated TableDescriptor tables = 1; }
 message DropTableRequest  { string name = 1; }
 message DropTableResponse {}
 
+// TTL specification mirrors aws dynamodb update-time-to-live.
+message TimeToLiveSpecification {
+  bool   enabled        = 1;
+  string attribute_name = 2; // ignored when enabled = false
+}
+
+message UpdateTimeToLiveRequest {
+  string                  table_name                 = 1;
+  TimeToLiveSpecification time_to_live_specification = 2;
+}
+message UpdateTimeToLiveResponse {
+  TimeToLiveSpecification time_to_live_specification = 1;
+}
+
+message DescribeTimeToLiveRequest  { string table_name = 1; }
+message DescribeTimeToLiveResponse {
+  // status mirrors aws dynamodb: "ENABLED" | "DISABLED".
+  string status         = 1;
+  string attribute_name = 2;
+}
+
 // ---------- item rpcs ----------
 
 message PutItemRequest {
@@ -197,6 +270,34 @@ message DeleteItemRequest {
 }
 message DeleteItemResponse {}
 
+// UpdateItemRequest mirrors aws dynamodb update-item. The cefas server
+// resolves #names + :values inline and dispatches the resulting SQL
+// UPDATE through the standard SQL executor — that path already does
+// SET / ADD / REMOVE / DELETE with GSI/LSI/TTL maintenance.
+enum ReturnValues {
+  RETURN_VALUES_UNSPECIFIED = 0;
+  RETURN_VALUES_NONE        = 1;
+  RETURN_VALUES_ALL_NEW     = 2;
+  RETURN_VALUES_ALL_OLD     = 3;
+  RETURN_VALUES_UPDATED_NEW = 4;
+  RETURN_VALUES_UPDATED_OLD = 5;
+}
+
+message UpdateItemRequest {
+  string                       table                       = 1;
+  map<string, AttributeValue>  key                         = 2;
+  string                       update_expression           = 3;
+  string                       condition_expression        = 4;
+  map<string, string>          expression_attribute_names  = 5;
+  map<string, AttributeValue>  expression_attribute_values = 6;
+  ReturnValues                 return_values               = 7;
+}
+
+message UpdateItemResponse {
+  // Set when return_values selects an OLD / NEW image.
+  map<string, AttributeValue> attributes = 1;
+}
+
 // ---------- batch ----------
 
 message BatchWriteOp {
@@ -230,6 +331,54 @@ message BatchGetItemResponse {
   repeated Item items = 1;
 }
 
+// ---------- transactions (single-shard v1) ----------
+
+// A TransactWriteOp is one entry in TransactWriteItems. Exactly one of
+// put / delete / condition_check is set. The condition_expression
+// (with its binds) applies to every kind. Update is not yet supported
+// — callers should compose Put + ConditionCheck or use UpdateItem
+// outside the transaction.
+message TransactWriteOp {
+  message Put {
+    string                       table = 1;
+    map<string, AttributeValue>  item  = 2;
+  }
+  message Delete {
+    string                       table = 1;
+    map<string, AttributeValue>  key   = 2;
+  }
+  message ConditionCheck {
+    string                       table = 1;
+    map<string, AttributeValue>  key   = 2;
+  }
+  oneof op {
+    Put            put             = 1;
+    Delete         delete          = 2;
+    ConditionCheck condition_check = 3;
+  }
+  string                       condition_expression = 4;
+  map<string, AttributeValue>  binds                = 5;
+}
+
+message TransactWriteItemsRequest {
+  repeated TransactWriteOp ops = 1;
+}
+message TransactWriteItemsResponse {}
+
+message TransactGet {
+  string                       table = 1;
+  map<string, AttributeValue>  key   = 2;
+}
+
+message TransactGetItemsRequest {
+  repeated TransactGet items = 1;
+}
+message TransactGetItemsResponse {
+  // Entries align with the request's `items` index. A missing item
+  // returns an empty Item (attributes map is empty).
+  repeated Item items = 1;
+}
+
 // ---------- streaming query / scan ----------
 
 message QueryRequest {
@@ -240,6 +389,20 @@ message QueryRequest {
   AttributeValue sk_high      = 5;
   int32          limit        = 6;
   Consistency    consistency  = 7;
+}
+
+// ScanRequest streams every primary item in `table`. FilterExpression
+// is evaluated server-side using the same grammar as ConditionExpression
+// on PutItem / DeleteItem (cefas DDB-condition subset, with `:bind`
+// placeholders resolved from `binds`). Multi-shard deployments scatter
+// the scan across every shard and merge the streams in arrival order
+// (no global ordering guarantee).
+message ScanRequest {
+  string                       table             = 1;
+  string                       filter_expression = 2;
+  map<string, AttributeValue>  binds             = 3;
+  int32                        limit             = 4;
+  Consistency                  consistency       = 5;
 }
 
 // ---------- spatial ----------

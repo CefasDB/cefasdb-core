@@ -26,23 +26,32 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Cefas_CreateTable_FullMethodName    = "/cefas.v1.Cefas/CreateTable"
-	Cefas_DescribeTable_FullMethodName  = "/cefas.v1.Cefas/DescribeTable"
-	Cefas_ListTables_FullMethodName     = "/cefas.v1.Cefas/ListTables"
-	Cefas_DropTable_FullMethodName      = "/cefas.v1.Cefas/DropTable"
-	Cefas_PutItem_FullMethodName        = "/cefas.v1.Cefas/PutItem"
-	Cefas_GetItem_FullMethodName        = "/cefas.v1.Cefas/GetItem"
-	Cefas_DeleteItem_FullMethodName     = "/cefas.v1.Cefas/DeleteItem"
-	Cefas_BatchWriteItem_FullMethodName = "/cefas.v1.Cefas/BatchWriteItem"
-	Cefas_BatchGetItem_FullMethodName   = "/cefas.v1.Cefas/BatchGetItem"
-	Cefas_Query_FullMethodName          = "/cefas.v1.Cefas/Query"
-	Cefas_SpatialQuery_FullMethodName   = "/cefas.v1.Cefas/SpatialQuery"
-	Cefas_Sql_FullMethodName            = "/cefas.v1.Cefas/Sql"
-	Cefas_ClusterStatus_FullMethodName  = "/cefas.v1.Cefas/ClusterStatus"
-	Cefas_AddVoter_FullMethodName       = "/cefas.v1.Cefas/AddVoter"
-	Cefas_RemoveServer_FullMethodName   = "/cefas.v1.Cefas/RemoveServer"
-	Cefas_StreamChanges_FullMethodName  = "/cefas.v1.Cefas/StreamChanges"
-	Cefas_ListSnapshots_FullMethodName  = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_CreateTable_FullMethodName            = "/cefas.v1.Cefas/CreateTable"
+	Cefas_DescribeTable_FullMethodName          = "/cefas.v1.Cefas/DescribeTable"
+	Cefas_ListTables_FullMethodName             = "/cefas.v1.Cefas/ListTables"
+	Cefas_DropTable_FullMethodName              = "/cefas.v1.Cefas/DropTable"
+	Cefas_UpdateTimeToLive_FullMethodName       = "/cefas.v1.Cefas/UpdateTimeToLive"
+	Cefas_DescribeTimeToLive_FullMethodName     = "/cefas.v1.Cefas/DescribeTimeToLive"
+	Cefas_PutItem_FullMethodName                = "/cefas.v1.Cefas/PutItem"
+	Cefas_GetItem_FullMethodName                = "/cefas.v1.Cefas/GetItem"
+	Cefas_UpdateItem_FullMethodName             = "/cefas.v1.Cefas/UpdateItem"
+	Cefas_DeleteItem_FullMethodName             = "/cefas.v1.Cefas/DeleteItem"
+	Cefas_BatchWriteItem_FullMethodName         = "/cefas.v1.Cefas/BatchWriteItem"
+	Cefas_BatchGetItem_FullMethodName           = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_TransactWriteItems_FullMethodName     = "/cefas.v1.Cefas/TransactWriteItems"
+	Cefas_TransactGetItems_FullMethodName       = "/cefas.v1.Cefas/TransactGetItems"
+	Cefas_Query_FullMethodName                  = "/cefas.v1.Cefas/Query"
+	Cefas_Scan_FullMethodName                   = "/cefas.v1.Cefas/Scan"
+	Cefas_SpatialQuery_FullMethodName           = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName                    = "/cefas.v1.Cefas/Sql"
+	Cefas_ClusterStatus_FullMethodName          = "/cefas.v1.Cefas/ClusterStatus"
+	Cefas_AddVoter_FullMethodName               = "/cefas.v1.Cefas/AddVoter"
+	Cefas_RemoveServer_FullMethodName           = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_StreamChanges_FullMethodName          = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName          = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_CreateBackup_FullMethodName           = "/cefas.v1.Cefas/CreateBackup"
+	Cefas_ListBackups_FullMethodName            = "/cefas.v1.Cefas/ListBackups"
+	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -54,16 +63,27 @@ type CefasClient interface {
 	DescribeTable(ctx context.Context, in *DescribeTableRequest, opts ...grpc.CallOption) (*DescribeTableResponse, error)
 	ListTables(ctx context.Context, in *ListTablesRequest, opts ...grpc.CallOption) (*ListTablesResponse, error)
 	DropTable(ctx context.Context, in *DropTableRequest, opts ...grpc.CallOption) (*DropTableResponse, error)
+	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+	// these RPCs only mutate the catalog entry.
+	UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error)
+	DescribeTimeToLive(ctx context.Context, in *DescribeTimeToLiveRequest, opts ...grpc.CallOption) (*DescribeTimeToLiveResponse, error)
 	// Item operations.
 	PutItem(ctx context.Context, in *PutItemRequest, opts ...grpc.CallOption) (*PutItemResponse, error)
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
+	UpdateItem(ctx context.Context, in *UpdateItemRequest, opts ...grpc.CallOption) (*UpdateItemResponse, error)
 	DeleteItem(ctx context.Context, in *DeleteItemRequest, opts ...grpc.CallOption) (*DeleteItemResponse, error)
 	// Bulk operations.
 	BatchWriteItem(ctx context.Context, in *BatchWriteItemRequest, opts ...grpc.CallOption) (*BatchWriteItemResponse, error)
 	BatchGetItem(ctx context.Context, in *BatchGetItemRequest, opts ...grpc.CallOption) (*BatchGetItemResponse, error)
+	// Atomic multi-item transactions. v1 ships single-shard, single-table
+	// atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+	// out of scope.
+	TransactWriteItems(ctx context.Context, in *TransactWriteItemsRequest, opts ...grpc.CallOption) (*TransactWriteItemsResponse, error)
+	TransactGetItems(ctx context.Context, in *TransactGetItemsRequest, opts ...grpc.CallOption) (*TransactGetItemsResponse, error)
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+	Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
 	SpatialQuery(ctx context.Context, in *SpatialQueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
 	// SQL surface — single statement per call. Affected_rows is set for
 	// DDL/DML; rows is set for SELECT.
@@ -79,6 +99,11 @@ type CefasClient interface {
 	StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error)
 	// Snapshot administration (PITR foundation).
 	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
+	// Admin-named backups (pebble.Checkpoint of the live keyspace,
+	// catalogued under cefas/admin/backups/<name>).
+	CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error)
+	ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error)
+	RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error)
 }
 
 type cefasClient struct {
@@ -129,6 +154,26 @@ func (c *cefasClient) DropTable(ctx context.Context, in *DropTableRequest, opts 
 	return out, nil
 }
 
+func (c *cefasClient) UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateTimeToLiveResponse)
+	err := c.cc.Invoke(ctx, Cefas_UpdateTimeToLive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribeTimeToLive(ctx context.Context, in *DescribeTimeToLiveRequest, opts ...grpc.CallOption) (*DescribeTimeToLiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeTimeToLiveResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribeTimeToLive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) PutItem(ctx context.Context, in *PutItemRequest, opts ...grpc.CallOption) (*PutItemResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PutItemResponse)
@@ -143,6 +188,16 @@ func (c *cefasClient) GetItem(ctx context.Context, in *GetItemRequest, opts ...g
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetItemResponse)
 	err := c.cc.Invoke(ctx, Cefas_GetItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) UpdateItem(ctx context.Context, in *UpdateItemRequest, opts ...grpc.CallOption) (*UpdateItemResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateItemResponse)
+	err := c.cc.Invoke(ctx, Cefas_UpdateItem_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +234,26 @@ func (c *cefasClient) BatchGetItem(ctx context.Context, in *BatchGetItemRequest,
 	return out, nil
 }
 
+func (c *cefasClient) TransactWriteItems(ctx context.Context, in *TransactWriteItemsRequest, opts ...grpc.CallOption) (*TransactWriteItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransactWriteItemsResponse)
+	err := c.cc.Invoke(ctx, Cefas_TransactWriteItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) TransactGetItems(ctx context.Context, in *TransactGetItemsRequest, opts ...grpc.CallOption) (*TransactGetItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransactGetItemsResponse)
+	err := c.cc.Invoke(ctx, Cefas_TransactGetItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[0], Cefas_Query_FullMethodName, cOpts...)
@@ -198,9 +273,28 @@ func (c *cefasClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_QueryClient = grpc.ServerStreamingClient[Item]
 
+func (c *cefasClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[1], Cefas_Scan_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ScanRequest, Item]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_ScanClient = grpc.ServerStreamingClient[Item]
+
 func (c *cefasClient) SpatialQuery(ctx context.Context, in *SpatialQueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[1], Cefas_SpatialQuery_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[2], Cefas_SpatialQuery_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +353,7 @@ func (c *cefasClient) RemoveServer(ctx context.Context, in *RemoveServerRequest,
 
 func (c *cefasClient) StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[2], Cefas_StreamChanges_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[3], Cefas_StreamChanges_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +380,36 @@ func (c *cefasClient) ListSnapshots(ctx context.Context, in *ListSnapshotsReques
 	return out, nil
 }
 
+func (c *cefasClient) CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateBackupResponse)
+	err := c.cc.Invoke(ctx, Cefas_CreateBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBackupsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListBackups_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestoreTableFromBackupResponse)
+	err := c.cc.Invoke(ctx, Cefas_RestoreTableFromBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -295,16 +419,27 @@ type CefasServer interface {
 	DescribeTable(context.Context, *DescribeTableRequest) (*DescribeTableResponse, error)
 	ListTables(context.Context, *ListTablesRequest) (*ListTablesResponse, error)
 	DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error)
+	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
+	// these RPCs only mutate the catalog entry.
+	UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error)
+	DescribeTimeToLive(context.Context, *DescribeTimeToLiveRequest) (*DescribeTimeToLiveResponse, error)
 	// Item operations.
 	PutItem(context.Context, *PutItemRequest) (*PutItemResponse, error)
 	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
+	UpdateItem(context.Context, *UpdateItemRequest) (*UpdateItemResponse, error)
 	DeleteItem(context.Context, *DeleteItemRequest) (*DeleteItemResponse, error)
 	// Bulk operations.
 	BatchWriteItem(context.Context, *BatchWriteItemRequest) (*BatchWriteItemResponse, error)
 	BatchGetItem(context.Context, *BatchGetItemRequest) (*BatchGetItemResponse, error)
+	// Atomic multi-item transactions. v1 ships single-shard, single-table
+	// atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+	// out of scope.
+	TransactWriteItems(context.Context, *TransactWriteItemsRequest) (*TransactWriteItemsResponse, error)
+	TransactGetItems(context.Context, *TransactGetItemsRequest) (*TransactGetItemsResponse, error)
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error
+	Scan(*ScanRequest, grpc.ServerStreamingServer[Item]) error
 	SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error
 	// SQL surface — single statement per call. Affected_rows is set for
 	// DDL/DML; rows is set for SELECT.
@@ -320,6 +455,11 @@ type CefasServer interface {
 	StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error
 	// Snapshot administration (PITR foundation).
 	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
+	// Admin-named backups (pebble.Checkpoint of the live keyspace,
+	// catalogued under cefas/admin/backups/<name>).
+	CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error)
+	ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error)
+	RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -342,11 +482,20 @@ func (UnimplementedCefasServer) ListTables(context.Context, *ListTablesRequest) 
 func (UnimplementedCefasServer) DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropTable not implemented")
 }
+func (UnimplementedCefasServer) UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTimeToLive not implemented")
+}
+func (UnimplementedCefasServer) DescribeTimeToLive(context.Context, *DescribeTimeToLiveRequest) (*DescribeTimeToLiveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeTimeToLive not implemented")
+}
 func (UnimplementedCefasServer) PutItem(context.Context, *PutItemRequest) (*PutItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PutItem not implemented")
 }
 func (UnimplementedCefasServer) GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetItem not implemented")
+}
+func (UnimplementedCefasServer) UpdateItem(context.Context, *UpdateItemRequest) (*UpdateItemResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateItem not implemented")
 }
 func (UnimplementedCefasServer) DeleteItem(context.Context, *DeleteItemRequest) (*DeleteItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteItem not implemented")
@@ -357,8 +506,17 @@ func (UnimplementedCefasServer) BatchWriteItem(context.Context, *BatchWriteItemR
 func (UnimplementedCefasServer) BatchGetItem(context.Context, *BatchGetItemRequest) (*BatchGetItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchGetItem not implemented")
 }
+func (UnimplementedCefasServer) TransactWriteItems(context.Context, *TransactWriteItemsRequest) (*TransactWriteItemsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransactWriteItems not implemented")
+}
+func (UnimplementedCefasServer) TransactGetItems(context.Context, *TransactGetItemsRequest) (*TransactGetItemsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransactGetItems not implemented")
+}
 func (UnimplementedCefasServer) Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method Query not implemented")
+}
+func (UnimplementedCefasServer) Scan(*ScanRequest, grpc.ServerStreamingServer[Item]) error {
+	return status.Errorf(codes.Unimplemented, "method Scan not implemented")
 }
 func (UnimplementedCefasServer) SpatialQuery(*SpatialQueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method SpatialQuery not implemented")
@@ -380,6 +538,15 @@ func (UnimplementedCefasServer) StreamChanges(*StreamChangesRequest, grpc.Server
 }
 func (UnimplementedCefasServer) ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSnapshots not implemented")
+}
+func (UnimplementedCefasServer) CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateBackup not implemented")
+}
+func (UnimplementedCefasServer) ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBackups not implemented")
+}
+func (UnimplementedCefasServer) RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestoreTableFromBackup not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -474,6 +641,42 @@ func _Cefas_DropTable_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_UpdateTimeToLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTimeToLiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).UpdateTimeToLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_UpdateTimeToLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).UpdateTimeToLive(ctx, req.(*UpdateTimeToLiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribeTimeToLive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeTimeToLiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribeTimeToLive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribeTimeToLive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribeTimeToLive(ctx, req.(*DescribeTimeToLiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_PutItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PutItemRequest)
 	if err := dec(in); err != nil {
@@ -506,6 +709,24 @@ func _Cefas_GetItem_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).GetItem(ctx, req.(*GetItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_UpdateItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).UpdateItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_UpdateItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).UpdateItem(ctx, req.(*UpdateItemRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -564,6 +785,42 @@ func _Cefas_BatchGetItem_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_TransactWriteItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransactWriteItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).TransactWriteItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_TransactWriteItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).TransactWriteItems(ctx, req.(*TransactWriteItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_TransactGetItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransactGetItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).TransactGetItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_TransactGetItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).TransactGetItems(ctx, req.(*TransactGetItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QueryRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -574,6 +831,17 @@ func _Cefas_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Cefas_QueryServer = grpc.ServerStreamingServer[Item]
+
+func _Cefas_Scan_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ScanRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CefasServer).Scan(m, &grpc.GenericServerStream[ScanRequest, Item]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_ScanServer = grpc.ServerStreamingServer[Item]
 
 func _Cefas_SpatialQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(SpatialQueryRequest)
@@ -687,6 +955,60 @@ func _Cefas_ListSnapshots_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_CreateBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateBackupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CreateBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CreateBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CreateBackup(ctx, req.(*CreateBackupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ListBackups_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBackupsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListBackups(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListBackups_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListBackups(ctx, req.(*ListBackupsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_RestoreTableFromBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreTableFromBackupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RestoreTableFromBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RestoreTableFromBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RestoreTableFromBackup(ctx, req.(*RestoreTableFromBackupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -711,12 +1033,24 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Cefas_DropTable_Handler,
 		},
 		{
+			MethodName: "UpdateTimeToLive",
+			Handler:    _Cefas_UpdateTimeToLive_Handler,
+		},
+		{
+			MethodName: "DescribeTimeToLive",
+			Handler:    _Cefas_DescribeTimeToLive_Handler,
+		},
+		{
 			MethodName: "PutItem",
 			Handler:    _Cefas_PutItem_Handler,
 		},
 		{
 			MethodName: "GetItem",
 			Handler:    _Cefas_GetItem_Handler,
+		},
+		{
+			MethodName: "UpdateItem",
+			Handler:    _Cefas_UpdateItem_Handler,
 		},
 		{
 			MethodName: "DeleteItem",
@@ -729,6 +1063,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchGetItem",
 			Handler:    _Cefas_BatchGetItem_Handler,
+		},
+		{
+			MethodName: "TransactWriteItems",
+			Handler:    _Cefas_TransactWriteItems_Handler,
+		},
+		{
+			MethodName: "TransactGetItems",
+			Handler:    _Cefas_TransactGetItems_Handler,
 		},
 		{
 			MethodName: "Sql",
@@ -750,11 +1092,28 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListSnapshots",
 			Handler:    _Cefas_ListSnapshots_Handler,
 		},
+		{
+			MethodName: "CreateBackup",
+			Handler:    _Cefas_CreateBackup_Handler,
+		},
+		{
+			MethodName: "ListBackups",
+			Handler:    _Cefas_ListBackups_Handler,
+		},
+		{
+			MethodName: "RestoreTableFromBackup",
+			Handler:    _Cefas_RestoreTableFromBackup_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Query",
 			Handler:       _Cefas_Query_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Scan",
+			Handler:       _Cefas_Scan_Handler,
 			ServerStreams: true,
 		},
 		{

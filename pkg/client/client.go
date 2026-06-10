@@ -162,6 +162,43 @@ func (c *Client) ListTables(ctx context.Context) ([]types.TableDescriptor, error
 	return out, nil
 }
 
+// TTLState mirrors the wire response of DescribeTimeToLive in a
+// caller-friendly shape. Enabled is true iff Status == "ENABLED".
+type TTLState struct {
+	Enabled       bool
+	AttributeName string
+}
+
+// UpdateTimeToLive enables or disables TTL on `table`. When enabling,
+// `attribute` names the numeric epoch-seconds column the reaper uses.
+// When disabling, `attribute` is ignored.
+func (c *Client) UpdateTimeToLive(ctx context.Context, table, attribute string, enabled bool) (TTLState, error) {
+	resp, err := c.stub.UpdateTimeToLive(c.withAuth(ctx), &cefaspb.UpdateTimeToLiveRequest{
+		TableName: table,
+		TimeToLiveSpecification: &cefaspb.TimeToLiveSpecification{
+			Enabled:       enabled,
+			AttributeName: attribute,
+		},
+	})
+	if err != nil {
+		return TTLState{}, err
+	}
+	spec := resp.GetTimeToLiveSpecification()
+	return TTLState{Enabled: spec.GetEnabled(), AttributeName: spec.GetAttributeName()}, nil
+}
+
+// DescribeTimeToLive returns the current TTL configuration for `table`.
+func (c *Client) DescribeTimeToLive(ctx context.Context, table string) (TTLState, error) {
+	resp, err := c.stub.DescribeTimeToLive(c.withAuth(ctx), &cefaspb.DescribeTimeToLiveRequest{TableName: table})
+	if err != nil {
+		return TTLState{}, err
+	}
+	return TTLState{
+		Enabled:       resp.GetStatus() == "ENABLED",
+		AttributeName: resp.GetAttributeName(),
+	}, nil
+}
+
 // DropTable removes a table descriptor.
 func (c *Client) DropTable(ctx context.Context, name string) error {
 	_, err := c.stub.DropTable(c.withAuth(ctx), &cefaspb.DropTableRequest{Name: name})
@@ -222,6 +259,49 @@ func (c *Client) GetItem(ctx context.Context, table string, key types.Item, opts
 	return itemFromPB(resp.GetItem()), nil
 }
 
+// UpdateOptions carries the aws-shaped UpdateItem accessories.
+type UpdateOptions struct {
+	UpdateExpression          string
+	ConditionExpression       string
+	ExpressionAttributeNames  map[string]string
+	ExpressionAttributeValues map[string]types.AttributeValue
+	// ReturnValues: "" | "NONE" | "ALL_NEW" | "ALL_OLD" | "UPDATED_NEW" | "UPDATED_OLD".
+	ReturnValues string
+}
+
+// UpdateItem applies the supplied UpdateExpression against the row
+// keyed by `key`. Returns the requested image (NEW / OLD) when
+// ReturnValues asks for one, nil otherwise.
+func (c *Client) UpdateItem(ctx context.Context, table string, key types.Item, opts UpdateOptions) (types.Item, error) {
+	rv := cefaspb.ReturnValues_RETURN_VALUES_NONE
+	switch opts.ReturnValues {
+	case "ALL_NEW":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_ALL_NEW
+	case "ALL_OLD":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_ALL_OLD
+	case "UPDATED_NEW":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_UPDATED_NEW
+	case "UPDATED_OLD":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_UPDATED_OLD
+	}
+	resp, err := c.stub.UpdateItem(c.withAuth(ctx), &cefaspb.UpdateItemRequest{
+		Table:                     table,
+		Key:                       itemAttrMap(key),
+		UpdateExpression:          opts.UpdateExpression,
+		ConditionExpression:       opts.ConditionExpression,
+		ExpressionAttributeNames:  opts.ExpressionAttributeNames,
+		ExpressionAttributeValues: itemAttrMap(types.Item(opts.ExpressionAttributeValues)),
+		ReturnValues:              rv,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.GetAttributes()) == 0 {
+		return nil, nil
+	}
+	return itemFromPB(resp.GetAttributes()), nil
+}
+
 // DeleteOptions mirrors PutOptions for deletes.
 type DeleteOptions struct {
 	Condition string
@@ -276,6 +356,89 @@ func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.It
 		pbKeys = append(pbKeys, &cefaspb.KeyMap{Attributes: itemAttrMap(k)})
 	}
 	resp, err := c.stub.BatchGetItem(c.withAuth(ctx), &cefaspb.BatchGetItemRequest{Table: table, Keys: pbKeys})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.Item, len(resp.GetItems()))
+	for i, it := range resp.GetItems() {
+		if len(it.GetAttributes()) == 0 {
+			out[i] = nil
+			continue
+		}
+		out[i] = itemFromPB(it.GetAttributes())
+	}
+	return out, nil
+}
+
+// ---------- transactions ----------
+
+// TransactKind selects the wire op for a TransactWriteOp.
+type TransactKind uint8
+
+const (
+	TransactPut            TransactKind = iota + 1
+	TransactDelete
+	TransactConditionCheck
+)
+
+// TransactWriteOp mirrors one entry in the AWS TransactWriteItems
+// shape. Exactly one of Item / Key is set depending on Kind.
+type TransactWriteOp struct {
+	Kind                TransactKind
+	Table               string
+	Item                types.Item // Put
+	Key                 types.Item // Delete / ConditionCheck
+	ConditionExpression string
+	Binds               map[string]types.AttributeValue
+}
+
+// TransactWriteItems applies up to 100 ops atomically. v1 requires
+// every op to reference the same table — cross-table / cross-shard
+// transactions are out of scope (issue #80 tracks the 2PC follow-up).
+func (c *Client) TransactWriteItems(ctx context.Context, ops []TransactWriteOp) error {
+	wire := make([]*cefaspb.TransactWriteOp, 0, len(ops))
+	for _, op := range ops {
+		w := &cefaspb.TransactWriteOp{
+			ConditionExpression: op.ConditionExpression,
+			Binds:               itemAttrMap(types.Item(op.Binds)),
+		}
+		switch op.Kind {
+		case TransactPut:
+			w.Op = &cefaspb.TransactWriteOp_Put_{Put: &cefaspb.TransactWriteOp_Put{
+				Table: op.Table, Item: itemAttrMap(op.Item),
+			}}
+		case TransactDelete:
+			w.Op = &cefaspb.TransactWriteOp_Delete_{Delete: &cefaspb.TransactWriteOp_Delete{
+				Table: op.Table, Key: itemAttrMap(op.Key),
+			}}
+		case TransactConditionCheck:
+			w.Op = &cefaspb.TransactWriteOp_ConditionCheck_{ConditionCheck: &cefaspb.TransactWriteOp_ConditionCheck{
+				Table: op.Table, Key: itemAttrMap(op.Key),
+			}}
+		default:
+			return fmt.Errorf("transact op: missing kind")
+		}
+		wire = append(wire, w)
+	}
+	_, err := c.stub.TransactWriteItems(c.withAuth(ctx), &cefaspb.TransactWriteItemsRequest{Ops: wire})
+	return err
+}
+
+// TransactGet is one entry in TransactGetItems.
+type TransactGet struct {
+	Table string
+	Key   types.Item
+}
+
+// TransactGetItems returns each requested item; index alignment with
+// the request is preserved (nil for items that didn't exist). v1
+// single-table; cross-table is rejected server-side.
+func (c *Client) TransactGetItems(ctx context.Context, items []TransactGet) ([]types.Item, error) {
+	wire := make([]*cefaspb.TransactGet, 0, len(items))
+	for _, it := range items {
+		wire = append(wire, &cefaspb.TransactGet{Table: it.Table, Key: itemAttrMap(it.Key)})
+	}
+	resp, err := c.stub.TransactGetItems(c.withAuth(ctx), &cefaspb.TransactGetItemsRequest{Items: wire})
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +524,73 @@ func (b *QueryBuilder) Stream(ctx context.Context) (grpc.ServerStreamingClient[c
 	return b.c.stub.Query(b.c.withAuth(ctx), b.req)
 }
 
+// ---------- scan ----------
+
+// ScanOptions tweaks a Scan call. FilterExpression is the same DDB
+// condition subset PutItem's Condition accepts; binds resolve `:name`
+// placeholders inside it.
+type ScanOptions struct {
+	FilterExpression string
+	Binds            map[string]types.AttributeValue
+	Limit            int
+	Strong           bool
+}
+
+// Scan streams every primary item in `table`, applying FilterExpression
+// server-side. For large result sets prefer ScanStream — Scan
+// materialises the whole stream in memory.
+func (c *Client) Scan(ctx context.Context, table string, opts ...ScanOptions) ([]types.Item, error) {
+	var o ScanOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	cons := cefaspb.Consistency_CONSISTENCY_EVENTUAL
+	if o.Strong {
+		cons = cefaspb.Consistency_CONSISTENCY_STRONG
+	}
+	stream, err := c.stub.Scan(c.withAuth(ctx), &cefaspb.ScanRequest{
+		Table:            table,
+		FilterExpression: o.FilterExpression,
+		Binds:            itemAttrMap(types.Item(o.Binds)),
+		Limit:            int32(o.Limit),
+		Consistency:      cons,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out []types.Item
+	for {
+		item, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, itemFromPB(item.GetAttributes()))
+	}
+}
+
+// ScanStream returns the underlying server-streaming RPC for callers
+// that want to iterate large scans lazily.
+func (c *Client) ScanStream(ctx context.Context, table string, opts ...ScanOptions) (grpc.ServerStreamingClient[cefaspb.Item], error) {
+	var o ScanOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	cons := cefaspb.Consistency_CONSISTENCY_EVENTUAL
+	if o.Strong {
+		cons = cefaspb.Consistency_CONSISTENCY_STRONG
+	}
+	return c.stub.Scan(c.withAuth(ctx), &cefaspb.ScanRequest{
+		Table:            table,
+		FilterExpression: o.FilterExpression,
+		Binds:            itemAttrMap(types.Item(o.Binds)),
+		Limit:            int32(o.Limit),
+		Consistency:      cons,
+	})
+}
+
 // ---------- spatial ----------
 
 // SpatialQueryByBBox runs a geohash bounding-box query.
@@ -438,6 +668,69 @@ func (c *Client) Sql(ctx context.Context, query string) (*SqlResult, error) {
 		out.Rows = append(out.Rows, itemFromPB(row.GetAttributes()))
 	}
 	return out, nil
+}
+
+// ---------- backups ----------
+
+// BackupDescriptor mirrors the wire shape — name + creation time +
+// table list + on-disk path.
+type BackupDescriptor struct {
+	Name          string
+	CreatedAt     int64
+	Tables        []string
+	CheckpointAt  string
+}
+
+// CreateBackup snapshots the live keyspace into a pebble checkpoint
+// and records metadata under cefas/admin/backups/<name>. Pass nil for
+// tables to back up every table the catalog currently knows.
+func (c *Client) CreateBackup(ctx context.Context, name string, tables []string) (BackupDescriptor, error) {
+	resp, err := c.stub.CreateBackup(c.withAuth(ctx), &cefaspb.CreateBackupRequest{Name: name, Tables: tables})
+	if err != nil {
+		return BackupDescriptor{}, err
+	}
+	return backupFromPB(resp.GetBackup()), nil
+}
+
+// ListBackups returns every admin-named backup the server knows about.
+func (c *Client) ListBackups(ctx context.Context) ([]BackupDescriptor, error) {
+	resp, err := c.stub.ListBackups(c.withAuth(ctx), &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BackupDescriptor, 0, len(resp.GetBackups()))
+	for _, b := range resp.GetBackups() {
+		out = append(out, backupFromPB(b))
+	}
+	return out, nil
+}
+
+func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
+	if b == nil {
+		return BackupDescriptor{}
+	}
+	return BackupDescriptor{
+		Name:         b.GetName(),
+		CreatedAt:    b.GetCreatedAtUnix(),
+		Tables:       b.GetTables(),
+		CheckpointAt: b.GetCheckpointPath(),
+	}
+}
+
+// RestoreTableFromBackup reads `sourceTable`'s descriptor from
+// `backupName` and reproduces it under `targetTable` in the live
+// catalog, then copies every row from the checkpoint into the new
+// table. Returns the number of rows copied.
+func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceTable, targetTable string) (int, error) {
+	resp, err := c.stub.RestoreTableFromBackup(c.withAuth(ctx), &cefaspb.RestoreTableFromBackupRequest{
+		BackupName:      backupName,
+		SourceTableName: sourceTable,
+		TargetTableName: targetTable,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(resp.GetRowsCopied()), nil
 }
 
 // ---------- cluster ----------
