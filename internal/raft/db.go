@@ -53,6 +53,13 @@ type Config struct {
 	LogOutput interface {
 		Write(p []byte) (n int, err error)
 	}
+
+	// StreamLayer, when non-nil, is used instead of the default
+	// TCP transport. Multi-Raft mode passes a per-shard
+	// hraft.StreamLayer routed by a shared MuxAcceptor so every
+	// shard shares one OS-level port. Single-Raft mode leaves this
+	// nil and Open builds its own NewTCPTransport on BindAddr.
+	StreamLayer hraft.StreamLayer
 }
 
 func (c Config) heartbeat() time.Duration {
@@ -180,9 +187,18 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 	}
 	d.fsm = newFSM(pdb)
 
-	t, err := hraft.NewTCPTransport(cfg.BindAddr, nil, 3, 10*time.Second, asWriter(logOutput))
-	if err != nil {
-		return nil, fmt.Errorf("tcp transport: %w", err)
+	var t hraft.Transport
+	if cfg.StreamLayer != nil {
+		// Multi-Raft: a shared MuxAcceptor provided this shard's
+		// StreamLayer. NewNetworkTransport drives raft's wire
+		// protocol on top.
+		t = hraft.NewNetworkTransport(cfg.StreamLayer, 3, 10*time.Second, asWriter(logOutput))
+	} else {
+		tcp, err := hraft.NewTCPTransport(cfg.BindAddr, nil, 3, 10*time.Second, asWriter(logOutput))
+		if err != nil {
+			return nil, fmt.Errorf("tcp transport: %w", err)
+		}
+		t = tcp
 	}
 	d.trans = t
 
@@ -215,8 +231,8 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 				})
 			}
 			if err := hraft.BootstrapCluster(rcfg, logs, stable, snaps, t, configuration); err != nil {
-				return nil, fmt.Errorf("BootstrapCluster: %w", err)
-			}
+			return nil, fmt.Errorf("BootstrapCluster: %w", err)
+		}
 		}
 	}
 

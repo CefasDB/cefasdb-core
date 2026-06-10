@@ -19,6 +19,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
@@ -40,12 +41,45 @@ type Cluster interface {
 type Server struct {
 	db        *storage.DB
 	cat       *catalog.Catalog
-	cluster   Cluster         // nil when not running in raft mode
-	validator *auth.Validator // nil when auth disabled (dev mode)
+	cluster   Cluster          // nil when not running in raft mode
+	manager   *cluster.Manager // nil when single-shard
+	validator *auth.Validator  // nil when auth disabled (dev mode)
 }
 
 func New(db *storage.DB, cat *catalog.Catalog) *Server {
 	return &Server{db: db, cat: cat}
+}
+
+// AttachManager wires the multi-shard manager. Pass nil to keep the
+// server single-shard. When attached, every PK-bearing handler
+// resolves the table descriptor on shard 0 (the metadata shard) and
+// routes the actual write/read to the shard that owns the PK.
+func (s *Server) AttachManager(m *cluster.Manager) { s.manager = m }
+
+// storageFor returns the storage.DB that owns the supplied partition
+// key bytes. Single-shard mode always returns s.db.
+func (s *Server) storageFor(pkBytes []byte) *storage.DB {
+	if s.manager == nil {
+		return s.db
+	}
+	if shard := s.manager.ShardForPK(pkBytes); shard != nil {
+		return shard.Storage
+	}
+	return s.db
+}
+
+// allShards iterates every storage.DB this server manages. Catalog
+// fan-out (CreateTable, DropTable) uses this so descriptors land on
+// every shard.
+func (s *Server) allShards() []*storage.DB {
+	if s.manager == nil {
+		return []*storage.DB{s.db}
+	}
+	out := make([]*storage.DB, 0, len(s.manager.Shards()))
+	for _, sh := range s.manager.Shards() {
+		out = append(out, sh.Storage)
+	}
+	return out
 }
 
 // AttachCluster wires the optional cluster-management surface. Pass a
@@ -139,6 +173,10 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, status, err)
 			return
 		}
+		// Fan the descriptor out to every shard so writes routed to
+		// any of them can resolve the schema locally. Shard 0 already
+		// has it via s.cat.Create above.
+		s.fanOutCatalog(td)
 		writeJSON(w, http.StatusCreated, td)
 	case http.MethodGet:
 		if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
@@ -249,7 +287,12 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
 		return
 	}
-	err = s.db.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds})
+	pkBytes, err := pkBytesFromItem(item, td.KeySchema)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	err = s.storageFor(pkBytes).PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds})
 	if err != nil {
 		writeWriteErr(w, r, err)
 		return
@@ -285,7 +328,12 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	item, err := s.db.GetItem(req.Table, td.KeySchema, keyAttrs)
+	pkBytes, err := pkBytesFromItem(keyAttrs, td.KeySchema)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	item, err := s.storageFor(pkBytes).GetItem(req.Table, td.KeySchema, keyAttrs)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			writeJSON(w, http.StatusOK, map[string]any{"found": false})
@@ -330,7 +378,12 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
 		return
 	}
-	err = s.db.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds})
+	pkBytes, err := pkBytesFromItem(keyAttrs, td.KeySchema)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	err = s.storageFor(pkBytes).DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds})
 	if err != nil {
 		writeWriteErr(w, r, err)
 		return
@@ -382,17 +435,23 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	pkBytes, err := storage.AttrCanonicalBytes(pkVal)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
+		return
+	}
+	queryDB := s.storageFor(pkBytes)
 	var items []types.Item
 	if req.IndexName != "" {
-		items, err = s.db.QueryByGSI(td, req.IndexName, pkVal, storage.QueryOptions{
+		items, err = queryDB.QueryByGSI(td, req.IndexName, pkVal, storage.QueryOptions{
 			SKLow:  lo,
 			SKHigh: hi,
 			Limit:  req.Limit,
 		})
 	} else if req.SKLow == nil && req.SKHigh == nil {
-		items, err = s.db.QueryByPK(req.Table, td.KeySchema, pkVal, req.Limit)
+		items, err = queryDB.QueryByPK(req.Table, td.KeySchema, pkVal, req.Limit)
 	} else {
-		items, err = s.db.QueryByPKRange(req.Table, td.KeySchema, pkVal, lo, hi, req.Limit)
+		items, err = queryDB.QueryByPKRange(req.Table, td.KeySchema, pkVal, lo, hi, req.Limit)
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -449,8 +508,8 @@ func (s *Server) handleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.db.BatchWriteItem(td, ops); err != nil {
-		writeErr(w, mapWriteErr(err), err)
+	if err := s.batchWriteByShard(td, ops); err != nil {
+		writeWriteErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
@@ -485,7 +544,7 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 		}
 		keys = append(keys, k)
 	}
-	items, err := s.db.BatchGetItem(req.Table, td.KeySchema, keys)
+	items, err := s.batchGetByShard(req.Table, td.KeySchema, keys)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -651,7 +710,7 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("one of bbox/radius/z required"))
 		return
 	}
-	items, err := s.db.SpatialQueryItems(td, req.IndexName, q)
+	items, err := s.spatialAllShards(td, req.IndexName, q)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, types.ErrSpatialNotFound) {
@@ -790,6 +849,111 @@ func (s *Server) ensureStrongRead(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// batchWriteByShard groups ops by the shard that owns each op's PK
+// and issues a per-shard BatchWriteItem. Multi-shard mode loses the
+// global atomicity guarantee — the trade-off for horizontal scale.
+// Single-shard mode collapses to one batch.
+func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.BatchOp) error {
+	if s.manager == nil {
+		return s.db.BatchWriteItem(td, ops)
+	}
+	buckets := make(map[*storage.DB][]storage.BatchOp)
+	for _, op := range ops {
+		probe := op.Item
+		if op.Op == storage.BatchOpDelete {
+			probe = op.Key
+		}
+		pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
+		if err != nil {
+			return err
+		}
+		db := s.storageFor(pkBytes)
+		buckets[db] = append(buckets[db], op)
+	}
+	for db, group := range buckets {
+		if err := db.BatchWriteItem(td, group); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// batchGetByShard routes each key to the shard that owns it and
+// preserves input ordering in the response. Misses stay nil.
+func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
+	if s.manager == nil {
+		return s.db.BatchGetItem(table, ks, keys)
+	}
+	out := make([]types.Item, len(keys))
+	for i, k := range keys {
+		pkBytes, err := pkBytesFromItem(k, ks)
+		if err != nil {
+			return nil, err
+		}
+		db := s.storageFor(pkBytes)
+		single, err := db.BatchGetItem(table, ks, []types.Item{k})
+		if err != nil {
+			return nil, err
+		}
+		if len(single) == 1 {
+			out[i] = single[0]
+		}
+	}
+	return out, nil
+}
+
+// spatialAllShards scatter-gathers a spatial query across every
+// shard. Spatial indexes are partitioned by the item's PK (same as
+// every other write), so the matching rows can live on any shard.
+// We merge results client-side; honouring the limit globally.
+func (s *Server) spatialAllShards(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error) {
+	if s.manager == nil {
+		return s.db.SpatialQueryItems(td, idxName, q)
+	}
+	var out []types.Item
+	for _, sh := range s.manager.Shards() {
+		got, err := sh.Storage.SpatialQueryItems(td, idxName, q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+		if q.Limit > 0 && len(out) >= q.Limit {
+			out = out[:q.Limit]
+			break
+		}
+	}
+	return out, nil
+}
+
+// fanOutCatalog mirrors the descriptor to every shard except shard 0
+// (which catalog.Create already touched). Single-shard mode is a
+// no-op.
+func (s *Server) fanOutCatalog(td types.TableDescriptor) {
+	if s.manager == nil {
+		return
+	}
+	for i, sh := range s.manager.Shards() {
+		if i == 0 {
+			continue
+		}
+		cat, err := catalog.New(sh.Storage)
+		if err != nil {
+			continue
+		}
+		_ = cat.Create(td)
+	}
+}
+
+// pkBytesFromItem extracts the canonical PK byte form from `item`
+// under the supplied key schema. Shared by every router decision.
+func pkBytesFromItem(item types.Item, ks types.KeySchema) ([]byte, error) {
+	pkAttr, ok := item[ks.PK]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", types.ErrMissingKey, ks.PK)
+	}
+	return storage.AttrCanonicalBytes(pkAttr)
 }
 
 func decodeBinds(in map[string]jsonAttribute) (map[string]types.AttributeValue, error) {

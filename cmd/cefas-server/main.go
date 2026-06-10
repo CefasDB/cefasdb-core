@@ -25,6 +25,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/cluster"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/api"
@@ -53,6 +54,10 @@ func main() {
 		identityAudience  = flag.String("identity-audience", "", "Expected token audience")
 		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
 
+		// Multi-Raft sharding.
+		shardsN     = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
+		muxAddr     = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
+
 		// gRPC flags.
 		grpcAddr       = flag.String("grpc", "", "gRPC listen address (e.g. ':9090'). Empty disables gRPC.")
 		grpcReflection = flag.Bool("grpc-reflection", false, "Enable gRPC server reflection (handy for grpcurl)")
@@ -62,19 +67,59 @@ func main() {
 	)
 	flag.Parse()
 
-	db, err := storage.Open(storage.Options{Path: *dataDir, FsyncOnCommit: *fsync})
-	if err != nil {
-		log.Fatalf("open pebble: %v", err)
-	}
-	defer db.Close()
+	var (
+		db      *storage.DB
+		cat     *catalog.Catalog
+		mgr     *cluster.Manager
+		raftDB  *craft.DB
+	)
 
-	cat, err := catalog.New(db)
-	if err != nil {
-		log.Fatalf("load catalog: %v", err)
+	if *shardsN > 0 {
+		peers, err := parsePeers(*raftPeersFlag)
+		if err != nil {
+			log.Fatalf("-raft-peers: %v", err)
+		}
+		httpPeers, err := parsePeers(*raftHTTPFlag)
+		if err != nil {
+			log.Fatalf("-raft-http-peers: %v", err)
+		}
+		mgr, err = cluster.Open(context.Background(), cluster.Config{
+			Root:          *dataDir,
+			Shards:        *shardsN,
+			SelfID:        *raftID,
+			MuxAddr:       *muxAddr,
+			Peers:         peers,
+			PeerHTTPAddrs: httpPeers,
+			Bootstrap:     *raftBootstrap,
+			FsyncOnCommit: *fsync,
+		})
+		if err != nil {
+			log.Fatalf("open cluster manager: %v", err)
+		}
+		defer mgr.Close()
+		// Shard 0 is the metadata shard; the catalog lives there
+		// and gets fanned out to other shards by the API layer.
+		shard0, _ := mgr.Shard(0)
+		db = shard0.Storage
+		cat, err = catalog.New(db)
+		if err != nil {
+			log.Fatalf("load catalog (shard 0): %v", err)
+		}
+		log.Printf("multi-Raft enabled: shards=%d mux=%s peers=%v", *shardsN, *muxAddr, peers)
+	} else {
+		var err error
+		db, err = storage.Open(storage.Options{Path: *dataDir, FsyncOnCommit: *fsync})
+		if err != nil {
+			log.Fatalf("open pebble: %v", err)
+		}
+		defer db.Close()
+		cat, err = catalog.New(db)
+		if err != nil {
+			log.Fatalf("load catalog: %v", err)
+		}
 	}
 
-	var raftDB *craft.DB
-	if *raftBind != "" {
+	if mgr == nil && *raftBind != "" {
 		if *raftID == "" {
 			log.Fatal("-raft-id is required when -raft-bind is set")
 		}
@@ -108,6 +153,7 @@ func main() {
 
 	var validator *auth.Validator
 	if *identityJwks != "" {
+		var err error
 		validator, err = auth.NewValidator(auth.Config{
 			JwksURL:   *identityJwks,
 			Issuer:    *identityIssuer,
@@ -124,6 +170,16 @@ func main() {
 	apiSrv := api.New(db, cat)
 	if raftDB != nil {
 		apiSrv.AttachCluster(raftDB)
+	} else if mgr != nil {
+		// In multi-shard mode the cluster-status surface uses shard
+		// 0's raft handle as a representative; per-shard status is
+		// available in the manager directly.
+		if sh, ok := mgr.Shard(0); ok && sh.Raft != nil {
+			apiSrv.AttachCluster(sh.Raft)
+		}
+	}
+	if mgr != nil {
+		apiSrv.AttachManager(mgr)
 	}
 	if validator != nil {
 		apiSrv.AttachAuth(validator)
@@ -155,11 +211,19 @@ func main() {
 			log.Fatalf("grpc opts: %v", err)
 		}
 		gsrv = grpc.NewServer(opts...)
-		var cluster api.Cluster
+		var clu api.Cluster
 		if raftDB != nil {
-			cluster = raftDB
+			clu = raftDB
+		} else if mgr != nil {
+			if sh, ok := mgr.Shard(0); ok && sh.Raft != nil {
+				clu = sh.Raft
+			}
 		}
-		cefaspb.RegisterCefasServer(gsrv, api.NewGRPCServer(db, cat, cluster))
+		gsrvImpl := api.NewGRPCServer(db, cat, clu)
+		if mgr != nil {
+			gsrvImpl.AttachManager(mgr)
+		}
+		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
 		if *grpcReflection {
 			reflection.Register(gsrv)
 		}
