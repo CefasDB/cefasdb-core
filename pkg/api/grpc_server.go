@@ -14,6 +14,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -317,6 +318,60 @@ func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefas
 		if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ---------- sql ----------
+
+func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb.SqlResponse, error) {
+	stmt, err := cefassql.Parse(req.GetQuery())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := sqlScopeCheck(ctx, stmt); err != nil {
+		return nil, err
+	}
+	plan, err := cefassql.PlanStmt(stmt, s.cat)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
+	res, err := ex.Execute(plan)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	out := &cefaspb.SqlResponse{AffectedRows: int64(res.AffectedRows)}
+	for _, row := range res.Rows {
+		out.Rows = append(out.Rows, &cefaspb.Item{Attributes: itemToPB(row)})
+	}
+	return out, nil
+}
+
+func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {
+	switch s := stmt.(type) {
+	case *cefassql.SelectStmt:
+		return requireAnyScope(ctx,
+			auth.TableScope(auth.ScopeQuery, s.Table),
+			auth.WildcardScope(auth.ScopeQuery),
+			auth.TableScope(auth.ScopeItemRead, s.Table),
+			auth.WildcardScope(auth.ScopeItemRead))
+	case *cefassql.InsertStmt:
+		return requireAnyScope(ctx,
+			auth.TableScope(auth.ScopeItemWrite, s.Table),
+			auth.WildcardScope(auth.ScopeItemWrite))
+	case *cefassql.UpdateStmt:
+		return requireAnyScope(ctx,
+			auth.TableScope(auth.ScopeItemWrite, s.Table),
+			auth.WildcardScope(auth.ScopeItemWrite))
+	case *cefassql.DeleteStmt:
+		return requireAnyScope(ctx,
+			auth.TableScope(auth.ScopeItemDelete, s.Table),
+			auth.WildcardScope(auth.ScopeItemDelete))
+	case *cefassql.CreateTableStmt:
+		return requireScope(ctx, auth.ScopeTableCreate)
+	case *cefassql.DropTableStmt:
+		return requireScope(ctx, auth.ScopeTableDrop)
 	}
 	return nil
 }
