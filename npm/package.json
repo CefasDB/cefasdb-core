@@ -1,0 +1,29 @@
+{
+  "name": "@osvaldoandrade/cefas",
+  "version": "0.0.0-development",
+  "description": "cefas CLI (installs a prebuilt Go binary from GitHub Releases)",
+  "license": "MIT",
+  "homepage": "https://github.com/osvaldoandrade/cefas#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/osvaldoandrade/cefas.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/osvaldoandrade/cefas/issues"
+  },
+  "bin": {
+    "cefas": "bin/cefas.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md"
+  ]
+}
