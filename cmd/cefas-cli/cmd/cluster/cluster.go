@@ -10,6 +10,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
+	"github.com/osvaldoandrade/cefas/pkg/client"
 )
 
 // Register installs the cluster subcommand tree onto root.
@@ -49,11 +50,17 @@ Example:
 				return err
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
-				"Mode":       st.Mode,
-				"IsLeader":   st.IsLeader,
-				"SelfID":     st.SelfID,
-				"BindAddr":   st.BindAddr,
-				"LeaderHTTP": st.LeaderHTTP,
+				"Mode":              st.Mode,
+				"IsLeader":          st.IsLeader,
+				"SelfID":            st.SelfID,
+				"BindAddr":          st.BindAddr,
+				"LeaderHTTP":        st.LeaderHTTP,
+				"RoutingEpoch":      st.RoutingEpoch,
+				"PlacementVersion":  st.PlacementVersion,
+				"ShardCount":        st.ShardCount,
+				"PlacementStrategy": st.PlacementStrategy,
+				"Shards":            st.Shards,
+				"Nodes":             st.Nodes,
 			})
 		},
 	}
@@ -61,8 +68,11 @@ Example:
 
 func addVoterCmd() *cobra.Command {
 	var (
-		id   string
-		addr string
+		id        string
+		addr      string
+		shardID   uint32
+		shardSet  bool
+		allShards bool
 	)
 	c := &cobra.Command{
 		Use:   "add-voter",
@@ -80,34 +90,54 @@ Example:
 			if addr == "" {
 				return fmt.Errorf("--addr is required")
 			}
+			if shardSet && allShards {
+				return fmt.Errorf("--shard and --all-shards are mutually exclusive")
+			}
 			ctx := cmd.Context()
 			cli, profile, err := runtime.Dial(ctx)
 			if err != nil {
 				return err
 			}
 			defer cli.Close()
-			if err := cli.AddVoter(ctx, id, addr); err != nil {
+			opts := clientMembershipOptions(shardID, shardSet, allShards)
+			if err := cli.AddVoterWithOptions(ctx, id, addr, opts); err != nil {
 				return fmt.Errorf("add voter: %w", err)
 			}
 			fm, err := output.Validate(profile.Output)
 			if err != nil {
 				return err
 			}
+			scope := "default"
+			if allShards {
+				scope = "all-shards"
+			} else if shardSet {
+				scope = fmt.Sprintf("shard-%d", shardID)
+			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
-				"Added": map[string]string{"ID": id, "Addr": addr},
+				"Added": map[string]string{"ID": id, "Addr": addr, "Scope": scope},
 			})
 		},
 	}
 	f := c.Flags()
 	f.StringVar(&id, "id", "", "Raft node ID (required)")
 	f.StringVar(&addr, "addr", "", "Raft transport address host:port (required)")
+	f.Uint32Var(&shardID, "shard", 0, "Apply to one shard ID instead of the representative cluster")
+	f.BoolVar(&allShards, "all-shards", false, "Apply to every shard Raft group")
+	c.PreRun = func(cmd *cobra.Command, _ []string) {
+		shardSet = cmd.Flags().Changed("shard")
+	}
 	_ = c.MarkFlagRequired("id")
 	_ = c.MarkFlagRequired("addr")
 	return c
 }
 
 func removeServerCmd() *cobra.Command {
-	var id string
+	var (
+		id        string
+		shardID   uint32
+		shardSet  bool
+		allShards bool
+	)
 	c := &cobra.Command{
 		Use:   "remove-server",
 		Short: "Evict a peer from the Raft configuration",
@@ -121,25 +151,50 @@ Example:
 			if id == "" {
 				return fmt.Errorf("--id is required")
 			}
+			if shardSet && allShards {
+				return fmt.Errorf("--shard and --all-shards are mutually exclusive")
+			}
 			ctx := cmd.Context()
 			cli, profile, err := runtime.Dial(ctx)
 			if err != nil {
 				return err
 			}
 			defer cli.Close()
-			if err := cli.RemoveServer(ctx, id); err != nil {
+			opts := clientMembershipOptions(shardID, shardSet, allShards)
+			if err := cli.RemoveServerWithOptions(ctx, id, opts); err != nil {
 				return fmt.Errorf("remove server: %w", err)
 			}
 			fm, err := output.Validate(profile.Output)
 			if err != nil {
 				return err
 			}
+			scope := "default"
+			if allShards {
+				scope = "all-shards"
+			} else if shardSet {
+				scope = fmt.Sprintf("shard-%d", shardID)
+			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
-				"Removed": map[string]string{"ID": id},
+				"Removed": map[string]string{"ID": id, "Scope": scope},
 			})
 		},
 	}
-	c.Flags().StringVar(&id, "id", "", "Raft node ID to remove (required)")
+	f := c.Flags()
+	f.StringVar(&id, "id", "", "Raft node ID to remove (required)")
+	f.Uint32Var(&shardID, "shard", 0, "Apply to one shard ID instead of the representative cluster")
+	f.BoolVar(&allShards, "all-shards", false, "Apply to every shard Raft group")
+	c.PreRun = func(cmd *cobra.Command, _ []string) {
+		shardSet = cmd.Flags().Changed("shard")
+	}
 	_ = c.MarkFlagRequired("id")
 	return c
+}
+
+func clientMembershipOptions(shardID uint32, shardSet, allShards bool) client.MembershipOptions {
+	opts := client.MembershipOptions{AllShards: allShards}
+	if shardSet {
+		id := shardID
+		opts.ShardID = &id
+	}
+	return opts
 }

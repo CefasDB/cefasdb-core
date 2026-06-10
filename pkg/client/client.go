@@ -1064,11 +1064,55 @@ func wireToPluginIndex(d *cefaspb.PluginIndexDescriptor) PluginIndex {
 
 // ClusterStatus returns membership and leadership info.
 type ClusterStatus struct {
-	Mode       string
-	IsLeader   bool
-	SelfID     string
-	BindAddr   string
-	LeaderHTTP string
+	Mode              string
+	IsLeader          bool
+	SelfID            string
+	BindAddr          string
+	LeaderHTTP        string
+	RoutingEpoch      uint64
+	PlacementVersion  uint64
+	ShardCount        int
+	PlacementStrategy string
+	Shards            []ShardPlacement
+	Nodes             []NodeDescriptor
+}
+
+type TokenRange struct {
+	Start uint64
+	End   uint64
+}
+
+type ShardPlacement struct {
+	ID         uint32
+	Ranges     []TokenRange
+	State      string
+	Epoch      uint64
+	Voters     []string
+	NonVoters  []string
+	LeaderHint string
+}
+
+type NodeCapacity struct {
+	Weight      int
+	CPU         int
+	MemoryBytes uint64
+	DiskBytes   uint64
+	Zone        string
+	Tags        []string
+}
+
+type NodeDescriptor struct {
+	ID           string
+	RaftAddr     string
+	HTTPAddr     string
+	State        string
+	Capacity     NodeCapacity
+	LastSeenUnix int64
+}
+
+type MembershipOptions struct {
+	ShardID   *uint32
+	AllShards bool
 }
 
 // Status fetches the cluster status. Works without a token (public).
@@ -1078,24 +1122,96 @@ func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 		return ClusterStatus{}, err
 	}
 	return ClusterStatus{
-		Mode:       resp.GetMode(),
-		IsLeader:   resp.GetIsLeader(),
-		SelfID:     resp.GetSelfId(),
-		BindAddr:   resp.GetBindAddr(),
-		LeaderHTTP: resp.GetLeaderHttp(),
+		Mode:              resp.GetMode(),
+		IsLeader:          resp.GetIsLeader(),
+		SelfID:            resp.GetSelfId(),
+		BindAddr:          resp.GetBindAddr(),
+		LeaderHTTP:        resp.GetLeaderHttp(),
+		RoutingEpoch:      resp.GetRoutingEpoch(),
+		PlacementVersion:  resp.GetPlacementVersion(),
+		ShardCount:        int(resp.GetShardCount()),
+		PlacementStrategy: resp.GetPlacementStrategy(),
+		Shards:            shardPlacementsFromPB(resp.GetShards()),
+		Nodes:             nodeDescriptorsFromPB(resp.GetNodes()),
 	}, nil
+}
+
+func shardPlacementsFromPB(in []*cefaspb.ShardPlacement) []ShardPlacement {
+	out := make([]ShardPlacement, 0, len(in))
+	for _, sh := range in {
+		out = append(out, ShardPlacement{
+			ID:         sh.GetId(),
+			Ranges:     tokenRangesFromPB(sh.GetRanges()),
+			State:      sh.GetState(),
+			Epoch:      sh.GetEpoch(),
+			Voters:     append([]string(nil), sh.GetVoters()...),
+			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
+			LeaderHint: sh.GetLeaderHint(),
+		})
+	}
+	return out
+}
+
+func tokenRangesFromPB(in []*cefaspb.TokenRange) []TokenRange {
+	out := make([]TokenRange, 0, len(in))
+	for _, r := range in {
+		out = append(out, TokenRange{Start: r.GetStart(), End: r.GetEnd()})
+	}
+	return out
+}
+
+func nodeDescriptorsFromPB(in []*cefaspb.NodeDescriptor) []NodeDescriptor {
+	out := make([]NodeDescriptor, 0, len(in))
+	for _, node := range in {
+		capacity := NodeCapacity{}
+		if c := node.GetCapacity(); c != nil {
+			capacity = NodeCapacity{
+				Weight:      int(c.GetWeight()),
+				CPU:         int(c.GetCpu()),
+				MemoryBytes: c.GetMemoryBytes(),
+				DiskBytes:   c.GetDiskBytes(),
+				Zone:        c.GetZone(),
+				Tags:        append([]string(nil), c.GetTags()...),
+			}
+		}
+		out = append(out, NodeDescriptor{
+			ID:           node.GetId(),
+			RaftAddr:     node.GetRaftAddr(),
+			HTTPAddr:     node.GetHttpAddr(),
+			State:        node.GetState(),
+			Capacity:     capacity,
+			LastSeenUnix: node.GetLastSeenUnix(),
+		})
+	}
+	return out
 }
 
 // AddVoter asks the leader to add `id` at `addr` to the cluster.
 // Requires cefas:cluster:admin scope.
 func (c *Client) AddVoter(ctx context.Context, id, addr string) error {
-	_, err := c.stub.AddVoter(c.withAuth(ctx), &cefaspb.AddVoterRequest{Id: id, Addr: addr})
+	return c.AddVoterWithOptions(ctx, id, addr, MembershipOptions{})
+}
+
+func (c *Client) AddVoterWithOptions(ctx context.Context, id, addr string, opts MembershipOptions) error {
+	req := &cefaspb.AddVoterRequest{Id: id, Addr: addr, AllShards: opts.AllShards}
+	if opts.ShardID != nil {
+		req.ShardId = opts.ShardID
+	}
+	_, err := c.stub.AddVoter(c.withAuth(ctx), req)
 	return err
 }
 
 // RemoveServer evicts a peer from the cluster. Requires
 // cefas:cluster:admin scope.
 func (c *Client) RemoveServer(ctx context.Context, id string) error {
-	_, err := c.stub.RemoveServer(c.withAuth(ctx), &cefaspb.RemoveServerRequest{Id: id})
+	return c.RemoveServerWithOptions(ctx, id, MembershipOptions{})
+}
+
+func (c *Client) RemoveServerWithOptions(ctx context.Context, id string, opts MembershipOptions) error {
+	req := &cefaspb.RemoveServerRequest{Id: id, AllShards: opts.AllShards}
+	if opts.ShardID != nil {
+		req.ShardId = opts.ShardID
+	}
+	_, err := c.stub.RemoveServer(c.withAuth(ctx), req)
 	return err
 }
