@@ -16,6 +16,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -27,11 +28,12 @@ import (
 type GRPCServer struct {
 	cefaspb.UnimplementedCefasServer
 
-	db      *storage.DB
-	cat     *catalog.Catalog
-	cluster Cluster          // nil in single-node mode
-	stream  ChangeStream     // nil when no CDC source attached
-	manager *cluster.Manager // nil in single-shard mode
+	db       *storage.DB
+	cat      *catalog.Catalog
+	cluster  Cluster          // nil in single-node mode
+	stream   ChangeStream     // nil when no CDC source attached
+	manager  *cluster.Manager // nil in single-shard mode
+	plugins  *plugin.Registry // nil → uses plugin.Default
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
@@ -43,6 +45,18 @@ func NewGRPCServer(db *storage.DB, cat *catalog.Catalog, cluster Cluster) *GRPCS
 // AttachManager wires the multi-shard manager onto the gRPC handler.
 // Without it the handler routes every write to s.db (single-shard).
 func (s *GRPCServer) AttachManager(m *cluster.Manager) { s.manager = m }
+
+// AttachPluginRegistry overrides the default plugin registry. The
+// server falls back to plugin.Default when no registry is attached —
+// the same registry built-in plugins register against via init().
+func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) { s.plugins = r }
+
+func (s *GRPCServer) pluginRegistry() *plugin.Registry {
+	if s.plugins != nil {
+		return s.plugins
+	}
+	return plugin.Default
+}
 
 func (s *GRPCServer) storageFor(pkBytes []byte) *storage.DB {
 	if s.manager == nil {

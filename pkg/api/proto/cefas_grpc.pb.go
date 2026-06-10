@@ -52,6 +52,8 @@ const (
 	Cefas_CreateBackup_FullMethodName           = "/cefas.v1.Cefas/CreateBackup"
 	Cefas_ListBackups_FullMethodName            = "/cefas.v1.Cefas/ListBackups"
 	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
+	Cefas_ListPlugins_FullMethodName            = "/cefas.v1.Cefas/ListPlugins"
+	Cefas_DescribePlugin_FullMethodName         = "/cefas.v1.Cefas/DescribePlugin"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -104,6 +106,9 @@ type CefasClient interface {
 	CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error)
 	ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error)
 	RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error)
+	// Plugin introspection.
+	ListPlugins(ctx context.Context, in *ListPluginsRequest, opts ...grpc.CallOption) (*ListPluginsResponse, error)
+	DescribePlugin(ctx context.Context, in *DescribePluginRequest, opts ...grpc.CallOption) (*DescribePluginResponse, error)
 }
 
 type cefasClient struct {
@@ -410,6 +415,26 @@ func (c *cefasClient) RestoreTableFromBackup(ctx context.Context, in *RestoreTab
 	return out, nil
 }
 
+func (c *cefasClient) ListPlugins(ctx context.Context, in *ListPluginsRequest, opts ...grpc.CallOption) (*ListPluginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPluginsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListPlugins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribePlugin(ctx context.Context, in *DescribePluginRequest, opts ...grpc.CallOption) (*DescribePluginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribePluginResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribePlugin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -460,6 +485,9 @@ type CefasServer interface {
 	CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error)
 	ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error)
 	RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error)
+	// Plugin introspection.
+	ListPlugins(context.Context, *ListPluginsRequest) (*ListPluginsResponse, error)
+	DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -547,6 +575,12 @@ func (UnimplementedCefasServer) ListBackups(context.Context, *ListBackupsRequest
 }
 func (UnimplementedCefasServer) RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreTableFromBackup not implemented")
+}
+func (UnimplementedCefasServer) ListPlugins(context.Context, *ListPluginsRequest) (*ListPluginsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPlugins not implemented")
+}
+func (UnimplementedCefasServer) DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribePlugin not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -1009,6 +1043,42 @@ func _Cefas_RestoreTableFromBackup_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_ListPlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPluginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListPlugins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListPlugins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListPlugins(ctx, req.(*ListPluginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribePlugin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribePluginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribePlugin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribePlugin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribePlugin(ctx, req.(*DescribePluginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1103,6 +1173,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestoreTableFromBackup",
 			Handler:    _Cefas_RestoreTableFromBackup_Handler,
+		},
+		{
+			MethodName: "ListPlugins",
+			Handler:    _Cefas_ListPlugins_Handler,
+		},
+		{
+			MethodName: "DescribePlugin",
+			Handler:    _Cefas_DescribePlugin_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
