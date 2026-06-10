@@ -39,6 +39,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/GetItem", s.handleGetItem)
 	mux.HandleFunc("/v1/DeleteItem", s.handleDeleteItem)
 	mux.HandleFunc("/v1/Query", s.handleQuery)
+	mux.HandleFunc("/v1/BatchWriteItem", s.handleBatchWriteItem)
+	mux.HandleFunc("/v1/BatchGetItem", s.handleBatchGetItem)
 	mux.HandleFunc("/v1/Health", s.handleHealth)
 }
 
@@ -113,8 +115,10 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 // ---------- item ops ----------
 
 type putItemRequest struct {
-	Table string                    `json:"table"`
-	Item  map[string]jsonAttribute  `json:"item"`
+	Table     string                    `json:"table"`
+	Item      map[string]jsonAttribute  `json:"item"`
+	Condition string                    `json:"condition,omitempty"`
+	Binds     map[string]jsonAttribute  `json:"binds,omitempty"`
 }
 
 type getItemRequest struct {
@@ -122,14 +126,36 @@ type getItemRequest struct {
 	Key   map[string]jsonAttribute `json:"key"`
 }
 
-type deleteItemRequest = getItemRequest
+type deleteItemRequest struct {
+	Table     string                   `json:"table"`
+	Key       map[string]jsonAttribute `json:"key"`
+	Condition string                   `json:"condition,omitempty"`
+	Binds     map[string]jsonAttribute `json:"binds,omitempty"`
+}
 
 type queryRequest struct {
-	Table    string                    `json:"table"`
-	PKValue  jsonAttribute             `json:"pkValue"`
-	SKLow    *jsonAttribute            `json:"skLow,omitempty"`
-	SKHigh   *jsonAttribute            `json:"skHigh,omitempty"`
-	Limit    int                       `json:"limit,omitempty"`
+	Table     string         `json:"table"`
+	IndexName string         `json:"indexName,omitempty"`
+	PKValue   jsonAttribute  `json:"pkValue"`
+	SKLow     *jsonAttribute `json:"skLow,omitempty"`
+	SKHigh    *jsonAttribute `json:"skHigh,omitempty"`
+	Limit     int            `json:"limit,omitempty"`
+}
+
+type batchWriteOp struct {
+	Op   string                   `json:"op"` // "put" | "delete"
+	Item map[string]jsonAttribute `json:"item,omitempty"`
+	Key  map[string]jsonAttribute `json:"key,omitempty"`
+}
+
+type batchWriteRequest struct {
+	Table string         `json:"table"`
+	Ops   []batchWriteOp `json:"ops"`
+}
+
+type batchGetRequest struct {
+	Table string                     `json:"table"`
+	Keys  []map[string]jsonAttribute `json:"keys"`
 }
 
 func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +178,13 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.db.PutItem(req.Table, td.KeySchema, item); err != nil {
+	binds, err := decodeBinds(req.Binds)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
+		return
+	}
+	err = s.db.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds})
+	if err != nil {
 		writeErr(w, mapWriteErr(err), err)
 		return
 	}
@@ -214,7 +246,13 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.db.DeleteItem(req.Table, td.KeySchema, keyAttrs); err != nil {
+	binds, err := decodeBinds(req.Binds)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
+		return
+	}
+	err = s.db.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds})
+	if err != nil {
 		writeErr(w, mapWriteErr(err), err)
 		return
 	}
@@ -241,26 +279,32 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
 		return
 	}
+	var lo, hi types.AttributeValue
+	if req.SKLow != nil {
+		lo, err = req.SKLow.toAttr()
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("skLow: %w", err))
+			return
+		}
+	}
+	if req.SKHigh != nil {
+		hi, err = req.SKHigh.toAttr()
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("skHigh: %w", err))
+			return
+		}
+	}
 
 	var items []types.Item
-	if req.SKLow == nil && req.SKHigh == nil {
+	if req.IndexName != "" {
+		items, err = s.db.QueryByGSI(td, req.IndexName, pkVal, storage.QueryOptions{
+			SKLow:  lo,
+			SKHigh: hi,
+			Limit:  req.Limit,
+		})
+	} else if req.SKLow == nil && req.SKHigh == nil {
 		items, err = s.db.QueryByPK(req.Table, td.KeySchema, pkVal, req.Limit)
 	} else {
-		var lo, hi types.AttributeValue
-		if req.SKLow != nil {
-			lo, err = req.SKLow.toAttr()
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("skLow: %w", err))
-				return
-			}
-		}
-		if req.SKHigh != nil {
-			hi, err = req.SKHigh.toAttr()
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("skHigh: %w", err))
-				return
-			}
-		}
 		items, err = s.db.QueryByPKRange(req.Table, td.KeySchema, pkVal, lo, hi, req.Limit)
 	}
 	if err != nil {
@@ -273,6 +317,106 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		out = append(out, encodeItem(it))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (s *Server) handleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req batchWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	td, err := s.cat.Describe(req.Table)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+
+	ops := make([]storage.BatchOp, 0, len(req.Ops))
+	for i, raw := range req.Ops {
+		switch raw.Op {
+		case "put":
+			item, err := decodeItem(raw.Item)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
+				return
+			}
+			ops = append(ops, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
+		case "delete":
+			keyAttrs, err := decodeItem(raw.Key)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
+				return
+			}
+			ops = append(ops, storage.BatchOp{Op: storage.BatchOpDelete, Key: keyAttrs})
+		default:
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: unknown op %q", i, raw.Op))
+			return
+		}
+	}
+	if err := s.db.BatchWriteItem(td, ops); err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req batchGetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	td, err := s.cat.Describe(req.Table)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	keys := make([]types.Item, 0, len(req.Keys))
+	for i, raw := range req.Keys {
+		k, err := decodeItem(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("key %d: %w", i, err))
+			return
+		}
+		keys = append(keys, k)
+	}
+	items, err := s.db.BatchGetItem(req.Table, td.KeySchema, keys)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]map[string]jsonAttribute, len(items))
+	for i, it := range items {
+		if it == nil {
+			out[i] = nil
+			continue
+		}
+		out[i] = encodeItem(it)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func decodeBinds(in map[string]jsonAttribute) (map[string]types.AttributeValue, error) {
+	if in == nil {
+		return nil, nil
+	}
+	out := make(map[string]types.AttributeValue, len(in))
+	for k, a := range in {
+		v, err := a.toAttr()
+		if err != nil {
+			return nil, fmt.Errorf("bind :%s: %w", k, err)
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 // ---------- helpers ----------
@@ -290,6 +434,11 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 func mapWriteErr(err error) int {
 	if errors.Is(err, types.ErrMissingKey) || errors.Is(err, types.ErrInvalidKeyType) {
 		return http.StatusBadRequest
+	}
+	if errors.Is(err, storage.ErrConditionFailed) {
+		// 412 Precondition Failed is the canonical status for an
+		// optimistic-concurrency check that did not hold.
+		return http.StatusPreconditionFailed
 	}
 	if errors.Is(err, storage.ErrNotLeader) {
 		// In Raft mode (Phase 4) the controller should redirect to the

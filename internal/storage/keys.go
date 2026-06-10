@@ -20,6 +20,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -139,4 +140,125 @@ func be8(n uint64) []byte {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], n)
 	return b[:]
+}
+
+// ---------- GSI keys ----------
+//
+// Layout for a single GSI entry:
+//
+//	cefas/t/<table>/gsi/<idx>/<gsi_pk_hash8><gsi_sk_bytes><pk_hash8>
+//
+// gsi_pk_hash8 is a fixed-width hash of the GSI partition value, so
+// equality lookups on the GSI PK are a single iterator with a static
+// prefix. The GSI SK bytes follow directly so range scans within a
+// partition sort lexicographically — exactly the same trick we play on
+// the primary table. The 8-byte trailing pk_hash8 disambiguates entries
+// whose (gsi_pk, gsi_sk) collide on different primary items, which is
+// legal because the team may project a non-unique attribute as GSI SK.
+//
+// The pointer value stores the primary key reference so a GSI iterator
+// can resolve back to the underlying item with one Get per row. The
+// reference layout is documented in EncodeGSIPointer / DecodeGSIPointer.
+
+// KeyGSI builds a GSI entry key. gsiPK / gsiSK are the canonical bytes
+// of the indexed attributes; primaryPK / primarySK are the bytes that
+// identify the underlying item (used here only to compute the unique
+// disambiguator suffix).
+func KeyGSI(table, idxName string, gsiPK, gsiSK, primaryPK, primarySK []byte) []byte {
+	base := tableBase(table) + segGSI + idxName + "/"
+	gph := pkHash8(gsiPK)
+	suffix := primaryDisambiguator(primaryPK, primarySK)
+	k := make([]byte, 0, len(base)+8+len(gsiSK)+8)
+	k = append(k, base...)
+	k = append(k, gph...)
+	k = append(k, gsiSK...)
+	k = append(k, suffix...)
+	return k
+}
+
+// PrefixGSIByPK returns [lower, upper) covering every entry for a
+// single GSI partition (every SK under one gsi_pk).
+func PrefixGSIByPK(table, idxName string, gsiPK []byte) (lower, upper []byte) {
+	base := tableBase(table) + segGSI + idxName + "/"
+	gph := pkHash8(gsiPK)
+	p := make([]byte, 0, len(base)+8)
+	p = append(p, base...)
+	p = append(p, gph...)
+	return p, prefixUpper(p)
+}
+
+// RangeGSIBySK constrains the GSI scan to entries where gsi_sk falls in
+// [skLow, skHigh) within a single gsi_pk. Either bound may be nil for
+// open-ended ranges on that side.
+func RangeGSIBySK(table, idxName string, gsiPK, skLow, skHigh []byte) (lower, upper []byte) {
+	base := tableBase(table) + segGSI + idxName + "/"
+	gph := pkHash8(gsiPK)
+
+	lower = make([]byte, 0, len(base)+8+len(skLow))
+	lower = append(lower, base...)
+	lower = append(lower, gph...)
+	lower = append(lower, skLow...)
+
+	if skHigh == nil {
+		p := make([]byte, 0, len(base)+8)
+		p = append(p, base...)
+		p = append(p, gph...)
+		upper = prefixUpper(p)
+	} else {
+		upper = make([]byte, 0, len(base)+8+len(skHigh))
+		upper = append(upper, base...)
+		upper = append(upper, gph...)
+		upper = append(upper, skHigh...)
+	}
+	return lower, upper
+}
+
+// primaryDisambiguator hashes the full primary key (PK + SK) into 8
+// bytes. The pair is stable per item, so two GSI entries for the same
+// (gsi_pk, gsi_sk) belonging to different items get distinct suffixes
+// and the same item's old GSI entry can be located by recomputing the
+// hash at update time.
+func primaryDisambiguator(primaryPK, primarySK []byte) []byte {
+	h := xxhash.New()
+	_, _ = h.Write(primaryPK)
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(primarySK)
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], h.Sum64())
+	return b[:]
+}
+
+// EncodeGSIPointer packs the primary key reference stored as the GSI
+// entry value. Reader extracts (pkBytes, skBytes) and rebuilds the
+// primary key with KeyPrimary.
+func EncodeGSIPointer(primaryPK, primarySK []byte) []byte {
+	out := make([]byte, 0, 4+len(primaryPK)+len(primarySK))
+	out = appendUvarint(out, uint64(len(primaryPK)))
+	out = append(out, primaryPK...)
+	out = appendUvarint(out, uint64(len(primarySK)))
+	out = append(out, primarySK...)
+	return out
+}
+
+// DecodeGSIPointer reverses EncodeGSIPointer. Returns the primary PK
+// and SK byte forms used to compute the primary item key.
+func DecodeGSIPointer(data []byte) (primaryPK, primarySK []byte, err error) {
+	n, rest, err := readUvarint(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gsi pointer pk len: %w", err)
+	}
+	if uint64(len(rest)) < n {
+		return nil, nil, fmt.Errorf("gsi pointer pk: short")
+	}
+	primaryPK = append([]byte(nil), rest[:n]...)
+	rest = rest[n:]
+	n, rest, err = readUvarint(rest)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gsi pointer sk len: %w", err)
+	}
+	if uint64(len(rest)) < n {
+		return nil, nil, fmt.Errorf("gsi pointer sk: short")
+	}
+	primarySK = append([]byte(nil), rest[:n]...)
+	return primaryPK, primarySK, nil
 }
