@@ -34,6 +34,7 @@ const (
 	Cefas_DescribeTimeToLive_FullMethodName = "/cefas.v1.Cefas/DescribeTimeToLive"
 	Cefas_PutItem_FullMethodName            = "/cefas.v1.Cefas/PutItem"
 	Cefas_GetItem_FullMethodName            = "/cefas.v1.Cefas/GetItem"
+	Cefas_UpdateItem_FullMethodName         = "/cefas.v1.Cefas/UpdateItem"
 	Cefas_DeleteItem_FullMethodName         = "/cefas.v1.Cefas/DeleteItem"
 	Cefas_BatchWriteItem_FullMethodName     = "/cefas.v1.Cefas/BatchWriteItem"
 	Cefas_BatchGetItem_FullMethodName       = "/cefas.v1.Cefas/BatchGetItem"
@@ -64,6 +65,7 @@ type CefasClient interface {
 	// Item operations.
 	PutItem(ctx context.Context, in *PutItemRequest, opts ...grpc.CallOption) (*PutItemResponse, error)
 	GetItem(ctx context.Context, in *GetItemRequest, opts ...grpc.CallOption) (*GetItemResponse, error)
+	UpdateItem(ctx context.Context, in *UpdateItemRequest, opts ...grpc.CallOption) (*UpdateItemResponse, error)
 	DeleteItem(ctx context.Context, in *DeleteItemRequest, opts ...grpc.CallOption) (*DeleteItemResponse, error)
 	// Bulk operations.
 	BatchWriteItem(ctx context.Context, in *BatchWriteItemRequest, opts ...grpc.CallOption) (*BatchWriteItemResponse, error)
@@ -171,6 +173,16 @@ func (c *cefasClient) GetItem(ctx context.Context, in *GetItemRequest, opts ...g
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetItemResponse)
 	err := c.cc.Invoke(ctx, Cefas_GetItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) UpdateItem(ctx context.Context, in *UpdateItemRequest, opts ...grpc.CallOption) (*UpdateItemResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateItemResponse)
+	err := c.cc.Invoke(ctx, Cefas_UpdateItem_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +361,7 @@ type CefasServer interface {
 	// Item operations.
 	PutItem(context.Context, *PutItemRequest) (*PutItemResponse, error)
 	GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error)
+	UpdateItem(context.Context, *UpdateItemRequest) (*UpdateItemResponse, error)
 	DeleteItem(context.Context, *DeleteItemRequest) (*DeleteItemResponse, error)
 	// Bulk operations.
 	BatchWriteItem(context.Context, *BatchWriteItemRequest) (*BatchWriteItemResponse, error)
@@ -405,6 +418,9 @@ func (UnimplementedCefasServer) PutItem(context.Context, *PutItemRequest) (*PutI
 }
 func (UnimplementedCefasServer) GetItem(context.Context, *GetItemRequest) (*GetItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetItem not implemented")
+}
+func (UnimplementedCefasServer) UpdateItem(context.Context, *UpdateItemRequest) (*UpdateItemResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateItem not implemented")
 }
 func (UnimplementedCefasServer) DeleteItem(context.Context, *DeleteItemRequest) (*DeleteItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteItem not implemented")
@@ -603,6 +619,24 @@ func _Cefas_GetItem_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).GetItem(ctx, req.(*GetItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_UpdateItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).UpdateItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_UpdateItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).UpdateItem(ctx, req.(*UpdateItemRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -833,6 +867,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetItem",
 			Handler:    _Cefas_GetItem_Handler,
+		},
+		{
+			MethodName: "UpdateItem",
+			Handler:    _Cefas_UpdateItem_Handler,
 		},
 		{
 			MethodName: "DeleteItem",

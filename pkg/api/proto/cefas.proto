@@ -26,6 +26,7 @@ service Cefas {
   // Item operations.
   rpc PutItem(PutItemRequest) returns (PutItemResponse);
   rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
   rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse);
 
   // Bulk operations.
@@ -223,6 +224,34 @@ message DeleteItemRequest {
   map<string, AttributeValue>  binds     = 4;
 }
 message DeleteItemResponse {}
+
+// UpdateItemRequest mirrors aws dynamodb update-item. The cefas server
+// resolves #names + :values inline and dispatches the resulting SQL
+// UPDATE through the standard SQL executor — that path already does
+// SET / ADD / REMOVE / DELETE with GSI/LSI/TTL maintenance.
+enum ReturnValues {
+  RETURN_VALUES_UNSPECIFIED = 0;
+  RETURN_VALUES_NONE        = 1;
+  RETURN_VALUES_ALL_NEW     = 2;
+  RETURN_VALUES_ALL_OLD     = 3;
+  RETURN_VALUES_UPDATED_NEW = 4;
+  RETURN_VALUES_UPDATED_OLD = 5;
+}
+
+message UpdateItemRequest {
+  string                       table                       = 1;
+  map<string, AttributeValue>  key                         = 2;
+  string                       update_expression           = 3;
+  string                       condition_expression        = 4;
+  map<string, string>          expression_attribute_names  = 5;
+  map<string, AttributeValue>  expression_attribute_values = 6;
+  ReturnValues                 return_values               = 7;
+}
+
+message UpdateItemResponse {
+  // Set when return_values selects an OLD / NEW image.
+  map<string, AttributeValue> attributes = 1;
+}
 
 // ---------- batch ----------
 

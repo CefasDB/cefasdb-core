@@ -232,6 +232,76 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	return &cefaspb.GetItemResponse{Found: true, Item: itemToPB(item)}, nil
 }
 
+func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequest) (*cefaspb.UpdateItemResponse, error) {
+	if err := requireAnyScope(ctx,
+		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
+		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
+		return nil, err
+	}
+	td, err := s.cat.Describe(req.GetTable())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	key, err := pbToItem(req.GetKey())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	values, err := pbToItem(req.GetExpressionAttributeValues())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("expression_attribute_values: %v", err))
+	}
+	sql, wantImage, err := translateUpdateItem(
+		req.GetTable(),
+		key,
+		td.KeySchema,
+		req.GetUpdateExpression(),
+		req.GetConditionExpression(),
+		req.GetExpressionAttributeNames(),
+		values,
+		returnValuesName(req.GetReturnValues()),
+	)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	stmt, err := cefassql.Parse(sql)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("translate: %v", err))
+	}
+	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	db := s.storageFor(pkBytes)
+	plan, err := cefassql.PlanStmt(stmt, s.cat)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("plan: %v", err))
+	}
+	ex := &cefassql.Executor{Storage: db, Catalog: s.cat}
+	res, err := ex.Execute(plan)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	resp := &cefaspb.UpdateItemResponse{}
+	if wantImage != "" && len(res.Rows) > 0 {
+		resp.Attributes = itemToPB(res.Rows[0])
+	}
+	return resp, nil
+}
+
+func returnValuesName(v cefaspb.ReturnValues) string {
+	switch v {
+	case cefaspb.ReturnValues_RETURN_VALUES_ALL_NEW:
+		return "ALL_NEW"
+	case cefaspb.ReturnValues_RETURN_VALUES_ALL_OLD:
+		return "ALL_OLD"
+	case cefaspb.ReturnValues_RETURN_VALUES_UPDATED_NEW:
+		return "UPDATED_NEW"
+	case cefaspb.ReturnValues_RETURN_VALUES_UPDATED_OLD:
+		return "UPDATED_OLD"
+	}
+	return "NONE"
+}
+
 func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequest) (*cefaspb.DeleteItemResponse, error) {
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemDelete, req.GetTable()),

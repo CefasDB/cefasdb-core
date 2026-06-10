@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 // PartiQLParameter is the wire shape of a parameter on the AWS
@@ -75,6 +77,28 @@ func BindPartiQL(statement string, params []PartiQLParameter) (string, error) {
 		return "", fmt.Errorf("statement uses %d placeholders, %d parameters provided", idx, len(params))
 	}
 	return b.String(), nil
+}
+
+// LiteralFromAttr renders a storage-layer AttributeValue as a cefas
+// SQL literal token. Used by callers that splice DDB-typed values
+// directly into a generated SQL statement (UpdateItem RPC, batch
+// translation, etc.). Returns an error for set / list / map / binary
+// values — cefas SQL doesn't have literal syntax for those.
+func LiteralFromAttr(av types.AttributeValue) (string, error) {
+	switch av.T {
+	case types.AttrS:
+		return "'" + strings.ReplaceAll(av.S, "'", "''") + "'", nil
+	case types.AttrN:
+		return av.N, nil
+	case types.AttrBOOL:
+		if av.BOOL {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
+	case types.AttrNull:
+		return "NULL", nil
+	}
+	return "", fmt.Errorf("cefas SQL has no literal form for attribute type %v", av.T)
 }
 
 func paramLiteral(p PartiQLParameter) (string, error) {
