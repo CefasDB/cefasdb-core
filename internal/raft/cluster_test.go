@@ -1,0 +1,252 @@
+package raft_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"testing"
+	"time"
+
+	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/types"
+)
+
+type node struct {
+	t       testing.TB
+	id      string
+	bind    string
+	storage *storage.DB
+	raft    *craft.DB
+}
+
+func (n *node) close() {
+	if n.raft != nil {
+		_ = n.raft.Close()
+	}
+	if n.storage != nil {
+		_ = n.storage.Close()
+	}
+}
+
+// pickPort grabs an ephemeral TCP port the test can hand to raft. The
+// listener closes immediately; raft re-binds the same port a moment
+// later. Race-prone in theory, fine in practice for tests.
+func pickPort(t testing.TB) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().String()
+}
+
+// startCluster spins up `count` nodes on ephemeral ports. The first
+// node bootstraps the cluster from the full peer set; the others wait
+// to be joined (they would normally join via AddVoter, but for the
+// bootstrap path we pass the same Configuration to every node so they
+// agree on initial membership).
+func startCluster(t testing.TB, count int) []*node {
+	t.Helper()
+	ids := make([]string, count)
+	addrs := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("n%d", i)
+		addrs[i] = pickPort(t)
+	}
+	peers := map[string]string{}
+	for i := range ids {
+		peers[ids[i]] = addrs[i]
+	}
+	httpPeers := map[string]string{}
+	for i := range ids {
+		httpPeers[ids[i]] = fmt.Sprintf("http://%s", addrs[i]) // placeholder
+	}
+
+	nodes := make([]*node, count)
+	for i := range nodes {
+		dir := t.TempDir()
+		st, err := storage.Open(storage.Options{Path: dir + "/state"})
+		if err != nil {
+			t.Fatalf("open storage[%d]: %v", i, err)
+		}
+		cfg := craft.Config{
+			Path:          dir,
+			SelfID:        ids[i],
+			BindAddr:      addrs[i],
+			Bootstrap:     true, // every node sees the same peer set
+			PeerAddrs:     peers,
+			PeerHTTPAddrs: httpPeers,
+			HeartbeatMS:   50,
+			ElectionMS:    150,
+			LeaderLeaseMS: 50,
+			CommitMS:      10,
+			ApplyTimeout:  3 * time.Second,
+			LogOutput:     io.Discard,
+		}
+		r, err := craft.Open(context.Background(), cfg, st.Raw())
+		if err != nil {
+			_ = st.Close()
+			t.Fatalf("open raft[%d]: %v", i, err)
+		}
+		st.AttachReplicator(r)
+		nodes[i] = &node{t: t, id: ids[i], bind: addrs[i], storage: st, raft: r}
+	}
+	return nodes
+}
+
+// waitLeader returns the index of the node that's currently the raft
+// leader. Polls for up to 10 s. The first leader wins under tight
+// election timeouts.
+func waitLeader(t testing.TB, nodes []*node) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, n := range nodes {
+			if n.raft.IsLeader() {
+				return i
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no leader after 10s")
+	return -1
+}
+
+func waitNewLeader(t testing.TB, nodes []*node, exclude int) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for i, n := range nodes {
+			if i == exclude {
+				continue
+			}
+			if n.raft.IsLeader() {
+				return i
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no replacement leader after 10s")
+	return -1
+}
+
+func waitItem(t testing.TB, n *node, table string, ks types.KeySchema, key types.Item, deadline time.Duration) types.Item {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		got, err := n.storage.GetItem(table, ks, key)
+		if err == nil {
+			return got
+		}
+		if !errors.Is(err, types.ErrItemNotFound) {
+			t.Fatalf("getItem on %s: %v", n.id, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("item not replicated to %s within %v", n.id, deadline)
+	return nil
+}
+
+func sAttr(s string) types.AttributeValue { return types.AttributeValue{T: types.AttrS, S: s} }
+
+func TestRaftReplicatesAcrossNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	nodes := startCluster(t, 3)
+	defer func() {
+		for _, n := range nodes {
+			n.close()
+		}
+	}()
+
+	leader := waitLeader(t, nodes)
+	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
+
+	// Write on the leader.
+	item := types.Item{"id": sAttr("k1"), "data": sAttr("hello")}
+	if err := nodes[leader].storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		t.Fatalf("put on leader: %v", err)
+	}
+
+	// Every follower must see the same value.
+	for i, n := range nodes {
+		if i == leader {
+			continue
+		}
+		got := waitItem(t, n, "tbl", td.KeySchema, types.Item{"id": sAttr("k1")}, 5*time.Second)
+		if got["data"].S != "hello" {
+			t.Fatalf("follower %s has data=%q, want hello", n.id, got["data"].S)
+		}
+	}
+}
+
+func TestRaftFollowerWritesAreRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	nodes := startCluster(t, 3)
+	defer func() {
+		for _, n := range nodes {
+			n.close()
+		}
+	}()
+
+	leader := waitLeader(t, nodes)
+	follower := (leader + 1) % len(nodes)
+	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
+
+	err := nodes[follower].storage.PutItemWith(td, types.Item{"id": sAttr("x"), "v": sAttr("y")}, storage.PutOptions{})
+	if !errors.Is(err, storage.ErrNotLeader) {
+		t.Fatalf("expected ErrNotLeader, got %v", err)
+	}
+}
+
+func TestRaftSurvivesLeaderLoss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	nodes := startCluster(t, 3)
+	defer func() {
+		for _, n := range nodes {
+			n.close()
+		}
+	}()
+
+	leader := waitLeader(t, nodes)
+	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
+
+	if err := nodes[leader].storage.PutItemWith(td, types.Item{"id": sAttr("pre"), "data": sAttr("before")}, storage.PutOptions{}); err != nil {
+		t.Fatalf("pre-failover write: %v", err)
+	}
+	// Wait until at least one follower has applied the entry — this
+	// guarantees the survivors' logs cover the pre-failover write.
+	other := (leader + 1) % len(nodes)
+	waitItem(t, nodes[other], "tbl", td.KeySchema, types.Item{"id": sAttr("pre")}, 5*time.Second)
+
+	// Kill the leader hard.
+	if err := nodes[leader].raft.Close(); err != nil {
+		t.Fatalf("close leader: %v", err)
+	}
+
+	newLeader := waitNewLeader(t, nodes, leader)
+	if err := nodes[newLeader].storage.PutItemWith(td, types.Item{"id": sAttr("post"), "data": sAttr("after")}, storage.PutOptions{}); err != nil {
+		t.Fatalf("post-failover write: %v", err)
+	}
+
+	// All surviving followers see both writes.
+	for i, n := range nodes {
+		if i == leader {
+			continue
+		}
+		pre := waitItem(t, n, "tbl", td.KeySchema, types.Item{"id": sAttr("pre")}, 5*time.Second)
+		post := waitItem(t, n, "tbl", td.KeySchema, types.Item{"id": sAttr("post")}, 5*time.Second)
+		if pre["data"].S != "before" || post["data"].S != "after" {
+			t.Fatalf("survivor %s has wrong state: pre=%q post=%q", n.id, pre["data"].S, post["data"].S)
+		}
+	}
+}
