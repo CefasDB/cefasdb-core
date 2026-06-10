@@ -6,9 +6,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,11 +19,16 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/reflection"
+
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/api"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 )
 
 func main() {
@@ -44,6 +52,13 @@ func main() {
 		identityIssuer    = flag.String("identity-issuer", "", "Expected token issuer")
 		identityAudience  = flag.String("identity-audience", "", "Expected token audience")
 		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
+
+		// gRPC flags.
+		grpcAddr       = flag.String("grpc", "", "gRPC listen address (e.g. ':9090'). Empty disables gRPC.")
+		grpcReflection = flag.Bool("grpc-reflection", false, "Enable gRPC server reflection (handy for grpcurl)")
+		tlsCert        = flag.String("tls-cert", "", "Path to TLS certificate (PEM). Enables TLS on the gRPC listener.")
+		tlsKey         = flag.String("tls-key", "", "Path to TLS private key (PEM)")
+		mtlsCA         = flag.String("mtls-ca", "", "Path to a client-CA bundle. When set, the gRPC listener requires mTLS.")
 	)
 	flag.Parse()
 
@@ -132,6 +147,34 @@ func main() {
 		}
 	}()
 
+	// gRPC listener (optional).
+	var gsrv *grpc.Server
+	if *grpcAddr != "" {
+		opts, err := buildGRPCOpts(validator, *tlsCert, *tlsKey, *mtlsCA)
+		if err != nil {
+			log.Fatalf("grpc opts: %v", err)
+		}
+		gsrv = grpc.NewServer(opts...)
+		var cluster api.Cluster
+		if raftDB != nil {
+			cluster = raftDB
+		}
+		cefaspb.RegisterCefasServer(gsrv, api.NewGRPCServer(db, cat, cluster))
+		if *grpcReflection {
+			reflection.Register(gsrv)
+		}
+		ln, err := net.Listen("tcp", *grpcAddr)
+		if err != nil {
+			log.Fatalf("grpc listen: %v", err)
+		}
+		go func() {
+			log.Printf("gRPC listening on %s (tls=%v mtls=%v reflection=%v)", *grpcAddr, *tlsCert != "", *mtlsCA != "", *grpcReflection)
+			if err := gsrv.Serve(ln); err != nil {
+				log.Printf("grpc serve: %v", err)
+			}
+		}()
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
@@ -140,6 +183,58 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	if gsrv != nil {
+		gsrv.GracefulStop()
+	}
+}
+
+// buildGRPCOpts assembles ServerOptions for the gRPC server: auth
+// interceptors (if a validator is configured) + TLS / mTLS credentials
+// when cert paths are supplied.
+func buildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grpc.ServerOption, error) {
+	var opts []grpc.ServerOption
+
+	if certPath != "" || keyPath != "" {
+		if certPath == "" || keyPath == "" {
+			return nil, fmt.Errorf("both -tls-cert and -tls-key must be set together")
+		}
+		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("load tls cert: %w", err)
+		}
+		tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+		if caBundle != "" {
+			caPEM, err := os.ReadFile(caBundle)
+			if err != nil {
+				return nil, fmt.Errorf("read mtls ca: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("mtls ca bundle has no PEM certs")
+			}
+			tlsCfg.ClientCAs = pool
+			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+		}
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+	}
+
+	if v != nil {
+		// Reflection probe stays available without a token so
+		// `grpcurl -plaintext localhost:9090 list` works in dev.
+		skip := map[string]bool{
+			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      true,
+			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": true,
+			"/cefas.v1.Cefas/ClusterStatus":                                  true,
+		}
+		unary, stream := api.AuthInterceptor(v, skip)
+		if unary != nil {
+			opts = append(opts, grpc.UnaryInterceptor(unary))
+		}
+		if stream != nil {
+			opts = append(opts, grpc.StreamInterceptor(stream))
+		}
+	}
+	return opts, nil
 }
 
 // parsePeers parses the "id1=addr1,id2=addr2" form used by both

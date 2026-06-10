@@ -72,6 +72,13 @@ func NewValidator(cfg Config) (*Validator, error) {
 // it directly.
 type Claims = identitymw.Claims
 
+// ValidateToken validates a bare bearer token and returns the
+// extracted Claims. Used by the gRPC interceptor which receives the
+// token through metadata rather than an Authorization header.
+func (v *Validator) ValidateToken(token string) (*Claims, error) {
+	return v.inner.Validate(token)
+}
+
 // ClaimsFromContext returns the authenticated identity, if any.
 func ClaimsFromContext(r *http.Request) (*Claims, bool) {
 	return identitymw.ClaimsFromContext(r.Context())
