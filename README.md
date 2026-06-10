@@ -1,7 +1,9 @@
 # cefas
 
-cefas is a self-hosted operational database and CLI for partition-keyed data,
-secondary indexes, spatial indexes, and plugin-backed query workflows.
+cefas is a high-performance NoSQL key-value and document database for
+operational workloads. It is designed for predictable millisecond-class access,
+horizontal scale, and a small operational footprint while still giving teams
+direct control over deployment, storage, replication, and extensions.
 
 The repository ships two main binaries:
 
@@ -19,8 +21,8 @@ Long-form documentation lives in the GitHub Wiki.
 
 ## What It Does
 
-cefas stores flexible items behind a partition key and optional sort key. On top of
-that storage model it provides:
+cefas stores flexible documents behind a partition key and optional sort key. On
+top of that storage model it provides:
 
 - Point reads and writes through `GetItem`, `PutItem`, `DeleteItem`, and batch APIs.
 - Partition queries with optional sort-key ranges and consistent-read routing.
