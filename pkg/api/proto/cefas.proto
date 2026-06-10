@@ -68,6 +68,10 @@ service Cefas {
   rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
   rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
   rpc RestoreTableFromBackup(RestoreTableFromBackupRequest) returns (RestoreTableFromBackupResponse);
+
+  // Plugin introspection.
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  rpc DescribePlugin(DescribePluginRequest) returns (DescribePluginResponse);
 }
 
 message StreamChangesRequest {
@@ -134,6 +138,34 @@ message RestoreTableFromBackupResponse {
   string target_table_name = 1;
   int64  rows_copied       = 2;
 }
+
+// PluginDescriptor describes one registered plugin. The kind values
+// match plugin.Kind.String() ("index" | "distance" | "estimator" |
+// "audience"); state values match plugin.State.String() ("loaded" |
+// "running" | "disabled" | "failed").
+message PluginDescriptor {
+  string name              = 1;
+  string kind              = 2;
+  string version           = 3;
+  string description       = 4;
+  string state             = 5;
+  string last_error        = 6;
+  int64  last_error_unix   = 7;
+  int64  items_indexed     = 8;
+  int64  started_at_unix   = 9;
+}
+
+message ListPluginsRequest {
+  // kind narrows to a single plugin kind ("index" / "distance" /
+  // "estimator" / "audience"). Empty = every kind.
+  string kind = 1;
+}
+message ListPluginsResponse {
+  repeated PluginDescriptor plugins = 1;
+}
+
+message DescribePluginRequest  { string name = 1; }
+message DescribePluginResponse { PluginDescriptor plugin = 1; }
 
 message SqlRequest  { string query = 1; }
 message SqlResponse {

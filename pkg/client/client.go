@@ -733,6 +733,64 @@ func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceT
 	return int(resp.GetRowsCopied()), nil
 }
 
+// ---------- plugins ----------
+
+// PluginInfo mirrors the wire-side PluginDescriptor in a Go-friendly
+// shape. Plugins not implementing StatusProvider report empty
+// counters.
+type PluginInfo struct {
+	Name           string
+	Kind           string
+	Version        string
+	Description    string
+	State          string
+	LastError      string
+	LastErrorUnix  int64
+	ItemsIndexed   int64
+	StartedAtUnix  int64
+}
+
+// ListPlugins enumerates every plugin registered with the server. The
+// optional kind filter narrows the result ("index" / "distance" /
+// "estimator" / "audience"); empty returns every kind.
+func (c *Client) ListPlugins(ctx context.Context, kind string) ([]PluginInfo, error) {
+	resp, err := c.stub.ListPlugins(c.withAuth(ctx), &cefaspb.ListPluginsRequest{Kind: kind})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PluginInfo, 0, len(resp.GetPlugins()))
+	for _, p := range resp.GetPlugins() {
+		out = append(out, pluginInfoFromPB(p))
+	}
+	return out, nil
+}
+
+// DescribePlugin returns one plugin's descriptor by name.
+func (c *Client) DescribePlugin(ctx context.Context, name string) (PluginInfo, error) {
+	resp, err := c.stub.DescribePlugin(c.withAuth(ctx), &cefaspb.DescribePluginRequest{Name: name})
+	if err != nil {
+		return PluginInfo{}, err
+	}
+	return pluginInfoFromPB(resp.GetPlugin()), nil
+}
+
+func pluginInfoFromPB(p *cefaspb.PluginDescriptor) PluginInfo {
+	if p == nil {
+		return PluginInfo{}
+	}
+	return PluginInfo{
+		Name:          p.GetName(),
+		Kind:          p.GetKind(),
+		Version:       p.GetVersion(),
+		Description:   p.GetDescription(),
+		State:         p.GetState(),
+		LastError:     p.GetLastError(),
+		LastErrorUnix: p.GetLastErrorUnix(),
+		ItemsIndexed:  p.GetItemsIndexed(),
+		StartedAtUnix: p.GetStartedAtUnix(),
+	}
+}
+
 // ---------- cluster ----------
 
 // ClusterStatus returns membership and leadership info.
