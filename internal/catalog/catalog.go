@@ -46,6 +46,16 @@ func (c *Catalog) loadAll() error {
 	return it.Error()
 }
 
+// Reload drops the in-memory cache and re-reads every descriptor from
+// Pebble. Useful in tests and after admin tools rewrite the catalog
+// out-of-band.
+func (c *Catalog) Reload() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tables = make(map[string]types.TableDescriptor)
+	return c.loadAll()
+}
+
 // Create persists a new table. Returns ErrTableAlreadyExists if the name
 // is taken.
 func (c *Catalog) Create(td types.TableDescriptor) error {
@@ -71,15 +81,32 @@ func (c *Catalog) Create(td types.TableDescriptor) error {
 	return nil
 }
 
-// Describe returns the descriptor for the given table.
+// Describe returns the descriptor for the given table. Falls back to a
+// Pebble Get on cache miss so followers see tables replicated through
+// the Raft log without needing to be told to reload — the FSM applies
+// the descriptor key, and the next Describe pulls it through.
 func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	td, ok := c.tables[name]
-	if !ok {
+	c.mu.RUnlock()
+	if ok {
+		return td, nil
+	}
+	raw, err := c.db.Get(storage.KeyCatalog(name))
+	if err == storage.ErrNotFound {
 		return types.TableDescriptor{}, types.ErrTableNotFound
 	}
-	return td, nil
+	if err != nil {
+		return types.TableDescriptor{}, err
+	}
+	var fresh types.TableDescriptor
+	if err := json.Unmarshal(raw, &fresh); err != nil {
+		return types.TableDescriptor{}, fmt.Errorf("decode descriptor: %w", err)
+	}
+	c.mu.Lock()
+	c.tables[fresh.Name] = fresh
+	c.mu.Unlock()
+	return fresh, nil
 }
 
 // List returns descriptors of every known table.

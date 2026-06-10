@@ -1,19 +1,23 @@
-// cefas-server is the Phase 1 single-node binary. Opens Pebble at the
-// configured directory, loads the catalog, and serves HTTP/JSON on the
-// configured port. Raft, multi-shard, and gRPC ship in later phases.
+// cefas-server is the cefas database binary. In single-node mode it
+// opens Pebble, loads the catalog, and serves HTTP/JSON. With the
+// -raft-bootstrap or -raft-join flags it additionally wires raft
+// replication so writes flow through the consensus log.
 package main
 
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/api"
 )
@@ -23,6 +27,15 @@ func main() {
 		dataDir  = flag.String("data", "./cefas-data", "Pebble data directory")
 		httpAddr = flag.String("http", ":8080", "HTTP listen address")
 		fsync    = flag.Bool("fsync", false, "fsync on commit (durability over throughput)")
+
+		// Raft mode flags. Empty raft-bind keeps the server in
+		// single-node mode (Phase 1-3 behaviour).
+		raftBind      = flag.String("raft-bind", "", "Raft TCP bind address (enables Raft mode)")
+		raftID        = flag.String("raft-id", "", "Unique raft ServerID for this node")
+		raftPath      = flag.String("raft-path", "", "Raft state path (snapshots/, etc.). Defaults to -data/raft")
+		raftBootstrap = flag.Bool("raft-bootstrap", false, "Bootstrap a new cluster from -raft-peers (run on the first node only)")
+		raftPeersFlag = flag.String("raft-peers", "", "Comma-separated id=raftAddr peer list, e.g. 'a=127.0.0.1:9001,b=127.0.0.1:9002,c=127.0.0.1:9003'")
+		raftHTTPFlag  = flag.String("raft-http-peers", "", "Comma-separated id=httpURL peer list for 307 redirects, e.g. 'a=http://h1:8080,b=http://h2:8080'")
 	)
 	flag.Parse()
 
@@ -37,8 +50,45 @@ func main() {
 		log.Fatalf("load catalog: %v", err)
 	}
 
+	var raftDB *craft.DB
+	if *raftBind != "" {
+		if *raftID == "" {
+			log.Fatal("-raft-id is required when -raft-bind is set")
+		}
+		path := *raftPath
+		if path == "" {
+			path = *dataDir + "/raft"
+		}
+		peers, err := parsePeers(*raftPeersFlag)
+		if err != nil {
+			log.Fatalf("-raft-peers: %v", err)
+		}
+		httpPeers, err := parsePeers(*raftHTTPFlag)
+		if err != nil {
+			log.Fatalf("-raft-http-peers: %v", err)
+		}
+		raftDB, err = craft.Open(context.Background(), craft.Config{
+			Path:          path,
+			SelfID:        *raftID,
+			BindAddr:      *raftBind,
+			Bootstrap:     *raftBootstrap,
+			PeerAddrs:     peers,
+			PeerHTTPAddrs: httpPeers,
+		}, db.Raw())
+		if err != nil {
+			log.Fatalf("open raft: %v", err)
+		}
+		defer raftDB.Close()
+		db.AttachReplicator(raftDB)
+		log.Printf("raft attached: id=%s bind=%s bootstrap=%v peers=%v", *raftID, *raftBind, *raftBootstrap, peers)
+	}
+
 	mux := http.NewServeMux()
-	api.New(db, cat).Routes(mux)
+	apiSrv := api.New(db, cat)
+	if raftDB != nil {
+		apiSrv.AttachCluster(raftDB)
+	}
+	apiSrv.Routes(mux)
 
 	srv := &http.Server{
 		Addr:              *httpAddr,
@@ -47,7 +97,11 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("cefas-server listening on %s (data=%s)", *httpAddr, *dataDir)
+		mode := "single-node"
+		if raftDB != nil {
+			mode = "raft"
+		}
+		log.Printf("cefas-server listening on %s (data=%s, mode=%s)", *httpAddr, *dataDir, mode)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http serve: %v", err)
 		}
@@ -61,4 +115,25 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+// parsePeers parses the "id1=addr1,id2=addr2" form used by both
+// -raft-peers and -raft-http-peers.
+func parsePeers(s string) (map[string]string, error) {
+	out := make(map[string]string)
+	if strings.TrimSpace(s) == "" {
+		return out, nil
+	}
+	for _, entry := range strings.Split(s, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		i := strings.IndexByte(entry, '=')
+		if i <= 0 || i == len(entry)-1 {
+			return nil, fmt.Errorf("bad peer %q: expected id=addr", entry)
+		}
+		out[strings.TrimSpace(entry[:i])] = strings.TrimSpace(entry[i+1:])
+	}
+	return out, nil
 }

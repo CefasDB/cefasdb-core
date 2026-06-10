@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
@@ -22,14 +23,31 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
+// Cluster is the optional cluster-management surface the API exposes
+// when the server runs in Raft mode. nil means single-node.
+type Cluster interface {
+	IsLeader() bool
+	LeaderHTTPAddr() string
+	AddVoter(id, addr string, timeout time.Duration) error
+	RemoveServer(id string, timeout time.Duration) error
+	Barrier(timeout time.Duration) error
+	SelfID() string
+	BindAddr() string
+}
+
 type Server struct {
-	db  *storage.DB
-	cat *catalog.Catalog
+	db      *storage.DB
+	cat     *catalog.Catalog
+	cluster Cluster // nil when not running in raft mode
 }
 
 func New(db *storage.DB, cat *catalog.Catalog) *Server {
 	return &Server{db: db, cat: cat}
 }
+
+// AttachCluster wires the optional cluster-management surface. Pass a
+// *raft.DB; nil keeps the server in single-node mode.
+func (s *Server) AttachCluster(c Cluster) { s.cluster = c }
 
 // Routes attaches cefas HTTP endpoints onto mux. Path layout follows
 // DynamoDB-ish verbs as resources under /v1/.
@@ -44,6 +62,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/BatchGetItem", s.handleBatchGetItem)
 	mux.HandleFunc("/v1/SpatialQuery", s.handleSpatialQuery)
 	mux.HandleFunc("/v1/Health", s.handleHealth)
+	mux.HandleFunc("/v1/cluster/status", s.handleClusterStatus)
+	mux.HandleFunc("/v1/cluster/AddVoter", s.handleClusterAddVoter)
+	mux.HandleFunc("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -126,8 +147,9 @@ type putItemRequest struct {
 }
 
 type getItemRequest struct {
-	Table string                   `json:"table"`
-	Key   map[string]jsonAttribute `json:"key"`
+	Table       string                   `json:"table"`
+	Key         map[string]jsonAttribute `json:"key"`
+	Consistency string                   `json:"consistency,omitempty"` // "" or "eventual" → local; "strong" → leader + barrier
 }
 
 type deleteItemRequest struct {
@@ -138,12 +160,13 @@ type deleteItemRequest struct {
 }
 
 type queryRequest struct {
-	Table     string         `json:"table"`
-	IndexName string         `json:"indexName,omitempty"`
-	PKValue   jsonAttribute  `json:"pkValue"`
-	SKLow     *jsonAttribute `json:"skLow,omitempty"`
-	SKHigh    *jsonAttribute `json:"skHigh,omitempty"`
-	Limit     int            `json:"limit,omitempty"`
+	Table       string         `json:"table"`
+	IndexName   string         `json:"indexName,omitempty"`
+	PKValue     jsonAttribute  `json:"pkValue"`
+	SKLow       *jsonAttribute `json:"skLow,omitempty"`
+	SKHigh      *jsonAttribute `json:"skHigh,omitempty"`
+	Limit       int            `json:"limit,omitempty"`
+	Consistency string         `json:"consistency,omitempty"`
 }
 
 type batchWriteOp struct {
@@ -189,7 +212,7 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 	}
 	err = s.db.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds})
 	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
+		writeWriteErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
@@ -203,6 +226,9 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	var req getItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
 		return
 	}
 	td, err := s.cat.Describe(req.Table)
@@ -257,7 +283,7 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 	}
 	err = s.db.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds})
 	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
+		writeWriteErr(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
@@ -271,6 +297,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	var req queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
 		return
 	}
 	td, err := s.cat.Describe(req.Table)
@@ -490,6 +519,123 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
+// ---------- cluster endpoints ----------
+
+type clusterStatusResponse struct {
+	Mode       string `json:"mode"`              // "single-node" or "raft"
+	IsLeader   bool   `json:"isLeader"`
+	SelfID     string `json:"selfId,omitempty"`
+	BindAddr   string `json:"bindAddr,omitempty"`
+	LeaderHTTP string `json:"leaderHttp,omitempty"`
+}
+
+func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	resp := clusterStatusResponse{Mode: "single-node"}
+	if s.cluster != nil {
+		resp.Mode = "raft"
+		resp.IsLeader = s.cluster.IsLeader()
+		resp.SelfID = s.cluster.SelfID()
+		resp.BindAddr = s.cluster.BindAddr()
+		resp.LeaderHTTP = s.cluster.LeaderHTTPAddr()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type addVoterRequest struct {
+	ID        string `json:"id"`
+	Addr      string `json:"addr"`
+	TimeoutMS int    `json:"timeoutMs,omitempty"`
+}
+
+func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
+	if s.cluster == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req addVoterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	if err := s.cluster.AddVoter(req.ID, req.Addr, timeout); err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+type removeServerRequest struct {
+	ID        string `json:"id"`
+	TimeoutMS int    `json:"timeoutMs,omitempty"`
+}
+
+func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Request) {
+	if s.cluster == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req removeServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	if err := s.cluster.RemoveServer(req.ID, timeout); err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// barrierTimeout is the per-request wait the strong-consistency read
+// path applies when forcing this node to catch up on the log before
+// serving a read.
+const barrierTimeout = 5 * time.Second
+
+// ensureStrongRead implements the strong-consistency contract for
+// reads: redirect non-leader reads with 307, then Barrier the leader
+// so the local Pebble has applied every entry committed before this
+// call returned.
+//
+// Returns true when the caller can proceed with a local read; false
+// when the response has already been written and the handler should
+// return.
+func (s *Server) ensureStrongRead(w http.ResponseWriter, r *http.Request) bool {
+	if s.cluster == nil {
+		return true
+	}
+	if !s.cluster.IsLeader() {
+		leader := s.cluster.LeaderHTTPAddr()
+		if leader != "" {
+			w.Header().Set("Location", leader+r.URL.RequestURI())
+			http.Error(w, "strong read must hit the leader; redirected", http.StatusTemporaryRedirect)
+		} else {
+			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("no leader currently elected"))
+		}
+		return false
+	}
+	if err := s.cluster.Barrier(barrierTimeout); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("barrier: %w", err))
+		return false
+	}
+	return true
+}
+
 func decodeBinds(in map[string]jsonAttribute) (map[string]types.AttributeValue, error) {
 	if in == nil {
 		return nil, nil
@@ -527,12 +673,36 @@ func mapWriteErr(err error) int {
 		return http.StatusPreconditionFailed
 	}
 	if errors.Is(err, storage.ErrNotLeader) {
-		// In Raft mode (Phase 4) the controller should redirect to the
-		// leader's HTTP address — keep 421 (Misdirected Request) for now;
-		// Phase 4 will rewrite this to a 307 with Location.
-		return http.StatusMisdirectedRequest
+		// Handled separately in writeWriteErr — we want 307 with a
+		// Location header, not a JSON body.
+		return http.StatusTemporaryRedirect
 	}
 	return http.StatusInternalServerError
+}
+
+// writeWriteErr is the shared error-emit path for write handlers. It
+// turns a NotLeaderError into a real 307 redirect when the leader's
+// HTTP URL is known; falls back to JSON otherwise.
+func writeWriteErr(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, storage.ErrNotLeader) {
+		var nle *storage.NotLeaderError
+		leader := ""
+		if errors.As(err, &nle) {
+			leader = nle.LeaderURL
+		}
+		if leader != "" {
+			// Redirect preserves method + body on 307. The client
+			// resubmits the same POST to the leader's HTTP listener.
+			w.Header().Set("Location", leader+r.URL.RequestURI())
+			http.Error(w, "not leader; redirected", http.StatusTemporaryRedirect)
+			return
+		}
+		// Leader unknown (election in progress). 503 lets clients
+		// back off and retry — there is no useful URL to redirect to.
+		writeErr(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	writeErr(w, mapWriteErr(err), err)
 }
 
 // jsonAttribute is the wire form of an AttributeValue. Exactly one of
