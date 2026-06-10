@@ -54,6 +54,17 @@ const (
 	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
 	Cefas_ListPlugins_FullMethodName            = "/cefas.v1.Cefas/ListPlugins"
 	Cefas_DescribePlugin_FullMethodName         = "/cefas.v1.Cefas/DescribePlugin"
+	Cefas_CreateIndex_FullMethodName            = "/cefas.v1.Cefas/CreateIndex"
+	Cefas_DescribeIndex_FullMethodName          = "/cefas.v1.Cefas/DescribeIndex"
+	Cefas_RebuildIndex_FullMethodName           = "/cefas.v1.Cefas/RebuildIndex"
+	Cefas_Explain_FullMethodName                = "/cefas.v1.Cefas/Explain"
+	Cefas_TopK_FullMethodName                   = "/cefas.v1.Cefas/TopK"
+	Cefas_CohortCreate_FullMethodName           = "/cefas.v1.Cefas/CohortCreate"
+	Cefas_CohortEstimate_FullMethodName         = "/cefas.v1.Cefas/CohortEstimate"
+	Cefas_GeoAudience_FullMethodName            = "/cefas.v1.Cefas/GeoAudience"
+	Cefas_Dedup_FullMethodName                  = "/cefas.v1.Cefas/Dedup"
+	Cefas_FreqCap_FullMethodName                = "/cefas.v1.Cefas/FreqCap"
+	Cefas_Aggregate_FullMethodName              = "/cefas.v1.Cefas/Aggregate"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -109,6 +120,21 @@ type CefasClient interface {
 	// Plugin introspection.
 	ListPlugins(ctx context.Context, in *ListPluginsRequest, opts ...grpc.CallOption) (*ListPluginsResponse, error)
 	DescribePlugin(ctx context.Context, in *DescribePluginRequest, opts ...grpc.CallOption) (*DescribePluginResponse, error)
+	// Plugin-backed index lifecycle (#158, #159, #160).
+	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error)
+	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
+	RebuildIndex(ctx context.Context, in *RebuildIndexRequest, opts ...grpc.CallOption) (*RebuildIndexResponse, error)
+	// Planner observability + top-K (#163, #164).
+	Explain(ctx context.Context, in *ExplainRequest, opts ...grpc.CallOption) (*ExplainResponse, error)
+	TopK(ctx context.Context, in *TopKRequest, opts ...grpc.CallOption) (*TopKResponse, error)
+	// Cohort ops backed by the roaring + HLL plugins (#165, #166).
+	CohortCreate(ctx context.Context, in *CohortCreateRequest, opts ...grpc.CallOption) (*CohortCreateResponse, error)
+	CohortEstimate(ctx context.Context, in *CohortEstimateRequest, opts ...grpc.CallOption) (*CohortEstimateResponse, error)
+	// Audience ops (#167-#170).
+	GeoAudience(ctx context.Context, in *GeoAudienceRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+	Dedup(ctx context.Context, in *DedupRequest, opts ...grpc.CallOption) (*DedupResponse, error)
+	FreqCap(ctx context.Context, in *FreqCapRequest, opts ...grpc.CallOption) (*FreqCapResponse, error)
+	Aggregate(ctx context.Context, in *AggregateRequest, opts ...grpc.CallOption) (*AggregateResponse, error)
 }
 
 type cefasClient struct {
@@ -435,6 +461,125 @@ func (c *cefasClient) DescribePlugin(ctx context.Context, in *DescribePluginRequ
 	return out, nil
 }
 
+func (c *cefasClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_CreateIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribeIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) RebuildIndex(ctx context.Context, in *RebuildIndexRequest, opts ...grpc.CallOption) (*RebuildIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RebuildIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_RebuildIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) Explain(ctx context.Context, in *ExplainRequest, opts ...grpc.CallOption) (*ExplainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExplainResponse)
+	err := c.cc.Invoke(ctx, Cefas_Explain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) TopK(ctx context.Context, in *TopKRequest, opts ...grpc.CallOption) (*TopKResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TopKResponse)
+	err := c.cc.Invoke(ctx, Cefas_TopK_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) CohortCreate(ctx context.Context, in *CohortCreateRequest, opts ...grpc.CallOption) (*CohortCreateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CohortCreateResponse)
+	err := c.cc.Invoke(ctx, Cefas_CohortCreate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) CohortEstimate(ctx context.Context, in *CohortEstimateRequest, opts ...grpc.CallOption) (*CohortEstimateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CohortEstimateResponse)
+	err := c.cc.Invoke(ctx, Cefas_CohortEstimate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) GeoAudience(ctx context.Context, in *GeoAudienceRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[4], Cefas_GeoAudience_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[GeoAudienceRequest, Item]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_GeoAudienceClient = grpc.ServerStreamingClient[Item]
+
+func (c *cefasClient) Dedup(ctx context.Context, in *DedupRequest, opts ...grpc.CallOption) (*DedupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DedupResponse)
+	err := c.cc.Invoke(ctx, Cefas_Dedup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) FreqCap(ctx context.Context, in *FreqCapRequest, opts ...grpc.CallOption) (*FreqCapResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FreqCapResponse)
+	err := c.cc.Invoke(ctx, Cefas_FreqCap_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) Aggregate(ctx context.Context, in *AggregateRequest, opts ...grpc.CallOption) (*AggregateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AggregateResponse)
+	err := c.cc.Invoke(ctx, Cefas_Aggregate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -488,6 +633,21 @@ type CefasServer interface {
 	// Plugin introspection.
 	ListPlugins(context.Context, *ListPluginsRequest) (*ListPluginsResponse, error)
 	DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error)
+	// Plugin-backed index lifecycle (#158, #159, #160).
+	CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error)
+	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
+	RebuildIndex(context.Context, *RebuildIndexRequest) (*RebuildIndexResponse, error)
+	// Planner observability + top-K (#163, #164).
+	Explain(context.Context, *ExplainRequest) (*ExplainResponse, error)
+	TopK(context.Context, *TopKRequest) (*TopKResponse, error)
+	// Cohort ops backed by the roaring + HLL plugins (#165, #166).
+	CohortCreate(context.Context, *CohortCreateRequest) (*CohortCreateResponse, error)
+	CohortEstimate(context.Context, *CohortEstimateRequest) (*CohortEstimateResponse, error)
+	// Audience ops (#167-#170).
+	GeoAudience(*GeoAudienceRequest, grpc.ServerStreamingServer[Item]) error
+	Dedup(context.Context, *DedupRequest) (*DedupResponse, error)
+	FreqCap(context.Context, *FreqCapRequest) (*FreqCapResponse, error)
+	Aggregate(context.Context, *AggregateRequest) (*AggregateResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -581,6 +741,39 @@ func (UnimplementedCefasServer) ListPlugins(context.Context, *ListPluginsRequest
 }
 func (UnimplementedCefasServer) DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribePlugin not implemented")
+}
+func (UnimplementedCefasServer) CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
+}
+func (UnimplementedCefasServer) DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndex not implemented")
+}
+func (UnimplementedCefasServer) RebuildIndex(context.Context, *RebuildIndexRequest) (*RebuildIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RebuildIndex not implemented")
+}
+func (UnimplementedCefasServer) Explain(context.Context, *ExplainRequest) (*ExplainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Explain not implemented")
+}
+func (UnimplementedCefasServer) TopK(context.Context, *TopKRequest) (*TopKResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TopK not implemented")
+}
+func (UnimplementedCefasServer) CohortCreate(context.Context, *CohortCreateRequest) (*CohortCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CohortCreate not implemented")
+}
+func (UnimplementedCefasServer) CohortEstimate(context.Context, *CohortEstimateRequest) (*CohortEstimateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CohortEstimate not implemented")
+}
+func (UnimplementedCefasServer) GeoAudience(*GeoAudienceRequest, grpc.ServerStreamingServer[Item]) error {
+	return status.Errorf(codes.Unimplemented, "method GeoAudience not implemented")
+}
+func (UnimplementedCefasServer) Dedup(context.Context, *DedupRequest) (*DedupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Dedup not implemented")
+}
+func (UnimplementedCefasServer) FreqCap(context.Context, *FreqCapRequest) (*FreqCapResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FreqCap not implemented")
+}
+func (UnimplementedCefasServer) Aggregate(context.Context, *AggregateRequest) (*AggregateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Aggregate not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -1079,6 +1272,197 @@ func _Cefas_DescribePlugin_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CreateIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CreateIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CreateIndex(ctx, req.(*CreateIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribeIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribeIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribeIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribeIndex(ctx, req.(*DescribeIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_RebuildIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RebuildIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RebuildIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RebuildIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RebuildIndex(ctx, req.(*RebuildIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_Explain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExplainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Explain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Explain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Explain(ctx, req.(*ExplainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_TopK_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopKRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).TopK(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_TopK_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).TopK(ctx, req.(*TopKRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_CohortCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CohortCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CohortCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CohortCreate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CohortCreate(ctx, req.(*CohortCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_CohortEstimate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CohortEstimateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CohortEstimate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CohortEstimate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CohortEstimate(ctx, req.(*CohortEstimateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_GeoAudience_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GeoAudienceRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CefasServer).GeoAudience(m, &grpc.GenericServerStream[GeoAudienceRequest, Item]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_GeoAudienceServer = grpc.ServerStreamingServer[Item]
+
+func _Cefas_Dedup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DedupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Dedup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Dedup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Dedup(ctx, req.(*DedupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_FreqCap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FreqCapRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).FreqCap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_FreqCap_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).FreqCap(ctx, req.(*FreqCapRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_Aggregate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AggregateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Aggregate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Aggregate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Aggregate(ctx, req.(*AggregateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1182,6 +1566,46 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "DescribePlugin",
 			Handler:    _Cefas_DescribePlugin_Handler,
 		},
+		{
+			MethodName: "CreateIndex",
+			Handler:    _Cefas_CreateIndex_Handler,
+		},
+		{
+			MethodName: "DescribeIndex",
+			Handler:    _Cefas_DescribeIndex_Handler,
+		},
+		{
+			MethodName: "RebuildIndex",
+			Handler:    _Cefas_RebuildIndex_Handler,
+		},
+		{
+			MethodName: "Explain",
+			Handler:    _Cefas_Explain_Handler,
+		},
+		{
+			MethodName: "TopK",
+			Handler:    _Cefas_TopK_Handler,
+		},
+		{
+			MethodName: "CohortCreate",
+			Handler:    _Cefas_CohortCreate_Handler,
+		},
+		{
+			MethodName: "CohortEstimate",
+			Handler:    _Cefas_CohortEstimate_Handler,
+		},
+		{
+			MethodName: "Dedup",
+			Handler:    _Cefas_Dedup_Handler,
+		},
+		{
+			MethodName: "FreqCap",
+			Handler:    _Cefas_FreqCap_Handler,
+		},
+		{
+			MethodName: "Aggregate",
+			Handler:    _Cefas_Aggregate_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1202,6 +1626,11 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StreamChanges",
 			Handler:       _Cefas_StreamChanges_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "GeoAudience",
+			Handler:       _Cefas_GeoAudience_Handler,
 			ServerStreams: true,
 		},
 	},

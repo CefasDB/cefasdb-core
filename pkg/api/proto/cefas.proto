@@ -72,6 +72,25 @@ service Cefas {
   // Plugin introspection.
   rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
   rpc DescribePlugin(DescribePluginRequest) returns (DescribePluginResponse);
+
+  // Plugin-backed index lifecycle (#158, #159, #160).
+  rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
+  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse);
+  rpc RebuildIndex(RebuildIndexRequest) returns (RebuildIndexResponse);
+
+  // Planner observability + top-K (#163, #164).
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
+  rpc TopK(TopKRequest) returns (TopKResponse);
+
+  // Cohort ops backed by the roaring + HLL plugins (#165, #166).
+  rpc CohortCreate(CohortCreateRequest) returns (CohortCreateResponse);
+  rpc CohortEstimate(CohortEstimateRequest) returns (CohortEstimateResponse);
+
+  // Audience ops (#167-#170).
+  rpc GeoAudience(GeoAudienceRequest) returns (stream Item);
+  rpc Dedup(DedupRequest) returns (DedupResponse);
+  rpc FreqCap(FreqCapRequest) returns (FreqCapResponse);
+  rpc Aggregate(AggregateRequest) returns (AggregateResponse);
 }
 
 message StreamChangesRequest {
@@ -166,6 +185,121 @@ message ListPluginsResponse {
 
 message DescribePluginRequest  { string name = 1; }
 message DescribePluginResponse { PluginDescriptor plugin = 1; }
+
+// ---------- plugin-backed indexes ----------
+
+message PluginIndexDescriptor {
+  string    table          = 1;
+  string    name           = 2;
+  string    plugin_name    = 3;
+  bytes     plugin_config  = 4; // opaque to the engine
+  KeySchema key_schema     = 5;
+}
+
+message CreateIndexRequest  { PluginIndexDescriptor descriptor = 1; }
+message CreateIndexResponse { PluginIndexDescriptor descriptor = 1; }
+
+message DescribeIndexRequest  { string table = 1; string name = 2; }
+message DescribeIndexResponse { PluginIndexDescriptor descriptor = 1; }
+
+message RebuildIndexRequest  { string table = 1; string name = 2; }
+message RebuildIndexResponse { int64  items_indexed = 1; }
+
+// ---------- explain ----------
+
+message ExplainRequest {
+  string table     = 1;
+  string predicate = 2;
+  string format    = 3; // "text" | "json"
+}
+message ExplainResponse {
+  string plan = 1;
+}
+
+// ---------- top-k ----------
+
+message TopKRequest {
+  string                       table             = 1;
+  string                       distance_operator = 2; // e.g. "cosine"
+  string                       field             = 3; // attribute compared against
+  AttributeValue               target            = 4;
+  int32                        k                 = 5;
+}
+message TopKRow {
+  Item   item     = 1;
+  double distance = 2;
+}
+message TopKResponse {
+  repeated TopKRow rows = 1;
+}
+
+// ---------- cohort ----------
+
+message CohortCreateRequest {
+  string table        = 1;
+  string cohort       = 2;
+  string field        = 3; // numeric attribute to bitmap
+  string filter       = 4; // optional WHERE-like predicate (DDB condition subset)
+  map<string, AttributeValue> binds = 5;
+}
+message CohortCreateResponse {
+  int64 members = 1;
+}
+
+message CohortEstimateRequest {
+  string table = 1;
+  string field = 2;
+  string filter = 3;
+  map<string, AttributeValue> binds = 4;
+}
+message CohortEstimateResponse {
+  double approximate_count = 1;
+}
+
+// ---------- audience ----------
+
+message GeoAudienceRequest {
+  string table          = 1;
+  string index          = 2; // geohash index name; defaults to "loc_geo" when empty
+  double lat            = 3;
+  double lon            = 4;
+  double radius_meters  = 5;
+  int32  limit          = 6;
+}
+
+message DedupRequest {
+  string scope       = 1;
+  string key         = 2;
+  int64  ttl_seconds = 3;
+}
+message DedupResponse {
+  bool allowed = 1;
+}
+
+message FreqCapRequest {
+  string scope          = 1;
+  string key            = 2;
+  int32  limit          = 3;
+  int64  window_seconds = 4;
+}
+message FreqCapResponse {
+  bool allowed = 1;
+}
+
+message AggregateRequest {
+  string          table          = 1;
+  repeated string group_by       = 2;
+  repeated string metrics        = 3;
+  int32           min_group_size = 4;
+}
+message AggregateRow {
+  map<string, string> group_key = 1;
+  map<string, double> counts    = 2;
+  int32               members   = 3;
+}
+message AggregateResponse {
+  repeated AggregateRow rows = 1;
+}
 
 message SqlRequest  { string query = 1; }
 message SqlResponse {

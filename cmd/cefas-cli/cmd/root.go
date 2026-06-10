@@ -13,6 +13,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd/cluster"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd/ddb"
+	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd/ops"
 	plugincmd "github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd/plugin"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
 )
@@ -51,6 +52,7 @@ The surface mirrors AWS DynamoDB CLI so scripts written against
 	ddb.Register(root)
 	cluster.Register(root)
 	plugincmd.Register(root)
+	ops.Register(root)
 
 	return root
 }
