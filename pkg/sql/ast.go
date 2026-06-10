@@ -19,30 +19,58 @@ type SelectStmt struct {
 	Limit     int
 }
 
-// InsertStmt is INSERT INTO <table> (cols) VALUES (vals).
+// InsertStmt is INSERT INTO <table> (cols) VALUES (vals) [IF expr].
 type InsertStmt struct {
 	Table   string
 	Columns []string
 	Values  []Expr
+	// If, when non-nil, is the optional ConditionExpression
+	// evaluated against the prior item before write.
+	If Expr
 }
 
-// UpdateStmt is UPDATE <table> SET col = val, ... WHERE <pred>.
+// UpdateStmt is UPDATE <table> SET <action> [, ...] WHERE <pred>
+// [IF <cond>].
+//
+// Each action is an Assignment carrying the kind (SET/REMOVE/ADD/
+// DELETE) and the operand. The executor reads the prior row, applies
+// each action in order, and writes the merged result back through
+// storage.PutItemWith so GSI + LSI + spatial + TTL maintenance all
+// stay atomic.
 type UpdateStmt struct {
 	Table       string
 	Assignments []Assignment
 	Where       Expr
+	If          Expr
 }
 
-// Assignment is "col = expr" inside UPDATE SET.
+// AssignKind picks the SET action grammar branch.
+type AssignKind uint8
+
+const (
+	AssignSet    AssignKind = iota + 1 // col = expr
+	AssignRemove                       // REMOVE col [, ...]
+	AssignAdd                          // ADD col value
+	AssignDelete                       // DELETE col value (set remove)
+)
+
+// Assignment is one entry in UPDATE SET. Kind selects which fields
+// matter:
+//   - Set    → Column, Value
+//   - Remove → Column (one Assignment per column listed in REMOVE)
+//   - Add    → Column, Value (numeric increment or set add)
+//   - Delete → Column, Value (set element to remove)
 type Assignment struct {
+	Kind   AssignKind
 	Column string
 	Value  Expr
 }
 
-// DeleteStmt is DELETE FROM <table> WHERE <pred>.
+// DeleteStmt is DELETE FROM <table> WHERE <pred> [IF <cond>].
 type DeleteStmt struct {
 	Table string
 	Where Expr
+	If    Expr
 }
 
 // CreateTableStmt is the minimal table-creation form. Indexes and
@@ -129,12 +157,33 @@ type BetweenExpr struct {
 }
 
 // FuncCall represents a function invocation. Used today for the
-// spatial helpers ST_Within / ST_DWithin / BBox / Point, but the
-// shape is generic enough to host other functions later.
+// spatial helpers ST_Within / ST_DWithin / BBox / Point, and the
+// scalar WHERE functions begins_with / contains / attribute_exists /
+// attribute_not_exists / attribute_type / size. Also lives in UPDATE
+// SET expressions as list_append / list_prepend.
 type FuncCall struct {
 	Name string
 	Args []Expr
 }
+
+// ArithKind selects the binary arithmetic operator on ArithExpr.
+type ArithKind uint8
+
+const (
+	ArithAdd ArithKind = iota + 1
+	ArithSub
+)
+
+// ArithExpr models `col + value` and `col - value` inside UPDATE SET.
+// Kept narrow to numeric attributes — the executor refuses to apply
+// arithmetic to non-numeric prior values.
+type ArithExpr struct {
+	Op    ArithKind
+	Left  Expr
+	Right Expr
+}
+
+func (*ArithExpr) expr() {}
 
 func (*ColumnRef) expr()   {}
 func (*Literal) expr()     {}

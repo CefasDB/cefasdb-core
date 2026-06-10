@@ -47,6 +47,8 @@ const (
 	tLte
 	tGt
 	tGte
+	tPlus
+	tMinus
 
 	// Literals.
 	tIdent
@@ -83,6 +85,10 @@ const (
 	tFalse
 	tUse
 	tIndex
+	tIf
+	tExists
+	tAdd
+	tRemove
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -124,6 +130,10 @@ var keywords = map[string]TokenKind{
 	"FALSE":   tFalse,
 	"USE":     tUse,
 	"INDEX":   tIndex,
+	"IF":      tIf,
+	"EXISTS":  tExists,
+	"ADD":     tAdd,
+	"REMOVE":  tRemove,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of
@@ -156,6 +166,9 @@ func Tokenize(src string) ([]Token, error) {
 			i++
 		case c == '*':
 			out = append(out, Token{Kind: tStar, Lit: "*", Pos: i})
+			i++
+		case c == '+':
+			out = append(out, Token{Kind: tPlus, Lit: "+", Pos: i})
 			i++
 		case c == '=':
 			out = append(out, Token{Kind: tEq, Lit: "=", Pos: i})
@@ -229,6 +242,9 @@ func Tokenize(src string) ([]Token, error) {
 				i++
 			}
 			return nil, fmt.Errorf("unterminated quoted identifier at %d", start)
+		case c == '-' && (i+1 >= len(r) || !unicode.IsDigit(r[i+1]) || !precedingAcceptsUnary(out)):
+			out = append(out, Token{Kind: tMinus, Lit: "-", Pos: i})
+			i++
 		case unicode.IsDigit(c) || (c == '.' && i+1 < len(r) && unicode.IsDigit(r[i+1])) ||
 			(c == '-' && i+1 < len(r) && unicode.IsDigit(r[i+1]) && precedingAcceptsUnary(out)):
 			start := i
