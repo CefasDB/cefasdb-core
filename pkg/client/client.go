@@ -398,6 +398,73 @@ func (b *QueryBuilder) Stream(ctx context.Context) (grpc.ServerStreamingClient[c
 	return b.c.stub.Query(b.c.withAuth(ctx), b.req)
 }
 
+// ---------- scan ----------
+
+// ScanOptions tweaks a Scan call. FilterExpression is the same DDB
+// condition subset PutItem's Condition accepts; binds resolve `:name`
+// placeholders inside it.
+type ScanOptions struct {
+	FilterExpression string
+	Binds            map[string]types.AttributeValue
+	Limit            int
+	Strong           bool
+}
+
+// Scan streams every primary item in `table`, applying FilterExpression
+// server-side. For large result sets prefer ScanStream — Scan
+// materialises the whole stream in memory.
+func (c *Client) Scan(ctx context.Context, table string, opts ...ScanOptions) ([]types.Item, error) {
+	var o ScanOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	cons := cefaspb.Consistency_CONSISTENCY_EVENTUAL
+	if o.Strong {
+		cons = cefaspb.Consistency_CONSISTENCY_STRONG
+	}
+	stream, err := c.stub.Scan(c.withAuth(ctx), &cefaspb.ScanRequest{
+		Table:            table,
+		FilterExpression: o.FilterExpression,
+		Binds:            itemAttrMap(types.Item(o.Binds)),
+		Limit:            int32(o.Limit),
+		Consistency:      cons,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out []types.Item
+	for {
+		item, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, itemFromPB(item.GetAttributes()))
+	}
+}
+
+// ScanStream returns the underlying server-streaming RPC for callers
+// that want to iterate large scans lazily.
+func (c *Client) ScanStream(ctx context.Context, table string, opts ...ScanOptions) (grpc.ServerStreamingClient[cefaspb.Item], error) {
+	var o ScanOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	cons := cefaspb.Consistency_CONSISTENCY_EVENTUAL
+	if o.Strong {
+		cons = cefaspb.Consistency_CONSISTENCY_STRONG
+	}
+	return c.stub.Scan(c.withAuth(ctx), &cefaspb.ScanRequest{
+		Table:            table,
+		FilterExpression: o.FilterExpression,
+		Binds:            itemAttrMap(types.Item(o.Binds)),
+		Limit:            int32(o.Limit),
+		Consistency:      cons,
+	})
+}
+
 // ---------- spatial ----------
 
 // SpatialQueryByBBox runs a geohash bounding-box query.
