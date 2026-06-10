@@ -11,6 +11,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -27,13 +28,28 @@ type GRPCServer struct {
 
 	db      *storage.DB
 	cat     *catalog.Catalog
-	cluster Cluster // nil in single-node mode
+	cluster Cluster          // nil in single-node mode
+	manager *cluster.Manager // nil in single-shard mode
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
 // instances the HTTP server uses. Cluster may be nil.
 func NewGRPCServer(db *storage.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
 	return &GRPCServer{db: db, cat: cat, cluster: cluster}
+}
+
+// AttachManager wires the multi-shard manager onto the gRPC handler.
+// Without it the handler routes every write to s.db (single-shard).
+func (s *GRPCServer) AttachManager(m *cluster.Manager) { s.manager = m }
+
+func (s *GRPCServer) storageFor(pkBytes []byte) *storage.DB {
+	if s.manager == nil {
+		return s.db
+	}
+	if shard := s.manager.ShardForPK(pkBytes); shard != nil {
+		return shard.Storage
+	}
+	return s.db
 }
 
 // ---------- schema ----------
@@ -45,6 +61,18 @@ func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRe
 	td := pbToTableDescriptor(req.GetDescriptor_())
 	if err := s.cat.Create(td); err != nil {
 		return nil, mapStorageErr(err)
+	}
+	// Fan out to every other shard so each can resolve the schema
+	// locally when a write lands on it.
+	if s.manager != nil {
+		for i, sh := range s.manager.Shards() {
+			if i == 0 {
+				continue
+			}
+			if cat, err := catalog.New(sh.Storage); err == nil {
+				_ = cat.Create(td)
+			}
+		}
 	}
 	return &cefaspb.CreateTableResponse{Descriptor_: tableDescriptorToPB(td)}, nil
 }
@@ -102,7 +130,11 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("binds: %v", err))
 	}
-	if err := s.db.PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	pkBytes, err := pkBytesFromItem(item, td.KeySchema)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.storageFor(pkBytes).PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.PutItemResponse{}, nil
@@ -127,7 +159,11 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	item, err := s.db.GetItem(req.GetTable(), td.KeySchema, key)
+	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	item, err := s.storageFor(pkBytes).GetItem(req.GetTable(), td.KeySchema, key)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			return &cefaspb.GetItemResponse{Found: false}, nil
@@ -155,7 +191,11 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("binds: %v", err))
 	}
-	if err := s.db.DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.storageFor(pkBytes).DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.DeleteItemResponse{}, nil
@@ -190,10 +230,35 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 			return nil, status.Errorf(codes.InvalidArgument, "op %d: unknown kind", i)
 		}
 	}
-	if err := s.db.BatchWriteItem(td, ops); err != nil {
+	if err := s.batchWriteFanOut(td, ops); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.BatchWriteItemResponse{}, nil
+}
+
+func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.BatchOp) error {
+	if s.manager == nil {
+		return s.db.BatchWriteItem(td, ops)
+	}
+	buckets := make(map[*storage.DB][]storage.BatchOp)
+	for _, op := range ops {
+		probe := op.Item
+		if op.Op == storage.BatchOpDelete {
+			probe = op.Key
+		}
+		pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
+		if err != nil {
+			return err
+		}
+		db := s.storageFor(pkBytes)
+		buckets[db] = append(buckets[db], op)
+	}
+	for db, group := range buckets {
+		if err := db.BatchWriteItem(td, group); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItemRequest) (*cefaspb.BatchGetItemResponse, error) {
@@ -214,7 +279,7 @@ func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItem
 		}
 		keys = append(keys, ka)
 	}
-	items, err := s.db.BatchGetItem(req.GetTable(), td.KeySchema, keys)
+	items, err := s.batchGetFanOut(req.GetTable(), td.KeySchema, keys)
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
@@ -265,15 +330,20 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 		}
 	}
 
+	pkBytes, err := storage.AttrCanonicalBytes(pkVal)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, fmt.Sprintf("pk_value: %v", err))
+	}
+	queryDB := s.storageFor(pkBytes)
 	var items []types.Item
 	limit := int(req.GetLimit())
 	switch {
 	case req.GetIndexName() != "":
-		items, err = s.db.QueryByGSI(td, req.GetIndexName(), pkVal, storage.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
+		items, err = queryDB.QueryByGSI(td, req.GetIndexName(), pkVal, storage.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
 	case req.GetSkLow() == nil && req.GetSkHigh() == nil:
-		items, err = s.db.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
+		items, err = queryDB.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
 	default:
-		items, err = s.db.QueryByPKRange(req.GetTable(), td.KeySchema, pkVal, lo, hi, limit)
+		items, err = queryDB.QueryByPKRange(req.GetTable(), td.KeySchema, pkVal, lo, hi, limit)
 	}
 	if err != nil {
 		return mapStorageErr(err)
@@ -310,7 +380,7 @@ func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefas
 	default:
 		return status.Error(codes.InvalidArgument, "one of bbox/radius/z required")
 	}
-	items, err := s.db.SpatialQueryItems(td, req.GetIndexName(), q)
+	items, err := s.scatterSpatial(td, req.GetIndexName(), q)
 	if err != nil {
 		return mapStorageErr(err)
 	}
@@ -320,6 +390,28 @@ func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefas
 		}
 	}
 	return nil
+}
+
+// scatterSpatial fans the spatial query across every shard. Spatial
+// indexes are partitioned by the item's PK so the matching rows can
+// live on any shard.
+func (s *GRPCServer) scatterSpatial(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error) {
+	if s.manager == nil {
+		return s.db.SpatialQueryItems(td, idxName, q)
+	}
+	var out []types.Item
+	for _, sh := range s.manager.Shards() {
+		got, err := sh.Storage.SpatialQueryItems(td, idxName, q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+		if q.Limit > 0 && len(out) >= q.Limit {
+			out = out[:q.Limit]
+			break
+		}
+	}
+	return out, nil
 }
 
 // ---------- sql ----------
@@ -377,6 +469,28 @@ func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {
 }
 
 // ---------- cluster ----------
+
+func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
+	if s.manager == nil {
+		return s.db.BatchGetItem(table, ks, keys)
+	}
+	out := make([]types.Item, len(keys))
+	for i, k := range keys {
+		pkBytes, err := pkBytesFromItem(k, ks)
+		if err != nil {
+			return nil, err
+		}
+		db := s.storageFor(pkBytes)
+		single, err := db.BatchGetItem(table, ks, []types.Item{k})
+		if err != nil {
+			return nil, err
+		}
+		if len(single) == 1 {
+			out[i] = single[0]
+		}
+	}
+	return out, nil
+}
 
 func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatusRequest) (*cefaspb.ClusterStatusResponse, error) {
 	resp := &cefaspb.ClusterStatusResponse{Mode: "single-node"}
