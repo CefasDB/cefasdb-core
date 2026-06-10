@@ -634,6 +634,22 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 	}
 }
 
+// RestoreTableFromBackup reads `sourceTable`'s descriptor from
+// `backupName` and reproduces it under `targetTable` in the live
+// catalog, then copies every row from the checkpoint into the new
+// table. Returns the number of rows copied.
+func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceTable, targetTable string) (int, error) {
+	resp, err := c.stub.RestoreTableFromBackup(c.withAuth(ctx), &cefaspb.RestoreTableFromBackupRequest{
+		BackupName:      backupName,
+		SourceTableName: sourceTable,
+		TargetTableName: targetTable,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(resp.GetRowsCopied()), nil
+}
+
 // ---------- cluster ----------
 
 // ClusterStatus returns membership and leadership info.

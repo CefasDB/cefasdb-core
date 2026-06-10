@@ -26,29 +26,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Cefas_CreateTable_FullMethodName        = "/cefas.v1.Cefas/CreateTable"
-	Cefas_DescribeTable_FullMethodName      = "/cefas.v1.Cefas/DescribeTable"
-	Cefas_ListTables_FullMethodName         = "/cefas.v1.Cefas/ListTables"
-	Cefas_DropTable_FullMethodName          = "/cefas.v1.Cefas/DropTable"
-	Cefas_UpdateTimeToLive_FullMethodName   = "/cefas.v1.Cefas/UpdateTimeToLive"
-	Cefas_DescribeTimeToLive_FullMethodName = "/cefas.v1.Cefas/DescribeTimeToLive"
-	Cefas_PutItem_FullMethodName            = "/cefas.v1.Cefas/PutItem"
-	Cefas_GetItem_FullMethodName            = "/cefas.v1.Cefas/GetItem"
-	Cefas_UpdateItem_FullMethodName         = "/cefas.v1.Cefas/UpdateItem"
-	Cefas_DeleteItem_FullMethodName         = "/cefas.v1.Cefas/DeleteItem"
-	Cefas_BatchWriteItem_FullMethodName     = "/cefas.v1.Cefas/BatchWriteItem"
-	Cefas_BatchGetItem_FullMethodName       = "/cefas.v1.Cefas/BatchGetItem"
-	Cefas_Query_FullMethodName              = "/cefas.v1.Cefas/Query"
-	Cefas_Scan_FullMethodName               = "/cefas.v1.Cefas/Scan"
-	Cefas_SpatialQuery_FullMethodName       = "/cefas.v1.Cefas/SpatialQuery"
-	Cefas_Sql_FullMethodName                = "/cefas.v1.Cefas/Sql"
-	Cefas_ClusterStatus_FullMethodName      = "/cefas.v1.Cefas/ClusterStatus"
-	Cefas_AddVoter_FullMethodName           = "/cefas.v1.Cefas/AddVoter"
-	Cefas_RemoveServer_FullMethodName       = "/cefas.v1.Cefas/RemoveServer"
-	Cefas_StreamChanges_FullMethodName      = "/cefas.v1.Cefas/StreamChanges"
-	Cefas_ListSnapshots_FullMethodName      = "/cefas.v1.Cefas/ListSnapshots"
-	Cefas_CreateBackup_FullMethodName       = "/cefas.v1.Cefas/CreateBackup"
-	Cefas_ListBackups_FullMethodName        = "/cefas.v1.Cefas/ListBackups"
+	Cefas_CreateTable_FullMethodName            = "/cefas.v1.Cefas/CreateTable"
+	Cefas_DescribeTable_FullMethodName          = "/cefas.v1.Cefas/DescribeTable"
+	Cefas_ListTables_FullMethodName             = "/cefas.v1.Cefas/ListTables"
+	Cefas_DropTable_FullMethodName              = "/cefas.v1.Cefas/DropTable"
+	Cefas_UpdateTimeToLive_FullMethodName       = "/cefas.v1.Cefas/UpdateTimeToLive"
+	Cefas_DescribeTimeToLive_FullMethodName     = "/cefas.v1.Cefas/DescribeTimeToLive"
+	Cefas_PutItem_FullMethodName                = "/cefas.v1.Cefas/PutItem"
+	Cefas_GetItem_FullMethodName                = "/cefas.v1.Cefas/GetItem"
+	Cefas_UpdateItem_FullMethodName             = "/cefas.v1.Cefas/UpdateItem"
+	Cefas_DeleteItem_FullMethodName             = "/cefas.v1.Cefas/DeleteItem"
+	Cefas_BatchWriteItem_FullMethodName         = "/cefas.v1.Cefas/BatchWriteItem"
+	Cefas_BatchGetItem_FullMethodName           = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_Query_FullMethodName                  = "/cefas.v1.Cefas/Query"
+	Cefas_Scan_FullMethodName                   = "/cefas.v1.Cefas/Scan"
+	Cefas_SpatialQuery_FullMethodName           = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName                    = "/cefas.v1.Cefas/Sql"
+	Cefas_ClusterStatus_FullMethodName          = "/cefas.v1.Cefas/ClusterStatus"
+	Cefas_AddVoter_FullMethodName               = "/cefas.v1.Cefas/AddVoter"
+	Cefas_RemoveServer_FullMethodName           = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_StreamChanges_FullMethodName          = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName          = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_CreateBackup_FullMethodName           = "/cefas.v1.Cefas/CreateBackup"
+	Cefas_ListBackups_FullMethodName            = "/cefas.v1.Cefas/ListBackups"
+	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -95,6 +96,7 @@ type CefasClient interface {
 	// catalogued under cefas/admin/backups/<name>).
 	CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error)
 	ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error)
+	RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error)
 }
 
 type cefasClient struct {
@@ -371,6 +373,16 @@ func (c *cefasClient) ListBackups(ctx context.Context, in *ListBackupsRequest, o
 	return out, nil
 }
 
+func (c *cefasClient) RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestoreTableFromBackupResponse)
+	err := c.cc.Invoke(ctx, Cefas_RestoreTableFromBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -415,6 +427,7 @@ type CefasServer interface {
 	// catalogued under cefas/admin/backups/<name>).
 	CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error)
 	ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error)
+	RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -493,6 +506,9 @@ func (UnimplementedCefasServer) CreateBackup(context.Context, *CreateBackupReque
 }
 func (UnimplementedCefasServer) ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListBackups not implemented")
+}
+func (UnimplementedCefasServer) RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestoreTableFromBackup not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -901,6 +917,24 @@ func _Cefas_ListBackups_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_RestoreTableFromBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreTableFromBackupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RestoreTableFromBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RestoreTableFromBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RestoreTableFromBackup(ctx, req.(*RestoreTableFromBackupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -983,6 +1017,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListBackups",
 			Handler:    _Cefas_ListBackups_Handler,
+		},
+		{
+			MethodName: "RestoreTableFromBackup",
+			Handler:    _Cefas_RestoreTableFromBackup_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

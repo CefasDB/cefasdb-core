@@ -61,6 +61,7 @@ service Cefas {
   // catalogued under cefas/admin/backups/<name>).
   rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
   rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc RestoreTableFromBackup(RestoreTableFromBackupRequest) returns (RestoreTableFromBackupResponse);
 }
 
 message StreamChangesRequest {
@@ -116,6 +117,16 @@ message CreateBackupResponse {
 message ListBackupsRequest {}
 message ListBackupsResponse {
   repeated BackupDescriptor backups = 1;
+}
+
+message RestoreTableFromBackupRequest {
+  string backup_name        = 1;
+  string source_table_name  = 2;
+  string target_table_name  = 3;
+}
+message RestoreTableFromBackupResponse {
+  string target_table_name = 1;
+  int64  rows_copied       = 2;
 }
 
 message SqlRequest  { string query = 1; }

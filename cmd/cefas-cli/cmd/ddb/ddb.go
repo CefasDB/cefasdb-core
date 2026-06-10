@@ -25,4 +25,5 @@ func Register(root *cobra.Command) {
 	registerUpdateItem(root)
 	registerCreateBackup(root)
 	registerListBackups(root)
+	registerRestoreTableFromBackup(root)
 }
