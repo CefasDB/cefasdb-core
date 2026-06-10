@@ -97,7 +97,12 @@ func (e *Executor) execInsert(p *PlanPutItem) (*Result, error) {
 	if err := e.Storage.PutItemWith(p.Descriptor, p.Item, storage.PutOptions{}); err != nil {
 		return nil, err
 	}
-	return &Result{AffectedRows: 1}, nil
+	res := &Result{AffectedRows: 1}
+	switch p.Returning {
+	case ReturningAll, ReturningNew:
+		res.Rows = []types.Item{cloneItem(p.Item)}
+	}
+	return res, nil
 }
 
 func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
@@ -117,6 +122,7 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 			return nil, storage.ErrConditionFailed
 		}
 	}
+	oldImage := cloneItem(prior)
 	for _, a := range p.Actions {
 		if err := applyAction(prior, a); err != nil {
 			return nil, fmt.Errorf("UPDATE %s %q: %w", actionKindName(a.Kind), a.Column, err)
@@ -125,27 +131,55 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 	if err := e.Storage.PutItemWith(p.Descriptor, prior, storage.PutOptions{}); err != nil {
 		return nil, err
 	}
-	return &Result{AffectedRows: 1}, nil
+	res := &Result{AffectedRows: 1}
+	switch p.Returning {
+	case ReturningNew, ReturningAll:
+		res.Rows = []types.Item{cloneItem(prior)}
+	case ReturningOld:
+		res.Rows = []types.Item{oldImage}
+	}
+	return res, nil
 }
 
 func (e *Executor) execDelete(p *PlanDelete) (*Result, error) {
-	if p.If != nil {
+	var oldImage types.Item
+	if p.If != nil || p.Returning != ReturningNone {
 		prior, err := e.Storage.GetItem(p.Table, p.Descriptor.KeySchema, p.Key)
 		if err != nil && !errors.Is(err, types.ErrItemNotFound) {
 			return nil, err
 		}
-		ok, evalErr := EvalBool(p.If, prior, nil)
-		if evalErr != nil {
-			return nil, evalErr
-		}
-		if !ok {
-			return nil, storage.ErrConditionFailed
+		oldImage = prior
+		if p.If != nil {
+			ok, evalErr := EvalBool(p.If, prior, nil)
+			if evalErr != nil {
+				return nil, evalErr
+			}
+			if !ok {
+				return nil, storage.ErrConditionFailed
+			}
 		}
 	}
 	if err := e.Storage.DeleteItemWith(p.Descriptor, p.Key, storage.DeleteOptions{}); err != nil {
 		return nil, err
 	}
-	return &Result{AffectedRows: 1}, nil
+	res := &Result{AffectedRows: 1}
+	if (p.Returning == ReturningOld || p.Returning == ReturningAll) && oldImage != nil {
+		res.Rows = []types.Item{oldImage}
+	}
+	return res, nil
+}
+
+// cloneItem returns a shallow copy. Used so RETURNING doesn't echo
+// back a map the caller could mutate over our internal state.
+func cloneItem(in types.Item) types.Item {
+	if in == nil {
+		return nil
+	}
+	out := make(types.Item, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func keyOnly(item types.Item, ks types.KeySchema) types.Item {
@@ -392,6 +426,9 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 			}
 		}
 		items = filtered
+	}
+	if p.Count {
+		return &Result{AffectedRows: len(items)}, nil
 	}
 	if p.OrderDesc {
 		reverse(items)

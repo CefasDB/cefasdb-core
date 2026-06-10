@@ -75,7 +75,7 @@ func planInsert(s *InsertStmt, cat Catalog) (*PlanPutItem, error) {
 	// so attribute_not_exists evaluates correctly on the snapshot
 	// prior item.
 	cond := refinePKShortcut(s.If, td.KeySchema.PK)
-	return &PlanPutItem{Table: s.Table, Item: item, Descriptor: td, If: cond}, nil
+	return &PlanPutItem{Table: s.Table, Item: item, Descriptor: td, If: cond, Returning: s.Returning}, nil
 }
 
 // refinePKShortcut replaces the placeholder ColumnRef "*" in an
@@ -104,7 +104,7 @@ func planUpdate(s *UpdateStmt, cat Catalog) (*PlanUpdate, error) {
 		}
 	}
 	cond := refinePKShortcut(s.If, td.KeySchema.PK)
-	return &PlanUpdate{Table: s.Table, Key: key, Actions: s.Assignments, Descriptor: td, If: cond}, nil
+	return &PlanUpdate{Table: s.Table, Key: key, Actions: s.Assignments, Descriptor: td, If: cond, Returning: s.Returning}, nil
 }
 
 func planDelete(s *DeleteStmt, cat Catalog) (*PlanDelete, error) {
@@ -117,7 +117,7 @@ func planDelete(s *DeleteStmt, cat Catalog) (*PlanDelete, error) {
 		return nil, fmt.Errorf("DELETE: %w", err)
 	}
 	cond := refinePKShortcut(s.If, td.KeySchema.PK)
-	return &PlanDelete{Table: s.Table, Key: key, Descriptor: td, If: cond}, nil
+	return &PlanDelete{Table: s.Table, Key: key, Descriptor: td, If: cond, Returning: s.Returning}, nil
 }
 
 // planSelect picks among GetItem, Query (primary or GSI), and
@@ -182,6 +182,7 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		OrderDesc:  s.OrderDesc,
 		Descriptor: td,
 		PostFilter: postFilter,
+		Count:      s.Count,
 	}, nil
 }
 

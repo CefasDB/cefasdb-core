@@ -89,9 +89,25 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 	}
 	stmt := &SelectStmt{}
 
-	if p.peek().Kind == tStar {
+	switch p.peek().Kind {
+	case tStar:
 		p.consume()
-	} else {
+	case tCount:
+		p.consume()
+		if _, err := p.expect(tLParen, "("); err != nil {
+			return nil, err
+		}
+		switch p.peek().Kind {
+		case tStar, tIdent:
+			p.consume()
+		default:
+			return nil, fmt.Errorf("expected * or column inside COUNT()")
+		}
+		if _, err := p.expect(tRParen, ")"); err != nil {
+			return nil, err
+		}
+		stmt.Count = true
+	default:
 		for {
 			id, err := p.expect(tIdent, "column name")
 			if err != nil {
@@ -236,7 +252,33 @@ func (p *parser) parseInsert() (*InsertStmt, error) {
 	} else if cond != nil {
 		stmt.If = cond
 	}
+	if mode, err := p.parseReturningTail(); err != nil {
+		return nil, err
+	} else {
+		stmt.Returning = mode
+	}
 	return stmt, nil
+}
+
+// parseReturningTail accepts an optional `RETURNING (*|NEW|OLD)`
+// suffix on DML statements. Returns ReturningNone when absent.
+func (p *parser) parseReturningTail() (ReturningMode, error) {
+	if p.peek().Kind != tReturning {
+		return ReturningNone, nil
+	}
+	p.consume()
+	switch p.peek().Kind {
+	case tStar:
+		p.consume()
+		return ReturningAll, nil
+	case tNew:
+		p.consume()
+		return ReturningNew, nil
+	case tOld:
+		p.consume()
+		return ReturningOld, nil
+	}
+	return ReturningNone, fmt.Errorf("expected *, NEW or OLD after RETURNING")
 }
 
 // parseIfTail accepts an optional `IF <expr>` suffix on DML
@@ -350,6 +392,11 @@ func (p *parser) parseUpdate() (*UpdateStmt, error) {
 	} else if cond != nil {
 		stmt.If = cond
 	}
+	if mode, err := p.parseReturningTail(); err != nil {
+		return nil, err
+	} else {
+		stmt.Returning = mode
+	}
 	return stmt, nil
 }
 
@@ -413,6 +460,11 @@ func (p *parser) parseDelete() (*DeleteStmt, error) {
 		return nil, err
 	} else if cond != nil {
 		stmt.If = cond
+	}
+	if mode, err := p.parseReturningTail(); err != nil {
+		return nil, err
+	} else {
+		stmt.Returning = mode
 	}
 	return stmt, nil
 }
