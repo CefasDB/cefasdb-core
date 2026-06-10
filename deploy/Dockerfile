@@ -13,6 +13,7 @@ WORKDIR /src
 
 # Dependencies first for cache efficiency.
 COPY go.mod go.sum ./
+COPY third_party/identity-middleware/go.mod third_party/identity-middleware/go.sum ./third_party/identity-middleware/
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 

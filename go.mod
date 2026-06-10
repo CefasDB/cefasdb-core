@@ -3,9 +3,10 @@ module github.com/osvaldoandrade/cefas
 go 1.25.0
 
 require (
+	github.com/RoaringBitmap/roaring/v2 v2.18.2
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cockroachdb/pebble v1.1.5
-	github.com/codecompany/identity-middleware v0.0.0-00010101000000-000000000000
+	github.com/codecompany/identity-middleware v0.0.0-20260129011223-c06aafa60c82
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.7.3
@@ -21,9 +22,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/codecompany/identity-middleware => ./third_party/identity-middleware
+
 require (
 	github.com/DataDog/zstd v1.5.2 // indirect
-	github.com/RoaringBitmap/roaring/v2 v2.18.2 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
@@ -90,5 +92,3 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
 )
-
-replace github.com/codecompany/identity-middleware => /Users/ova/GolandProjects/identity-middleware
