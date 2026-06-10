@@ -96,7 +96,7 @@ jobs:
 
           VERSION="${RELEASE_TAG#v}"
           cd npm
-          npm version --no-git-tag-version "$VERSION"
+          npm version --no-git-tag-version --allow-same-version "$VERSION"
           npm pack --dry-run --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
           npm publish --access public --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
 
