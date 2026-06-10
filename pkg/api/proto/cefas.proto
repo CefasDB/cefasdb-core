@@ -33,6 +33,12 @@ service Cefas {
   rpc BatchWriteItem(BatchWriteItemRequest) returns (BatchWriteItemResponse);
   rpc BatchGetItem(BatchGetItemRequest) returns (BatchGetItemResponse);
 
+  // Atomic multi-item transactions. v1 ships single-shard, single-table
+  // atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+  // out of scope.
+  rpc TransactWriteItems(TransactWriteItemsRequest) returns (TransactWriteItemsResponse);
+  rpc TransactGetItems(TransactGetItemsRequest) returns (TransactGetItemsResponse);
+
   // Query and scan stream rows so the server never materialises an
   // unbounded result set in memory.
   rpc Query(QueryRequest) returns (stream Item);
@@ -321,6 +327,54 @@ message KeyMap { map<string, AttributeValue> attributes = 1; }
 
 message BatchGetItemResponse {
   // Entries align with the request's `keys` index. A missing item
+  // returns an empty Item (attributes map is empty).
+  repeated Item items = 1;
+}
+
+// ---------- transactions (single-shard v1) ----------
+
+// A TransactWriteOp is one entry in TransactWriteItems. Exactly one of
+// put / delete / condition_check is set. The condition_expression
+// (with its binds) applies to every kind. Update is not yet supported
+// — callers should compose Put + ConditionCheck or use UpdateItem
+// outside the transaction.
+message TransactWriteOp {
+  message Put {
+    string                       table = 1;
+    map<string, AttributeValue>  item  = 2;
+  }
+  message Delete {
+    string                       table = 1;
+    map<string, AttributeValue>  key   = 2;
+  }
+  message ConditionCheck {
+    string                       table = 1;
+    map<string, AttributeValue>  key   = 2;
+  }
+  oneof op {
+    Put            put             = 1;
+    Delete         delete          = 2;
+    ConditionCheck condition_check = 3;
+  }
+  string                       condition_expression = 4;
+  map<string, AttributeValue>  binds                = 5;
+}
+
+message TransactWriteItemsRequest {
+  repeated TransactWriteOp ops = 1;
+}
+message TransactWriteItemsResponse {}
+
+message TransactGet {
+  string                       table = 1;
+  map<string, AttributeValue>  key   = 2;
+}
+
+message TransactGetItemsRequest {
+  repeated TransactGet items = 1;
+}
+message TransactGetItemsResponse {
+  // Entries align with the request's `items` index. A missing item
   // returns an empty Item (attributes map is empty).
   repeated Item items = 1;
 }

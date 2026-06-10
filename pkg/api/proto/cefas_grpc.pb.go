@@ -38,6 +38,8 @@ const (
 	Cefas_DeleteItem_FullMethodName             = "/cefas.v1.Cefas/DeleteItem"
 	Cefas_BatchWriteItem_FullMethodName         = "/cefas.v1.Cefas/BatchWriteItem"
 	Cefas_BatchGetItem_FullMethodName           = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_TransactWriteItems_FullMethodName     = "/cefas.v1.Cefas/TransactWriteItems"
+	Cefas_TransactGetItems_FullMethodName       = "/cefas.v1.Cefas/TransactGetItems"
 	Cefas_Query_FullMethodName                  = "/cefas.v1.Cefas/Query"
 	Cefas_Scan_FullMethodName                   = "/cefas.v1.Cefas/Scan"
 	Cefas_SpatialQuery_FullMethodName           = "/cefas.v1.Cefas/SpatialQuery"
@@ -73,6 +75,11 @@ type CefasClient interface {
 	// Bulk operations.
 	BatchWriteItem(ctx context.Context, in *BatchWriteItemRequest, opts ...grpc.CallOption) (*BatchWriteItemResponse, error)
 	BatchGetItem(ctx context.Context, in *BatchGetItemRequest, opts ...grpc.CallOption) (*BatchGetItemResponse, error)
+	// Atomic multi-item transactions. v1 ships single-shard, single-table
+	// atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+	// out of scope.
+	TransactWriteItems(ctx context.Context, in *TransactWriteItemsRequest, opts ...grpc.CallOption) (*TransactWriteItemsResponse, error)
+	TransactGetItems(ctx context.Context, in *TransactGetItemsRequest, opts ...grpc.CallOption) (*TransactGetItemsResponse, error)
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
@@ -221,6 +228,26 @@ func (c *cefasClient) BatchGetItem(ctx context.Context, in *BatchGetItemRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BatchGetItemResponse)
 	err := c.cc.Invoke(ctx, Cefas_BatchGetItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) TransactWriteItems(ctx context.Context, in *TransactWriteItemsRequest, opts ...grpc.CallOption) (*TransactWriteItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransactWriteItemsResponse)
+	err := c.cc.Invoke(ctx, Cefas_TransactWriteItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) TransactGetItems(ctx context.Context, in *TransactGetItemsRequest, opts ...grpc.CallOption) (*TransactGetItemsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransactGetItemsResponse)
+	err := c.cc.Invoke(ctx, Cefas_TransactGetItems_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +431,11 @@ type CefasServer interface {
 	// Bulk operations.
 	BatchWriteItem(context.Context, *BatchWriteItemRequest) (*BatchWriteItemResponse, error)
 	BatchGetItem(context.Context, *BatchGetItemRequest) (*BatchGetItemResponse, error)
+	// Atomic multi-item transactions. v1 ships single-shard, single-table
+	// atomicity via one pebble.Batch + one raft entry. Multi-shard 2PC is
+	// out of scope.
+	TransactWriteItems(context.Context, *TransactWriteItemsRequest) (*TransactWriteItemsResponse, error)
+	TransactGetItems(context.Context, *TransactGetItemsRequest) (*TransactGetItemsResponse, error)
 	// Query and scan stream rows so the server never materialises an
 	// unbounded result set in memory.
 	Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error
@@ -473,6 +505,12 @@ func (UnimplementedCefasServer) BatchWriteItem(context.Context, *BatchWriteItemR
 }
 func (UnimplementedCefasServer) BatchGetItem(context.Context, *BatchGetItemRequest) (*BatchGetItemResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchGetItem not implemented")
+}
+func (UnimplementedCefasServer) TransactWriteItems(context.Context, *TransactWriteItemsRequest) (*TransactWriteItemsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransactWriteItems not implemented")
+}
+func (UnimplementedCefasServer) TransactGetItems(context.Context, *TransactGetItemsRequest) (*TransactGetItemsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransactGetItems not implemented")
 }
 func (UnimplementedCefasServer) Query(*QueryRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method Query not implemented")
@@ -747,6 +785,42 @@ func _Cefas_BatchGetItem_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_TransactWriteItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransactWriteItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).TransactWriteItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_TransactWriteItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).TransactWriteItems(ctx, req.(*TransactWriteItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_TransactGetItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransactGetItemsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).TransactGetItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_TransactGetItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).TransactGetItems(ctx, req.(*TransactGetItemsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(QueryRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -989,6 +1063,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchGetItem",
 			Handler:    _Cefas_BatchGetItem_Handler,
+		},
+		{
+			MethodName: "TransactWriteItems",
+			Handler:    _Cefas_TransactWriteItems_Handler,
+		},
+		{
+			MethodName: "TransactGetItems",
+			Handler:    _Cefas_TransactGetItems_Handler,
 		},
 		{
 			MethodName: "Sql",

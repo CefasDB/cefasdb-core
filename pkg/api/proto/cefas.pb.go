@@ -3034,6 +3034,347 @@ func (x *BatchGetItemResponse) GetItems() []*Item {
 	return nil
 }
 
+// A TransactWriteOp is one entry in TransactWriteItems. Exactly one of
+// put / delete / condition_check is set. The condition_expression
+// (with its binds) applies to every kind. Update is not yet supported
+// — callers should compose Put + ConditionCheck or use UpdateItem
+// outside the transaction.
+type TransactWriteOp struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Op:
+	//
+	//	*TransactWriteOp_Put_
+	//	*TransactWriteOp_Delete_
+	//	*TransactWriteOp_ConditionCheck_
+	Op                  isTransactWriteOp_Op       `protobuf_oneof:"op"`
+	ConditionExpression string                     `protobuf:"bytes,4,opt,name=condition_expression,json=conditionExpression,proto3" json:"condition_expression,omitempty"`
+	Binds               map[string]*AttributeValue `protobuf:"bytes,5,rep,name=binds,proto3" json:"binds,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *TransactWriteOp) Reset() {
+	*x = TransactWriteOp{}
+	mi := &file_cefas_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteOp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteOp) ProtoMessage() {}
+
+func (x *TransactWriteOp) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteOp.ProtoReflect.Descriptor instead.
+func (*TransactWriteOp) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *TransactWriteOp) GetOp() isTransactWriteOp_Op {
+	if x != nil {
+		return x.Op
+	}
+	return nil
+}
+
+func (x *TransactWriteOp) GetPut() *TransactWriteOp_Put {
+	if x != nil {
+		if x, ok := x.Op.(*TransactWriteOp_Put_); ok {
+			return x.Put
+		}
+	}
+	return nil
+}
+
+func (x *TransactWriteOp) GetDelete() *TransactWriteOp_Delete {
+	if x != nil {
+		if x, ok := x.Op.(*TransactWriteOp_Delete_); ok {
+			return x.Delete
+		}
+	}
+	return nil
+}
+
+func (x *TransactWriteOp) GetConditionCheck() *TransactWriteOp_ConditionCheck {
+	if x != nil {
+		if x, ok := x.Op.(*TransactWriteOp_ConditionCheck_); ok {
+			return x.ConditionCheck
+		}
+	}
+	return nil
+}
+
+func (x *TransactWriteOp) GetConditionExpression() string {
+	if x != nil {
+		return x.ConditionExpression
+	}
+	return ""
+}
+
+func (x *TransactWriteOp) GetBinds() map[string]*AttributeValue {
+	if x != nil {
+		return x.Binds
+	}
+	return nil
+}
+
+type isTransactWriteOp_Op interface {
+	isTransactWriteOp_Op()
+}
+
+type TransactWriteOp_Put_ struct {
+	Put *TransactWriteOp_Put `protobuf:"bytes,1,opt,name=put,proto3,oneof"`
+}
+
+type TransactWriteOp_Delete_ struct {
+	Delete *TransactWriteOp_Delete `protobuf:"bytes,2,opt,name=delete,proto3,oneof"`
+}
+
+type TransactWriteOp_ConditionCheck_ struct {
+	ConditionCheck *TransactWriteOp_ConditionCheck `protobuf:"bytes,3,opt,name=condition_check,json=conditionCheck,proto3,oneof"`
+}
+
+func (*TransactWriteOp_Put_) isTransactWriteOp_Op() {}
+
+func (*TransactWriteOp_Delete_) isTransactWriteOp_Op() {}
+
+func (*TransactWriteOp_ConditionCheck_) isTransactWriteOp_Op() {}
+
+type TransactWriteItemsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ops           []*TransactWriteOp     `protobuf:"bytes,1,rep,name=ops,proto3" json:"ops,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactWriteItemsRequest) Reset() {
+	*x = TransactWriteItemsRequest{}
+	mi := &file_cefas_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteItemsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteItemsRequest) ProtoMessage() {}
+
+func (x *TransactWriteItemsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteItemsRequest.ProtoReflect.Descriptor instead.
+func (*TransactWriteItemsRequest) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *TransactWriteItemsRequest) GetOps() []*TransactWriteOp {
+	if x != nil {
+		return x.Ops
+	}
+	return nil
+}
+
+type TransactWriteItemsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactWriteItemsResponse) Reset() {
+	*x = TransactWriteItemsResponse{}
+	mi := &file_cefas_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteItemsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteItemsResponse) ProtoMessage() {}
+
+func (x *TransactWriteItemsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteItemsResponse.ProtoReflect.Descriptor instead.
+func (*TransactWriteItemsResponse) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{54}
+}
+
+type TransactGet struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	Key           map[string]*AttributeValue `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactGet) Reset() {
+	*x = TransactGet{}
+	mi := &file_cefas_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactGet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactGet) ProtoMessage() {}
+
+func (x *TransactGet) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactGet.ProtoReflect.Descriptor instead.
+func (*TransactGet) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *TransactGet) GetTable() string {
+	if x != nil {
+		return x.Table
+	}
+	return ""
+}
+
+func (x *TransactGet) GetKey() map[string]*AttributeValue {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+type TransactGetItemsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TransactGet         `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactGetItemsRequest) Reset() {
+	*x = TransactGetItemsRequest{}
+	mi := &file_cefas_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactGetItemsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactGetItemsRequest) ProtoMessage() {}
+
+func (x *TransactGetItemsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactGetItemsRequest.ProtoReflect.Descriptor instead.
+func (*TransactGetItemsRequest) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *TransactGetItemsRequest) GetItems() []*TransactGet {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type TransactGetItemsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Entries align with the request's `items` index. A missing item
+	// returns an empty Item (attributes map is empty).
+	Items         []*Item `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactGetItemsResponse) Reset() {
+	*x = TransactGetItemsResponse{}
+	mi := &file_cefas_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactGetItemsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactGetItemsResponse) ProtoMessage() {}
+
+func (x *TransactGetItemsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactGetItemsResponse.ProtoReflect.Descriptor instead.
+func (*TransactGetItemsResponse) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *TransactGetItemsResponse) GetItems() []*Item {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 type QueryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Table         string                 `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
@@ -3049,7 +3390,7 @@ type QueryRequest struct {
 
 func (x *QueryRequest) Reset() {
 	*x = QueryRequest{}
-	mi := &file_cefas_proto_msgTypes[52]
+	mi := &file_cefas_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3061,7 +3402,7 @@ func (x *QueryRequest) String() string {
 func (*QueryRequest) ProtoMessage() {}
 
 func (x *QueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[52]
+	mi := &file_cefas_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3074,7 +3415,7 @@ func (x *QueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryRequest.ProtoReflect.Descriptor instead.
 func (*QueryRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{52}
+	return file_cefas_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *QueryRequest) GetTable() string {
@@ -3145,7 +3486,7 @@ type ScanRequest struct {
 
 func (x *ScanRequest) Reset() {
 	*x = ScanRequest{}
-	mi := &file_cefas_proto_msgTypes[53]
+	mi := &file_cefas_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3157,7 +3498,7 @@ func (x *ScanRequest) String() string {
 func (*ScanRequest) ProtoMessage() {}
 
 func (x *ScanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[53]
+	mi := &file_cefas_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3170,7 +3511,7 @@ func (x *ScanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanRequest.ProtoReflect.Descriptor instead.
 func (*ScanRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{53}
+	return file_cefas_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *ScanRequest) GetTable() string {
@@ -3220,7 +3561,7 @@ type BBox struct {
 
 func (x *BBox) Reset() {
 	*x = BBox{}
-	mi := &file_cefas_proto_msgTypes[54]
+	mi := &file_cefas_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3232,7 +3573,7 @@ func (x *BBox) String() string {
 func (*BBox) ProtoMessage() {}
 
 func (x *BBox) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[54]
+	mi := &file_cefas_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3245,7 +3586,7 @@ func (x *BBox) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BBox.ProtoReflect.Descriptor instead.
 func (*BBox) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{54}
+	return file_cefas_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *BBox) GetMinLat() float64 {
@@ -3287,7 +3628,7 @@ type Radius struct {
 
 func (x *Radius) Reset() {
 	*x = Radius{}
-	mi := &file_cefas_proto_msgTypes[55]
+	mi := &file_cefas_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3299,7 +3640,7 @@ func (x *Radius) String() string {
 func (*Radius) ProtoMessage() {}
 
 func (x *Radius) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[55]
+	mi := &file_cefas_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3312,7 +3653,7 @@ func (x *Radius) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Radius.ProtoReflect.Descriptor instead.
 func (*Radius) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{55}
+	return file_cefas_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *Radius) GetLat() float64 {
@@ -3346,7 +3687,7 @@ type ZBBox struct {
 
 func (x *ZBBox) Reset() {
 	*x = ZBBox{}
-	mi := &file_cefas_proto_msgTypes[56]
+	mi := &file_cefas_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3358,7 +3699,7 @@ func (x *ZBBox) String() string {
 func (*ZBBox) ProtoMessage() {}
 
 func (x *ZBBox) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[56]
+	mi := &file_cefas_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3371,7 +3712,7 @@ func (x *ZBBox) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ZBBox.ProtoReflect.Descriptor instead.
 func (*ZBBox) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{56}
+	return file_cefas_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ZBBox) GetLo() []uint32 {
@@ -3405,7 +3746,7 @@ type SpatialQueryRequest struct {
 
 func (x *SpatialQueryRequest) Reset() {
 	*x = SpatialQueryRequest{}
-	mi := &file_cefas_proto_msgTypes[57]
+	mi := &file_cefas_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3417,7 +3758,7 @@ func (x *SpatialQueryRequest) String() string {
 func (*SpatialQueryRequest) ProtoMessage() {}
 
 func (x *SpatialQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[57]
+	mi := &file_cefas_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3430,7 +3771,7 @@ func (x *SpatialQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpatialQueryRequest.ProtoReflect.Descriptor instead.
 func (*SpatialQueryRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{57}
+	return file_cefas_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *SpatialQueryRequest) GetTable() string {
@@ -3518,7 +3859,7 @@ type ClusterStatusRequest struct {
 
 func (x *ClusterStatusRequest) Reset() {
 	*x = ClusterStatusRequest{}
-	mi := &file_cefas_proto_msgTypes[58]
+	mi := &file_cefas_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3530,7 +3871,7 @@ func (x *ClusterStatusRequest) String() string {
 func (*ClusterStatusRequest) ProtoMessage() {}
 
 func (x *ClusterStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[58]
+	mi := &file_cefas_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3543,7 +3884,7 @@ func (x *ClusterStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatusRequest.ProtoReflect.Descriptor instead.
 func (*ClusterStatusRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{58}
+	return file_cefas_proto_rawDescGZIP(), []int{64}
 }
 
 type ClusterStatusResponse struct {
@@ -3559,7 +3900,7 @@ type ClusterStatusResponse struct {
 
 func (x *ClusterStatusResponse) Reset() {
 	*x = ClusterStatusResponse{}
-	mi := &file_cefas_proto_msgTypes[59]
+	mi := &file_cefas_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3571,7 +3912,7 @@ func (x *ClusterStatusResponse) String() string {
 func (*ClusterStatusResponse) ProtoMessage() {}
 
 func (x *ClusterStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[59]
+	mi := &file_cefas_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3584,7 +3925,7 @@ func (x *ClusterStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatusResponse.ProtoReflect.Descriptor instead.
 func (*ClusterStatusResponse) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{59}
+	return file_cefas_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ClusterStatusResponse) GetMode() string {
@@ -3633,7 +3974,7 @@ type AddVoterRequest struct {
 
 func (x *AddVoterRequest) Reset() {
 	*x = AddVoterRequest{}
-	mi := &file_cefas_proto_msgTypes[60]
+	mi := &file_cefas_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3645,7 +3986,7 @@ func (x *AddVoterRequest) String() string {
 func (*AddVoterRequest) ProtoMessage() {}
 
 func (x *AddVoterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[60]
+	mi := &file_cefas_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3658,7 +3999,7 @@ func (x *AddVoterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVoterRequest.ProtoReflect.Descriptor instead.
 func (*AddVoterRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{60}
+	return file_cefas_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *AddVoterRequest) GetId() string {
@@ -3690,7 +4031,7 @@ type AddVoterResponse struct {
 
 func (x *AddVoterResponse) Reset() {
 	*x = AddVoterResponse{}
-	mi := &file_cefas_proto_msgTypes[61]
+	mi := &file_cefas_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3702,7 +4043,7 @@ func (x *AddVoterResponse) String() string {
 func (*AddVoterResponse) ProtoMessage() {}
 
 func (x *AddVoterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[61]
+	mi := &file_cefas_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3715,7 +4056,7 @@ func (x *AddVoterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVoterResponse.ProtoReflect.Descriptor instead.
 func (*AddVoterResponse) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{61}
+	return file_cefas_proto_rawDescGZIP(), []int{67}
 }
 
 type RemoveServerRequest struct {
@@ -3728,7 +4069,7 @@ type RemoveServerRequest struct {
 
 func (x *RemoveServerRequest) Reset() {
 	*x = RemoveServerRequest{}
-	mi := &file_cefas_proto_msgTypes[62]
+	mi := &file_cefas_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3740,7 +4081,7 @@ func (x *RemoveServerRequest) String() string {
 func (*RemoveServerRequest) ProtoMessage() {}
 
 func (x *RemoveServerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[62]
+	mi := &file_cefas_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3753,7 +4094,7 @@ func (x *RemoveServerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveServerRequest.ProtoReflect.Descriptor instead.
 func (*RemoveServerRequest) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{62}
+	return file_cefas_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *RemoveServerRequest) GetId() string {
@@ -3778,7 +4119,7 @@ type RemoveServerResponse struct {
 
 func (x *RemoveServerResponse) Reset() {
 	*x = RemoveServerResponse{}
-	mi := &file_cefas_proto_msgTypes[63]
+	mi := &file_cefas_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3790,7 +4131,7 @@ func (x *RemoveServerResponse) String() string {
 func (*RemoveServerResponse) ProtoMessage() {}
 
 func (x *RemoveServerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[63]
+	mi := &file_cefas_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3803,7 +4144,163 @@ func (x *RemoveServerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveServerResponse.ProtoReflect.Descriptor instead.
 func (*RemoveServerResponse) Descriptor() ([]byte, []int) {
-	return file_cefas_proto_rawDescGZIP(), []int{63}
+	return file_cefas_proto_rawDescGZIP(), []int{69}
+}
+
+type TransactWriteOp_Put struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	Item          map[string]*AttributeValue `protobuf:"bytes,2,rep,name=item,proto3" json:"item,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactWriteOp_Put) Reset() {
+	*x = TransactWriteOp_Put{}
+	mi := &file_cefas_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteOp_Put) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteOp_Put) ProtoMessage() {}
+
+func (x *TransactWriteOp_Put) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteOp_Put.ProtoReflect.Descriptor instead.
+func (*TransactWriteOp_Put) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{52, 0}
+}
+
+func (x *TransactWriteOp_Put) GetTable() string {
+	if x != nil {
+		return x.Table
+	}
+	return ""
+}
+
+func (x *TransactWriteOp_Put) GetItem() map[string]*AttributeValue {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+type TransactWriteOp_Delete struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	Key           map[string]*AttributeValue `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactWriteOp_Delete) Reset() {
+	*x = TransactWriteOp_Delete{}
+	mi := &file_cefas_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteOp_Delete) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteOp_Delete) ProtoMessage() {}
+
+func (x *TransactWriteOp_Delete) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteOp_Delete.ProtoReflect.Descriptor instead.
+func (*TransactWriteOp_Delete) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{52, 1}
+}
+
+func (x *TransactWriteOp_Delete) GetTable() string {
+	if x != nil {
+		return x.Table
+	}
+	return ""
+}
+
+func (x *TransactWriteOp_Delete) GetKey() map[string]*AttributeValue {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+type TransactWriteOp_ConditionCheck struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	Key           map[string]*AttributeValue `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransactWriteOp_ConditionCheck) Reset() {
+	*x = TransactWriteOp_ConditionCheck{}
+	mi := &file_cefas_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransactWriteOp_ConditionCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransactWriteOp_ConditionCheck) ProtoMessage() {}
+
+func (x *TransactWriteOp_ConditionCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransactWriteOp_ConditionCheck.ProtoReflect.Descriptor instead.
+func (*TransactWriteOp_ConditionCheck) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{52, 2}
+}
+
+func (x *TransactWriteOp_ConditionCheck) GetTable() string {
+	if x != nil {
+		return x.Table
+	}
+	return ""
+}
+
+func (x *TransactWriteOp_ConditionCheck) GetKey() map[string]*AttributeValue {
+	if x != nil {
+		return x.Key
+	}
+	return nil
 }
 
 var File_cefas_proto protoreflect.FileDescriptor
@@ -4047,6 +4544,48 @@ const file_cefas_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
 	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\"<\n" +
 	"\x14BatchGetItemResponse\x12$\n" +
+	"\x05items\x18\x01 \x03(\v2\x0e.cefas.v1.ItemR\x05items\"\xbc\a\n" +
+	"\x0fTransactWriteOp\x121\n" +
+	"\x03put\x18\x01 \x01(\v2\x1d.cefas.v1.TransactWriteOp.PutH\x00R\x03put\x12:\n" +
+	"\x06delete\x18\x02 \x01(\v2 .cefas.v1.TransactWriteOp.DeleteH\x00R\x06delete\x12S\n" +
+	"\x0fcondition_check\x18\x03 \x01(\v2(.cefas.v1.TransactWriteOp.ConditionCheckH\x00R\x0econditionCheck\x121\n" +
+	"\x14condition_expression\x18\x04 \x01(\tR\x13conditionExpression\x12:\n" +
+	"\x05binds\x18\x05 \x03(\v2$.cefas.v1.TransactWriteOp.BindsEntryR\x05binds\x1a\xab\x01\n" +
+	"\x03Put\x12\x14\n" +
+	"\x05table\x18\x01 \x01(\tR\x05table\x12;\n" +
+	"\x04item\x18\x02 \x03(\v2'.cefas.v1.TransactWriteOp.Put.ItemEntryR\x04item\x1aQ\n" +
+	"\tItemEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\x1a\xad\x01\n" +
+	"\x06Delete\x12\x14\n" +
+	"\x05table\x18\x01 \x01(\tR\x05table\x12;\n" +
+	"\x03key\x18\x02 \x03(\v2).cefas.v1.TransactWriteOp.Delete.KeyEntryR\x03key\x1aP\n" +
+	"\bKeyEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\x1a\xbd\x01\n" +
+	"\x0eConditionCheck\x12\x14\n" +
+	"\x05table\x18\x01 \x01(\tR\x05table\x12C\n" +
+	"\x03key\x18\x02 \x03(\v21.cefas.v1.TransactWriteOp.ConditionCheck.KeyEntryR\x03key\x1aP\n" +
+	"\bKeyEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\x1aR\n" +
+	"\n" +
+	"BindsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01B\x04\n" +
+	"\x02op\"H\n" +
+	"\x19TransactWriteItemsRequest\x12+\n" +
+	"\x03ops\x18\x01 \x03(\v2\x19.cefas.v1.TransactWriteOpR\x03ops\"\x1c\n" +
+	"\x1aTransactWriteItemsResponse\"\xa7\x01\n" +
+	"\vTransactGet\x12\x14\n" +
+	"\x05table\x18\x01 \x01(\tR\x05table\x120\n" +
+	"\x03key\x18\x02 \x03(\v2\x1e.cefas.v1.TransactGet.KeyEntryR\x03key\x1aP\n" +
+	"\bKeyEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\"F\n" +
+	"\x17TransactGetItemsRequest\x12+\n" +
+	"\x05items\x18\x01 \x03(\v2\x15.cefas.v1.TransactGetR\x05items\"@\n" +
+	"\x18TransactGetItemsResponse\x12$\n" +
 	"\x05items\x18\x01 \x03(\v2\x0e.cefas.v1.ItemR\x05items\"\xab\x02\n" +
 	"\fQueryRequest\x12\x14\n" +
 	"\x05table\x18\x01 \x01(\tR\x05table\x12\x1d\n" +
@@ -4117,7 +4656,7 @@ const file_cefas_proto_rawDesc = "" +
 	"\x15RETURN_VALUES_ALL_NEW\x10\x02\x12\x19\n" +
 	"\x15RETURN_VALUES_ALL_OLD\x10\x03\x12\x1d\n" +
 	"\x19RETURN_VALUES_UPDATED_NEW\x10\x04\x12\x1d\n" +
-	"\x19RETURN_VALUES_UPDATED_OLD\x10\x052\x87\x0e\n" +
+	"\x19RETURN_VALUES_UPDATED_OLD\x10\x052\xc3\x0f\n" +
 	"\x05Cefas\x12J\n" +
 	"\vCreateTable\x12\x1c.cefas.v1.CreateTableRequest\x1a\x1d.cefas.v1.CreateTableResponse\x12P\n" +
 	"\rDescribeTable\x12\x1e.cefas.v1.DescribeTableRequest\x1a\x1f.cefas.v1.DescribeTableResponse\x12G\n" +
@@ -4133,7 +4672,9 @@ const file_cefas_proto_rawDesc = "" +
 	"\n" +
 	"DeleteItem\x12\x1b.cefas.v1.DeleteItemRequest\x1a\x1c.cefas.v1.DeleteItemResponse\x12S\n" +
 	"\x0eBatchWriteItem\x12\x1f.cefas.v1.BatchWriteItemRequest\x1a .cefas.v1.BatchWriteItemResponse\x12M\n" +
-	"\fBatchGetItem\x12\x1d.cefas.v1.BatchGetItemRequest\x1a\x1e.cefas.v1.BatchGetItemResponse\x121\n" +
+	"\fBatchGetItem\x12\x1d.cefas.v1.BatchGetItemRequest\x1a\x1e.cefas.v1.BatchGetItemResponse\x12_\n" +
+	"\x12TransactWriteItems\x12#.cefas.v1.TransactWriteItemsRequest\x1a$.cefas.v1.TransactWriteItemsResponse\x12Y\n" +
+	"\x10TransactGetItems\x12!.cefas.v1.TransactGetItemsRequest\x1a\".cefas.v1.TransactGetItemsResponse\x121\n" +
 	"\x05Query\x12\x16.cefas.v1.QueryRequest\x1a\x0e.cefas.v1.Item0\x01\x12/\n" +
 	"\x04Scan\x12\x15.cefas.v1.ScanRequest\x1a\x0e.cefas.v1.Item0\x01\x12?\n" +
 	"\fSpatialQuery\x12\x1d.cefas.v1.SpatialQueryRequest\x1a\x0e.cefas.v1.Item0\x01\x122\n" +
@@ -4160,7 +4701,7 @@ func file_cefas_proto_rawDescGZIP() []byte {
 }
 
 var file_cefas_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_cefas_proto_msgTypes = make([]protoimpl.MessageInfo, 80)
+var file_cefas_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
 var file_cefas_proto_goTypes = []any{
 	(Consistency)(0),                       // 0: cefas.v1.Consistency
 	(ReturnValues)(0),                      // 1: cefas.v1.ReturnValues
@@ -4218,156 +4759,190 @@ var file_cefas_proto_goTypes = []any{
 	(*BatchGetItemRequest)(nil),            // 53: cefas.v1.BatchGetItemRequest
 	(*KeyMap)(nil),                         // 54: cefas.v1.KeyMap
 	(*BatchGetItemResponse)(nil),           // 55: cefas.v1.BatchGetItemResponse
-	(*QueryRequest)(nil),                   // 56: cefas.v1.QueryRequest
-	(*ScanRequest)(nil),                    // 57: cefas.v1.ScanRequest
-	(*BBox)(nil),                           // 58: cefas.v1.BBox
-	(*Radius)(nil),                         // 59: cefas.v1.Radius
-	(*ZBBox)(nil),                          // 60: cefas.v1.ZBBox
-	(*SpatialQueryRequest)(nil),            // 61: cefas.v1.SpatialQueryRequest
-	(*ClusterStatusRequest)(nil),           // 62: cefas.v1.ClusterStatusRequest
-	(*ClusterStatusResponse)(nil),          // 63: cefas.v1.ClusterStatusResponse
-	(*AddVoterRequest)(nil),                // 64: cefas.v1.AddVoterRequest
-	(*AddVoterResponse)(nil),               // 65: cefas.v1.AddVoterResponse
-	(*RemoveServerRequest)(nil),            // 66: cefas.v1.RemoveServerRequest
-	(*RemoveServerResponse)(nil),           // 67: cefas.v1.RemoveServerResponse
-	nil,                                    // 68: cefas.v1.Map.ValuesEntry
-	nil,                                    // 69: cefas.v1.Item.AttributesEntry
-	nil,                                    // 70: cefas.v1.PutItemRequest.ItemEntry
-	nil,                                    // 71: cefas.v1.PutItemRequest.BindsEntry
-	nil,                                    // 72: cefas.v1.GetItemRequest.KeyEntry
-	nil,                                    // 73: cefas.v1.GetItemResponse.ItemEntry
-	nil,                                    // 74: cefas.v1.DeleteItemRequest.KeyEntry
-	nil,                                    // 75: cefas.v1.DeleteItemRequest.BindsEntry
-	nil,                                    // 76: cefas.v1.UpdateItemRequest.KeyEntry
-	nil,                                    // 77: cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
-	nil,                                    // 78: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
-	nil,                                    // 79: cefas.v1.UpdateItemResponse.AttributesEntry
-	nil,                                    // 80: cefas.v1.BatchWriteOp.ItemEntry
-	nil,                                    // 81: cefas.v1.BatchWriteOp.KeyEntry
-	nil,                                    // 82: cefas.v1.KeyMap.AttributesEntry
-	nil,                                    // 83: cefas.v1.ScanRequest.BindsEntry
+	(*TransactWriteOp)(nil),                // 56: cefas.v1.TransactWriteOp
+	(*TransactWriteItemsRequest)(nil),      // 57: cefas.v1.TransactWriteItemsRequest
+	(*TransactWriteItemsResponse)(nil),     // 58: cefas.v1.TransactWriteItemsResponse
+	(*TransactGet)(nil),                    // 59: cefas.v1.TransactGet
+	(*TransactGetItemsRequest)(nil),        // 60: cefas.v1.TransactGetItemsRequest
+	(*TransactGetItemsResponse)(nil),       // 61: cefas.v1.TransactGetItemsResponse
+	(*QueryRequest)(nil),                   // 62: cefas.v1.QueryRequest
+	(*ScanRequest)(nil),                    // 63: cefas.v1.ScanRequest
+	(*BBox)(nil),                           // 64: cefas.v1.BBox
+	(*Radius)(nil),                         // 65: cefas.v1.Radius
+	(*ZBBox)(nil),                          // 66: cefas.v1.ZBBox
+	(*SpatialQueryRequest)(nil),            // 67: cefas.v1.SpatialQueryRequest
+	(*ClusterStatusRequest)(nil),           // 68: cefas.v1.ClusterStatusRequest
+	(*ClusterStatusResponse)(nil),          // 69: cefas.v1.ClusterStatusResponse
+	(*AddVoterRequest)(nil),                // 70: cefas.v1.AddVoterRequest
+	(*AddVoterResponse)(nil),               // 71: cefas.v1.AddVoterResponse
+	(*RemoveServerRequest)(nil),            // 72: cefas.v1.RemoveServerRequest
+	(*RemoveServerResponse)(nil),           // 73: cefas.v1.RemoveServerResponse
+	nil,                                    // 74: cefas.v1.Map.ValuesEntry
+	nil,                                    // 75: cefas.v1.Item.AttributesEntry
+	nil,                                    // 76: cefas.v1.PutItemRequest.ItemEntry
+	nil,                                    // 77: cefas.v1.PutItemRequest.BindsEntry
+	nil,                                    // 78: cefas.v1.GetItemRequest.KeyEntry
+	nil,                                    // 79: cefas.v1.GetItemResponse.ItemEntry
+	nil,                                    // 80: cefas.v1.DeleteItemRequest.KeyEntry
+	nil,                                    // 81: cefas.v1.DeleteItemRequest.BindsEntry
+	nil,                                    // 82: cefas.v1.UpdateItemRequest.KeyEntry
+	nil,                                    // 83: cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
+	nil,                                    // 84: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
+	nil,                                    // 85: cefas.v1.UpdateItemResponse.AttributesEntry
+	nil,                                    // 86: cefas.v1.BatchWriteOp.ItemEntry
+	nil,                                    // 87: cefas.v1.BatchWriteOp.KeyEntry
+	nil,                                    // 88: cefas.v1.KeyMap.AttributesEntry
+	(*TransactWriteOp_Put)(nil),            // 89: cefas.v1.TransactWriteOp.Put
+	(*TransactWriteOp_Delete)(nil),         // 90: cefas.v1.TransactWriteOp.Delete
+	(*TransactWriteOp_ConditionCheck)(nil), // 91: cefas.v1.TransactWriteOp.ConditionCheck
+	nil,                                    // 92: cefas.v1.TransactWriteOp.BindsEntry
+	nil,                                    // 93: cefas.v1.TransactWriteOp.Put.ItemEntry
+	nil,                                    // 94: cefas.v1.TransactWriteOp.Delete.KeyEntry
+	nil,                                    // 95: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
+	nil,                                    // 96: cefas.v1.TransactGet.KeyEntry
+	nil,                                    // 97: cefas.v1.ScanRequest.BindsEntry
 }
 var file_cefas_proto_depIdxs = []int32{
-	2,  // 0: cefas.v1.ChangeEvent.op:type_name -> cefas.v1.ChangeEvent.Op
-	8,  // 1: cefas.v1.ListSnapshotsResponse.snapshots:type_name -> cefas.v1.SnapshotMetadata
-	9,  // 2: cefas.v1.CreateBackupResponse.backup:type_name -> cefas.v1.BackupDescriptor
-	9,  // 3: cefas.v1.ListBackupsResponse.backups:type_name -> cefas.v1.BackupDescriptor
-	23, // 4: cefas.v1.SqlResponse.rows:type_name -> cefas.v1.Item
-	19, // 5: cefas.v1.AttributeValue.ss:type_name -> cefas.v1.StringSet
-	19, // 6: cefas.v1.AttributeValue.ns:type_name -> cefas.v1.StringSet
-	20, // 7: cefas.v1.AttributeValue.bs:type_name -> cefas.v1.BinarySet
-	21, // 8: cefas.v1.AttributeValue.l:type_name -> cefas.v1.List
-	22, // 9: cefas.v1.AttributeValue.m:type_name -> cefas.v1.Map
-	18, // 10: cefas.v1.List.values:type_name -> cefas.v1.AttributeValue
-	68, // 11: cefas.v1.Map.values:type_name -> cefas.v1.Map.ValuesEntry
-	69, // 12: cefas.v1.Item.attributes:type_name -> cefas.v1.Item.AttributesEntry
-	24, // 13: cefas.v1.GSIDescriptor.key_schema:type_name -> cefas.v1.KeySchema
-	26, // 14: cefas.v1.SpatialIndexDescriptor.ranges:type_name -> cefas.v1.NumRange
-	24, // 15: cefas.v1.TableDescriptor.key_schema:type_name -> cefas.v1.KeySchema
-	25, // 16: cefas.v1.TableDescriptor.gsis:type_name -> cefas.v1.GSIDescriptor
-	27, // 17: cefas.v1.TableDescriptor.spatial_indexes:type_name -> cefas.v1.SpatialIndexDescriptor
-	28, // 18: cefas.v1.CreateTableRequest.descriptor:type_name -> cefas.v1.TableDescriptor
-	28, // 19: cefas.v1.CreateTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
-	28, // 20: cefas.v1.DescribeTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
-	28, // 21: cefas.v1.ListTablesResponse.tables:type_name -> cefas.v1.TableDescriptor
-	37, // 22: cefas.v1.UpdateTimeToLiveRequest.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
-	37, // 23: cefas.v1.UpdateTimeToLiveResponse.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
-	70, // 24: cefas.v1.PutItemRequest.item:type_name -> cefas.v1.PutItemRequest.ItemEntry
-	71, // 25: cefas.v1.PutItemRequest.binds:type_name -> cefas.v1.PutItemRequest.BindsEntry
-	72, // 26: cefas.v1.GetItemRequest.key:type_name -> cefas.v1.GetItemRequest.KeyEntry
-	0,  // 27: cefas.v1.GetItemRequest.consistency:type_name -> cefas.v1.Consistency
-	73, // 28: cefas.v1.GetItemResponse.item:type_name -> cefas.v1.GetItemResponse.ItemEntry
-	74, // 29: cefas.v1.DeleteItemRequest.key:type_name -> cefas.v1.DeleteItemRequest.KeyEntry
-	75, // 30: cefas.v1.DeleteItemRequest.binds:type_name -> cefas.v1.DeleteItemRequest.BindsEntry
-	76, // 31: cefas.v1.UpdateItemRequest.key:type_name -> cefas.v1.UpdateItemRequest.KeyEntry
-	77, // 32: cefas.v1.UpdateItemRequest.expression_attribute_names:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
-	78, // 33: cefas.v1.UpdateItemRequest.expression_attribute_values:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
-	1,  // 34: cefas.v1.UpdateItemRequest.return_values:type_name -> cefas.v1.ReturnValues
-	79, // 35: cefas.v1.UpdateItemResponse.attributes:type_name -> cefas.v1.UpdateItemResponse.AttributesEntry
-	3,  // 36: cefas.v1.BatchWriteOp.kind:type_name -> cefas.v1.BatchWriteOp.Kind
-	80, // 37: cefas.v1.BatchWriteOp.item:type_name -> cefas.v1.BatchWriteOp.ItemEntry
-	81, // 38: cefas.v1.BatchWriteOp.key:type_name -> cefas.v1.BatchWriteOp.KeyEntry
-	50, // 39: cefas.v1.BatchWriteItemRequest.ops:type_name -> cefas.v1.BatchWriteOp
-	54, // 40: cefas.v1.BatchGetItemRequest.keys:type_name -> cefas.v1.KeyMap
-	82, // 41: cefas.v1.KeyMap.attributes:type_name -> cefas.v1.KeyMap.AttributesEntry
-	23, // 42: cefas.v1.BatchGetItemResponse.items:type_name -> cefas.v1.Item
-	18, // 43: cefas.v1.QueryRequest.pk_value:type_name -> cefas.v1.AttributeValue
-	18, // 44: cefas.v1.QueryRequest.sk_low:type_name -> cefas.v1.AttributeValue
-	18, // 45: cefas.v1.QueryRequest.sk_high:type_name -> cefas.v1.AttributeValue
-	0,  // 46: cefas.v1.QueryRequest.consistency:type_name -> cefas.v1.Consistency
-	83, // 47: cefas.v1.ScanRequest.binds:type_name -> cefas.v1.ScanRequest.BindsEntry
-	0,  // 48: cefas.v1.ScanRequest.consistency:type_name -> cefas.v1.Consistency
-	58, // 49: cefas.v1.SpatialQueryRequest.bbox:type_name -> cefas.v1.BBox
-	59, // 50: cefas.v1.SpatialQueryRequest.radius:type_name -> cefas.v1.Radius
-	60, // 51: cefas.v1.SpatialQueryRequest.z:type_name -> cefas.v1.ZBBox
-	18, // 52: cefas.v1.Map.ValuesEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 53: cefas.v1.Item.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 54: cefas.v1.PutItemRequest.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 55: cefas.v1.PutItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 56: cefas.v1.GetItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 57: cefas.v1.GetItemResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 58: cefas.v1.DeleteItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 59: cefas.v1.DeleteItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 60: cefas.v1.UpdateItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 61: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 62: cefas.v1.UpdateItemResponse.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 63: cefas.v1.BatchWriteOp.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 64: cefas.v1.BatchWriteOp.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 65: cefas.v1.KeyMap.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	18, // 66: cefas.v1.ScanRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	29, // 67: cefas.v1.Cefas.CreateTable:input_type -> cefas.v1.CreateTableRequest
-	31, // 68: cefas.v1.Cefas.DescribeTable:input_type -> cefas.v1.DescribeTableRequest
-	33, // 69: cefas.v1.Cefas.ListTables:input_type -> cefas.v1.ListTablesRequest
-	35, // 70: cefas.v1.Cefas.DropTable:input_type -> cefas.v1.DropTableRequest
-	38, // 71: cefas.v1.Cefas.UpdateTimeToLive:input_type -> cefas.v1.UpdateTimeToLiveRequest
-	40, // 72: cefas.v1.Cefas.DescribeTimeToLive:input_type -> cefas.v1.DescribeTimeToLiveRequest
-	42, // 73: cefas.v1.Cefas.PutItem:input_type -> cefas.v1.PutItemRequest
-	44, // 74: cefas.v1.Cefas.GetItem:input_type -> cefas.v1.GetItemRequest
-	48, // 75: cefas.v1.Cefas.UpdateItem:input_type -> cefas.v1.UpdateItemRequest
-	46, // 76: cefas.v1.Cefas.DeleteItem:input_type -> cefas.v1.DeleteItemRequest
-	51, // 77: cefas.v1.Cefas.BatchWriteItem:input_type -> cefas.v1.BatchWriteItemRequest
-	53, // 78: cefas.v1.Cefas.BatchGetItem:input_type -> cefas.v1.BatchGetItemRequest
-	56, // 79: cefas.v1.Cefas.Query:input_type -> cefas.v1.QueryRequest
-	57, // 80: cefas.v1.Cefas.Scan:input_type -> cefas.v1.ScanRequest
-	61, // 81: cefas.v1.Cefas.SpatialQuery:input_type -> cefas.v1.SpatialQueryRequest
-	16, // 82: cefas.v1.Cefas.Sql:input_type -> cefas.v1.SqlRequest
-	62, // 83: cefas.v1.Cefas.ClusterStatus:input_type -> cefas.v1.ClusterStatusRequest
-	64, // 84: cefas.v1.Cefas.AddVoter:input_type -> cefas.v1.AddVoterRequest
-	66, // 85: cefas.v1.Cefas.RemoveServer:input_type -> cefas.v1.RemoveServerRequest
-	4,  // 86: cefas.v1.Cefas.StreamChanges:input_type -> cefas.v1.StreamChangesRequest
-	6,  // 87: cefas.v1.Cefas.ListSnapshots:input_type -> cefas.v1.ListSnapshotsRequest
-	10, // 88: cefas.v1.Cefas.CreateBackup:input_type -> cefas.v1.CreateBackupRequest
-	12, // 89: cefas.v1.Cefas.ListBackups:input_type -> cefas.v1.ListBackupsRequest
-	14, // 90: cefas.v1.Cefas.RestoreTableFromBackup:input_type -> cefas.v1.RestoreTableFromBackupRequest
-	30, // 91: cefas.v1.Cefas.CreateTable:output_type -> cefas.v1.CreateTableResponse
-	32, // 92: cefas.v1.Cefas.DescribeTable:output_type -> cefas.v1.DescribeTableResponse
-	34, // 93: cefas.v1.Cefas.ListTables:output_type -> cefas.v1.ListTablesResponse
-	36, // 94: cefas.v1.Cefas.DropTable:output_type -> cefas.v1.DropTableResponse
-	39, // 95: cefas.v1.Cefas.UpdateTimeToLive:output_type -> cefas.v1.UpdateTimeToLiveResponse
-	41, // 96: cefas.v1.Cefas.DescribeTimeToLive:output_type -> cefas.v1.DescribeTimeToLiveResponse
-	43, // 97: cefas.v1.Cefas.PutItem:output_type -> cefas.v1.PutItemResponse
-	45, // 98: cefas.v1.Cefas.GetItem:output_type -> cefas.v1.GetItemResponse
-	49, // 99: cefas.v1.Cefas.UpdateItem:output_type -> cefas.v1.UpdateItemResponse
-	47, // 100: cefas.v1.Cefas.DeleteItem:output_type -> cefas.v1.DeleteItemResponse
-	52, // 101: cefas.v1.Cefas.BatchWriteItem:output_type -> cefas.v1.BatchWriteItemResponse
-	55, // 102: cefas.v1.Cefas.BatchGetItem:output_type -> cefas.v1.BatchGetItemResponse
-	23, // 103: cefas.v1.Cefas.Query:output_type -> cefas.v1.Item
-	23, // 104: cefas.v1.Cefas.Scan:output_type -> cefas.v1.Item
-	23, // 105: cefas.v1.Cefas.SpatialQuery:output_type -> cefas.v1.Item
-	17, // 106: cefas.v1.Cefas.Sql:output_type -> cefas.v1.SqlResponse
-	63, // 107: cefas.v1.Cefas.ClusterStatus:output_type -> cefas.v1.ClusterStatusResponse
-	65, // 108: cefas.v1.Cefas.AddVoter:output_type -> cefas.v1.AddVoterResponse
-	67, // 109: cefas.v1.Cefas.RemoveServer:output_type -> cefas.v1.RemoveServerResponse
-	5,  // 110: cefas.v1.Cefas.StreamChanges:output_type -> cefas.v1.ChangeEvent
-	7,  // 111: cefas.v1.Cefas.ListSnapshots:output_type -> cefas.v1.ListSnapshotsResponse
-	11, // 112: cefas.v1.Cefas.CreateBackup:output_type -> cefas.v1.CreateBackupResponse
-	13, // 113: cefas.v1.Cefas.ListBackups:output_type -> cefas.v1.ListBackupsResponse
-	15, // 114: cefas.v1.Cefas.RestoreTableFromBackup:output_type -> cefas.v1.RestoreTableFromBackupResponse
-	91, // [91:115] is the sub-list for method output_type
-	67, // [67:91] is the sub-list for method input_type
-	67, // [67:67] is the sub-list for extension type_name
-	67, // [67:67] is the sub-list for extension extendee
-	0,  // [0:67] is the sub-list for field type_name
+	2,   // 0: cefas.v1.ChangeEvent.op:type_name -> cefas.v1.ChangeEvent.Op
+	8,   // 1: cefas.v1.ListSnapshotsResponse.snapshots:type_name -> cefas.v1.SnapshotMetadata
+	9,   // 2: cefas.v1.CreateBackupResponse.backup:type_name -> cefas.v1.BackupDescriptor
+	9,   // 3: cefas.v1.ListBackupsResponse.backups:type_name -> cefas.v1.BackupDescriptor
+	23,  // 4: cefas.v1.SqlResponse.rows:type_name -> cefas.v1.Item
+	19,  // 5: cefas.v1.AttributeValue.ss:type_name -> cefas.v1.StringSet
+	19,  // 6: cefas.v1.AttributeValue.ns:type_name -> cefas.v1.StringSet
+	20,  // 7: cefas.v1.AttributeValue.bs:type_name -> cefas.v1.BinarySet
+	21,  // 8: cefas.v1.AttributeValue.l:type_name -> cefas.v1.List
+	22,  // 9: cefas.v1.AttributeValue.m:type_name -> cefas.v1.Map
+	18,  // 10: cefas.v1.List.values:type_name -> cefas.v1.AttributeValue
+	74,  // 11: cefas.v1.Map.values:type_name -> cefas.v1.Map.ValuesEntry
+	75,  // 12: cefas.v1.Item.attributes:type_name -> cefas.v1.Item.AttributesEntry
+	24,  // 13: cefas.v1.GSIDescriptor.key_schema:type_name -> cefas.v1.KeySchema
+	26,  // 14: cefas.v1.SpatialIndexDescriptor.ranges:type_name -> cefas.v1.NumRange
+	24,  // 15: cefas.v1.TableDescriptor.key_schema:type_name -> cefas.v1.KeySchema
+	25,  // 16: cefas.v1.TableDescriptor.gsis:type_name -> cefas.v1.GSIDescriptor
+	27,  // 17: cefas.v1.TableDescriptor.spatial_indexes:type_name -> cefas.v1.SpatialIndexDescriptor
+	28,  // 18: cefas.v1.CreateTableRequest.descriptor:type_name -> cefas.v1.TableDescriptor
+	28,  // 19: cefas.v1.CreateTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
+	28,  // 20: cefas.v1.DescribeTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
+	28,  // 21: cefas.v1.ListTablesResponse.tables:type_name -> cefas.v1.TableDescriptor
+	37,  // 22: cefas.v1.UpdateTimeToLiveRequest.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
+	37,  // 23: cefas.v1.UpdateTimeToLiveResponse.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
+	76,  // 24: cefas.v1.PutItemRequest.item:type_name -> cefas.v1.PutItemRequest.ItemEntry
+	77,  // 25: cefas.v1.PutItemRequest.binds:type_name -> cefas.v1.PutItemRequest.BindsEntry
+	78,  // 26: cefas.v1.GetItemRequest.key:type_name -> cefas.v1.GetItemRequest.KeyEntry
+	0,   // 27: cefas.v1.GetItemRequest.consistency:type_name -> cefas.v1.Consistency
+	79,  // 28: cefas.v1.GetItemResponse.item:type_name -> cefas.v1.GetItemResponse.ItemEntry
+	80,  // 29: cefas.v1.DeleteItemRequest.key:type_name -> cefas.v1.DeleteItemRequest.KeyEntry
+	81,  // 30: cefas.v1.DeleteItemRequest.binds:type_name -> cefas.v1.DeleteItemRequest.BindsEntry
+	82,  // 31: cefas.v1.UpdateItemRequest.key:type_name -> cefas.v1.UpdateItemRequest.KeyEntry
+	83,  // 32: cefas.v1.UpdateItemRequest.expression_attribute_names:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
+	84,  // 33: cefas.v1.UpdateItemRequest.expression_attribute_values:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
+	1,   // 34: cefas.v1.UpdateItemRequest.return_values:type_name -> cefas.v1.ReturnValues
+	85,  // 35: cefas.v1.UpdateItemResponse.attributes:type_name -> cefas.v1.UpdateItemResponse.AttributesEntry
+	3,   // 36: cefas.v1.BatchWriteOp.kind:type_name -> cefas.v1.BatchWriteOp.Kind
+	86,  // 37: cefas.v1.BatchWriteOp.item:type_name -> cefas.v1.BatchWriteOp.ItemEntry
+	87,  // 38: cefas.v1.BatchWriteOp.key:type_name -> cefas.v1.BatchWriteOp.KeyEntry
+	50,  // 39: cefas.v1.BatchWriteItemRequest.ops:type_name -> cefas.v1.BatchWriteOp
+	54,  // 40: cefas.v1.BatchGetItemRequest.keys:type_name -> cefas.v1.KeyMap
+	88,  // 41: cefas.v1.KeyMap.attributes:type_name -> cefas.v1.KeyMap.AttributesEntry
+	23,  // 42: cefas.v1.BatchGetItemResponse.items:type_name -> cefas.v1.Item
+	89,  // 43: cefas.v1.TransactWriteOp.put:type_name -> cefas.v1.TransactWriteOp.Put
+	90,  // 44: cefas.v1.TransactWriteOp.delete:type_name -> cefas.v1.TransactWriteOp.Delete
+	91,  // 45: cefas.v1.TransactWriteOp.condition_check:type_name -> cefas.v1.TransactWriteOp.ConditionCheck
+	92,  // 46: cefas.v1.TransactWriteOp.binds:type_name -> cefas.v1.TransactWriteOp.BindsEntry
+	56,  // 47: cefas.v1.TransactWriteItemsRequest.ops:type_name -> cefas.v1.TransactWriteOp
+	96,  // 48: cefas.v1.TransactGet.key:type_name -> cefas.v1.TransactGet.KeyEntry
+	59,  // 49: cefas.v1.TransactGetItemsRequest.items:type_name -> cefas.v1.TransactGet
+	23,  // 50: cefas.v1.TransactGetItemsResponse.items:type_name -> cefas.v1.Item
+	18,  // 51: cefas.v1.QueryRequest.pk_value:type_name -> cefas.v1.AttributeValue
+	18,  // 52: cefas.v1.QueryRequest.sk_low:type_name -> cefas.v1.AttributeValue
+	18,  // 53: cefas.v1.QueryRequest.sk_high:type_name -> cefas.v1.AttributeValue
+	0,   // 54: cefas.v1.QueryRequest.consistency:type_name -> cefas.v1.Consistency
+	97,  // 55: cefas.v1.ScanRequest.binds:type_name -> cefas.v1.ScanRequest.BindsEntry
+	0,   // 56: cefas.v1.ScanRequest.consistency:type_name -> cefas.v1.Consistency
+	64,  // 57: cefas.v1.SpatialQueryRequest.bbox:type_name -> cefas.v1.BBox
+	65,  // 58: cefas.v1.SpatialQueryRequest.radius:type_name -> cefas.v1.Radius
+	66,  // 59: cefas.v1.SpatialQueryRequest.z:type_name -> cefas.v1.ZBBox
+	18,  // 60: cefas.v1.Map.ValuesEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 61: cefas.v1.Item.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 62: cefas.v1.PutItemRequest.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 63: cefas.v1.PutItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 64: cefas.v1.GetItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 65: cefas.v1.GetItemResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 66: cefas.v1.DeleteItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 67: cefas.v1.DeleteItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 68: cefas.v1.UpdateItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 69: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 70: cefas.v1.UpdateItemResponse.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 71: cefas.v1.BatchWriteOp.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 72: cefas.v1.BatchWriteOp.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 73: cefas.v1.KeyMap.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	93,  // 74: cefas.v1.TransactWriteOp.Put.item:type_name -> cefas.v1.TransactWriteOp.Put.ItemEntry
+	94,  // 75: cefas.v1.TransactWriteOp.Delete.key:type_name -> cefas.v1.TransactWriteOp.Delete.KeyEntry
+	95,  // 76: cefas.v1.TransactWriteOp.ConditionCheck.key:type_name -> cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
+	18,  // 77: cefas.v1.TransactWriteOp.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 78: cefas.v1.TransactWriteOp.Put.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 79: cefas.v1.TransactWriteOp.Delete.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 80: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 81: cefas.v1.TransactGet.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	18,  // 82: cefas.v1.ScanRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	29,  // 83: cefas.v1.Cefas.CreateTable:input_type -> cefas.v1.CreateTableRequest
+	31,  // 84: cefas.v1.Cefas.DescribeTable:input_type -> cefas.v1.DescribeTableRequest
+	33,  // 85: cefas.v1.Cefas.ListTables:input_type -> cefas.v1.ListTablesRequest
+	35,  // 86: cefas.v1.Cefas.DropTable:input_type -> cefas.v1.DropTableRequest
+	38,  // 87: cefas.v1.Cefas.UpdateTimeToLive:input_type -> cefas.v1.UpdateTimeToLiveRequest
+	40,  // 88: cefas.v1.Cefas.DescribeTimeToLive:input_type -> cefas.v1.DescribeTimeToLiveRequest
+	42,  // 89: cefas.v1.Cefas.PutItem:input_type -> cefas.v1.PutItemRequest
+	44,  // 90: cefas.v1.Cefas.GetItem:input_type -> cefas.v1.GetItemRequest
+	48,  // 91: cefas.v1.Cefas.UpdateItem:input_type -> cefas.v1.UpdateItemRequest
+	46,  // 92: cefas.v1.Cefas.DeleteItem:input_type -> cefas.v1.DeleteItemRequest
+	51,  // 93: cefas.v1.Cefas.BatchWriteItem:input_type -> cefas.v1.BatchWriteItemRequest
+	53,  // 94: cefas.v1.Cefas.BatchGetItem:input_type -> cefas.v1.BatchGetItemRequest
+	57,  // 95: cefas.v1.Cefas.TransactWriteItems:input_type -> cefas.v1.TransactWriteItemsRequest
+	60,  // 96: cefas.v1.Cefas.TransactGetItems:input_type -> cefas.v1.TransactGetItemsRequest
+	62,  // 97: cefas.v1.Cefas.Query:input_type -> cefas.v1.QueryRequest
+	63,  // 98: cefas.v1.Cefas.Scan:input_type -> cefas.v1.ScanRequest
+	67,  // 99: cefas.v1.Cefas.SpatialQuery:input_type -> cefas.v1.SpatialQueryRequest
+	16,  // 100: cefas.v1.Cefas.Sql:input_type -> cefas.v1.SqlRequest
+	68,  // 101: cefas.v1.Cefas.ClusterStatus:input_type -> cefas.v1.ClusterStatusRequest
+	70,  // 102: cefas.v1.Cefas.AddVoter:input_type -> cefas.v1.AddVoterRequest
+	72,  // 103: cefas.v1.Cefas.RemoveServer:input_type -> cefas.v1.RemoveServerRequest
+	4,   // 104: cefas.v1.Cefas.StreamChanges:input_type -> cefas.v1.StreamChangesRequest
+	6,   // 105: cefas.v1.Cefas.ListSnapshots:input_type -> cefas.v1.ListSnapshotsRequest
+	10,  // 106: cefas.v1.Cefas.CreateBackup:input_type -> cefas.v1.CreateBackupRequest
+	12,  // 107: cefas.v1.Cefas.ListBackups:input_type -> cefas.v1.ListBackupsRequest
+	14,  // 108: cefas.v1.Cefas.RestoreTableFromBackup:input_type -> cefas.v1.RestoreTableFromBackupRequest
+	30,  // 109: cefas.v1.Cefas.CreateTable:output_type -> cefas.v1.CreateTableResponse
+	32,  // 110: cefas.v1.Cefas.DescribeTable:output_type -> cefas.v1.DescribeTableResponse
+	34,  // 111: cefas.v1.Cefas.ListTables:output_type -> cefas.v1.ListTablesResponse
+	36,  // 112: cefas.v1.Cefas.DropTable:output_type -> cefas.v1.DropTableResponse
+	39,  // 113: cefas.v1.Cefas.UpdateTimeToLive:output_type -> cefas.v1.UpdateTimeToLiveResponse
+	41,  // 114: cefas.v1.Cefas.DescribeTimeToLive:output_type -> cefas.v1.DescribeTimeToLiveResponse
+	43,  // 115: cefas.v1.Cefas.PutItem:output_type -> cefas.v1.PutItemResponse
+	45,  // 116: cefas.v1.Cefas.GetItem:output_type -> cefas.v1.GetItemResponse
+	49,  // 117: cefas.v1.Cefas.UpdateItem:output_type -> cefas.v1.UpdateItemResponse
+	47,  // 118: cefas.v1.Cefas.DeleteItem:output_type -> cefas.v1.DeleteItemResponse
+	52,  // 119: cefas.v1.Cefas.BatchWriteItem:output_type -> cefas.v1.BatchWriteItemResponse
+	55,  // 120: cefas.v1.Cefas.BatchGetItem:output_type -> cefas.v1.BatchGetItemResponse
+	58,  // 121: cefas.v1.Cefas.TransactWriteItems:output_type -> cefas.v1.TransactWriteItemsResponse
+	61,  // 122: cefas.v1.Cefas.TransactGetItems:output_type -> cefas.v1.TransactGetItemsResponse
+	23,  // 123: cefas.v1.Cefas.Query:output_type -> cefas.v1.Item
+	23,  // 124: cefas.v1.Cefas.Scan:output_type -> cefas.v1.Item
+	23,  // 125: cefas.v1.Cefas.SpatialQuery:output_type -> cefas.v1.Item
+	17,  // 126: cefas.v1.Cefas.Sql:output_type -> cefas.v1.SqlResponse
+	69,  // 127: cefas.v1.Cefas.ClusterStatus:output_type -> cefas.v1.ClusterStatusResponse
+	71,  // 128: cefas.v1.Cefas.AddVoter:output_type -> cefas.v1.AddVoterResponse
+	73,  // 129: cefas.v1.Cefas.RemoveServer:output_type -> cefas.v1.RemoveServerResponse
+	5,   // 130: cefas.v1.Cefas.StreamChanges:output_type -> cefas.v1.ChangeEvent
+	7,   // 131: cefas.v1.Cefas.ListSnapshots:output_type -> cefas.v1.ListSnapshotsResponse
+	11,  // 132: cefas.v1.Cefas.CreateBackup:output_type -> cefas.v1.CreateBackupResponse
+	13,  // 133: cefas.v1.Cefas.ListBackups:output_type -> cefas.v1.ListBackupsResponse
+	15,  // 134: cefas.v1.Cefas.RestoreTableFromBackup:output_type -> cefas.v1.RestoreTableFromBackupResponse
+	109, // [109:135] is the sub-list for method output_type
+	83,  // [83:109] is the sub-list for method input_type
+	83,  // [83:83] is the sub-list for extension type_name
+	83,  // [83:83] is the sub-list for extension extendee
+	0,   // [0:83] is the sub-list for field type_name
 }
 
 func init() { file_cefas_proto_init() }
@@ -4387,7 +4962,12 @@ func file_cefas_proto_init() {
 		(*AttributeValue_L)(nil),
 		(*AttributeValue_M)(nil),
 	}
-	file_cefas_proto_msgTypes[57].OneofWrappers = []any{
+	file_cefas_proto_msgTypes[52].OneofWrappers = []any{
+		(*TransactWriteOp_Put_)(nil),
+		(*TransactWriteOp_Delete_)(nil),
+		(*TransactWriteOp_ConditionCheck_)(nil),
+	}
+	file_cefas_proto_msgTypes[63].OneofWrappers = []any{
 		(*SpatialQueryRequest_Bbox)(nil),
 		(*SpatialQueryRequest_Radius)(nil),
 		(*SpatialQueryRequest_Z)(nil),
@@ -4398,7 +4978,7 @@ func file_cefas_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cefas_proto_rawDesc), len(file_cefas_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   80,
+			NumMessages:   94,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
