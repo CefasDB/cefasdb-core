@@ -1,6 +1,9 @@
-// cefas gRPC service definition. Wire format is independent of AWS
-// DynamoDB; the shape mirrors it for ergonomic parity. Phase 1 omits
-// transaction, batch, and conditional-write APIs — they land in Phase 2.
+// cefas gRPC service definition.
+//
+// Wire format is independent of any third-party item store; the shape
+// mirrors DynamoDB only as far as it makes ergonomic sense. Streaming
+// reads (Query / Scan / SpatialQuery) keep server memory bounded for
+// large result sets.
 
 syntax = "proto3";
 
@@ -9,90 +12,236 @@ package cefas.v1;
 option go_package = "github.com/osvaldoandrade/cefas/pkg/api/proto;cefaspb";
 
 service Cefas {
+  // Schema management.
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc DescribeTable(DescribeTableRequest) returns (DescribeTableResponse);
   rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+  rpc DropTable(DropTableRequest) returns (DropTableResponse);
 
+  // Item operations.
   rpc PutItem(PutItemRequest) returns (PutItemResponse);
   rpc GetItem(GetItemRequest) returns (GetItemResponse);
   rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse);
-  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Bulk operations.
+  rpc BatchWriteItem(BatchWriteItemRequest) returns (BatchWriteItemResponse);
+  rpc BatchGetItem(BatchGetItemRequest) returns (BatchGetItemResponse);
+
+  // Query and scan stream rows so the server never materialises an
+  // unbounded result set in memory.
+  rpc Query(QueryRequest) returns (stream Item);
+  rpc SpatialQuery(SpatialQueryRequest) returns (stream Item);
+
+  // Cluster surface (no-ops in single-node mode).
+  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+  rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
+  rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
 }
+
+// ---------- attribute model ----------
 
 message AttributeValue {
   oneof value {
-    string s = 1;
-    string n = 2;          // canonical decimal text (arbitrary precision)
-    bytes  b = 3;
-    bool   bool_val = 4;
-    bool   null_val = 5;   // true = explicit null
-    StringSet ss = 6;
-    StringSet ns = 7;
-    BinarySet bs = 8;
-    List l = 9;
-    Map m = 10;
+    string         s        = 1;
+    string         n        = 2; // canonical decimal text
+    bytes          b        = 3;
+    bool           bool_val = 4;
+    bool           null_val = 5; // true means "explicit null"
+    StringSet      ss       = 6;
+    StringSet      ns       = 7;
+    BinarySet      bs       = 8;
+    List           l        = 9;
+    Map            m        = 10;
   }
 }
 
-message StringSet { repeated string values = 1; }
-message BinarySet { repeated bytes  values = 1; }
+message StringSet { repeated string         values = 1; }
+message BinarySet { repeated bytes          values = 1; }
 message List      { repeated AttributeValue values = 1; }
 message Map       { map<string, AttributeValue> values = 1; }
+
+message Item {
+  map<string, AttributeValue> attributes = 1;
+}
+
+// ---------- schema ----------
 
 message KeySchema {
   string pk = 1;
   string sk = 2;
 }
 
-message TableDescriptor {
-  string name = 1;
-  KeySchema key_schema = 2;
-  // GSI / spatial indexes land in later phases.
+message GSIDescriptor {
+  string             name        = 1;
+  KeySchema          key_schema  = 2;
+  repeated string    projected   = 3;
 }
+
+message NumRange {
+  double lo = 1;
+  double hi = 2;
+}
+
+message SpatialIndexDescriptor {
+  string             name       = 1;
+  string             kind       = 2; // "geohash" | "zorder"
+  repeated string    attributes = 3;
+  int32              precision  = 4;
+  repeated NumRange  ranges     = 5;
+}
+
+message TableDescriptor {
+  string                          name             = 1;
+  KeySchema                       key_schema       = 2;
+  repeated GSIDescriptor          gsis             = 3;
+  repeated SpatialIndexDescriptor spatial_indexes  = 4;
+}
+
+// ---------- schema rpcs ----------
 
 message CreateTableRequest  { TableDescriptor descriptor = 1; }
 message CreateTableResponse { TableDescriptor descriptor = 1; }
 
-message DescribeTableRequest  { string name = 1; }
+message DescribeTableRequest  { string          name       = 1; }
 message DescribeTableResponse { TableDescriptor descriptor = 1; }
 
 message ListTablesRequest  {}
 message ListTablesResponse { repeated TableDescriptor tables = 1; }
 
+message DropTableRequest  { string name = 1; }
+message DropTableResponse {}
+
+// ---------- item rpcs ----------
+
 message PutItemRequest {
-  string table = 1;
-  map<string, AttributeValue> item = 2;
+  string                       table     = 1;
+  map<string, AttributeValue>  item      = 2;
+  // Optional ConditionExpression and bind variables.
+  string                       condition = 3;
+  map<string, AttributeValue>  binds     = 4;
 }
 message PutItemResponse {}
 
+enum Consistency {
+  CONSISTENCY_UNSPECIFIED = 0;
+  CONSISTENCY_EVENTUAL    = 1; // local read on whichever node served the call
+  CONSISTENCY_STRONG      = 2; // routed to the leader + barrier
+}
+
 message GetItemRequest {
-  string table = 1;
-  map<string, AttributeValue> key = 2;
+  string                       table       = 1;
+  map<string, AttributeValue>  key         = 2;
+  Consistency                  consistency = 3;
 }
 message GetItemResponse {
-  bool found = 1;
-  map<string, AttributeValue> item = 2;
+  bool                         found = 1;
+  map<string, AttributeValue>  item  = 2;
 }
 
 message DeleteItemRequest {
-  string table = 1;
-  map<string, AttributeValue> key = 2;
+  string                       table     = 1;
+  map<string, AttributeValue>  key       = 2;
+  string                       condition = 3;
+  map<string, AttributeValue>  binds     = 4;
 }
 message DeleteItemResponse {}
 
-message QueryRequest {
-  string table = 1;
-  AttributeValue pk_value = 2;
-  // Optional SK range. When sk_low and sk_high are both unset, every
-  // item under pk_value is returned.
-  AttributeValue sk_low = 3;
-  AttributeValue sk_high = 4;
-  int32 limit = 5;
+// ---------- batch ----------
+
+message BatchWriteOp {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_PUT         = 1;
+    KIND_DELETE      = 2;
+  }
+  Kind                         kind = 1;
+  map<string, AttributeValue>  item = 2; // for PUT
+  map<string, AttributeValue>  key  = 3; // for DELETE
 }
-message QueryResponse {
+
+message BatchWriteItemRequest {
+  string                table = 1;
+  repeated BatchWriteOp ops   = 2;
+}
+message BatchWriteItemResponse {}
+
+message BatchGetItemRequest {
+  string                              table = 1;
+  // Each entry is the set of key attributes for one item. Order is
+  // preserved in the response.
+  repeated KeyMap                     keys  = 2;
+}
+message KeyMap { map<string, AttributeValue> attributes = 1; }
+
+message BatchGetItemResponse {
+  // Entries align with the request's `keys` index. A missing item
+  // returns an empty Item (attributes map is empty).
   repeated Item items = 1;
 }
 
-message Item {
-  map<string, AttributeValue> attributes = 1;
+// ---------- streaming query / scan ----------
+
+message QueryRequest {
+  string         table        = 1;
+  string         index_name   = 2; // empty → primary; otherwise GSI name
+  AttributeValue pk_value     = 3;
+  AttributeValue sk_low       = 4;
+  AttributeValue sk_high      = 5;
+  int32          limit        = 6;
+  Consistency    consistency  = 7;
 }
+
+// ---------- spatial ----------
+
+message BBox {
+  double min_lat = 1;
+  double min_lon = 2;
+  double max_lat = 3;
+  double max_lon = 4;
+}
+
+message Radius {
+  double lat    = 1;
+  double lon    = 2;
+  double meters = 3;
+}
+
+message ZBBox {
+  repeated uint32 lo = 1;
+  repeated uint32 hi = 2;
+}
+
+message SpatialQueryRequest {
+  string table      = 1;
+  string index_name = 2;
+  oneof  shape {
+    BBox   bbox     = 3;
+    Radius radius   = 4;
+    ZBBox  z        = 5;
+  }
+  int32 limit       = 6;
+}
+
+// ---------- cluster ----------
+
+message ClusterStatusRequest  {}
+message ClusterStatusResponse {
+  string mode        = 1; // "single-node" | "raft"
+  bool   is_leader   = 2;
+  string self_id     = 3;
+  string bind_addr   = 4;
+  string leader_http = 5;
+}
+
+message AddVoterRequest {
+  string id         = 1;
+  string addr       = 2;
+  int32  timeout_ms = 3;
+}
+message AddVoterResponse {}
+
+message RemoveServerRequest {
+  string id         = 1;
+  int32  timeout_ms = 2;
+}
+message RemoveServerResponse {}

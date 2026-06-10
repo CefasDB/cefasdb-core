@@ -6,8 +6,11 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/codecompany/identity-middleware v0.0.0-00010101000000-000000000000
+	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.7.3
+	google.golang.org/grpc v1.71.0
+	google.golang.org/protobuf v1.36.4
 )
 
 require (
@@ -33,8 +36,7 @@ require (
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.0.0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/hashicorp/go-hclog v1.6.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.0.0 // indirect
@@ -66,7 +68,7 @@ require (
 	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	google.golang.org/protobuf v1.34.1 // indirect
+	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
