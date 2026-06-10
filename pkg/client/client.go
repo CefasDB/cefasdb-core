@@ -259,6 +259,49 @@ func (c *Client) GetItem(ctx context.Context, table string, key types.Item, opts
 	return itemFromPB(resp.GetItem()), nil
 }
 
+// UpdateOptions carries the aws-shaped UpdateItem accessories.
+type UpdateOptions struct {
+	UpdateExpression          string
+	ConditionExpression       string
+	ExpressionAttributeNames  map[string]string
+	ExpressionAttributeValues map[string]types.AttributeValue
+	// ReturnValues: "" | "NONE" | "ALL_NEW" | "ALL_OLD" | "UPDATED_NEW" | "UPDATED_OLD".
+	ReturnValues string
+}
+
+// UpdateItem applies the supplied UpdateExpression against the row
+// keyed by `key`. Returns the requested image (NEW / OLD) when
+// ReturnValues asks for one, nil otherwise.
+func (c *Client) UpdateItem(ctx context.Context, table string, key types.Item, opts UpdateOptions) (types.Item, error) {
+	rv := cefaspb.ReturnValues_RETURN_VALUES_NONE
+	switch opts.ReturnValues {
+	case "ALL_NEW":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_ALL_NEW
+	case "ALL_OLD":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_ALL_OLD
+	case "UPDATED_NEW":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_UPDATED_NEW
+	case "UPDATED_OLD":
+		rv = cefaspb.ReturnValues_RETURN_VALUES_UPDATED_OLD
+	}
+	resp, err := c.stub.UpdateItem(c.withAuth(ctx), &cefaspb.UpdateItemRequest{
+		Table:                     table,
+		Key:                       itemAttrMap(key),
+		UpdateExpression:          opts.UpdateExpression,
+		ConditionExpression:       opts.ConditionExpression,
+		ExpressionAttributeNames:  opts.ExpressionAttributeNames,
+		ExpressionAttributeValues: itemAttrMap(types.Item(opts.ExpressionAttributeValues)),
+		ReturnValues:              rv,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.GetAttributes()) == 0 {
+		return nil, nil
+	}
+	return itemFromPB(resp.GetAttributes()), nil
+}
+
 // DeleteOptions mirrors PutOptions for deletes.
 type DeleteOptions struct {
 	Condition string
