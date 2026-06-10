@@ -1,6 +1,6 @@
 {
   "name": "@osvaldoandrade/cefas",
-  "version": "0.0.0-development",
+  "version": "0.1.3",
   "description": "cefas CLI (installs a prebuilt Go binary from GitHub Releases)",
   "license": "MIT",
   "homepage": "https://github.com/osvaldoandrade/cefas#readme",

@@ -4,15 +4,20 @@
 #   docker compose -p cefas-fsync -f deploy/docker-compose.cluster.fsync.yml down -v
 #   docker compose -p cefas-fsync -f deploy/docker-compose.cluster.fsync.yml up --build -d
 #
-# Host gRPC endpoints:
+# Host gRPC endpoints by default:
 #   n1: localhost:9291
 #   n2: localhost:9292
 #   n3: localhost:9293
+# Override host ports with CEFAS_FSYNC_NODE{1,2,3}_{HTTP,GRPC}_PORT.
+
+x-cefas-fsync-build: &cefas-fsync-build
+  context: ..
+  dockerfile: deploy/Dockerfile
+  args:
+    VERSION: ${CEFAS_IMAGE_TAG:-0.1.3}
 
 x-cefas-fsync-common: &cefas-fsync-common
-  build:
-    context: ..
-    dockerfile: deploy/Dockerfile
+  image: ghcr.io/osvaldoandrade/cefas:${CEFAS_IMAGE_TAG:-0.1.3}
   environment:
     CEFAS_STORAGE_PROFILE: ${STORAGE_PROFILE:-balanced}
     CEFAS_STORAGE_BACKPRESSURE_ENABLED: ${STORAGE_BACKPRESSURE_ENABLED:-true}
@@ -29,6 +34,7 @@ x-cefas-fsync-common: &cefas-fsync-common
 services:
   cefas-fsync-node-1:
     <<: *cefas-fsync-common
+    build: *cefas-fsync-build
     command:
       - "-data"
       - "/var/lib/cefas"
@@ -48,8 +54,8 @@ services:
       - "-raft-http-peers"
       - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
     ports:
-      - "18181:8080"
-      - "9291:9090"
+      - "${CEFAS_FSYNC_NODE1_HTTP_PORT:-18181}:8080"
+      - "${CEFAS_FSYNC_NODE1_GRPC_PORT:-9291}:9090"
     volumes:
       - cefas-fsync-node-1-data:/var/lib/cefas
 
@@ -74,8 +80,8 @@ services:
       - "-raft-http-peers"
       - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
     ports:
-      - "18182:8080"
-      - "9292:9090"
+      - "${CEFAS_FSYNC_NODE2_HTTP_PORT:-18182}:8080"
+      - "${CEFAS_FSYNC_NODE2_GRPC_PORT:-9292}:9090"
     volumes:
       - cefas-fsync-node-2-data:/var/lib/cefas
 
@@ -100,8 +106,8 @@ services:
       - "-raft-http-peers"
       - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
     ports:
-      - "18183:8080"
-      - "9293:9090"
+      - "${CEFAS_FSYNC_NODE3_HTTP_PORT:-18183}:8080"
+      - "${CEFAS_FSYNC_NODE3_GRPC_PORT:-9293}:9090"
     volumes:
       - cefas-fsync-node-3-data:/var/lib/cefas
 
