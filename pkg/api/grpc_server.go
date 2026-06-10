@@ -738,6 +738,41 @@ func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequ
 	return &cefaspb.ListBackupsResponse{Backups: out}, nil
 }
 
+func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.RestoreTableFromBackupRequest) (*cefaspb.RestoreTableFromBackupResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	register := func(td types.TableDescriptor) error {
+		if err := s.cat.Create(td); err != nil {
+			return err
+		}
+		if s.manager != nil {
+			for i, sh := range s.manager.Shards() {
+				if i == 0 {
+					continue
+				}
+				if cat, cerr := catalog.New(sh.Storage); cerr == nil {
+					_ = cat.Create(td)
+				}
+			}
+		}
+		return nil
+	}
+	res, err := s.db.RestoreTableFromBackup(
+		req.GetBackupName(),
+		req.GetSourceTableName(),
+		req.GetTargetTableName(),
+		register,
+	)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.RestoreTableFromBackupResponse{
+		TargetTableName: res.TargetTable.Name,
+		RowsCopied:      int64(res.RowsCopied),
+	}, nil
+}
+
 func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 	return &cefaspb.BackupDescriptor{
 		Name:           m.Name,

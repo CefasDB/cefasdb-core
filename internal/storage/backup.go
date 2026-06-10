@@ -47,6 +47,12 @@ func (d *DB) CreateBackup(name string, tables []string) (BackupMetadata, error) 
 	if err := os.MkdirAll(filepath.Dir(checkpointDir), 0o755); err != nil {
 		return BackupMetadata{}, fmt.Errorf("mkdir backups: %w", err)
 	}
+	// Flush forces the memtable out to an SSTable before checkpointing,
+	// so the snapshot reflects every committed write — pebble's read-only
+	// re-open does not replay the live WAL.
+	if err := d.db.Flush(); err != nil {
+		return BackupMetadata{}, fmt.Errorf("pebble flush: %w", err)
+	}
 	if err := d.db.Checkpoint(checkpointDir); err != nil {
 		return BackupMetadata{}, fmt.Errorf("pebble checkpoint: %w", err)
 	}
