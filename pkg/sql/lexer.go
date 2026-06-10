@@ -89,6 +89,10 @@ const (
 	tExists
 	tAdd
 	tRemove
+	tCount
+	tReturning
+	tNew
+	tOld
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -130,10 +134,14 @@ var keywords = map[string]TokenKind{
 	"FALSE":   tFalse,
 	"USE":     tUse,
 	"INDEX":   tIndex,
-	"IF":      tIf,
-	"EXISTS":  tExists,
-	"ADD":     tAdd,
-	"REMOVE":  tRemove,
+	"IF":        tIf,
+	"EXISTS":    tExists,
+	"ADD":       tAdd,
+	"REMOVE":    tRemove,
+	"COUNT":     tCount,
+	"RETURNING": tReturning,
+	"NEW":       tNew,
+	"OLD":       tOld,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of

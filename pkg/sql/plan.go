@@ -45,6 +45,9 @@ type PlanQuery struct {
 	// into the storage range scan (begins_with on non-key cols,
 	// contains, attribute_*, size).
 	PostFilter Expr
+	// Count = true means the executor returns AffectedRows = N
+	// instead of materialising row data.
+	Count bool
 }
 
 // PlanSpatial is a geohash / Z-order / radius scan.
@@ -56,12 +59,14 @@ type PlanSpatial struct {
 	Descriptor types.TableDescriptor
 }
 
-// PlanPutItem is INSERT INTO ... VALUES (...) [IF expr].
+// PlanPutItem is INSERT INTO ... VALUES (...) [IF expr]
+// [RETURNING mode].
 type PlanPutItem struct {
 	Table      string
 	Item       types.Item
 	Descriptor types.TableDescriptor
-	If         Expr // optional; nil for unconditional
+	If         Expr
+	Returning  ReturningMode
 }
 
 // PlanUpdate is the single-item UPDATE path. The executor reads the
@@ -70,18 +75,21 @@ type PlanPutItem struct {
 // TTL maintenance stay atomic.
 type PlanUpdate struct {
 	Table      string
-	Key        types.Item // PK [+ SK] of the row to update
+	Key        types.Item
 	Actions    []Assignment
 	Descriptor types.TableDescriptor
 	If         Expr
+	Returning  ReturningMode
 }
 
-// PlanDelete is DELETE WHERE pk = ... [AND sk = ...] [IF expr].
+// PlanDelete is DELETE WHERE pk = ... [AND sk = ...] [IF expr]
+// [RETURNING OLD].
 type PlanDelete struct {
 	Table      string
 	Key        types.Item
 	Descriptor types.TableDescriptor
 	If         Expr
+	Returning  ReturningMode
 }
 
 func (*PlanCreateTable) plan() {}

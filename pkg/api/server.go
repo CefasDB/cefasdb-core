@@ -162,6 +162,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/BatchGetItem", s.handleBatchGetItem)
 	register("/v1/SpatialQuery", s.handleSpatialQuery)
 	register("/v1/Sql", s.handleSql)
+	register("/v1/PartiQL", s.handlePartiQL)
 	register("/v1/Health", s.handleHealth)
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
@@ -739,6 +740,60 @@ func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt)
 		return auth.RequireAnyScope(w, r, auth.ScopeTableDrop)
 	}
 	return true
+}
+
+// partiqlRequest mirrors the AWS DynamoDB ExecuteStatement shape:
+// `Statement` is the SQL text, `Parameters` substitute `?` markers in
+// order. The handler binds the parameters into the SQL text and then
+// runs the regular cefas SQL pipeline so the result shape matches
+// /v1/Sql.
+type partiqlRequest struct {
+	Statement  string                     `json:"Statement"`
+	Parameters []cefassql.PartiQLParameter `json:"Parameters,omitempty"`
+}
+
+func (s *Server) handlePartiQL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req partiqlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	bound, err := cefassql.BindPartiQL(req.Statement, req.Parameters)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	stmt, err := cefassql.Parse(bound)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !sqlEnforceScope(w, r, stmt) {
+		return
+	}
+	plan, err := cefassql.PlanStmt(stmt, s.cat)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
+	res, err := ex.Execute(plan)
+	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	out := struct {
+		AffectedRows int                        `json:"affectedRows"`
+		Rows         []map[string]jsonAttribute `json:"rows,omitempty"`
+	}{AffectedRows: res.AffectedRows}
+	for _, row := range res.Rows {
+		out.Rows = append(out.Rows, encodeItem(row))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type spatialQueryRequest struct {

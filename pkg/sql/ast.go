@@ -17,31 +17,46 @@ type SelectStmt struct {
 	OrderBy   string
 	OrderDesc bool
 	Limit     int
+	// Count = true for SELECT COUNT(*) FROM ... — executor returns
+	// the matching-row total as AffectedRows instead of materialising
+	// row data.
+	Count bool
 }
 
-// InsertStmt is INSERT INTO <table> (cols) VALUES (vals) [IF expr].
+// ReturningMode picks which snapshot of the row to return to the
+// caller after a DML statement.
+type ReturningMode string
+
+const (
+	// ReturningNone is the default — nothing returned.
+	ReturningNone ReturningMode = ""
+	// ReturningAll mirrors RETURNING *: returns the post-mutation
+	// state for INSERT/UPDATE; pre-mutation row for DELETE.
+	ReturningAll ReturningMode = "ALL"
+	// ReturningNew returns the new image (post-mutation row).
+	ReturningNew ReturningMode = "NEW"
+	// ReturningOld returns the old image (pre-mutation row).
+	ReturningOld ReturningMode = "OLD"
+)
+
+// InsertStmt is INSERT INTO <table> (cols) VALUES (vals) [IF expr]
+// [RETURNING (*|NEW|OLD)].
 type InsertStmt struct {
-	Table   string
-	Columns []string
-	Values  []Expr
-	// If, when non-nil, is the optional ConditionExpression
-	// evaluated against the prior item before write.
-	If Expr
+	Table     string
+	Columns   []string
+	Values    []Expr
+	If        Expr
+	Returning ReturningMode
 }
 
 // UpdateStmt is UPDATE <table> SET <action> [, ...] WHERE <pred>
-// [IF <cond>].
-//
-// Each action is an Assignment carrying the kind (SET/REMOVE/ADD/
-// DELETE) and the operand. The executor reads the prior row, applies
-// each action in order, and writes the merged result back through
-// storage.PutItemWith so GSI + LSI + spatial + TTL maintenance all
-// stay atomic.
+// [IF <cond>] [RETURNING (*|NEW|OLD)].
 type UpdateStmt struct {
 	Table       string
 	Assignments []Assignment
 	Where       Expr
 	If          Expr
+	Returning   ReturningMode
 }
 
 // AssignKind picks the SET action grammar branch.
@@ -66,11 +81,13 @@ type Assignment struct {
 	Value  Expr
 }
 
-// DeleteStmt is DELETE FROM <table> WHERE <pred> [IF <cond>].
+// DeleteStmt is DELETE FROM <table> WHERE <pred> [IF <cond>]
+// [RETURNING OLD].
 type DeleteStmt struct {
-	Table string
-	Where Expr
-	If    Expr
+	Table     string
+	Where     Expr
+	If        Expr
+	Returning ReturningMode
 }
 
 // CreateTableStmt is the minimal table-creation form. Indexes and

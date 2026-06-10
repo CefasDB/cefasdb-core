@@ -1,0 +1,101 @@
+package sql
+
+import (
+	"encoding/base64"
+	"fmt"
+	"strings"
+)
+
+// PartiQLParameter is the wire shape of a parameter on the AWS
+// ExecuteStatement request. We accept the same letter-tagged
+// AttributeValue every other endpoint uses; only the fields that
+// matter for SQL substitution are populated.
+type PartiQLParameter struct {
+	S    *string  `json:"S,omitempty"`
+	N    *string  `json:"N,omitempty"`
+	B    *string  `json:"B,omitempty"` // base64
+	BOOL *bool    `json:"BOOL,omitempty"`
+	NULL *bool    `json:"NULL,omitempty"`
+}
+
+// BindPartiQL substitutes `?` placeholders in `statement` with the
+// supplied parameter values, producing a plain cefas SQL string. This
+// keeps the PartiQL endpoint thin: clients write the AWS PartiQL
+// grammar that our parser already supports (modulo features), and the
+// server applies the standard cefas pipeline downstream.
+//
+// String / binary values become single-quoted literals (with proper
+// `''` escaping). Numbers stay unquoted. Booleans become TRUE/FALSE.
+// NULL becomes the SQL keyword NULL.
+func BindPartiQL(statement string, params []PartiQLParameter) (string, error) {
+	if !strings.Contains(statement, "?") {
+		if len(params) > 0 {
+			return "", fmt.Errorf("statement has no ? placeholders but %d parameters were provided", len(params))
+		}
+		return statement, nil
+	}
+	var b strings.Builder
+	b.Grow(len(statement) + 16*len(params))
+	idx := 0
+	for i := 0; i < len(statement); i++ {
+		c := statement[i]
+		// Don't substitute ? inside single-quoted strings. Cheap
+		// state machine — toggles on every unescaped quote.
+		if c == '\'' {
+			b.WriteByte(c)
+			i++
+			for ; i < len(statement); i++ {
+				b.WriteByte(statement[i])
+				if statement[i] == '\'' {
+					if i+1 < len(statement) && statement[i+1] == '\'' {
+						b.WriteByte('\'')
+						i++
+						continue
+					}
+					break
+				}
+			}
+			continue
+		}
+		if c == '?' {
+			if idx >= len(params) {
+				return "", fmt.Errorf("not enough parameters: statement uses %d, only %d provided", idx+1, len(params))
+			}
+			lit, err := paramLiteral(params[idx])
+			if err != nil {
+				return "", fmt.Errorf("parameter %d: %w", idx, err)
+			}
+			b.WriteString(lit)
+			idx++
+			continue
+		}
+		b.WriteByte(c)
+	}
+	if idx != len(params) {
+		return "", fmt.Errorf("statement uses %d placeholders, %d parameters provided", idx, len(params))
+	}
+	return b.String(), nil
+}
+
+func paramLiteral(p PartiQLParameter) (string, error) {
+	switch {
+	case p.S != nil:
+		return "'" + strings.ReplaceAll(*p.S, "'", "''") + "'", nil
+	case p.N != nil:
+		return *p.N, nil
+	case p.B != nil:
+		raw, err := base64.StdEncoding.DecodeString(*p.B)
+		if err != nil {
+			return "", fmt.Errorf("base64: %w", err)
+		}
+		return "'" + strings.ReplaceAll(string(raw), "'", "''") + "'", nil
+	case p.BOOL != nil:
+		if *p.BOOL {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
+	case p.NULL != nil && *p.NULL:
+		return "NULL", nil
+	}
+	return "", fmt.Errorf("parameter has no field set")
+}
