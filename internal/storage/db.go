@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	pebbledb "github.com/cockroachdb/pebble"
-	"github.com/cockroachdb/pebble/bloom"
 )
 
 // Replicator is satisfied by anything that knows how to ship a
@@ -50,6 +49,15 @@ type Options struct {
 	// false (NoSync) for max throughput. Production deployments that
 	// need crash durability flip this on.
 	FsyncOnCommit bool
+	// Profile selects a named Pebble performance profile. Supported
+	// values: default, balanced, write-heavy, raft.
+	Profile string
+	// Tuning overrides individual Pebble profile values. Zero values
+	// inherit the selected profile/default.
+	Tuning PebbleTuning
+	// Backpressure slows or rejects caller-facing writes when Pebble
+	// LSM pressure crosses configured thresholds.
+	Backpressure BackpressureOptions
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -63,8 +71,9 @@ type DB struct {
 	stopCh   chan struct{}
 	stopped  chan struct{}
 
-	syncOpt  *pebbledb.WriteOptions
-	repl     Replicator
+	syncOpt *pebbledb.WriteOptions
+	repl    Replicator
+	bp      backpressureController
 }
 
 type commitReq struct {
@@ -80,14 +89,7 @@ const (
 // Open creates or opens the Pebble database at opts.Path. Pebble takes
 // an exclusive file lock on the directory — one process per path.
 func Open(opts Options) (*DB, error) {
-	pOpts := &pebbledb.Options{
-		Cache: pebbledb.NewCache(256 << 20), // 256 MiB block cache
-	}
-	for i := range pOpts.Levels {
-		pOpts.Levels[i].FilterPolicy = bloom.FilterPolicy(10)
-		pOpts.Levels[i].FilterType = pebbledb.TableFilter
-	}
-
+	pOpts := newPebbleOptions(opts)
 	d, err := pebbledb.Open(opts.Path, pOpts)
 	if err != nil {
 		return nil, fmt.Errorf("pebble open %s: %w", opts.Path, err)
@@ -105,6 +107,7 @@ func Open(opts Options) (*DB, error) {
 		stopCh:   make(chan struct{}),
 		stopped:  make(chan struct{}),
 		syncOpt:  syncOpt,
+		bp:       newBackpressureController(opts.Backpressure),
 	}
 	go wrapper.commitLoop()
 	return wrapper, nil
@@ -129,6 +132,19 @@ func (d *DB) Close() error {
 // and the future Raft snapshot path (pebble.NewSnapshot over the cefas/
 // range). Production code should go through the typed helpers.
 func (d *DB) Raw() *pebbledb.DB { return d.db }
+
+// Metrics returns Pebble's point-in-time engine metrics. The values are
+// intended for observability collectors and diagnostics.
+func (d *DB) Metrics() pebbledb.Metrics {
+	if d == nil || d.db == nil {
+		return pebbledb.Metrics{}
+	}
+	m := d.db.Metrics()
+	if m == nil {
+		return pebbledb.Metrics{}
+	}
+	return *m
+}
 
 // Get returns the value at key. Returns (nil, ErrNotFound) on miss.
 func (d *DB) Get(key []byte) ([]byte, error) {

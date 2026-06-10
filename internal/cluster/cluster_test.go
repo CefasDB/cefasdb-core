@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -48,6 +50,41 @@ func TestRouterSingleShard(t *testing.T) {
 		if r.ShardForPK([]byte(fmt.Sprintf("k%d", i))) != 0 {
 			t.Fatalf("single-shard router routed away from 0")
 		}
+	}
+}
+
+func TestManagerSeparatesRaftStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	addr := pickPort(t)
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:          t.TempDir(),
+		Shards:        1,
+		SelfID:        "n0",
+		MuxAddr:       addr,
+		Peers:         map[string]string{"n0": addr},
+		Bootstrap:     true,
+		HeartbeatMS:   50,
+		ElectionMS:    150,
+		LeaderLeaseMS: 50,
+		CommitMS:      10,
+		LogOutput:     io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	sh, ok := mgr.Shard(0)
+	if !ok || sh.RaftStorage == nil {
+		t.Fatalf("missing shard raft storage: %#v", sh)
+	}
+	if hasPrefix(t, sh.Storage, []byte("raft/")) {
+		t.Fatal("data store contains raft metadata")
+	}
+	if !hasPrefix(t, sh.RaftStorage, []byte("raft/")) {
+		t.Fatal("raft store does not contain raft metadata")
 	}
 }
 
@@ -221,4 +258,20 @@ func TestMultiShardCluster(t *testing.T) {
 			t.Fatalf("post-failover write on shard %d: %v", shardID, err)
 		}
 	}
+}
+
+func hasPrefix(t testing.TB, db *storage.DB, prefix []byte) bool {
+	t.Helper()
+	upper := append([]byte(nil), prefix...)
+	upper[len(upper)-1]++
+	iter, err := db.Raw().NewIter(&pebbledb.IterOptions{LowerBound: prefix, UpperBound: upper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+	ok := iter.First()
+	if err := iter.Error(); err != nil {
+		t.Fatal(err)
+	}
+	return ok
 }

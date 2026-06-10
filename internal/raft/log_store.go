@@ -12,7 +12,7 @@ import (
 )
 
 // logStore implements hashicorp/raft.LogStore over Pebble. Entries
-// live under raft/log/<be8 index>. Values are msgpack-encoded
+// live under raft/log/<be8 index> in the raft metadata store. Values are msgpack-encoded
 // hraft.Log structs — same encoding hashicorp/raft-boltdb uses, so the
 // on-disk shape is unsurprising.
 //

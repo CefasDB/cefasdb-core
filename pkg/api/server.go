@@ -11,6 +11,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,6 +122,63 @@ func (s *Server) allShards() []*storage.DB {
 	return out
 }
 
+func (s *Server) compact(table, lowerB64, upperB64 string, parallelize bool) ([]storage.CompactionResult, error) {
+	dbs := s.allShards()
+	results := make([]storage.CompactionResult, 0, len(dbs))
+	if table != "" {
+		if _, err := s.cat.Describe(table); err != nil {
+			return nil, err
+		}
+		for _, db := range dbs {
+			res, err := db.CompactTable(table, parallelize)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, res)
+		}
+		return results, nil
+	}
+	if lowerB64 == "" || upperB64 == "" {
+		return nil, fmt.Errorf("table or lower/upper range is required")
+	}
+	lower, err := base64.StdEncoding.DecodeString(lowerB64)
+	if err != nil {
+		return nil, fmt.Errorf("lower: %w", err)
+	}
+	upper, err := base64.StdEncoding.DecodeString(upperB64)
+	if err != nil {
+		return nil, fmt.Errorf("upper: %w", err)
+	}
+	for _, db := range dbs {
+		res, err := db.CompactRange(lower, upper, parallelize)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+	}
+	return results, nil
+}
+
+func compactionResultsJSON(results []storage.CompactionResult) []map[string]any {
+	out := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		out = append(out, map[string]any{
+			"table":           r.Table,
+			"lower":           base64.StdEncoding.EncodeToString(r.Lower),
+			"upper":           base64.StdEncoding.EncodeToString(r.Upper),
+			"startedAt":       r.StartedAt.Format(time.RFC3339Nano),
+			"finishedAt":      r.FinishedAt.Format(time.RFC3339Nano),
+			"elapsedSeconds":  r.Elapsed.Seconds(),
+			"parallelized":    r.Parallelized,
+			"beforeL0Files":   r.BeforeL0Files,
+			"afterL0Files":    r.AfterL0Files,
+			"beforeDebtBytes": r.BeforeDebtBytes,
+			"afterDebtBytes":  r.AfterDebtBytes,
+		})
+	}
+	return out
+}
+
 // AttachCluster wires the optional cluster-management surface. Pass a
 // *raft.DB; nil keeps the server in single-node mode.
 func (s *Server) AttachCluster(c Cluster) { s.cluster = c }
@@ -132,8 +190,8 @@ func (s *Server) AttachAuth(v *auth.Validator) { s.validator = v }
 // publicPaths bypass the auth middleware so probes and cluster status
 // stay reachable on an unjoined or pre-credentialed node.
 var publicPaths = map[string]bool{
-	"/v1/Health":          true,
-	"/v1/cluster/status":  true,
+	"/v1/Health":         true,
+	"/v1/cluster/status": true,
 }
 
 // Routes attaches cefas HTTP endpoints onto mux. Path layout follows
@@ -152,8 +210,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		}
 		mux.Handle(path, h)
 	}
-	register("/v1/tables", s.handleTables)              // POST=create, GET=list
-	register("/v1/tables/", s.handleTable)              // GET=describe
+	register("/v1/tables", s.handleTables) // POST=create, GET=list
+	register("/v1/tables/", s.handleTable) // GET=describe
 	register("/v1/PutItem", s.handlePutItem)
 	register("/v1/GetItem", s.handleGetItem)
 	register("/v1/DeleteItem", s.handleDeleteItem)
@@ -172,6 +230,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("/v1/Stream", s.handleStream)
 	mux.HandleFunc("/v1/admin/snapshots", s.handleListSnapshots)
+	mux.HandleFunc("/v1/admin/compact", s.handleCompact)
 }
 
 // handleStream is the HTTP/SSE variant of the CDC stream. Clients
@@ -227,6 +286,34 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"snapshots": metas})
 }
 
+type compactRequest struct {
+	Table       string `json:"table,omitempty"`
+	LowerBase64 string `json:"lower,omitempty"`
+	UpperBase64 string `json:"upper,omitempty"`
+	Parallelize bool   `json:"parallelize,omitempty"`
+}
+
+func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	var req compactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	results, err := s.compact(req.Table, req.LowerBase64, req.UpperBase64, req.Parallelize)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"compactions": compactionResultsJSON(results)})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Health(r.Context()); err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err)
@@ -238,10 +325,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // ---------- table management ----------
 
 type createTableRequest struct {
-	Name           string                          `json:"name"`
-	KeySchema      jsonKeySchema                   `json:"keySchema"`
-	GSIs           []types.GSIDescriptor           `json:"gsis,omitempty"`
-	SpatialIndexes []types.SpatialIndexDescriptor  `json:"spatialIndexes,omitempty"`
+	Name           string                         `json:"name"`
+	KeySchema      jsonKeySchema                  `json:"keySchema"`
+	GSIs           []types.GSIDescriptor          `json:"gsis,omitempty"`
+	SpatialIndexes []types.SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
 }
 
 type jsonKeySchema struct {
@@ -313,37 +400,37 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 // ---------- item ops ----------
 
 type putItemRequest struct {
-	Table     string                    `json:"table"`
-	Item      map[string]ddbjson.Attribute  `json:"item"`
-	Condition string                    `json:"condition,omitempty"`
-	Binds     map[string]ddbjson.Attribute  `json:"binds,omitempty"`
+	Table     string                       `json:"table"`
+	Item      map[string]ddbjson.Attribute `json:"item"`
+	Condition string                       `json:"condition,omitempty"`
+	Binds     map[string]ddbjson.Attribute `json:"binds,omitempty"`
 }
 
 type getItemRequest struct {
-	Table       string                   `json:"table"`
+	Table       string                       `json:"table"`
 	Key         map[string]ddbjson.Attribute `json:"key"`
-	Consistency string                   `json:"consistency,omitempty"` // "" or "eventual" → local; "strong" → leader + barrier
+	Consistency string                       `json:"consistency,omitempty"` // "" or "eventual" → local; "strong" → leader + barrier
 }
 
 type deleteItemRequest struct {
-	Table     string                   `json:"table"`
+	Table     string                       `json:"table"`
 	Key       map[string]ddbjson.Attribute `json:"key"`
-	Condition string                   `json:"condition,omitempty"`
+	Condition string                       `json:"condition,omitempty"`
 	Binds     map[string]ddbjson.Attribute `json:"binds,omitempty"`
 }
 
 type queryRequest struct {
-	Table       string         `json:"table"`
-	IndexName   string         `json:"indexName,omitempty"`
+	Table       string             `json:"table"`
+	IndexName   string             `json:"indexName,omitempty"`
 	PKValue     ddbjson.Attribute  `json:"pkValue"`
 	SKLow       *ddbjson.Attribute `json:"skLow,omitempty"`
 	SKHigh      *ddbjson.Attribute `json:"skHigh,omitempty"`
-	Limit       int            `json:"limit,omitempty"`
-	Consistency string         `json:"consistency,omitempty"`
+	Limit       int                `json:"limit,omitempty"`
+	Consistency string             `json:"consistency,omitempty"`
 }
 
 type batchWriteOp struct {
-	Op   string                   `json:"op"` // "put" | "delete"
+	Op   string                       `json:"op"` // "put" | "delete"
 	Item map[string]ddbjson.Attribute `json:"item,omitempty"`
 	Key  map[string]ddbjson.Attribute `json:"key,omitempty"`
 }
@@ -354,7 +441,7 @@ type batchWriteRequest struct {
 }
 
 type batchGetRequest struct {
-	Table string                     `json:"table"`
+	Table string                         `json:"table"`
 	Keys  []map[string]ddbjson.Attribute `json:"keys"`
 }
 
@@ -697,8 +784,8 @@ func (s *Server) handleSql(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := struct {
-		AffectedRows int                              `json:"affectedRows"`
-		Rows         []map[string]ddbjson.Attribute       `json:"rows,omitempty"`
+		AffectedRows int                            `json:"affectedRows"`
+		Rows         []map[string]ddbjson.Attribute `json:"rows,omitempty"`
 	}{AffectedRows: res.AffectedRows}
 	for _, row := range res.Rows {
 		out.Rows = append(out.Rows, ddbjson.EncodeItem(row))
@@ -748,7 +835,7 @@ func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt)
 // runs the regular cefas SQL pipeline so the result shape matches
 // /v1/Sql.
 type partiqlRequest struct {
-	Statement  string                     `json:"Statement"`
+	Statement  string                      `json:"Statement"`
 	Parameters []cefassql.PartiQLParameter `json:"Parameters,omitempty"`
 }
 
@@ -787,7 +874,7 @@ func (s *Server) handlePartiQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := struct {
-		AffectedRows int                        `json:"affectedRows"`
+		AffectedRows int                            `json:"affectedRows"`
 		Rows         []map[string]ddbjson.Attribute `json:"rows,omitempty"`
 	}{AffectedRows: res.AffectedRows}
 	for _, row := range res.Rows {
@@ -797,12 +884,12 @@ func (s *Server) handlePartiQL(w http.ResponseWriter, r *http.Request) {
 }
 
 type spatialQueryRequest struct {
-	Table     string         `json:"table"`
-	IndexName string         `json:"indexName"`
-	BBox      *bboxJSON      `json:"bbox,omitempty"`
-	Radius    *radiusJSON    `json:"radius,omitempty"`
-	Z         *zboxJSON      `json:"z,omitempty"`
-	Limit     int            `json:"limit,omitempty"`
+	Table     string      `json:"table"`
+	IndexName string      `json:"indexName"`
+	BBox      *bboxJSON   `json:"bbox,omitempty"`
+	Radius    *radiusJSON `json:"radius,omitempty"`
+	Z         *zboxJSON   `json:"z,omitempty"`
+	Limit     int         `json:"limit,omitempty"`
 }
 
 type bboxJSON struct {
@@ -886,7 +973,7 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 // ---------- cluster endpoints ----------
 
 type clusterStatusResponse struct {
-	Mode       string `json:"mode"`              // "single-node" or "raft"
+	Mode       string `json:"mode"` // "single-node" or "raft"
 	IsLeader   bool   `json:"isLeader"`
 	SelfID     string `json:"selfId,omitempty"`
 	BindAddr   string `json:"bindAddr,omitempty"`
@@ -1187,6 +1274,9 @@ func mapWriteErr(err error) int {
 		// Location header, not a JSON body.
 		return http.StatusTemporaryRedirect
 	}
+	if errors.Is(err, storage.ErrThrottled) {
+		return http.StatusTooManyRequests
+	}
 	return http.StatusInternalServerError
 }
 
@@ -1214,4 +1304,3 @@ func writeWriteErr(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	writeErr(w, mapWriteErr(err), err)
 }
-

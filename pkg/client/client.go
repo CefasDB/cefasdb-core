@@ -377,7 +377,7 @@ func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.It
 type TransactKind uint8
 
 const (
-	TransactPut            TransactKind = iota + 1
+	TransactPut TransactKind = iota + 1
 	TransactDelete
 	TransactConditionCheck
 )
@@ -676,10 +676,10 @@ func (c *Client) Sql(ctx context.Context, query string) (*SqlResult, error) {
 // BackupDescriptor mirrors the wire shape — name + creation time +
 // table list + on-disk path.
 type BackupDescriptor struct {
-	Name          string
-	CreatedAt     int64
-	Tables        []string
-	CheckpointAt  string
+	Name         string
+	CreatedAt    int64
+	Tables       []string
+	CheckpointAt string
 }
 
 // CreateBackup snapshots the live keyspace into a pebble checkpoint
@@ -734,21 +734,59 @@ func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceT
 	return int(resp.GetRowsCopied()), nil
 }
 
+type CompactionResult struct {
+	Table            string
+	Lower            []byte
+	Upper            []byte
+	StartedAtUnixNS  int64
+	FinishedAtUnixNS int64
+	ElapsedSeconds   float64
+	Parallelized     bool
+	BeforeL0Files    int64
+	AfterL0Files     int64
+	BeforeDebtBytes  uint64
+	AfterDebtBytes   uint64
+}
+
+func (c *Client) CompactTable(ctx context.Context, table string, parallelize bool) ([]CompactionResult, error) {
+	resp, err := c.stub.Compact(c.withAuth(ctx), &cefaspb.CompactRequest{Table: table, Parallelize: parallelize})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CompactionResult, 0, len(resp.GetResults()))
+	for _, r := range resp.GetResults() {
+		out = append(out, CompactionResult{
+			Table:            r.GetTable(),
+			Lower:            append([]byte(nil), r.GetLower()...),
+			Upper:            append([]byte(nil), r.GetUpper()...),
+			StartedAtUnixNS:  r.GetStartedAtUnixNs(),
+			FinishedAtUnixNS: r.GetFinishedAtUnixNs(),
+			ElapsedSeconds:   r.GetElapsedSeconds(),
+			Parallelized:     r.GetParallelized(),
+			BeforeL0Files:    r.GetBeforeL0Files(),
+			AfterL0Files:     r.GetAfterL0Files(),
+			BeforeDebtBytes:  r.GetBeforeDebtBytes(),
+			AfterDebtBytes:   r.GetAfterDebtBytes(),
+		})
+	}
+	return out, nil
+}
+
 // ---------- plugins ----------
 
 // PluginInfo mirrors the wire-side PluginDescriptor in a Go-friendly
 // shape. Plugins not implementing StatusProvider report empty
 // counters.
 type PluginInfo struct {
-	Name           string
-	Kind           string
-	Version        string
-	Description    string
-	State          string
-	LastError      string
-	LastErrorUnix  int64
-	ItemsIndexed   int64
-	StartedAtUnix  int64
+	Name          string
+	Kind          string
+	Version       string
+	Description   string
+	State         string
+	LastError     string
+	LastErrorUnix int64
+	ItemsIndexed  int64
+	StartedAtUnix int64
 }
 
 // ListPlugins enumerates every plugin registered with the server. The
@@ -909,11 +947,11 @@ func (c *Client) CohortEstimate(ctx context.Context, table, field, filter string
 
 // GeoAudienceRequest packs the inputs for GeoAudience.
 type GeoAudienceRequest struct {
-	Table      string
-	Index      string  // empty → "loc_geo"
-	Lat, Lon   float64
+	Table        string
+	Index        string // empty → "loc_geo"
+	Lat, Lon     float64
 	RadiusMeters float64
-	Limit      int
+	Limit        int
 }
 
 // GeoAudience streams every item within radius of (lat, lon).

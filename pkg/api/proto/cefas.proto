@@ -63,6 +63,9 @@ service Cefas {
   // Snapshot administration (PITR foundation).
   rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
 
+  // Storage administration.
+  rpc Compact(CompactRequest) returns (CompactResponse);
+
   // Admin-named backups (pebble.Checkpoint of the live keyspace,
   // catalogued under cefas/admin/backups/<name>).
   rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
@@ -123,6 +126,29 @@ message SnapshotMetadata {
   uint64 raft_term     = 3;
   int64  unix_seconds  = 4;
   int64  size_bytes    = 5;
+}
+
+message CompactRequest {
+  string table        = 1;
+  bytes  lower        = 2;
+  bytes  upper        = 3;
+  bool   parallelize  = 4;
+}
+message CompactResult {
+  string table              = 1;
+  bytes  lower              = 2;
+  bytes  upper              = 3;
+  int64  started_at_unix_ns = 4;
+  int64  finished_at_unix_ns = 5;
+  double elapsed_seconds    = 6;
+  bool   parallelized       = 7;
+  int64  before_l0_files    = 8;
+  int64  after_l0_files     = 9;
+  uint64 before_debt_bytes  = 10;
+  uint64 after_debt_bytes   = 11;
+}
+message CompactResponse {
+  repeated CompactResult results = 1;
 }
 
 message BackupDescriptor {

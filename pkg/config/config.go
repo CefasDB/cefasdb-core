@@ -33,7 +33,29 @@ type Config struct {
 		MTLSCAPath  string `yaml:"mtlsCaPath"`
 	} `yaml:"grpc"`
 	Storage struct {
-		FsyncOnCommit bool `yaml:"fsyncOnCommit"`
+		FsyncOnCommit               bool          `yaml:"fsyncOnCommit"`
+		Profile                     string        `yaml:"profile"`
+		RaftProfile                 string        `yaml:"raftProfile"`
+		BlockCacheSizeBytes         int64         `yaml:"blockCacheSizeBytes"`
+		MemTableSizeBytes           uint64        `yaml:"memTableSizeBytes"`
+		MemTableStopWritesThreshold int           `yaml:"memTableStopWritesThreshold"`
+		MaxConcurrentCompactions    int           `yaml:"maxConcurrentCompactions"`
+		L0CompactionConcurrency     int           `yaml:"l0CompactionConcurrency"`
+		L0CompactionThreshold       int           `yaml:"l0CompactionThreshold"`
+		L0CompactionFileThreshold   int           `yaml:"l0CompactionFileThreshold"`
+		L0StopWritesThreshold       int           `yaml:"l0StopWritesThreshold"`
+		BytesPerSync                int           `yaml:"bytesPerSync"`
+		WALBytesPerSync             int           `yaml:"walBytesPerSync"`
+		BackpressureEnabled         bool          `yaml:"backpressureEnabled"`
+		BackpressureRejectCritical  bool          `yaml:"backpressureRejectCritical"`
+		BackpressureWarningL0Files  int64         `yaml:"backpressureWarningL0Files"`
+		BackpressureCriticalL0Files int64         `yaml:"backpressureCriticalL0Files"`
+		BackpressureWarningDebt     uint64        `yaml:"backpressureWarningDebtBytes"`
+		BackpressureCriticalDebt    uint64        `yaml:"backpressureCriticalDebtBytes"`
+		BackpressureWarningReadAmp  int           `yaml:"backpressureWarningReadAmp"`
+		BackpressureCriticalReadAmp int           `yaml:"backpressureCriticalReadAmp"`
+		BackpressureWarningDelay    time.Duration `yaml:"backpressureWarningDelay"`
+		BackpressureCriticalDelay   time.Duration `yaml:"backpressureCriticalDelay"`
 	} `yaml:"storage"`
 	Cluster struct {
 		Shards    int               `yaml:"shards"`
@@ -44,8 +66,9 @@ type Config struct {
 		HTTPPeers map[string]string `yaml:"httpPeers"`
 	} `yaml:"cluster"`
 	Raft struct {
-		Bind string `yaml:"bind"`
-		Path string `yaml:"path"`
+		Bind      string `yaml:"bind"`
+		Path      string `yaml:"path"`
+		StorePath string `yaml:"storePath"`
 	} `yaml:"raft"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
@@ -124,6 +147,24 @@ func ApplyEnv(cfg *Config) error {
 		}
 		return current
 	}
+	integer64 := func(key string, current int64) int64 {
+		if v, ok := os.LookupEnv("CEFAS_" + key); ok {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err == nil {
+				return parsed
+			}
+		}
+		return current
+	}
+	unsigned64 := func(key string, current uint64) uint64 {
+		if v, ok := os.LookupEnv("CEFAS_" + key); ok {
+			parsed, err := strconv.ParseUint(v, 10, 64)
+			if err == nil {
+				return parsed
+			}
+		}
+		return current
+	}
 	dur := func(key string, current time.Duration) time.Duration {
 		if v, ok := os.LookupEnv("CEFAS_" + key); ok {
 			parsed, err := time.ParseDuration(v)
@@ -152,6 +193,28 @@ func ApplyEnv(cfg *Config) error {
 	cfg.GRPC.MTLSCAPath = str("GRPC_MTLS_CA", cfg.GRPC.MTLSCAPath)
 
 	cfg.Storage.FsyncOnCommit = boolean("STORAGE_FSYNC", cfg.Storage.FsyncOnCommit)
+	cfg.Storage.Profile = str("STORAGE_PROFILE", cfg.Storage.Profile)
+	cfg.Storage.RaftProfile = str("STORAGE_RAFT_PROFILE", cfg.Storage.RaftProfile)
+	cfg.Storage.BlockCacheSizeBytes = integer64("STORAGE_BLOCK_CACHE_SIZE_BYTES", cfg.Storage.BlockCacheSizeBytes)
+	cfg.Storage.MemTableSizeBytes = unsigned64("STORAGE_MEMTABLE_SIZE_BYTES", cfg.Storage.MemTableSizeBytes)
+	cfg.Storage.MemTableStopWritesThreshold = integer("STORAGE_MEMTABLE_STOP_WRITES_THRESHOLD", cfg.Storage.MemTableStopWritesThreshold)
+	cfg.Storage.MaxConcurrentCompactions = integer("STORAGE_MAX_CONCURRENT_COMPACTIONS", cfg.Storage.MaxConcurrentCompactions)
+	cfg.Storage.L0CompactionConcurrency = integer("STORAGE_L0_COMPACTION_CONCURRENCY", cfg.Storage.L0CompactionConcurrency)
+	cfg.Storage.L0CompactionThreshold = integer("STORAGE_L0_COMPACTION_THRESHOLD", cfg.Storage.L0CompactionThreshold)
+	cfg.Storage.L0CompactionFileThreshold = integer("STORAGE_L0_COMPACTION_FILE_THRESHOLD", cfg.Storage.L0CompactionFileThreshold)
+	cfg.Storage.L0StopWritesThreshold = integer("STORAGE_L0_STOP_WRITES_THRESHOLD", cfg.Storage.L0StopWritesThreshold)
+	cfg.Storage.BytesPerSync = integer("STORAGE_BYTES_PER_SYNC", cfg.Storage.BytesPerSync)
+	cfg.Storage.WALBytesPerSync = integer("STORAGE_WAL_BYTES_PER_SYNC", cfg.Storage.WALBytesPerSync)
+	cfg.Storage.BackpressureEnabled = boolean("STORAGE_BACKPRESSURE_ENABLED", cfg.Storage.BackpressureEnabled)
+	cfg.Storage.BackpressureRejectCritical = boolean("STORAGE_BACKPRESSURE_REJECT_CRITICAL", cfg.Storage.BackpressureRejectCritical)
+	cfg.Storage.BackpressureWarningL0Files = integer64("STORAGE_BACKPRESSURE_WARNING_L0_FILES", cfg.Storage.BackpressureWarningL0Files)
+	cfg.Storage.BackpressureCriticalL0Files = integer64("STORAGE_BACKPRESSURE_CRITICAL_L0_FILES", cfg.Storage.BackpressureCriticalL0Files)
+	cfg.Storage.BackpressureWarningDebt = unsigned64("STORAGE_BACKPRESSURE_WARNING_DEBT_BYTES", cfg.Storage.BackpressureWarningDebt)
+	cfg.Storage.BackpressureCriticalDebt = unsigned64("STORAGE_BACKPRESSURE_CRITICAL_DEBT_BYTES", cfg.Storage.BackpressureCriticalDebt)
+	cfg.Storage.BackpressureWarningReadAmp = integer("STORAGE_BACKPRESSURE_WARNING_READ_AMP", cfg.Storage.BackpressureWarningReadAmp)
+	cfg.Storage.BackpressureCriticalReadAmp = integer("STORAGE_BACKPRESSURE_CRITICAL_READ_AMP", cfg.Storage.BackpressureCriticalReadAmp)
+	cfg.Storage.BackpressureWarningDelay = dur("STORAGE_BACKPRESSURE_WARNING_DELAY", cfg.Storage.BackpressureWarningDelay)
+	cfg.Storage.BackpressureCriticalDelay = dur("STORAGE_BACKPRESSURE_CRITICAL_DELAY", cfg.Storage.BackpressureCriticalDelay)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
 	cfg.Cluster.MuxAddr = str("CLUSTER_MUX_ADDR", cfg.Cluster.MuxAddr)
@@ -162,6 +225,7 @@ func ApplyEnv(cfg *Config) error {
 
 	cfg.Raft.Bind = str("RAFT_BIND", cfg.Raft.Bind)
 	cfg.Raft.Path = str("RAFT_PATH", cfg.Raft.Path)
+	cfg.Raft.StorePath = str("RAFT_STORE_PATH", cfg.Raft.StorePath)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)

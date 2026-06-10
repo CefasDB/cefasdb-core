@@ -1,7 +1,7 @@
 // Package metrics is the cefas Prometheus surface. It exposes a
 // per-process Registry with counters and histograms for every public
-// operation, plus a few engine-level gauges (raft commit lag, Pebble
-// L0 file count). The HTTP server registers /metrics against this
+// operation, plus engine-level gauges (raft commit lag, Pebble
+// health and level stats). The HTTP server registers /metrics against this
 // registry so a Prometheus scraper sees a stable schema across
 // versions.
 //
@@ -37,7 +37,23 @@ type Metrics struct {
 
 	RaftCommitLagSeconds *prometheus.GaugeVec // shard
 	RaftIsLeader         *prometheus.GaugeVec // shard
-	PebbleL0Files        *prometheus.GaugeVec // shard
+
+	PebbleReadAmp               *prometheus.GaugeVec // shard
+	PebbleCompactionDebtBytes   *prometheus.GaugeVec // shard
+	PebbleCompactionsInProgress *prometheus.GaugeVec // shard
+	PebbleCompactionCount       *prometheus.GaugeVec // shard
+	PebbleFlushCount            *prometheus.GaugeVec // shard
+	PebbleMemTableBytes         *prometheus.GaugeVec // shard
+	PebbleWALBytes              *prometheus.GaugeVec // shard
+	PebbleTableBytes            *prometheus.GaugeVec // shard
+	PebbleL0Files               *prometheus.GaugeVec // shard
+	PebbleLevelFiles            *prometheus.GaugeVec // shard, level
+	PebbleLevelBytes            *prometheus.GaugeVec // shard, level
+	PebbleLevelSublevels        *prometheus.GaugeVec // shard, level
+	PebbleLevelScore            *prometheus.GaugeVec // shard, level
+
+	BackpressureState  *prometheus.GaugeVec // shard
+	BackpressureReason *prometheus.GaugeVec // shard, reason
 
 	AuthRejectedTotal *prometheus.CounterVec // reason{missing_token,invalid_token,bad_scope}
 }
@@ -87,10 +103,66 @@ func New() *Metrics {
 			Name: "cefas_raft_is_leader",
 			Help: "1 if this node is the current leader of the shard, else 0.",
 		}, []string{"shard"}),
+		PebbleReadAmp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_read_amp",
+			Help: "Current Pebble read amplification estimate for the shard.",
+		}, []string{"shard"}),
+		PebbleCompactionDebtBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_compaction_debt_bytes",
+			Help: "Estimated bytes that need compaction for the shard to reach steady state.",
+		}, []string{"shard"}),
+		PebbleCompactionsInProgress: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_compactions_in_progress",
+			Help: "Number of Pebble compactions currently in progress for the shard.",
+		}, []string{"shard"}),
+		PebbleCompactionCount: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_compaction_count",
+			Help: "Cumulative Pebble compaction count since the shard was opened.",
+		}, []string{"shard"}),
+		PebbleFlushCount: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_flush_count",
+			Help: "Cumulative Pebble flush count since the shard was opened.",
+		}, []string{"shard"}),
+		PebbleMemTableBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_memtable_bytes",
+			Help: "Pebble memtable bytes allocated for the shard.",
+		}, []string{"shard"}),
+		PebbleWALBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_wal_bytes",
+			Help: "Pebble live WAL bytes for the shard.",
+		}, []string{"shard"}),
+		PebbleTableBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_table_bytes",
+			Help: "Pebble backing table bytes for the shard.",
+		}, []string{"shard"}),
 		PebbleL0Files: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_pebble_l0_files",
 			Help: "Number of L0 SSTables in the shard's Pebble store.",
 		}, []string{"shard"}),
+		PebbleLevelFiles: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_level_files",
+			Help: "Pebble SSTable count per level.",
+		}, []string{"shard", "level"}),
+		PebbleLevelBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_level_bytes",
+			Help: "Pebble SSTable bytes per level.",
+		}, []string{"shard", "level"}),
+		PebbleLevelSublevels: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_level_sublevels",
+			Help: "Pebble sublevel count per level.",
+		}, []string{"shard", "level"}),
+		PebbleLevelScore: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_level_score",
+			Help: "Pebble compaction score per level.",
+		}, []string{"shard", "level"}),
+		BackpressureState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_backpressure_state",
+			Help: "Write backpressure state for the shard: 0 normal, 1 warning, 2 critical.",
+		}, []string{"shard"}),
+		BackpressureReason: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_backpressure_active",
+			Help: "1 when write backpressure is active for the shard and reason.",
+		}, []string{"shard", "reason"}),
 		AuthRejectedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "cefas_auth_rejected_total",
 			Help: "Authentication / authorisation failures by reason.",
@@ -104,7 +176,21 @@ func New() *Metrics {
 		m.SpatialCells,
 		m.RaftCommitLagSeconds,
 		m.RaftIsLeader,
+		m.PebbleReadAmp,
+		m.PebbleCompactionDebtBytes,
+		m.PebbleCompactionsInProgress,
+		m.PebbleCompactionCount,
+		m.PebbleFlushCount,
+		m.PebbleMemTableBytes,
+		m.PebbleWALBytes,
+		m.PebbleTableBytes,
 		m.PebbleL0Files,
+		m.PebbleLevelFiles,
+		m.PebbleLevelBytes,
+		m.PebbleLevelSublevels,
+		m.PebbleLevelScore,
+		m.BackpressureState,
+		m.BackpressureReason,
 		m.AuthRejectedTotal,
 	)
 	return m
