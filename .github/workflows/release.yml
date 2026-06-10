@@ -1,13 +1,14 @@
-name: Auto Release
+name: Release
 
 on:
   push:
-    branches: ["main"]
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to reuse (e.g. v0.1.0). Leave empty to create the next patch tag."
-        required: false
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
         type: string
 
 permissions:
@@ -15,101 +16,48 @@ permissions:
   id-token: write
 
 concurrency:
-  group: autorelease-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   BIN_NAME: cefas
   NPM_PACKAGE: "@osvaldoandrade/cefas"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Resolve release tag
-        id: vars
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-
-          requested="${{ github.event.inputs.tag || '' }}"
-          if [ -n "$requested" ]; then
-            if ! [[ "$requested" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "invalid release tag: $requested" >&2
-              exit 1
-            fi
-            if ! git rev-parse "$requested" >/dev/null 2>&1; then
-              echo "release tag does not exist: $requested" >&2
-              exit 1
-            fi
-            git checkout "$requested"
-            tag="$requested"
-            ver="${tag#v}"
-            create_tag=false
-          else
-            latest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -V | tail -n 1 || true)"
-            if [ -z "$latest" ]; then
-              major=0
-              minor=0
-              patch=0
-            else
-              IFS='.' read -r major minor patch <<< "$latest"
-            fi
-
-            if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
-              echo "invalid latest tag version: $latest" >&2
-              exit 1
-            fi
-
-            new_patch=$((patch + 1))
-            ver="${major}.${minor}.${new_patch}"
-            tag="v${ver}"
-
-            while git rev-parse "$tag" >/dev/null 2>&1; do
-              new_patch=$((new_patch + 1))
-              ver="${major}.${minor}.${new_patch}"
-              tag="v${ver}"
-            done
-            create_tag=true
-          fi
-
-          echo "ver=$ver" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "create_tag=$create_tag" >> "$GITHUB_OUTPUT"
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Test CLI
+      - name: Test
         run: go test ./cmd/cefas-cli/...
 
-      - name: Build CLI binaries
+      - name: Build binaries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
 
-          VERSION="${{ steps.vars.outputs.ver }}"
+          VERSION="${RELEASE_TAG#v}"
           for GOOS in linux darwin windows; do
             for GOARCH in amd64 arm64; do
               ext=""
               if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-              echo "Building ${BIN_NAME} ${GOOS}/${GOARCH}"
+              echo "Building $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
-                  -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd.Version=${VERSION}" \
-                  -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
-                  ./cmd/cefas-cli
+                -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd.Version=${VERSION}" \
+                -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
+                ./cmd/cefas-cli
             done
           done
 
@@ -117,22 +65,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum dist/* > dist/SHA256SUMS.txt
-
-      - name: Create and push tag
-        if: ${{ steps.vars.outputs.create_tag == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${{ steps.vars.outputs.tag }}"
-          git tag "$tag"
-          git push origin "$tag"
+          shasum -a 256 dist/* > dist/SHA256SUMS.txt
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: ${{ steps.vars.outputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           files: |
             dist/*
@@ -142,11 +81,12 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+          scope: "@osvaldoandrade"
 
-      - name: Publish npm package
+      - name: Publish npm package (npmjs)
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
@@ -154,21 +94,21 @@ jobs:
             exit 1
           fi
 
-          VERSION="${{ steps.vars.outputs.ver }}"
+          VERSION="${RELEASE_TAG#v}"
           cd npm
           npm version --no-git-tag-version "$VERSION"
-          npm pack --dry-run
-          npm publish --access public --provenance
+          npm pack --dry-run --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
+          npm publish --access public --provenance --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
 
       - name: Smoke test npm install
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ steps.vars.outputs.ver }}"
+          VERSION="${RELEASE_TAG#v}"
           PREFIX="${RUNNER_TEMP}/cefas-npm-smoke"
 
           for attempt in {1..12}; do
-            if npm view "${NPM_PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
+            if npm view "${NPM_PACKAGE}@${VERSION}" version --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 12 ]; then
@@ -178,5 +118,5 @@ jobs:
             sleep 10
           done
 
-          npm install --global --prefix "$PREFIX" "${NPM_PACKAGE}@${VERSION}"
+          npm install --global --prefix "$PREFIX" "${NPM_PACKAGE}@${VERSION}" --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
           "$PREFIX/bin/${BIN_NAME}" version
