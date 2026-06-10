@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: cefas
+    static_configs:
+      - targets:
+          - cefas:8080
+    metrics_path: /metrics

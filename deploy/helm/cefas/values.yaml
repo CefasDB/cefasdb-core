@@ -1,0 +1,77 @@
+# cefas Helm chart values.
+#
+# Defaults bring up a single replica StatefulSet on hostPort-style
+# Services with persistent storage. Multi-node clusters require
+# replicaCount ≥ 3 and the multi-Raft flags below.
+
+image:
+  repository: ghcr.io/osvaldoandrade/cefas
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
+
+service:
+  type: ClusterIP
+  http: 8080
+  grpc: 9090
+  mux: 9100
+
+# Multi-Raft sharding. shards>1 turns on the mux transport.
+cluster:
+  shards: 1
+  bootstrap: true
+  fsyncOnCommit: false
+
+# Optional identity provider (Tikti JWKS).
+identity:
+  jwksUrl: ""
+  issuer: ""
+  audience: ""
+
+# Optional OTLP/gRPC tracing collector.
+tracing:
+  endpoint: ""
+  insecure: true
+  sampleRate: 1.0
+
+# Metrics endpoint always exposed unless explicitly disabled.
+metrics:
+  enabled: true
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+
+# Probes target the cheap /v1/Health endpoint.
+livenessProbe:
+  httpGet:
+    path: /v1/Health
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /v1/Health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10

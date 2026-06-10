@@ -1,0 +1,11 @@
+apiVersion: v2
+name: cefas
+description: cefas — distributed multi-model database with native spatial indexing.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/osvaldoandrade/cefas
+sources:
+  - https://github.com/osvaldoandrade/cefas
+maintainers:
+  - name: osvaldoandrade
