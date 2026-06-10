@@ -28,12 +28,12 @@ import (
 type GRPCServer struct {
 	cefaspb.UnimplementedCefasServer
 
-	db       *storage.DB
-	cat      *catalog.Catalog
-	cluster  Cluster          // nil in single-node mode
-	stream   ChangeStream     // nil when no CDC source attached
-	manager  *cluster.Manager // nil in single-shard mode
-	plugins  *plugin.Registry // nil → uses plugin.Default
+	db      *storage.DB
+	cat     *catalog.Catalog
+	cluster Cluster          // nil in single-node mode
+	stream  ChangeStream     // nil when no CDC source attached
+	manager *cluster.Manager // nil in single-shard mode
+	plugins *plugin.Registry // nil → uses plugin.Default
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
@@ -66,6 +66,46 @@ func (s *GRPCServer) storageFor(pkBytes []byte) *storage.DB {
 		return shard.Storage
 	}
 	return s.db
+}
+
+func (s *GRPCServer) allShards() []*storage.DB {
+	if s.manager == nil {
+		return []*storage.DB{s.db}
+	}
+	out := make([]*storage.DB, 0, len(s.manager.Shards()))
+	for _, sh := range s.manager.Shards() {
+		out = append(out, sh.Storage)
+	}
+	return out
+}
+
+func (s *GRPCServer) compact(table string, lower, upper []byte, parallelize bool) ([]storage.CompactionResult, error) {
+	dbs := s.allShards()
+	results := make([]storage.CompactionResult, 0, len(dbs))
+	if table != "" {
+		if _, err := s.cat.Describe(table); err != nil {
+			return nil, err
+		}
+		for _, db := range dbs {
+			res, err := db.CompactTable(table, parallelize)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, res)
+		}
+		return results, nil
+	}
+	if len(lower) == 0 || len(upper) == 0 {
+		return nil, fmt.Errorf("table or lower/upper range is required")
+	}
+	for _, db := range dbs {
+		res, err := db.CompactRange(lower, upper, parallelize)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+	}
+	return results, nil
 }
 
 // ---------- schema ----------
@@ -820,6 +860,33 @@ func (s *GRPCServer) ListSnapshots(ctx context.Context, _ *cefaspb.ListSnapshots
 	return &cefaspb.ListSnapshotsResponse{Snapshots: out}, nil
 }
 
+func (s *GRPCServer) Compact(ctx context.Context, req *cefaspb.CompactRequest) (*cefaspb.CompactResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	results, err := s.compact(req.GetTable(), req.GetLower(), req.GetUpper(), req.GetParallelize())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	out := make([]*cefaspb.CompactResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, &cefaspb.CompactResult{
+			Table:            r.Table,
+			Lower:            append([]byte(nil), r.Lower...),
+			Upper:            append([]byte(nil), r.Upper...),
+			StartedAtUnixNs:  r.StartedAt.UnixNano(),
+			FinishedAtUnixNs: r.FinishedAt.UnixNano(),
+			ElapsedSeconds:   r.Elapsed.Seconds(),
+			Parallelized:     r.Parallelized,
+			BeforeL0Files:    r.BeforeL0Files,
+			AfterL0Files:     r.AfterL0Files,
+			BeforeDebtBytes:  r.BeforeDebtBytes,
+			AfterDebtBytes:   r.AfterDebtBytes,
+		})
+	}
+	return &cefaspb.CompactResponse{Results: out}, nil
+}
+
 // ---------- cluster ----------
 
 func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
@@ -937,6 +1004,8 @@ func mapStorageErr(err error) error {
 			return status.Errorf(codes.FailedPrecondition, "not leader; retry at %s", nle.LeaderURL)
 		}
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, storage.ErrThrottled):
+		return status.Error(codes.ResourceExhausted, err.Error())
 	}
 	return status.Error(codes.Internal, err.Error())
 }

@@ -19,10 +19,14 @@ import (
 type ShardConfig struct {
 	ShardID uint32
 
-	StoragePath  string
-	FsyncOnCommit bool
+	StoragePath    string
+	FsyncOnCommit  bool
+	StorageProfile string
+	StorageTuning  storage.PebbleTuning
+	Backpressure   storage.BackpressureOptions
 
 	RaftPath      string
+	RaftStorePath string
 	SelfID        string
 	BindAddr      string
 	Bootstrap     bool
@@ -36,9 +40,10 @@ type ShardConfig struct {
 // Shard is the per-shard handle owned by Manager: one storage.DB
 // (with raft attached) per shard.
 type Shard struct {
-	ID      uint32
-	Storage *storage.DB
-	Raft    *craft.DB
+	ID          uint32
+	Storage     *storage.DB
+	RaftStorage *storage.DB
+	Raft        *craft.DB
 }
 
 // Config bundles every input needed to bring up a multi-Raft node.
@@ -77,7 +82,12 @@ type Config struct {
 	// HasExistingState contract).
 	Bootstrap bool
 
-	FsyncOnCommit bool
+	FsyncOnCommit  bool
+	StorageProfile string
+	StorageTuning  storage.PebbleTuning
+	Backpressure   storage.BackpressureOptions
+	RaftProfile    string
+	RaftTuning     storage.PebbleTuning
 
 	HeartbeatMS   int
 	ElectionMS    int
@@ -142,6 +152,7 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 	shardDir := filepath.Join(m.cfg.Root, "shards", fmt.Sprintf("%d", shardID))
 	stateDir := filepath.Join(shardDir, "state")
 	raftDir := filepath.Join(shardDir, "raft")
+	raftStoreDir := filepath.Join(raftDir, "store")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", stateDir, err)
 	}
@@ -149,7 +160,13 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 		return nil, fmt.Errorf("mkdir %s: %w", raftDir, err)
 	}
 
-	st, err := storage.Open(storage.Options{Path: stateDir, FsyncOnCommit: m.cfg.FsyncOnCommit})
+	st, err := storage.Open(storage.Options{
+		Path:          stateDir,
+		FsyncOnCommit: m.cfg.FsyncOnCommit,
+		Profile:       m.cfg.StorageProfile,
+		Tuning:        m.cfg.StorageTuning,
+		Backpressure:  m.cfg.Backpressure,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
 	}
@@ -157,6 +174,21 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
 		// Single-node mode (no raft). The storage.DB stands alone.
 		return &Shard{ID: shardID, Storage: st}, nil
+	}
+
+	raftProfile := m.cfg.RaftProfile
+	if raftProfile == "" {
+		raftProfile = storage.ProfileRaft
+	}
+	raftStore, err := storage.Open(storage.Options{
+		Path:          raftStoreDir,
+		FsyncOnCommit: m.cfg.FsyncOnCommit,
+		Profile:       raftProfile,
+		Tuning:        m.cfg.RaftTuning,
+	})
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("raft storage: %w", err)
 	}
 
 	// Build the per-shard raft config. PeerAddrs in our cluster
@@ -180,19 +212,21 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 	if m.mux != nil {
 		sl, err := m.mux.RegisterGroup(m.router.GroupID(shardID))
 		if err != nil {
+			_ = raftStore.Close()
 			_ = st.Close()
 			return nil, fmt.Errorf("mux register group: %w", err)
 		}
 		rcfg.StreamLayer = sl
 	}
 
-	rdb, err := craft.Open(ctx, rcfg, st.Raw())
+	rdb, err := craft.Open(ctx, rcfg, st.Raw(), raftStore.Raw())
 	if err != nil {
+		_ = raftStore.Close()
 		_ = st.Close()
 		return nil, fmt.Errorf("raft open: %w", err)
 	}
 	st.AttachReplicator(rdb)
-	return &Shard{ID: shardID, Storage: st, Raft: rdb}, nil
+	return &Shard{ID: shardID, Storage: st, RaftStorage: raftStore, Raft: rdb}, nil
 }
 
 // Router exposes the partition router so the API layer can look up a
@@ -226,6 +260,11 @@ func (m *Manager) Close() error {
 	for _, s := range m.shards {
 		if s.Raft != nil {
 			if err := s.Raft.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if s.RaftStorage != nil {
+			if err := s.RaftStorage.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}

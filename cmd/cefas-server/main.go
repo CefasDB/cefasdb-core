@@ -49,9 +49,36 @@ func main() {
 		raftBind      = flag.String("raft-bind", "", "Raft TCP bind address (enables Raft mode)")
 		raftID        = flag.String("raft-id", "", "Unique raft ServerID for this node")
 		raftPath      = flag.String("raft-path", "", "Raft state path (snapshots/, etc.). Defaults to -data/raft")
+		raftStorePath = flag.String("raft-store-path", "", "Pebble path for Raft log/stable metadata. Defaults to -data/raft-store in single-Raft mode.")
 		raftBootstrap = flag.Bool("raft-bootstrap", false, "Bootstrap a new cluster from -raft-peers (run on the first node only)")
 		raftPeersFlag = flag.String("raft-peers", "", "Comma-separated id=raftAddr peer list, e.g. 'a=127.0.0.1:9001,b=127.0.0.1:9002,c=127.0.0.1:9003'")
 		raftHTTPFlag  = flag.String("raft-http-peers", "", "Comma-separated id=httpURL peer list for 307 redirects, e.g. 'a=http://h1:8080,b=http://h2:8080'")
+
+		// Storage tuning.
+		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
+		raftStorageProfile        = flag.String("raft-storage-profile", "", "Pebble profile for separated Raft metadata stores. Defaults to raft.")
+		storageBlockCache         = flag.Int64("storage-block-cache-size", 0, "Pebble block cache size in bytes. 0 inherits selected profile.")
+		storageMemTableSize       = flag.Uint64("storage-memtable-size", 0, "Pebble MemTableSize in bytes. 0 inherits selected profile.")
+		storageMemTableStopWrites = flag.Int("storage-memtable-stop-writes", 0, "Pebble MemTableStopWritesThreshold. 0 inherits selected profile.")
+		storageMaxCompactions     = flag.Int("storage-max-compactions", 0, "Pebble MaxConcurrentCompactions. 0 inherits selected profile.")
+		storageL0Concurrency      = flag.Int("storage-l0-compaction-concurrency", 0, "Pebble Experimental.L0CompactionConcurrency. 0 inherits selected profile.")
+		storageL0Threshold        = flag.Int("storage-l0-compaction-threshold", 0, "Pebble L0CompactionThreshold. 0 inherits selected profile.")
+		storageL0FileThreshold    = flag.Int("storage-l0-compaction-file-threshold", 0, "Pebble L0CompactionFileThreshold. 0 inherits selected profile.")
+		storageL0Stop             = flag.Int("storage-l0-stop-writes-threshold", 0, "Pebble L0StopWritesThreshold. 0 inherits selected profile.")
+		storageBytesPerSync       = flag.Int("storage-bytes-per-sync", 0, "Pebble BytesPerSync. 0 inherits selected profile.")
+		storageWALBytesPerSync    = flag.Int("storage-wal-bytes-per-sync", 0, "Pebble WALBytesPerSync. 0 inherits selected profile.")
+
+		// Adaptive write backpressure.
+		backpressureEnabled      = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
+		backpressureReject       = flag.Bool("storage-backpressure-reject-critical", false, "Reject writes instead of only sleeping when pressure is critical.")
+		backpressureWarnL0       = flag.Int64("storage-backpressure-warning-l0-files", 0, "Warning L0 file threshold. 0 uses default.")
+		backpressureCriticalL0   = flag.Int64("storage-backpressure-critical-l0-files", 0, "Critical L0 file threshold. 0 uses default.")
+		backpressureWarnDebt     = flag.Uint64("storage-backpressure-warning-debt", 0, "Warning compaction debt threshold in bytes. 0 uses default.")
+		backpressureCriticalDebt = flag.Uint64("storage-backpressure-critical-debt", 0, "Critical compaction debt threshold in bytes. 0 uses default.")
+		backpressureWarnReadAmp  = flag.Int("storage-backpressure-warning-read-amp", 0, "Warning Pebble read amplification threshold. 0 uses default.")
+		backpressureCritReadAmp  = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
+		backpressureWarnDelay    = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
+		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -61,8 +88,8 @@ func main() {
 		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
 
 		// Multi-Raft sharding.
-		shardsN     = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
-		muxAddr     = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
+		shardsN = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
+		muxAddr = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
 
 		// gRPC flags.
 		grpcAddr       = flag.String("grpc", "", "gRPC listen address (e.g. ':9090'). Empty disables gRPC.")
@@ -72,10 +99,10 @@ func main() {
 		mtlsCA         = flag.String("mtls-ca", "", "Path to a client-CA bundle. When set, the gRPC listener requires mTLS.")
 
 		// Observability + config.
-		configPath  = flag.String("config", "", "Path to YAML config file. Flag/env values override the file.")
-		metricsOff  = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
-		tracingURL  = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
-		tracingIns  = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
+		configPath = flag.String("config", "", "Path to YAML config file. Flag/env values override the file.")
+		metricsOff = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
+		tracingURL = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
+		tracingIns = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
 	)
 	flag.Parse()
 
@@ -89,7 +116,14 @@ func main() {
 	// Promote any flag value the user actually set onto cfg so the
 	// downstream code paths can read a single source of truth.
 	overlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
-		*raftBind, *raftID, *raftPath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
+		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
+		*storageProfile, *raftStorageProfile,
+		*storageBlockCache, *storageMemTableSize, *storageMemTableStopWrites,
+		*storageMaxCompactions, *storageL0Concurrency, *storageL0Threshold,
+		*storageL0FileThreshold, *storageL0Stop, *storageBytesPerSync, *storageWALBytesPerSync,
+		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
+		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
+		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
@@ -124,24 +158,20 @@ func main() {
 		raftDB *craft.DB
 	)
 
-	if *shardsN > 0 {
-		peers, err := parsePeers(*raftPeersFlag)
-		if err != nil {
-			log.Fatalf("-raft-peers: %v", err)
-		}
-		httpPeers, err := parsePeers(*raftHTTPFlag)
-		if err != nil {
-			log.Fatalf("-raft-http-peers: %v", err)
-		}
+	if cfg.Cluster.Shards > 0 {
 		mgr, err = cluster.Open(context.Background(), cluster.Config{
-			Root:          *dataDir,
-			Shards:        *shardsN,
-			SelfID:        *raftID,
-			MuxAddr:       *muxAddr,
-			Peers:         peers,
-			PeerHTTPAddrs: httpPeers,
-			Bootstrap:     *raftBootstrap,
-			FsyncOnCommit: *fsync,
+			Root:           cfg.Data,
+			Shards:         cfg.Cluster.Shards,
+			SelfID:         cfg.Cluster.SelfID,
+			MuxAddr:        cfg.Cluster.MuxAddr,
+			Peers:          cfg.Cluster.Peers,
+			PeerHTTPAddrs:  cfg.Cluster.HTTPPeers,
+			Bootstrap:      cfg.Cluster.Bootstrap,
+			FsyncOnCommit:  cfg.Storage.FsyncOnCommit,
+			StorageProfile: cfg.Storage.Profile,
+			StorageTuning:  storageTuningFromConfig(cfg),
+			Backpressure:   backpressureFromConfig(cfg),
+			RaftProfile:    cfg.Storage.RaftProfile,
 		})
 		if err != nil {
 			log.Fatalf("open cluster manager: %v", err)
@@ -155,10 +185,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("load catalog (shard 0): %v", err)
 		}
-		log.Printf("multi-Raft enabled: shards=%d mux=%s peers=%v", *shardsN, *muxAddr, peers)
+		log.Printf("multi-Raft enabled: shards=%d mux=%s peers=%v", cfg.Cluster.Shards, cfg.Cluster.MuxAddr, cfg.Cluster.Peers)
 	} else {
 		var err error
-		db, err = storage.Open(storage.Options{Path: *dataDir, FsyncOnCommit: *fsync})
+		db, err = storage.Open(storageOptionsFromConfig(cfg, cfg.Data))
 		if err != nil {
 			log.Fatalf("open pebble: %v", err)
 		}
@@ -169,51 +199,61 @@ func main() {
 		}
 	}
 
-	if mgr == nil && *raftBind != "" {
-		if *raftID == "" {
+	var raftStore *storage.DB
+	if mgr == nil && cfg.Raft.Bind != "" {
+		if cfg.Cluster.SelfID == "" {
 			log.Fatal("-raft-id is required when -raft-bind is set")
 		}
-		path := *raftPath
+		path := cfg.Raft.Path
 		if path == "" {
-			path = *dataDir + "/raft"
+			path = cfg.Data + "/raft"
 		}
-		peers, err := parsePeers(*raftPeersFlag)
+		storePath := cfg.Raft.StorePath
+		if storePath == "" {
+			storePath = cfg.Data + "/raft-store"
+		}
+		raftProfile := cfg.Storage.RaftProfile
+		if raftProfile == "" {
+			raftProfile = storage.ProfileRaft
+		}
+		raftStore, err = storage.Open(storage.Options{
+			Path:          storePath,
+			FsyncOnCommit: cfg.Storage.FsyncOnCommit,
+			Profile:       raftProfile,
+		})
 		if err != nil {
-			log.Fatalf("-raft-peers: %v", err)
+			log.Fatalf("open raft store: %v", err)
 		}
-		httpPeers, err := parsePeers(*raftHTTPFlag)
-		if err != nil {
-			log.Fatalf("-raft-http-peers: %v", err)
-		}
+		defer raftStore.Close()
 		raftDB, err = craft.Open(context.Background(), craft.Config{
 			Path:          path,
-			SelfID:        *raftID,
-			BindAddr:      *raftBind,
-			Bootstrap:     *raftBootstrap,
-			PeerAddrs:     peers,
-			PeerHTTPAddrs: httpPeers,
-		}, db.Raw())
+			SelfID:        cfg.Cluster.SelfID,
+			BindAddr:      cfg.Raft.Bind,
+			Bootstrap:     cfg.Cluster.Bootstrap,
+			PeerAddrs:     cfg.Cluster.Peers,
+			PeerHTTPAddrs: cfg.Cluster.HTTPPeers,
+		}, db.Raw(), raftStore.Raw())
 		if err != nil {
 			log.Fatalf("open raft: %v", err)
 		}
 		defer raftDB.Close()
 		db.AttachReplicator(raftDB)
-		log.Printf("raft attached: id=%s bind=%s bootstrap=%v peers=%v", *raftID, *raftBind, *raftBootstrap, peers)
+		log.Printf("raft attached: id=%s bind=%s bootstrap=%v peers=%v raftStore=%s", cfg.Cluster.SelfID, cfg.Raft.Bind, cfg.Cluster.Bootstrap, cfg.Cluster.Peers, storePath)
 	}
 
 	var validator *auth.Validator
-	if *identityJwks != "" {
+	if cfg.Identity.JwksURL != "" {
 		var err error
 		validator, err = auth.NewValidator(auth.Config{
-			JwksURL:   *identityJwks,
-			Issuer:    *identityIssuer,
-			Audience:  *identityAudience,
-			ClockSkew: *identityClockSkew,
+			JwksURL:   cfg.Identity.JwksURL,
+			Issuer:    cfg.Identity.Issuer,
+			Audience:  cfg.Identity.Audience,
+			ClockSkew: cfg.Identity.ClockSkew,
 		})
 		if err != nil {
 			log.Fatalf("auth validator: %v", err)
 		}
-		log.Printf("identity auth enabled: jwks=%s issuer=%q audience=%q", *identityJwks, *identityIssuer, *identityAudience)
+		log.Printf("identity auth enabled: jwks=%s issuer=%q audience=%q", cfg.Identity.JwksURL, cfg.Identity.Issuer, cfg.Identity.Audience)
 	}
 
 	mux := http.NewServeMux()
@@ -243,12 +283,17 @@ func main() {
 		apiSrv.AttachMetrics(prom)
 		if mgr != nil {
 			go metrics.RunShardCollector(context.Background(), prom, mgr, 5*time.Second)
+		} else if db != nil {
+			go metrics.RunStorageCollector(context.Background(), prom, "0", db, raftDB, 5*time.Second)
+			if raftStore != nil {
+				go metrics.RunStorageCollector(context.Background(), prom, "raft", raftStore, nil, 5*time.Second)
+			}
 		}
 	}
 	apiSrv.Routes(mux)
 
 	srv := &http.Server{
-		Addr:              *httpAddr,
+		Addr:              cfg.HTTP.Addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -258,7 +303,7 @@ func main() {
 		if raftDB != nil {
 			mode = "raft"
 		}
-		log.Printf("cefas-server listening on %s (data=%s, mode=%s)", *httpAddr, *dataDir, mode)
+		log.Printf("cefas-server listening on %s (data=%s, mode=%s)", cfg.HTTP.Addr, cfg.Data, mode)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http serve: %v", err)
 		}
@@ -266,8 +311,8 @@ func main() {
 
 	// gRPC listener (optional).
 	var gsrv *grpc.Server
-	if *grpcAddr != "" {
-		opts, err := buildGRPCOpts(validator, *tlsCert, *tlsKey, *mtlsCA)
+	if cfg.GRPC.Addr != "" {
+		opts, err := buildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath)
 		if err != nil {
 			log.Fatalf("grpc opts: %v", err)
 		}
@@ -288,15 +333,15 @@ func main() {
 			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
-		if *grpcReflection {
+		if cfg.GRPC.Reflection {
 			reflection.Register(gsrv)
 		}
-		ln, err := net.Listen("tcp", *grpcAddr)
+		ln, err := net.Listen("tcp", cfg.GRPC.Addr)
 		if err != nil {
 			log.Fatalf("grpc listen: %v", err)
 		}
 		go func() {
-			log.Printf("gRPC listening on %s (tls=%v mtls=%v reflection=%v)", *grpcAddr, *tlsCert != "", *mtlsCA != "", *grpcReflection)
+			log.Printf("gRPC listening on %s (tls=%v mtls=%v reflection=%v)", cfg.GRPC.Addr, cfg.GRPC.TLSCertPath != "", cfg.GRPC.MTLSCAPath != "", cfg.GRPC.Reflection)
 			if err := gsrv.Serve(ln); err != nil {
 				log.Printf("grpc serve: %v", err)
 			}
@@ -369,6 +414,46 @@ func buildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grp
 // -raft-peers and -raft-http-peers.
 func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
 
+func storageOptionsFromConfig(cfg config.Config, path string) storage.Options {
+	return storage.Options{
+		Path:          path,
+		FsyncOnCommit: cfg.Storage.FsyncOnCommit,
+		Profile:       cfg.Storage.Profile,
+		Tuning:        storageTuningFromConfig(cfg),
+		Backpressure:  backpressureFromConfig(cfg),
+	}
+}
+
+func storageTuningFromConfig(cfg config.Config) storage.PebbleTuning {
+	return storage.PebbleTuning{
+		BlockCacheSizeBytes:       cfg.Storage.BlockCacheSizeBytes,
+		MemTableSizeBytes:         cfg.Storage.MemTableSizeBytes,
+		MemTableStopWrites:        cfg.Storage.MemTableStopWritesThreshold,
+		MaxConcurrentCompactions:  cfg.Storage.MaxConcurrentCompactions,
+		L0CompactionConcurrency:   cfg.Storage.L0CompactionConcurrency,
+		L0CompactionThreshold:     cfg.Storage.L0CompactionThreshold,
+		L0CompactionFileThreshold: cfg.Storage.L0CompactionFileThreshold,
+		L0StopWritesThreshold:     cfg.Storage.L0StopWritesThreshold,
+		BytesPerSync:              cfg.Storage.BytesPerSync,
+		WALBytesPerSync:           cfg.Storage.WALBytesPerSync,
+	}
+}
+
+func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
+	return storage.BackpressureOptions{
+		Enabled:                     cfg.Storage.BackpressureEnabled,
+		RejectOnCritical:            cfg.Storage.BackpressureRejectCritical,
+		WarningL0Files:              cfg.Storage.BackpressureWarningL0Files,
+		CriticalL0Files:             cfg.Storage.BackpressureCriticalL0Files,
+		WarningCompactionDebtBytes:  cfg.Storage.BackpressureWarningDebt,
+		CriticalCompactionDebtBytes: cfg.Storage.BackpressureCriticalDebt,
+		WarningReadAmp:              cfg.Storage.BackpressureWarningReadAmp,
+		CriticalReadAmp:             cfg.Storage.BackpressureCriticalReadAmp,
+		WarningDelay:                cfg.Storage.BackpressureWarningDelay,
+		CriticalDelay:               cfg.Storage.BackpressureCriticalDelay,
+	}
+}
+
 // streamAdapter bridges the raft package's CDC types to the api
 // package's wire-agnostic shape. Lives here so neither package needs
 // to import the other.
@@ -427,7 +512,16 @@ func (a *streamAdapter) ListSnapshots() ([]api.SnapshotMetadata, error) {
 func overlayFlags(
 	cfg *config.Config,
 	dataDir, httpAddr string, fsync bool,
-	raftBind, raftID, raftPath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
+	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
+	storageProfile, raftStorageProfile string,
+	storageBlockCache int64, storageMemTableSize uint64, storageMemTableStopWrites int,
+	storageMaxCompactions, storageL0Concurrency, storageL0Threshold int,
+	storageL0FileThreshold, storageL0Stop, storageBytesPerSync, storageWALBytesPerSync int,
+	backpressureEnabled, backpressureReject bool,
+	backpressureWarnL0, backpressureCriticalL0 int64,
+	backpressureWarnDebt, backpressureCriticalDebt uint64,
+	backpressureWarnReadAmp, backpressureCriticalReadAmp int,
+	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
 	shardsN int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
@@ -452,6 +546,9 @@ func overlayFlags(
 	if raftPath != "" {
 		cfg.Raft.Path = raftPath
 	}
+	if raftStorePath != "" {
+		cfg.Raft.StorePath = raftStorePath
+	}
 	if raftID != "" {
 		cfg.Cluster.SelfID = raftID
 	}
@@ -465,6 +562,72 @@ func overlayFlags(
 	if raftHTTPPeers != "" {
 		hp, _ := parsePeers(raftHTTPPeers)
 		cfg.Cluster.HTTPPeers = hp
+	}
+	if storageProfile != "" {
+		cfg.Storage.Profile = storageProfile
+	}
+	if raftStorageProfile != "" {
+		cfg.Storage.RaftProfile = raftStorageProfile
+	}
+	if storageBlockCache > 0 {
+		cfg.Storage.BlockCacheSizeBytes = storageBlockCache
+	}
+	if storageMemTableSize > 0 {
+		cfg.Storage.MemTableSizeBytes = storageMemTableSize
+	}
+	if storageMemTableStopWrites > 0 {
+		cfg.Storage.MemTableStopWritesThreshold = storageMemTableStopWrites
+	}
+	if storageMaxCompactions > 0 {
+		cfg.Storage.MaxConcurrentCompactions = storageMaxCompactions
+	}
+	if storageL0Concurrency > 0 {
+		cfg.Storage.L0CompactionConcurrency = storageL0Concurrency
+	}
+	if storageL0Threshold > 0 {
+		cfg.Storage.L0CompactionThreshold = storageL0Threshold
+	}
+	if storageL0FileThreshold > 0 {
+		cfg.Storage.L0CompactionFileThreshold = storageL0FileThreshold
+	}
+	if storageL0Stop > 0 {
+		cfg.Storage.L0StopWritesThreshold = storageL0Stop
+	}
+	if storageBytesPerSync > 0 {
+		cfg.Storage.BytesPerSync = storageBytesPerSync
+	}
+	if storageWALBytesPerSync > 0 {
+		cfg.Storage.WALBytesPerSync = storageWALBytesPerSync
+	}
+	if backpressureEnabled {
+		cfg.Storage.BackpressureEnabled = true
+	}
+	if backpressureReject {
+		cfg.Storage.BackpressureRejectCritical = true
+	}
+	if backpressureWarnL0 > 0 {
+		cfg.Storage.BackpressureWarningL0Files = backpressureWarnL0
+	}
+	if backpressureCriticalL0 > 0 {
+		cfg.Storage.BackpressureCriticalL0Files = backpressureCriticalL0
+	}
+	if backpressureWarnDebt > 0 {
+		cfg.Storage.BackpressureWarningDebt = backpressureWarnDebt
+	}
+	if backpressureCriticalDebt > 0 {
+		cfg.Storage.BackpressureCriticalDebt = backpressureCriticalDebt
+	}
+	if backpressureWarnReadAmp > 0 {
+		cfg.Storage.BackpressureWarningReadAmp = backpressureWarnReadAmp
+	}
+	if backpressureCriticalReadAmp > 0 {
+		cfg.Storage.BackpressureCriticalReadAmp = backpressureCriticalReadAmp
+	}
+	if backpressureWarnDelay > 0 {
+		cfg.Storage.BackpressureWarningDelay = backpressureWarnDelay
+	}
+	if backpressureCriticalDelay > 0 {
+		cfg.Storage.BackpressureCriticalDelay = backpressureCriticalDelay
 	}
 	if identityJwks != "" {
 		cfg.Identity.JwksURL = identityJwks

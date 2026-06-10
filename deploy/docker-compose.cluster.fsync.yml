@@ -1,0 +1,111 @@
+# Three-node Raft cluster with fsync-on-commit enabled for durability testing.
+#
+# Start from a clean state:
+#   docker compose -p cefas-fsync -f deploy/docker-compose.cluster.fsync.yml down -v
+#   docker compose -p cefas-fsync -f deploy/docker-compose.cluster.fsync.yml up --build -d
+#
+# Host gRPC endpoints:
+#   n1: localhost:9291
+#   n2: localhost:9292
+#   n3: localhost:9293
+
+x-cefas-fsync-common: &cefas-fsync-common
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  environment:
+    CEFAS_STORAGE_PROFILE: ${STORAGE_PROFILE:-balanced}
+    CEFAS_STORAGE_BACKPRESSURE_ENABLED: ${STORAGE_BACKPRESSURE_ENABLED:-true}
+    CEFAS_STORAGE_BACKPRESSURE_REJECT_CRITICAL: ${STORAGE_BACKPRESSURE_REJECT_CRITICAL:-true}
+    CEFAS_STORAGE_BACKPRESSURE_WARNING_L0_FILES: ${STORAGE_BACKPRESSURE_WARNING_L0_FILES:-64}
+    CEFAS_STORAGE_BACKPRESSURE_CRITICAL_L0_FILES: ${STORAGE_BACKPRESSURE_CRITICAL_L0_FILES:-128}
+    CEFAS_STORAGE_BACKPRESSURE_WARNING_DEBT_BYTES: ${STORAGE_BACKPRESSURE_WARNING_DEBT_BYTES:-268435456}
+    CEFAS_STORAGE_BACKPRESSURE_CRITICAL_DEBT_BYTES: ${STORAGE_BACKPRESSURE_CRITICAL_DEBT_BYTES:-805306368}
+  expose:
+    - "7000"
+    - "8080"
+    - "9090"
+
+services:
+  cefas-fsync-node-1:
+    <<: *cefas-fsync-common
+    command:
+      - "-data"
+      - "/var/lib/cefas"
+      - "-http"
+      - ":8080"
+      - "-grpc"
+      - ":9090"
+      - "-grpc-reflection"
+      - "-fsync"
+      - "-raft-bootstrap"
+      - "-raft-id"
+      - "n1"
+      - "-raft-bind"
+      - "cefas-fsync-node-1:7000"
+      - "-raft-peers"
+      - "n1=cefas-fsync-node-1:7000,n2=cefas-fsync-node-2:7000,n3=cefas-fsync-node-3:7000"
+      - "-raft-http-peers"
+      - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
+    ports:
+      - "18181:8080"
+      - "9291:9090"
+    volumes:
+      - cefas-fsync-node-1-data:/var/lib/cefas
+
+  cefas-fsync-node-2:
+    <<: *cefas-fsync-common
+    command:
+      - "-data"
+      - "/var/lib/cefas"
+      - "-http"
+      - ":8080"
+      - "-grpc"
+      - ":9090"
+      - "-grpc-reflection"
+      - "-fsync"
+      - "-raft-bootstrap"
+      - "-raft-id"
+      - "n2"
+      - "-raft-bind"
+      - "cefas-fsync-node-2:7000"
+      - "-raft-peers"
+      - "n1=cefas-fsync-node-1:7000,n2=cefas-fsync-node-2:7000,n3=cefas-fsync-node-3:7000"
+      - "-raft-http-peers"
+      - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
+    ports:
+      - "18182:8080"
+      - "9292:9090"
+    volumes:
+      - cefas-fsync-node-2-data:/var/lib/cefas
+
+  cefas-fsync-node-3:
+    <<: *cefas-fsync-common
+    command:
+      - "-data"
+      - "/var/lib/cefas"
+      - "-http"
+      - ":8080"
+      - "-grpc"
+      - ":9090"
+      - "-grpc-reflection"
+      - "-fsync"
+      - "-raft-bootstrap"
+      - "-raft-id"
+      - "n3"
+      - "-raft-bind"
+      - "cefas-fsync-node-3:7000"
+      - "-raft-peers"
+      - "n1=cefas-fsync-node-1:7000,n2=cefas-fsync-node-2:7000,n3=cefas-fsync-node-3:7000"
+      - "-raft-http-peers"
+      - "n1=http://cefas-fsync-node-1:8080,n2=http://cefas-fsync-node-2:8080,n3=http://cefas-fsync-node-3:8080"
+    ports:
+      - "18183:8080"
+      - "9293:9090"
+    volumes:
+      - cefas-fsync-node-3-data:/var/lib/cefas
+
+volumes:
+  cefas-fsync-node-1-data:
+  cefas-fsync-node-2-data:
+  cefas-fsync-node-3-data:

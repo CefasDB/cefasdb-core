@@ -91,6 +91,9 @@ func (d *DB) PutItem(table string, ks types.KeySchema, item types.Item) error {
 // write and every index pointer are atomic with respect to readers and
 // (in Phase 4) the Raft log.
 func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOptions) error {
+	if err := d.checkWritePressure(); err != nil {
+		return err
+	}
 	pk, sk, err := extractKeyBytes(item, td.KeySchema)
 	if err != nil {
 		return err
@@ -177,6 +180,9 @@ func (d *DB) DeleteItem(table string, ks types.KeySchema, keyAttrs types.Item) e
 // DeleteItemWith removes an item AND every GSI pointer that referenced
 // it, atomically. Honors an optional ConditionExpression.
 func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
+	if err := d.checkWritePressure(); err != nil {
+		return err
+	}
 	pk, sk, err := extractKeyBytes(keyAttrs, td.KeySchema)
 	if err != nil {
 		return err
@@ -521,6 +527,9 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	if len(ops) == 0 {
 		return nil
+	}
+	if err := d.checkWritePressure(); err != nil {
+		return err
 	}
 	snap := d.db.NewSnapshot()
 	defer snap.Close()

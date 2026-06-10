@@ -73,6 +73,13 @@ func PrefixPrimaryAll(table string) (lower, upper []byte) {
 	return p, prefixUpper(p)
 }
 
+// PrefixTable returns the [lower, upper) bound covering every key that belongs
+// to a table, including primary rows and secondary index entries.
+func PrefixTable(table string) (lower, upper []byte) {
+	p := []byte(tableBase(table) + "/")
+	return p, prefixUpper(p)
+}
+
 // PrefixPrimaryByPK returns the [lower, upper) bound covering every SK
 // under a single PK — used for Query without an SK condition.
 func PrefixPrimaryByPK(table string, pkSerialized []byte) (lower, upper []byte) {

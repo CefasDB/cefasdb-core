@@ -116,9 +116,12 @@ var ErrNotFound = pebbledb.ErrNotFound
 
 // DB attaches raft replication onto a *pebble.DB the storage layer
 // owns. The storage.DB.AttachReplicator wiring forwards CommitBatch
-// to DB.Replicate so writes flow through the raft log.
+// to DB.Replicate so writes flow through the raft log. Raft log/stable
+// metadata may use a separate Pebble instance to avoid competing with
+// user data compaction.
 type DB struct {
 	pebble        *pebbledb.DB
+	raftPebble    *pebbledb.DB
 	raft          *hraft.Raft
 	fsm           *fsm
 	trans         hraft.Transport
@@ -151,9 +154,11 @@ const (
 	raftApplyChanBuf = 1024
 )
 
-// Open wires raft on top of the caller's Pebble store. The storage
-// layer keeps ownership of pdb (Close does not touch it).
-func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
+// Open wires raft on top of the caller's data Pebble store. When
+// raftStores is supplied, raft log/stable metadata use raftStores[0];
+// otherwise they fall back to pdb for legacy shared-store deployments.
+// Close does not close either Pebble store; callers retain ownership.
+func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebbledb.DB) (*DB, error) {
 	if pdb == nil {
 		return nil, fmt.Errorf("raft: pdb is required")
 	}
@@ -166,6 +171,10 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 	if cfg.Path == "" {
 		return nil, fmt.Errorf("raft: Path is required (for snapshot dir)")
 	}
+	raftPDB := pdb
+	if len(raftStores) > 0 && raftStores[0] != nil {
+		raftPDB = raftStores[0]
+	}
 
 	logOutput := cfg.LogOutput
 	if logOutput == nil {
@@ -174,6 +183,7 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 
 	d := &DB{
 		pebble:       pdb,
+		raftPebble:   raftPDB,
 		cfg:          cfg,
 		leaderCh:     make(chan bool, 8),
 		stopCh:       make(chan struct{}),
@@ -181,8 +191,8 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 		applyStopped: make(chan struct{}),
 	}
 
-	logs := newLogStore(pdb)
-	stable := newStableStore(pdb)
+	logs := newLogStore(raftPDB)
+	stable := newStableStore(raftPDB)
 	snaps, err := newSnapshotStore(cfg.Path + "/snapshots")
 	if err != nil {
 		return nil, fmt.Errorf("snapshot store: %w", err)
@@ -234,8 +244,8 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 				})
 			}
 			if err := hraft.BootstrapCluster(rcfg, logs, stable, snaps, t, configuration); err != nil {
-			return nil, fmt.Errorf("BootstrapCluster: %w", err)
-		}
+				return nil, fmt.Errorf("BootstrapCluster: %w", err)
+			}
 		}
 	}
 

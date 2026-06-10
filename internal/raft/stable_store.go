@@ -9,8 +9,8 @@ import (
 )
 
 // stableStore implements hashicorp/raft.StableStore over Pebble. Term,
-// vote, and other small durable state lives under raft/stable/ on the
-// same Pebble instance the log and FSM share.
+// vote, and other small durable state lives under raft/stable/ in the
+// raft metadata store.
 //
 // Per the StableStore docstring (raft@v1.7.3/stable.go:16-17), missing
 // keys return zero values — not errors.
