@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
@@ -36,9 +37,10 @@ type Cluster interface {
 }
 
 type Server struct {
-	db      *storage.DB
-	cat     *catalog.Catalog
-	cluster Cluster // nil when not running in raft mode
+	db        *storage.DB
+	cat       *catalog.Catalog
+	cluster   Cluster         // nil when not running in raft mode
+	validator *auth.Validator // nil when auth disabled (dev mode)
 }
 
 func New(db *storage.DB, cat *catalog.Catalog) *Server {
@@ -49,22 +51,43 @@ func New(db *storage.DB, cat *catalog.Catalog) *Server {
 // *raft.DB; nil keeps the server in single-node mode.
 func (s *Server) AttachCluster(c Cluster) { s.cluster = c }
 
+// AttachAuth wires bearer-token validation onto every non-public
+// route. Pass nil to keep the server open (dev mode).
+func (s *Server) AttachAuth(v *auth.Validator) { s.validator = v }
+
+// publicPaths bypass the auth middleware so probes and cluster status
+// stay reachable on an unjoined or pre-credentialed node.
+var publicPaths = map[string]bool{
+	"/v1/Health":          true,
+	"/v1/cluster/status":  true,
+}
+
 // Routes attaches cefas HTTP endpoints onto mux. Path layout follows
-// DynamoDB-ish verbs as resources under /v1/.
+// DynamoDB-ish verbs as resources under /v1/. If AttachAuth has been
+// called, every non-public route is wrapped in the bearer-token
+// middleware; handlers then enforce per-operation, per-table scopes
+// internally.
 func (s *Server) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("/v1/tables", s.handleTables)             // POST=create, GET=list
-	mux.HandleFunc("/v1/tables/", s.handleTable)             // GET=describe (path: /v1/tables/{name})
-	mux.HandleFunc("/v1/PutItem", s.handlePutItem)
-	mux.HandleFunc("/v1/GetItem", s.handleGetItem)
-	mux.HandleFunc("/v1/DeleteItem", s.handleDeleteItem)
-	mux.HandleFunc("/v1/Query", s.handleQuery)
-	mux.HandleFunc("/v1/BatchWriteItem", s.handleBatchWriteItem)
-	mux.HandleFunc("/v1/BatchGetItem", s.handleBatchGetItem)
-	mux.HandleFunc("/v1/SpatialQuery", s.handleSpatialQuery)
-	mux.HandleFunc("/v1/Health", s.handleHealth)
-	mux.HandleFunc("/v1/cluster/status", s.handleClusterStatus)
-	mux.HandleFunc("/v1/cluster/AddVoter", s.handleClusterAddVoter)
-	mux.HandleFunc("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
+	register := func(path string, handler http.HandlerFunc) {
+		var h http.Handler = handler
+		if s.validator != nil && !publicPaths[path] {
+			h = s.validator.Middleware(publicPaths)(h)
+		}
+		mux.Handle(path, h)
+	}
+	register("/v1/tables", s.handleTables)              // POST=create, GET=list
+	register("/v1/tables/", s.handleTable)              // GET=describe
+	register("/v1/PutItem", s.handlePutItem)
+	register("/v1/GetItem", s.handleGetItem)
+	register("/v1/DeleteItem", s.handleDeleteItem)
+	register("/v1/Query", s.handleQuery)
+	register("/v1/BatchWriteItem", s.handleBatchWriteItem)
+	register("/v1/BatchGetItem", s.handleBatchGetItem)
+	register("/v1/SpatialQuery", s.handleSpatialQuery)
+	register("/v1/Health", s.handleHealth)
+	register("/v1/cluster/status", s.handleClusterStatus)
+	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
+	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +115,9 @@ type jsonKeySchema struct {
 func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
+		if !auth.RequireAnyScope(w, r, auth.ScopeTableCreate) {
+			return
+		}
 		var req createTableRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
@@ -113,6 +139,9 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusCreated, td)
 	case http.MethodGet:
+		if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
+			return
+		}
 		writeJSON(w, http.StatusOK, s.cat.List())
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -123,6 +152,9 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Path[len("/v1/tables/"):]
 	if name == "" {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("table name required"))
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
 		return
 	}
 	td, err := s.cat.Describe(name)
@@ -195,6 +227,11 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeItemWrite, req.Table),
+		auth.WildcardScope(auth.ScopeItemWrite)) {
+		return
+	}
 	td, err := s.cat.Describe(req.Table)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -226,6 +263,11 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	var req getItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeItemRead, req.Table),
+		auth.WildcardScope(auth.ScopeItemRead)) {
 		return
 	}
 	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
@@ -266,6 +308,11 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeItemDelete, req.Table),
+		auth.WildcardScope(auth.ScopeItemDelete)) {
+		return
+	}
 	td, err := s.cat.Describe(req.Table)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -297,6 +344,11 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	var req queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeQuery, req.Table),
+		auth.WildcardScope(auth.ScopeQuery)) {
 		return
 	}
 	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
@@ -362,6 +414,11 @@ func (s *Server) handleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeItemWrite, req.Table),
+		auth.WildcardScope(auth.ScopeItemWrite)) {
+		return
+	}
 	td, err := s.cat.Describe(req.Table)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -405,6 +462,11 @@ func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 	var req batchGetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeItemRead, req.Table),
+		auth.WildcardScope(auth.ScopeItemRead)) {
 		return
 	}
 	td, err := s.cat.Describe(req.Table)
@@ -472,6 +534,11 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 	var req spatialQueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !auth.RequireAnyScope(w, r,
+		auth.TableScope(auth.ScopeSpatial, req.Table),
+		auth.WildcardScope(auth.ScopeSpatial)) {
 		return
 	}
 	td, err := s.cat.Describe(req.Table)
@@ -556,6 +623,9 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
 	var req addVoterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -584,6 +654,9 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
 		return
 	}
 	var req removeServerRequest

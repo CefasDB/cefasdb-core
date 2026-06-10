@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
@@ -36,6 +37,13 @@ func main() {
 		raftBootstrap = flag.Bool("raft-bootstrap", false, "Bootstrap a new cluster from -raft-peers (run on the first node only)")
 		raftPeersFlag = flag.String("raft-peers", "", "Comma-separated id=raftAddr peer list, e.g. 'a=127.0.0.1:9001,b=127.0.0.1:9002,c=127.0.0.1:9003'")
 		raftHTTPFlag  = flag.String("raft-http-peers", "", "Comma-separated id=httpURL peer list for 307 redirects, e.g. 'a=http://h1:8080,b=http://h2:8080'")
+
+		// Identity/auth flags. Empty -identity-jwks-url keeps the
+		// server open (single-node dev mode).
+		identityJwks      = flag.String("identity-jwks-url", "", "Tikti JWKS endpoint (enables bearer-token auth)")
+		identityIssuer    = flag.String("identity-issuer", "", "Expected token issuer")
+		identityAudience  = flag.String("identity-audience", "", "Expected token audience")
+		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
 	)
 	flag.Parse()
 
@@ -83,10 +91,27 @@ func main() {
 		log.Printf("raft attached: id=%s bind=%s bootstrap=%v peers=%v", *raftID, *raftBind, *raftBootstrap, peers)
 	}
 
+	var validator *auth.Validator
+	if *identityJwks != "" {
+		validator, err = auth.NewValidator(auth.Config{
+			JwksURL:   *identityJwks,
+			Issuer:    *identityIssuer,
+			Audience:  *identityAudience,
+			ClockSkew: *identityClockSkew,
+		})
+		if err != nil {
+			log.Fatalf("auth validator: %v", err)
+		}
+		log.Printf("identity auth enabled: jwks=%s issuer=%q audience=%q", *identityJwks, *identityIssuer, *identityAudience)
+	}
+
 	mux := http.NewServeMux()
 	apiSrv := api.New(db, cat)
 	if raftDB != nil {
 		apiSrv.AttachCluster(raftDB)
+	}
+	if validator != nil {
+		apiSrv.AttachAuth(validator)
 	}
 	apiSrv.Routes(mux)
 
