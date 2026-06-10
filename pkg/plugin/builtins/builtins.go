@@ -25,4 +25,11 @@ import (
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/jarowinkler"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/levenshtein"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/manhattan"
+
+	// Search index plugins (Epic 5).
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/minhash"
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/radix"
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/simhash"
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/trigram"
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/vectorlsh"
 )
