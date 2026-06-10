@@ -23,10 +23,19 @@ import (
 // Snapshot() before returning the FSMSnapshot — the iterator sees a
 // stable view even as new entries land.
 type fsm struct {
-	pebble *pebbledb.DB
+	pebble    *pebbledb.DB
+	publisher *Publisher // nil when no CDC subscribers ever attached
+	// applyIndex tracks the most recent log index for the CDC event
+	// stamps. The raft engine hands us the log via Apply(*Log) so we
+	// pull it from there.
 }
 
 func newFSM(pebble *pebbledb.DB) *fsm { return &fsm{pebble: pebble} }
+
+// AttachPublisher wires a Publisher onto the FSM. After this call
+// every committed batch emits ChangeEvents for the cefas/ keys it
+// touched.
+func (f *fsm) AttachPublisher(p *Publisher) { f.publisher = p }
 
 // Apply replays the committed log entry into Pebble. The Data slice is
 // produced by storage.DB.CommitBatch → Replicator.Replicate(batch.Repr).
@@ -41,6 +50,13 @@ func (f *fsm) Apply(log *hraft.Log) any {
 	}
 	repr := make([]byte, len(log.Data))
 	copy(repr, log.Data)
+
+	if f.publisher != nil {
+		if err := applyAndPublish(f.pebble, repr, log.Index, f.publisher); err != nil {
+			return fmt.Errorf("fsm apply (cdc): %w", err)
+		}
+		return nil
+	}
 
 	batch := f.pebble.NewBatch()
 	defer batch.Close()

@@ -118,11 +118,13 @@ var ErrNotFound = pebbledb.ErrNotFound
 // owns. The storage.DB.AttachReplicator wiring forwards CommitBatch
 // to DB.Replicate so writes flow through the raft log.
 type DB struct {
-	pebble *pebbledb.DB
-	raft   *hraft.Raft
-	fsm    *fsm
-	trans  hraft.Transport
-	cfg    Config
+	pebble        *pebbledb.DB
+	raft          *hraft.Raft
+	fsm           *fsm
+	trans         hraft.Transport
+	cfg           Config
+	publisher     *Publisher
+	snapshotStore hraft.SnapshotStore
 
 	leaderCh chan bool
 	stopCh   chan struct{}
@@ -186,6 +188,7 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB) (*DB, error) {
 		return nil, fmt.Errorf("snapshot store: %w", err)
 	}
 	d.fsm = newFSM(pdb)
+	d.snapshotStore = snaps
 
 	var t hraft.Transport
 	if cfg.StreamLayer != nil {
@@ -333,6 +336,52 @@ func (d *DB) LeaderInfo() (id, addr string) {
 	}
 	rawAddr, rawID := d.raft.LeaderWithID()
 	return string(rawID), string(rawAddr)
+}
+
+// AttachPublisher wires a CDC Publisher onto the FSM. After this
+// call every committed batch emits ChangeEvents the publisher fans
+// out to its subscribers.
+func (d *DB) AttachPublisher(p *Publisher) {
+	d.publisher = p
+	if d.fsm != nil {
+		d.fsm.AttachPublisher(p)
+	}
+}
+
+// Publisher returns the attached publisher (nil if none).
+func (d *DB) Publisher() *Publisher { return d.publisher }
+
+// SnapshotMetadata mirrors hraft.SnapshotMeta with cefas-friendly
+// names so the API layer can re-encode it without importing the
+// hashicorp/raft package.
+type SnapshotMetadata struct {
+	ID          string
+	Index       uint64
+	Term        uint64
+	UnixSeconds int64
+	SizeBytes   int64
+}
+
+// ListSnapshots returns metadata for every retained raft snapshot.
+// Used by the admin PITR surface.
+func (d *DB) ListSnapshots() ([]SnapshotMetadata, error) {
+	if d.snapshotStore == nil {
+		return nil, nil
+	}
+	metas, err := d.snapshotStore.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SnapshotMetadata, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, SnapshotMetadata{
+			ID:        m.ID,
+			Index:     m.Index,
+			Term:      m.Term,
+			SizeBytes: m.Size,
+		})
+	}
+	return out, nil
 }
 
 // LeaderHTTPAddr returns the leader's HTTP base URL when known, or "".

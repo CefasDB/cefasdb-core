@@ -41,6 +41,8 @@ const (
 	Cefas_ClusterStatus_FullMethodName  = "/cefas.v1.Cefas/ClusterStatus"
 	Cefas_AddVoter_FullMethodName       = "/cefas.v1.Cefas/AddVoter"
 	Cefas_RemoveServer_FullMethodName   = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_StreamChanges_FullMethodName  = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName  = "/cefas.v1.Cefas/ListSnapshots"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -70,6 +72,13 @@ type CefasClient interface {
 	ClusterStatus(ctx context.Context, in *ClusterStatusRequest, opts ...grpc.CallOption) (*ClusterStatusResponse, error)
 	AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error)
 	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
+	// Change Data Capture stream. Subscribers receive every committed
+	// write in raft log order. Slow consumers may miss events when their
+	// server-side ring buffer fills; at-least-once-in-order for live
+	// consumers.
+	StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error)
+	// Snapshot administration (PITR foundation).
+	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
 }
 
 type cefasClient struct {
@@ -248,6 +257,35 @@ func (c *cefasClient) RemoveServer(ctx context.Context, in *RemoveServerRequest,
 	return out, nil
 }
 
+func (c *cefasClient) StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[2], Cefas_StreamChanges_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamChangesRequest, ChangeEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_StreamChangesClient = grpc.ServerStreamingClient[ChangeEvent]
+
+func (c *cefasClient) ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSnapshotsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListSnapshots_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -275,6 +313,13 @@ type CefasServer interface {
 	ClusterStatus(context.Context, *ClusterStatusRequest) (*ClusterStatusResponse, error)
 	AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error)
 	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
+	// Change Data Capture stream. Subscribers receive every committed
+	// write in raft log order. Slow consumers may miss events when their
+	// server-side ring buffer fills; at-least-once-in-order for live
+	// consumers.
+	StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error
+	// Snapshot administration (PITR foundation).
+	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -329,6 +374,12 @@ func (UnimplementedCefasServer) AddVoter(context.Context, *AddVoterRequest) (*Ad
 }
 func (UnimplementedCefasServer) RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoveServer not implemented")
+}
+func (UnimplementedCefasServer) StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamChanges not implemented")
+}
+func (UnimplementedCefasServer) ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSnapshots not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -607,6 +658,35 @@ func _Cefas_RemoveServer_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_StreamChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StreamChangesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CefasServer).StreamChanges(m, &grpc.GenericServerStream[StreamChangesRequest, ChangeEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Cefas_StreamChangesServer = grpc.ServerStreamingServer[ChangeEvent]
+
+func _Cefas_ListSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSnapshotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListSnapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListSnapshots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListSnapshots(ctx, req.(*ListSnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -666,6 +746,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RemoveServer",
 			Handler:    _Cefas_RemoveServer_Handler,
 		},
+		{
+			MethodName: "ListSnapshots",
+			Handler:    _Cefas_ListSnapshots_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -676,6 +760,11 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SpatialQuery",
 			Handler:       _Cefas_SpatialQuery_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamChanges",
+			Handler:       _Cefas_StreamChanges_Handler,
 			ServerStreams: true,
 		},
 	},

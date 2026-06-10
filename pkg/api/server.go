@@ -10,6 +10,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -40,14 +41,45 @@ type Cluster interface {
 	BindAddr() string
 }
 
+// ChangeStream is the CDC subset of the Cluster surface. Implemented
+// by *raft.DB when CDC is wired; nil when the server runs without
+// raft or without an attached publisher.
+type ChangeStream interface {
+	SubscribeChanges(ctx context.Context) (<-chan ChangeEvent, func())
+	ListSnapshots() ([]SnapshotMetadata, error)
+}
+
+// ChangeEvent is the wire-agnostic shape of a CDC entry. raft.DB's
+// ChangeEvent is convertible to this.
+type ChangeEvent struct {
+	RaftIndex uint64
+	Op        string // "PUT" | "DELETE"
+	Key       []byte
+	Value     []byte
+}
+
+// SnapshotMetadata mirrors raft.SnapshotMetadata for API consumers.
+type SnapshotMetadata struct {
+	ID          string
+	Index       uint64
+	Term        uint64
+	UnixSeconds int64
+	SizeBytes   int64
+}
+
 type Server struct {
 	db        *storage.DB
 	cat       *catalog.Catalog
 	cluster   Cluster          // nil when not running in raft mode
+	stream    ChangeStream     // nil when no CDC source attached
 	manager   *cluster.Manager // nil when single-shard
 	validator *auth.Validator  // nil when auth disabled (dev mode)
 	metrics   *metrics.Metrics // nil when metrics disabled
 }
+
+// AttachChangeStream wires the CDC source. Passing nil keeps the
+// stream endpoints off.
+func (s *Server) AttachChangeStream(c ChangeStream) { s.stream = c }
 
 // AttachMetrics wires the Prometheus surface. When attached, every
 // handler records latency + outcome; /metrics serves the registry.
@@ -137,6 +169,61 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
+	mux.HandleFunc("/v1/Stream", s.handleStream)
+	mux.HandleFunc("/v1/admin/snapshots", s.handleListSnapshots)
+}
+
+// handleStream is the HTTP/SSE variant of the CDC stream. Clients
+// receive `data:` lines with one JSON ChangeEvent each.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if s.stream == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("change stream not configured"))
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("server does not support streaming"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	events, cancel := s.stream.SubscribeChanges(r.Context())
+	defer cancel()
+
+	enc := json.NewEncoder(w)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			fmt.Fprint(w, "data: ")
+			_ = enc.Encode(ev) // writes JSON + newline
+			flusher.Flush()
+		}
+	}
+}
+
+// handleListSnapshots is the admin endpoint that lists every retained
+// raft snapshot.
+func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	if s.stream == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"snapshots": nil})
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	metas, err := s.stream.ListSnapshots()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"snapshots": metas})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -40,6 +40,47 @@ service Cefas {
   rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
   rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
+
+  // Change Data Capture stream. Subscribers receive every committed
+  // write in raft log order. Slow consumers may miss events when their
+  // server-side ring buffer fills; at-least-once-in-order for live
+  // consumers.
+  rpc StreamChanges(StreamChangesRequest) returns (stream ChangeEvent);
+
+  // Snapshot administration (PITR foundation).
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+}
+
+message StreamChangesRequest {
+  // RaftIndex hints the lowest index the consumer cares about; the
+  // server publishes events ≥ this index when its in-memory ring
+  // buffer still has them, otherwise the consumer must fall back to
+  // a snapshot restore.
+  uint64 from_index = 1;
+}
+
+message ChangeEvent {
+  enum Op {
+    OP_UNSPECIFIED = 0;
+    OP_PUT         = 1;
+    OP_DELETE      = 2;
+  }
+  uint64 raft_index = 1;
+  Op     op         = 2;
+  bytes  key        = 3;
+  bytes  value      = 4; // empty on OP_DELETE
+}
+
+message ListSnapshotsRequest {}
+message ListSnapshotsResponse {
+  repeated SnapshotMetadata snapshots = 1;
+}
+message SnapshotMetadata {
+  string id            = 1; // raft snapshot id ("<term>-<index>-<unix>")
+  uint64 raft_index    = 2;
+  uint64 raft_term     = 3;
+  int64  unix_seconds  = 4;
+  int64  size_bytes    = 5;
 }
 
 message SqlRequest  { string query = 1; }

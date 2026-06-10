@@ -29,6 +29,7 @@ type GRPCServer struct {
 	db      *storage.DB
 	cat     *catalog.Catalog
 	cluster Cluster          // nil in single-node mode
+	stream  ChangeStream     // nil when no CDC source attached
 	manager *cluster.Manager // nil in single-shard mode
 }
 
@@ -466,6 +467,69 @@ func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {
 		return requireScope(ctx, auth.ScopeTableDrop)
 	}
 	return nil
+}
+
+// ---------- CDC + snapshot admin ----------
+
+// AttachChangeStream wires the CDC + snapshot listing source onto
+// the gRPC handler.
+func (s *GRPCServer) AttachChangeStream(c ChangeStream) { s.stream = c }
+
+func (s *GRPCServer) StreamChanges(req *cefaspb.StreamChangesRequest, stream cefaspb.Cefas_StreamChangesServer) error {
+	if s.stream == nil {
+		return status.Error(codes.FailedPrecondition, "change stream not configured")
+	}
+	events, cancel := s.stream.SubscribeChanges(stream.Context())
+	defer cancel()
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case ev, ok := <-events:
+			if !ok {
+				return nil
+			}
+			if req.GetFromIndex() != 0 && ev.RaftIndex < req.GetFromIndex() {
+				continue
+			}
+			op := cefaspb.ChangeEvent_OP_PUT
+			if ev.Op == "DELETE" {
+				op = cefaspb.ChangeEvent_OP_DELETE
+			}
+			if err := stream.Send(&cefaspb.ChangeEvent{
+				RaftIndex: ev.RaftIndex,
+				Op:        op,
+				Key:       ev.Key,
+				Value:     ev.Value,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *GRPCServer) ListSnapshots(ctx context.Context, _ *cefaspb.ListSnapshotsRequest) (*cefaspb.ListSnapshotsResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.stream == nil {
+		return &cefaspb.ListSnapshotsResponse{}, nil
+	}
+	metas, err := s.stream.ListSnapshots()
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	out := make([]*cefaspb.SnapshotMetadata, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, &cefaspb.SnapshotMetadata{
+			Id:          m.ID,
+			RaftIndex:   m.Index,
+			RaftTerm:    m.Term,
+			UnixSeconds: m.UnixSeconds,
+			SizeBytes:   m.SizeBytes,
+		})
+	}
+	return &cefaspb.ListSnapshotsResponse{Snapshots: out}, nil
 }
 
 // ---------- cluster ----------
