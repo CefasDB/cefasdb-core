@@ -32,4 +32,9 @@ import (
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/simhash"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/trigram"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/vectorlsh"
+
+	// Geo + ads (Epic 6). audience must come after geohash + hll so
+	// its init() can look them up from plugin.Default at registration.
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/audience"
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/geohash"
 )
