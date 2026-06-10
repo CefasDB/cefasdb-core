@@ -127,7 +127,7 @@ func gsiEntry(
 	}
 
 	key := KeyGSI(table, g.Name, gsiPKBytes, gsiSKBytes, primaryPKBytes, primarySKBytes)
-	val := EncodeGSIPointer(primaryPKBytes, primarySKBytes)
+	val := buildIndexPointer(item, primaryPKBytes, primarySKBytes, g.Projection)
 	return key, val, nil
 }
 

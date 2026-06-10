@@ -58,9 +58,45 @@ type KeySchema struct {
 // shape is defined here so callers can prepare schemas; the writer/index
 // code lands later.
 type GSIDescriptor struct {
-	Name      string    `json:"name"`
-	KeySchema KeySchema `json:"keySchema"`
-	Projected []string  `json:"projected,omitempty"`
+	Name       string          `json:"name"`
+	KeySchema  KeySchema       `json:"keySchema"`
+	Projection IndexProjection `json:"projection,omitempty"`
+	// Projected is the legacy field — kept for backward compat with
+	// existing descriptors. New code uses Projection.
+	Projected []string `json:"projected,omitempty"`
+}
+
+// LSIDescriptor describes a local secondary index — an alternate sort
+// key co-located with the primary partition. Cheaper than a GSI
+// because writes never leave the primary partition's hash bucket, so
+// the planner needs no cross-shard coordination.
+//
+// LSI key layout (built by storage.KeyLSI):
+//
+//	cefas/t/<table>/lsi/<idx>/<primary_pk_hash8><lsi_sk_bytes><primary_sk_bytes>
+type LSIDescriptor struct {
+	Name string `json:"name"`
+	// SK is the alternate sort-key attribute name. The partition key
+	// is implicitly the table's primary PK, so we do not store a
+	// KeySchema struct.
+	SK         string          `json:"sk"`
+	Projection IndexProjection `json:"projection,omitempty"`
+}
+
+// IndexProjection controls which item attributes the index stores in
+// its value payload, mirroring DynamoDB's projection modes.
+//
+//   - "KEYS_ONLY" (zero value) — index value carries only the primary
+//     key reference. Readers must do one Get per row to materialise
+//     attributes.
+//   - "INCLUDE"   — primary key reference + the listed attribute names.
+//     Readers can satisfy queries that touch only those attributes
+//     without a dereference.
+//   - "ALL"       — full denormalised item in the index value.
+//     Readers never dereference but writes amplify by O(item size).
+type IndexProjection struct {
+	Mode    string   `json:"mode,omitempty"`    // "KEYS_ONLY" | "INCLUDE" | "ALL"
+	Include []string `json:"include,omitempty"` // INCLUDE only; ignored otherwise
 }
 
 // SpatialIndexDescriptor describes either a geohash or a Z-order index
@@ -93,7 +129,13 @@ type TableDescriptor struct {
 	Name           string                   `json:"name"`
 	KeySchema      KeySchema                `json:"keySchema"`
 	GSIs           []GSIDescriptor          `json:"gsis,omitempty"`
+	LSIs           []LSIDescriptor          `json:"lsis,omitempty"`
 	SpatialIndexes []SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	// TTLAttribute, when non-empty, names a numeric attribute whose
+	// value (Unix epoch seconds) marks the row's expiration. The
+	// background reaper sweeps expired rows lazily; reads of an
+	// expired row are still served until the reaper passes.
+	TTLAttribute string `json:"ttlAttribute,omitempty"`
 }
 
 // Errors surfaced by the public API. Server code maps these to HTTP /

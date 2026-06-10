@@ -32,8 +32,10 @@ const (
 
 	segPrimary = "/p/"
 	segGSI     = "/gsi/"
+	segLSI     = "/lsi/"
 	segGeo     = "/geo/"
 	segZorder  = "/zorder/"
+	segTTL     = "/ttl/"
 )
 
 // KeyCatalog returns the catalog descriptor key for a table.
@@ -240,6 +242,110 @@ func EncodeGSIPointer(primaryPK, primarySK []byte) []byte {
 	return out
 }
 
+// ---------- LSI keys ----------
+//
+// LSI rows live in the primary partition's hash bucket so writes
+// never leave the local shard. The disambiguator suffix is the
+// item's primary SK bytes (the partition is already pinned by
+// pk_hash8, so we don't need the primaryDisambiguator hash).
+//
+//	cefas/t/<table>/lsi/<idx>/<primary_pk_hash8><lsi_sk_bytes><primary_sk_bytes>
+
+// KeyLSI builds a local-secondary-index entry key.
+func KeyLSI(table, idxName string, primaryPK, lsiSK, primarySK []byte) []byte {
+	base := tableBase(table) + segLSI + idxName + "/"
+	pkh := pkHash8(primaryPK)
+	k := make([]byte, 0, len(base)+8+len(lsiSK)+len(primarySK))
+	k = append(k, base...)
+	k = append(k, pkh...)
+	k = append(k, lsiSK...)
+	k = append(k, primarySK...)
+	return k
+}
+
+// PrefixLSIByPK returns [lower, upper) covering every LSI entry for a
+// single primary partition.
+func PrefixLSIByPK(table, idxName string, primaryPK []byte) (lower, upper []byte) {
+	base := tableBase(table) + segLSI + idxName + "/"
+	pkh := pkHash8(primaryPK)
+	p := make([]byte, 0, len(base)+8)
+	p = append(p, base...)
+	p = append(p, pkh...)
+	return p, prefixUpper(p)
+}
+
+// RangeLSIBySK constrains the LSI scan to entries whose lsi_sk falls
+// in [skLow, skHigh) inside a single primary partition. Either bound
+// may be nil for an open-ended range.
+func RangeLSIBySK(table, idxName string, primaryPK, skLow, skHigh []byte) (lower, upper []byte) {
+	base := tableBase(table) + segLSI + idxName + "/"
+	pkh := pkHash8(primaryPK)
+
+	lower = make([]byte, 0, len(base)+8+len(skLow))
+	lower = append(lower, base...)
+	lower = append(lower, pkh...)
+	lower = append(lower, skLow...)
+
+	if skHigh == nil {
+		p := make([]byte, 0, len(base)+8)
+		p = append(p, base...)
+		p = append(p, pkh...)
+		upper = prefixUpper(p)
+	} else {
+		upper = make([]byte, 0, len(base)+8+len(skHigh))
+		upper = append(upper, base...)
+		upper = append(upper, pkh...)
+		upper = append(upper, skHigh...)
+	}
+	return lower, upper
+}
+
+// ---------- TTL keys ----------
+//
+// TTL pointers live under a per-table prefix sorted by expire time.
+// The reaper iterates them in ascending order and deletes both the
+// pointer and the primary item once expire ≤ now.
+//
+//	cefas/t/<table>/ttl/<expire_be8>/<pk_hash8><sk_bytes>
+
+// KeyTTL builds a TTL index entry for an item.
+func KeyTTL(table string, expireUnix uint64, primaryPK, primarySK []byte) []byte {
+	base := tableBase(table) + segTTL
+	pkh := pkHash8(primaryPK)
+	k := make([]byte, 0, len(base)+8+8+len(primarySK))
+	k = append(k, base...)
+	k = append(k, be8(expireUnix)...)
+	k = append(k, pkh...)
+	k = append(k, primarySK...)
+	return k
+}
+
+// PrefixTTLBefore returns [lower, upper) covering every TTL entry
+// whose expire time is strictly less than `before`. Used by the
+// reaper to sweep expired rows.
+func PrefixTTLBefore(table string, before uint64) (lower, upper []byte) {
+	base := tableBase(table) + segTTL
+	lower = []byte(base)
+	upper = make([]byte, 0, len(base)+8)
+	upper = append(upper, base...)
+	upper = append(upper, be8(before)...)
+	return lower, upper
+}
+
+// ParseTTLKey returns the primary key (pkHash8) and primarySK bytes
+// embedded in a TTL entry key. The pk_hash8 is enough to identify
+// which storage shard owns the row; the SK is the row's primary SK.
+func ParseTTLKey(table string, key []byte) (pkHash, primarySK []byte, ok bool) {
+	prefix := tableBase(table) + segTTL
+	if len(key) < len(prefix)+8+8 || string(key[:len(prefix)]) != prefix {
+		return nil, nil, false
+	}
+	rest := key[len(prefix)+8:] // skip the expire_be8
+	pkHash = rest[:8]
+	primarySK = rest[8:]
+	return pkHash, primarySK, true
+}
+
 // ---------- spatial keys ----------
 //
 // Layouts:
@@ -305,6 +411,91 @@ func RangeZorder(table, idxName string, low, high []byte) (lower, upper []byte) 
 	// disambiguator — use prefixUpper of (high + 0xff*8).
 	upper = prefixUpper(upper)
 	return lower, upper
+}
+
+// Index pointer markers. KEYS_ONLY pointers omit the marker for
+// wire-compat with pre-projection entries. INCLUDE/ALL pointers
+// lead with one of these reserved bytes which can never appear as
+// the first byte of a varint length prefix (>= 0xFD).
+const (
+	projMarkerInclude byte = 0xFE
+	projMarkerAll     byte = 0xFD
+)
+
+// EncodeProjectedPointer encodes a pointer that also carries
+// projected attributes. mode is the Projection.Mode string from the
+// descriptor; projected is the subset of the item that should travel
+// with the pointer (INCLUDE: only the listed names; ALL: every
+// attribute on the item).
+func EncodeProjectedPointer(primaryPK, primarySK []byte, mode string, projected []byte) []byte {
+	marker := byte(0)
+	switch mode {
+	case "INCLUDE":
+		marker = projMarkerInclude
+	case "ALL":
+		marker = projMarkerAll
+	default:
+		// KEYS_ONLY → original layout, no marker.
+		return EncodeGSIPointer(primaryPK, primarySK)
+	}
+	out := make([]byte, 0, 1+4+len(primaryPK)+len(primarySK)+len(projected))
+	out = append(out, marker)
+	out = appendUvarint(out, uint64(len(primaryPK)))
+	out = append(out, primaryPK...)
+	out = appendUvarint(out, uint64(len(primarySK)))
+	out = append(out, primarySK...)
+	out = appendUvarint(out, uint64(len(projected)))
+	out = append(out, projected...)
+	return out
+}
+
+// DecodeProjectedPointer reverses EncodeProjectedPointer. mode is
+// inferred from the first byte: missing → "KEYS_ONLY".
+// projectedBytes is the raw item bytes the caller can pass through
+// DecodeItem to materialise the projected attributes (nil for
+// KEYS_ONLY).
+func DecodeProjectedPointer(data []byte) (primaryPK, primarySK, projectedBytes []byte, mode string, err error) {
+	if len(data) == 0 {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer: empty")
+	}
+	switch data[0] {
+	case projMarkerInclude:
+		mode = "INCLUDE"
+	case projMarkerAll:
+		mode = "ALL"
+	default:
+		mode = "KEYS_ONLY"
+		pk, sk, err := DecodeGSIPointer(data)
+		return pk, sk, nil, mode, err
+	}
+	rest := data[1:]
+	n, rest, err := readUvarint(rest)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer pk len: %w", err)
+	}
+	if uint64(len(rest)) < n {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer pk: short")
+	}
+	primaryPK = append([]byte(nil), rest[:n]...)
+	rest = rest[n:]
+	n, rest, err = readUvarint(rest)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer sk len: %w", err)
+	}
+	if uint64(len(rest)) < n {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer sk: short")
+	}
+	primarySK = append([]byte(nil), rest[:n]...)
+	rest = rest[n:]
+	n, rest, err = readUvarint(rest)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer item len: %w", err)
+	}
+	if uint64(len(rest)) < n {
+		return nil, nil, nil, "", fmt.Errorf("projected pointer item: short")
+	}
+	projectedBytes = append([]byte(nil), rest[:n]...)
+	return primaryPK, primarySK, projectedBytes, mode, nil
 }
 
 // DecodeGSIPointer reverses EncodeGSIPointer. Returns the primary PK
