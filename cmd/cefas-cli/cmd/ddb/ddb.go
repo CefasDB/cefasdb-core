@@ -9,4 +9,10 @@ import "github.com/spf13/cobra"
 // commands here.
 func Register(root *cobra.Command) {
 	registerListTables(root)
+	registerCreateTable(root)
+	registerDeleteTable(root)
+	registerDescribeTable(root)
+	registerGetItem(root)
+	registerPutItem(root)
+	registerDeleteItem(root)
 }
