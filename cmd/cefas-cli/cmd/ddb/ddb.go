@@ -19,4 +19,6 @@ func Register(root *cobra.Command) {
 	registerBatchGetItem(root)
 	registerBatchWriteItem(root)
 	registerExecuteStatement(root)
+	registerUpdateTimeToLive(root)
+	registerDescribeTimeToLive(root)
 }

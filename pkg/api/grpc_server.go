@@ -111,6 +111,63 @@ func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableReques
 	return &cefaspb.DropTableResponse{}, nil
 }
 
+func (s *GRPCServer) UpdateTimeToLive(ctx context.Context, req *cefaspb.UpdateTimeToLiveRequest) (*cefaspb.UpdateTimeToLiveResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	spec := req.GetTimeToLiveSpecification()
+	if spec == nil {
+		return nil, status.Error(codes.InvalidArgument, "TimeToLiveSpecification required")
+	}
+	td, err := s.cat.Describe(req.GetTableName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	if spec.GetEnabled() {
+		if spec.GetAttributeName() == "" {
+			return nil, status.Error(codes.InvalidArgument, "attribute_name required when enabling TTL")
+		}
+		td.TTLAttribute = spec.GetAttributeName()
+	} else {
+		td.TTLAttribute = ""
+	}
+	if err := s.cat.UpdateTable(td); err != nil {
+		return nil, mapStorageErr(err)
+	}
+	if s.manager != nil {
+		for i, sh := range s.manager.Shards() {
+			if i == 0 {
+				continue
+			}
+			if cat, cerr := catalog.New(sh.Storage); cerr == nil {
+				_ = cat.UpdateTable(td)
+			}
+		}
+	}
+	return &cefaspb.UpdateTimeToLiveResponse{
+		TimeToLiveSpecification: &cefaspb.TimeToLiveSpecification{
+			Enabled:       td.TTLAttribute != "",
+			AttributeName: td.TTLAttribute,
+		},
+	}, nil
+}
+
+func (s *GRPCServer) DescribeTimeToLive(ctx context.Context, req *cefaspb.DescribeTimeToLiveRequest) (*cefaspb.DescribeTimeToLiveResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	td, err := s.cat.Describe(req.GetTableName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	resp := &cefaspb.DescribeTimeToLiveResponse{Status: "DISABLED"}
+	if td.TTLAttribute != "" {
+		resp.Status = "ENABLED"
+		resp.AttributeName = td.TTLAttribute
+	}
+	return resp, nil
+}
+
 // ---------- item ----------
 
 func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (*cefaspb.PutItemResponse, error) {
