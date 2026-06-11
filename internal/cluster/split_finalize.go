@@ -2,14 +2,33 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 const splitCopyBatchSize = 1024
+
+const splitFinalizeStatePrefix = storage.Namespace + "cluster/split/finalize/"
+
+type SplitFinalizePhase string
+
+const (
+	SplitFinalizePhaseCopying      SplitFinalizePhase = "copying"
+	SplitFinalizePhaseCopied       SplitFinalizePhase = "copied"
+	SplitFinalizePhaseVerified     SplitFinalizePhase = "verified"
+	SplitFinalizePhasePublishing   SplitFinalizePhase = "publishing"
+	SplitFinalizePhasePublished    SplitFinalizePhase = "published"
+	SplitFinalizePhaseCleanup      SplitFinalizePhase = "cleanup"
+	SplitFinalizePhaseDone         SplitFinalizePhase = "done"
+	SplitFinalizePhaseVerifyFailed SplitFinalizePhase = "verify_failed"
+	SplitFinalizePhaseRolledBack   SplitFinalizePhase = "rolled_back"
+)
 
 type SplitFinalizeRequest struct {
 	ParentShardID  uint32 `json:"parentShardId"`
@@ -19,19 +38,67 @@ type SplitFinalizeRequest struct {
 	WritesQuiesced bool   `json:"writesQuiesced"`
 }
 
-type SplitFinalizeResult struct {
-	ParentShardID     uint32           `json:"parentShardId"`
-	ChildShardID      uint32           `json:"childShardId"`
-	BeforeEpoch       uint64           `json:"beforeEpoch"`
-	AfterEpoch        uint64           `json:"afterEpoch"`
-	ParentRangeBefore TokenRange       `json:"parentRangeBefore"`
-	ParentRangeAfter  TokenRange       `json:"parentRangeAfter"`
-	ChildRange        TokenRange       `json:"childRange"`
-	CopiedKeys        int64            `json:"copiedKeys"`
-	CopiedCatalogKeys int64            `json:"copiedCatalogKeys"`
-	DeletedKeys       int64            `json:"deletedKeys"`
-	Placement         PlacementCatalog `json:"placement"`
+type SplitRollbackRequest struct {
+	ParentShardID uint32 `json:"parentShardId"`
+	ChildShardID  uint32 `json:"childShardId"`
+	ExpectedEpoch uint64 `json:"expectedEpoch,omitempty"`
+	TimeoutMS     int    `json:"timeoutMs,omitempty"`
 }
+
+type SplitVerification struct {
+	ParentCount    int64  `json:"parentCount"`
+	ChildCount     int64  `json:"childCount"`
+	ParentChecksum uint64 `json:"parentChecksum"`
+	ChildChecksum  uint64 `json:"childChecksum"`
+	Verified       bool   `json:"verified"`
+}
+
+type SplitFinalizeState struct {
+	ParentShardID     uint32             `json:"parentShardId"`
+	ChildShardID      uint32             `json:"childShardId"`
+	BeforeEpoch       uint64             `json:"beforeEpoch"`
+	AfterEpoch        uint64             `json:"afterEpoch,omitempty"`
+	ParentRangeBefore TokenRange         `json:"parentRangeBefore"`
+	ParentRangeAfter  TokenRange         `json:"parentRangeAfter"`
+	ChildRange        TokenRange         `json:"childRange"`
+	Phase             SplitFinalizePhase `json:"phase"`
+	CopiedKeys        int64              `json:"copiedKeys,omitempty"`
+	CopiedCatalogKeys int64              `json:"copiedCatalogKeys,omitempty"`
+	DeletedKeys       int64              `json:"deletedKeys,omitempty"`
+	Verification      SplitVerification  `json:"verification,omitempty"`
+	UpdatedAtUnix     int64              `json:"updatedAtUnix"`
+	LastError         string             `json:"lastError,omitempty"`
+}
+
+type SplitFinalizeResult struct {
+	ParentShardID     uint32            `json:"parentShardId"`
+	ChildShardID      uint32            `json:"childShardId"`
+	BeforeEpoch       uint64            `json:"beforeEpoch"`
+	AfterEpoch        uint64            `json:"afterEpoch"`
+	ParentRangeBefore TokenRange        `json:"parentRangeBefore"`
+	ParentRangeAfter  TokenRange        `json:"parentRangeAfter"`
+	ChildRange        TokenRange        `json:"childRange"`
+	CopiedKeys        int64             `json:"copiedKeys"`
+	CopiedCatalogKeys int64             `json:"copiedCatalogKeys"`
+	DeletedKeys       int64             `json:"deletedKeys"`
+	Phase             string            `json:"phase,omitempty"`
+	Verification      SplitVerification `json:"verification,omitempty"`
+	Placement         PlacementCatalog  `json:"placement"`
+}
+
+type SplitRollbackResult struct {
+	ParentShardID      uint32           `json:"parentShardId"`
+	ChildShardID       uint32           `json:"childShardId"`
+	BeforeEpoch        uint64           `json:"beforeEpoch"`
+	AfterEpoch         uint64           `json:"afterEpoch"`
+	ChildRange         TokenRange       `json:"childRange"`
+	DeletedChildKeys   int64            `json:"deletedChildKeys"`
+	DeletedCatalogKeys int64            `json:"deletedCatalogKeys"`
+	Phase              string           `json:"phase"`
+	Placement          PlacementCatalog `json:"placement"`
+}
+
+var splitFinalizeTestHook func(phase SplitFinalizePhase, state SplitFinalizeState) error
 
 func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (SplitFinalizeResult, error) {
 	m.splitMu.Lock()
@@ -41,6 +108,9 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 		return SplitFinalizeResult{}, err
 	}
 	current := m.Placement()
+	if result, ok, err := m.resumePublishedSplit(ctx, current, req); ok || err != nil {
+		return result, err
+	}
 	parentIdx, childIdx, parent, child, parentRangeAfter, err := validateFinalizeSplit(current, req)
 	if err != nil {
 		return SplitFinalizeResult{}, err
@@ -61,6 +131,22 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 		return SplitFinalizeResult{}, err
 	}
 
+	state := SplitFinalizeState{
+		ParentShardID:     req.ParentShardID,
+		ChildShardID:      req.ChildShardID,
+		BeforeEpoch:       current.Epoch,
+		ParentRangeBefore: parent.Ranges[0],
+		ParentRangeAfter:  parentRangeAfter,
+		ChildRange:        child.Ranges[0],
+		Phase:             SplitFinalizePhaseCopying,
+	}
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	if err := runSplitFinalizeHook(SplitFinalizePhaseCopying, state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+
 	catalogKeys, err := copyCatalogKeys(ctx, parentShard.Storage, childShard.Storage)
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("copy catalog keys: %w", err)
@@ -68,6 +154,31 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	copied, err := copyPrimaryTokenRangeWithIndexes(ctx, tables, parentShard.Storage, childShard.Storage, child.Ranges[0])
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("copy token range: %w", err)
+	}
+	state.CopiedCatalogKeys = catalogKeys
+	state.CopiedKeys = copied
+	state.Phase = SplitFinalizePhaseCopied
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	if err := runSplitFinalizeHook(SplitFinalizePhaseCopied, state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+
+	verification, err := verifySplitRange(ctx, tables, parentShard.Storage, childShard.Storage, child.Ranges[0])
+	state.Verification = verification
+	if err != nil {
+		state.Phase = SplitFinalizePhaseVerifyFailed
+		state.LastError = err.Error()
+		_ = m.saveSplitFinalizeState(state)
+		return SplitFinalizeResult{}, err
+	}
+	state.Phase = SplitFinalizePhaseVerified
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	if err := runSplitFinalizeHook(SplitFinalizePhaseVerified, state); err != nil {
+		return SplitFinalizeResult{}, err
 	}
 
 	after := nextCatalog(current)
@@ -80,15 +191,40 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	if err := ValidatePlacement(after); err != nil {
 		return SplitFinalizeResult{}, err
 	}
+	state.AfterEpoch = after.Epoch
+	state.Phase = SplitFinalizePhasePublishing
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	if err := runSplitFinalizeHook(SplitFinalizePhasePublishing, state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
 	if err := m.persistPlacementSnapshotStrict(m.placementPath, after); err != nil {
 		return SplitFinalizeResult{}, err
 	}
 	if err := m.applyPlacement(after, false); err != nil {
 		return SplitFinalizeResult{}, err
 	}
+	state.Phase = SplitFinalizePhasePublished
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	if err := runSplitFinalizeHook(SplitFinalizePhasePublished, state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
+
+	state.Phase = SplitFinalizePhaseCleanup
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
+	}
 	deleted, err := deletePrimaryTokenRangeWithIndexes(ctx, tables, parentShard.Storage, child.Ranges[0])
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("delete parent token range after final placement epoch %d: %w", after.Epoch, err)
+	}
+	state.DeletedKeys = deleted
+	state.Phase = SplitFinalizePhaseDone
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, err
 	}
 
 	return SplitFinalizeResult{
@@ -102,7 +238,98 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 		CopiedKeys:        copied,
 		CopiedCatalogKeys: catalogKeys,
 		DeletedKeys:       deleted,
+		Phase:             string(state.Phase),
+		Verification:      verification,
 		Placement:         after.Clone(),
+	}, nil
+}
+
+func (m *Manager) RollbackSplit(ctx context.Context, req SplitRollbackRequest) (SplitRollbackResult, error) {
+	m.splitMu.Lock()
+	defer m.splitMu.Unlock()
+
+	if err := m.RefreshPlacement(); err != nil {
+		return SplitRollbackResult{}, err
+	}
+	current := m.Placement()
+	state, ok, err := m.loadSplitFinalizeState(req.ParentShardID, req.ChildShardID)
+	if err != nil {
+		return SplitRollbackResult{}, err
+	}
+	if ok && splitPhasePublishedOrDone(state.Phase) {
+		return SplitRollbackResult{}, invalidPlan("cannot roll back split after final routing epoch was published; phase=%s", state.Phase)
+	}
+	parentIdx, childIdx, parent, child, _, err := validateFinalizeSplit(current, SplitFinalizeRequest{
+		ParentShardID: req.ParentShardID,
+		ChildShardID:  req.ChildShardID,
+		ExpectedEpoch: req.ExpectedEpoch,
+	})
+	if err != nil {
+		return SplitRollbackResult{}, err
+	}
+	parentShard, ok := m.Shard(req.ParentShardID)
+	if !ok || parentShard == nil || parentShard.Storage == nil {
+		return SplitRollbackResult{}, invalidPlan("parent shard %d is not open locally", req.ParentShardID)
+	}
+	childShard, ok := m.Shard(req.ChildShardID)
+	if !ok || childShard == nil || childShard.Storage == nil {
+		return SplitRollbackResult{}, invalidPlan("child shard %d is not open locally", req.ChildShardID)
+	}
+	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
+		return SplitRollbackResult{}, err
+	}
+
+	deletedData, err := deleteAllKeys(ctx, childShard.Storage, storage.PrefixTables)
+	if err != nil {
+		return SplitRollbackResult{}, fmt.Errorf("delete child data: %w", err)
+	}
+	deletedCatalog, err := deleteAllKeys(ctx, childShard.Storage, storage.PrefixCatalog)
+	if err != nil {
+		return SplitRollbackResult{}, fmt.Errorf("delete child catalog: %w", err)
+	}
+
+	after := nextCatalog(current)
+	after.Shards[parentIdx].State = ShardStateActive
+	after.Shards[parentIdx].Ranges = append([]TokenRange(nil), parent.Ranges...)
+	after.Shards[parentIdx].Epoch = after.Epoch
+	after.Shards[childIdx].State = ShardStateDecommissioned
+	after.Shards[childIdx].Ranges = nil
+	after.Shards[childIdx].Epoch = after.Epoch
+	after.normalize()
+	if err := ValidatePlacement(after); err != nil {
+		return SplitRollbackResult{}, err
+	}
+	if err := m.persistPlacementSnapshotStrict(m.placementPath, after); err != nil {
+		return SplitRollbackResult{}, err
+	}
+	if err := m.applyPlacement(after, false); err != nil {
+		return SplitRollbackResult{}, err
+	}
+	if !ok {
+		state = SplitFinalizeState{
+			ParentShardID:     req.ParentShardID,
+			ChildShardID:      req.ChildShardID,
+			BeforeEpoch:       current.Epoch,
+			ParentRangeBefore: parent.Ranges[0],
+			ParentRangeAfter:  parent.Ranges[0],
+			ChildRange:        child.Ranges[0],
+		}
+	}
+	state.AfterEpoch = after.Epoch
+	state.Phase = SplitFinalizePhaseRolledBack
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitRollbackResult{}, err
+	}
+	return SplitRollbackResult{
+		ParentShardID:      req.ParentShardID,
+		ChildShardID:       req.ChildShardID,
+		BeforeEpoch:        current.Epoch,
+		AfterEpoch:         after.Epoch,
+		ChildRange:         child.Ranges[0],
+		DeletedChildKeys:   deletedData,
+		DeletedCatalogKeys: deletedCatalog,
+		Phase:              string(state.Phase),
+		Placement:          after.Clone(),
 	}, nil
 }
 
@@ -125,6 +352,105 @@ func (m *Manager) requireSplitFinalizeLeaders(parent, child *Shard) error {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) resumePublishedSplit(ctx context.Context, current PlacementCatalog, req SplitFinalizeRequest) (SplitFinalizeResult, bool, error) {
+	state, ok, err := m.loadSplitFinalizeState(req.ParentShardID, req.ChildShardID)
+	if err != nil || !ok {
+		return SplitFinalizeResult{}, false, err
+	}
+	if !splitPhasePublishedOrDone(state.Phase) {
+		return SplitFinalizeResult{}, false, nil
+	}
+	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != current.Epoch && req.ExpectedEpoch != state.BeforeEpoch {
+		return SplitFinalizeResult{}, true, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: current.Epoch}
+	}
+	parentShard, ok := m.Shard(req.ParentShardID)
+	if !ok || parentShard == nil || parentShard.Storage == nil {
+		return SplitFinalizeResult{}, true, invalidPlan("parent shard %d is not open locally", req.ParentShardID)
+	}
+	childShard, ok := m.Shard(req.ChildShardID)
+	if !ok || childShard == nil || childShard.Storage == nil {
+		return SplitFinalizeResult{}, true, invalidPlan("child shard %d is not open locally", req.ChildShardID)
+	}
+	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
+		return SplitFinalizeResult{}, true, err
+	}
+	if err := validatePublishedSplitPlacement(current, state); err != nil {
+		return SplitFinalizeResult{}, true, err
+	}
+	if state.Phase == SplitFinalizePhaseDone {
+		return splitFinalizeResultFromState(state, current), true, nil
+	}
+	tables, err := loadSplitCopyTables(parentShard.Storage)
+	if err != nil {
+		return SplitFinalizeResult{}, true, err
+	}
+	state.Phase = SplitFinalizePhaseCleanup
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, true, err
+	}
+	deleted, err := deletePrimaryTokenRangeWithIndexes(ctx, tables, parentShard.Storage, state.ChildRange)
+	if err != nil {
+		return SplitFinalizeResult{}, true, fmt.Errorf("delete parent token range after final placement epoch %d: %w", state.AfterEpoch, err)
+	}
+	state.DeletedKeys += deleted
+	state.Phase = SplitFinalizePhaseDone
+	if err := m.saveSplitFinalizeState(state); err != nil {
+		return SplitFinalizeResult{}, true, err
+	}
+	return splitFinalizeResultFromState(state, current), true, nil
+}
+
+func splitFinalizeResultFromState(state SplitFinalizeState, placement PlacementCatalog) SplitFinalizeResult {
+	return SplitFinalizeResult{
+		ParentShardID:     state.ParentShardID,
+		ChildShardID:      state.ChildShardID,
+		BeforeEpoch:       state.BeforeEpoch,
+		AfterEpoch:        state.AfterEpoch,
+		ParentRangeBefore: state.ParentRangeBefore,
+		ParentRangeAfter:  state.ParentRangeAfter,
+		ChildRange:        state.ChildRange,
+		CopiedKeys:        state.CopiedKeys,
+		CopiedCatalogKeys: state.CopiedCatalogKeys,
+		DeletedKeys:       state.DeletedKeys,
+		Phase:             string(state.Phase),
+		Verification:      state.Verification,
+		Placement:         placement.Clone(),
+	}
+}
+
+func validatePublishedSplitPlacement(cat PlacementCatalog, state SplitFinalizeState) error {
+	if cat.Strategy != PlacementStrategyTokenRange {
+		return invalidPlan("resume split cleanup requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+	}
+	_, parent, err := findShard(cat, state.ParentShardID)
+	if err != nil {
+		return err
+	}
+	_, child, err := findShard(cat, state.ChildShardID)
+	if err != nil {
+		return err
+	}
+	if parent.State != ShardStateActive || child.State != ShardStateActive {
+		return invalidPlan("resume split cleanup requires active parent and child, got parent=%s child=%s", parent.State, child.State)
+	}
+	if len(parent.Ranges) != 1 || parent.Ranges[0] != state.ParentRangeAfter {
+		return invalidPlan("resume split cleanup parent range mismatch")
+	}
+	if len(child.Ranges) != 1 || child.Ranges[0] != state.ChildRange {
+		return invalidPlan("resume split cleanup child range mismatch")
+	}
+	return nil
+}
+
+func splitPhasePublishedOrDone(phase SplitFinalizePhase) bool {
+	switch phase {
+	case SplitFinalizePhasePublished, SplitFinalizePhaseCleanup, SplitFinalizePhaseDone:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateFinalizeSplit(cat PlacementCatalog, req SplitFinalizeRequest) (int, int, ShardPlacement, ShardPlacement, TokenRange, error) {
@@ -172,6 +498,53 @@ func loadSplitCopyTables(db *storage.DB) ([]types.TableDescriptor, error) {
 		return nil, fmt.Errorf("load catalog before split finalize: %w", err)
 	}
 	return cat.List(), nil
+}
+
+func (m *Manager) SplitFinalizeState(parentShardID, childShardID uint32) (SplitFinalizeState, bool, error) {
+	return m.loadSplitFinalizeState(parentShardID, childShardID)
+}
+
+func (m *Manager) loadSplitFinalizeState(parentShardID, childShardID uint32) (SplitFinalizeState, bool, error) {
+	shard0, ok := m.Shard(0)
+	if !ok || shard0 == nil || shard0.Storage == nil {
+		return SplitFinalizeState{}, false, fmt.Errorf("cluster: shard 0 unavailable")
+	}
+	raw, err := shard0.Storage.Get(splitFinalizeStateKey(parentShardID, childShardID))
+	if err == storage.ErrNotFound {
+		return SplitFinalizeState{}, false, nil
+	}
+	if err != nil {
+		return SplitFinalizeState{}, false, err
+	}
+	var state SplitFinalizeState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return SplitFinalizeState{}, false, fmt.Errorf("decode split finalize state: %w", err)
+	}
+	return state, true, nil
+}
+
+func (m *Manager) saveSplitFinalizeState(state SplitFinalizeState) error {
+	shard0, ok := m.Shard(0)
+	if !ok || shard0 == nil || shard0.Storage == nil {
+		return fmt.Errorf("cluster: shard 0 unavailable")
+	}
+	state.UpdatedAtUnix = time.Now().Unix()
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode split finalize state: %w", err)
+	}
+	return shard0.Storage.Set(splitFinalizeStateKey(state.ParentShardID, state.ChildShardID), raw)
+}
+
+func splitFinalizeStateKey(parentShardID, childShardID uint32) []byte {
+	return []byte(fmt.Sprintf("%s%d/%d", splitFinalizeStatePrefix, parentShardID, childShardID))
+}
+
+func runSplitFinalizeHook(phase SplitFinalizePhase, state SplitFinalizeState) error {
+	if splitFinalizeTestHook == nil {
+		return nil
+	}
+	return splitFinalizeTestHook(phase, state)
 }
 
 func copyCatalogKeys(ctx context.Context, src, dst *storage.DB) (int64, error) {
@@ -228,6 +601,72 @@ func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableD
 		}
 	}
 	return copied, nil
+}
+
+func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, parent, child *storage.DB, rng TokenRange) (SplitVerification, error) {
+	parentDigest, err := digestPrimaryTokenRange(ctx, tables, parent, rng)
+	if err != nil {
+		return SplitVerification{}, fmt.Errorf("digest parent range: %w", err)
+	}
+	childDigest, err := digestPrimaryTokenRange(ctx, tables, child, rng)
+	if err != nil {
+		return SplitVerification{}, fmt.Errorf("digest child range: %w", err)
+	}
+	out := SplitVerification{
+		ParentCount:    parentDigest.count,
+		ChildCount:     childDigest.count,
+		ParentChecksum: parentDigest.checksum,
+		ChildChecksum:  childDigest.checksum,
+		Verified:       parentDigest == childDigest,
+	}
+	if !out.Verified {
+		return out, invalidPlan("split verification failed: parent count/checksum %d/%d child %d/%d", out.ParentCount, out.ParentChecksum, out.ChildCount, out.ChildChecksum)
+	}
+	return out, nil
+}
+
+type splitDigest struct {
+	count    int64
+	checksum uint64
+}
+
+func digestPrimaryTokenRange(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng TokenRange) (splitDigest, error) {
+	var out splitDigest
+	for _, td := range tables {
+		lower, upper := storage.PrefixPrimaryAll(td.Name)
+		iter, err := db.Iter(lower, upper)
+		if err != nil {
+			return out, err
+		}
+		for valid := iter.First(); valid; valid = iter.Next() {
+			if err := ctx.Err(); err != nil {
+				_ = iter.Close()
+				return out, err
+			}
+			token, ok := storage.PrimaryTokenFromKey(iter.Key())
+			if !ok || !rng.Contains(token) {
+				continue
+			}
+			out.count++
+			out.checksum ^= checksumKV(iter.Key(), iter.Value())
+		}
+		if err := iter.Error(); err != nil {
+			_ = iter.Close()
+			return out, err
+		}
+		if err := iter.Close(); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func checksumKV(key, value []byte) uint64 {
+	h := xxhash.New()
+	_, _ = h.Write(key)
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(value)
+	return h.Sum64()
 }
 
 func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng TokenRange) (int64, error) {
@@ -288,6 +727,11 @@ func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDesc
 		return nil, err
 	}
 	return items, nil
+}
+
+func deleteAllKeys(ctx context.Context, db *storage.DB, bounds func() ([]byte, []byte)) (int64, error) {
+	lower, upper := bounds()
+	return deleteKeys(ctx, db, lower, upper, nil)
 }
 
 func copyKeys(ctx context.Context, src, dst *storage.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {
