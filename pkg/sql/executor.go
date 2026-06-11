@@ -471,12 +471,64 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range items {
-		if err := eng.Observe(item); err != nil {
-			return nil, err
+
+	if p.Predicate == nil {
+		for _, item := range items {
+			if err := eng.Observe(item); err != nil {
+				return nil, err
+			}
+		}
+		return e.finishANN(p, eng.Result()), nil
+	}
+
+	pred := cquery.PredicateFunc(func(it types.Item) (bool, error) {
+		return EvalBool(p.Predicate, it, nil)
+	})
+
+	candidates := items
+	if p.Filter.Strategy == cquery.StrategyANNFirstOverscan {
+		// Without a streaming ANN index in storage today we rank the
+		// full table here and slice the top k*overscan. A real ANN
+		// engine would terminate its candidate stream once enough
+		// survivors were collected.
+		overscan := p.Filter.OverscanFactor
+		if overscan < 1 {
+			overscan = 1
+		}
+		ranker, rerr := cquery.NewTopK(op, p.Field, p.Target, p.Limit*overscan)
+		if rerr != nil {
+			return nil, rerr
+		}
+		for _, item := range items {
+			if err := ranker.Observe(item); err != nil {
+				return nil, err
+			}
+		}
+		ranked := ranker.Result()
+		candidates = make([]types.Item, len(ranked))
+		for i, r := range ranked {
+			candidates[i] = r.Item
 		}
 	}
+
+	sel, err := cquery.ApplyPredicate(eng, pred, candidates)
+	if err != nil {
+		return nil, err
+	}
+
 	rows := eng.Result()
+	if sel != nil {
+		p.Filter.Selectivity.Actual = sel.Actual
+		p.Filter.Selectivity.CandidateRows = sel.CandidateRows
+		p.Filter.Selectivity.KeptRows = sel.KeptRows
+	}
+	if len(rows) < p.Limit {
+		p.Filter.Warning = cquery.FewerThanKWarning
+	}
+	return e.finishANN(p, rows), nil
+}
+
+func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult) *Result {
 	out := make([]types.Item, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.Item)
@@ -484,7 +536,7 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 	if len(p.Project) > 0 {
 		project(out, p.Project)
 	}
-	return &Result{Rows: out}, nil
+	return &Result{Rows: out}
 }
 
 func reverse(items []types.Item) {
