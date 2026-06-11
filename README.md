@@ -277,6 +277,14 @@ cefas restore-table-from-backup \
   --dry-run
 cefas apply-backup-retention --keep-latest 7 --max-age 720h --dry-run
 cefas delete-backup --backup-name before-maintenance
+cefas-server \
+  -backup-scheduler-enabled \
+  -backup-scheduler-dry-run \
+  -backup-scheduler-interval 1h \
+  -backup-scheduler-name-template 'hourly-{{timestamp}}' \
+  -backup-scheduler-retention-keep-latest 24 \
+  -backup-scheduler-retention-dry-run
+cefas cluster status
 curl -s -X POST "$CEFAS_HTTP/v1/RestoreTableFromBackup" \
   -H "Authorization: Bearer $CEFAS_TOKEN" \
   -H "Content-Type: application/json" \

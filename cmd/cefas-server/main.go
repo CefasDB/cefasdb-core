@@ -116,6 +116,18 @@ func main() {
 		rebalancerMinVoters     = flag.Int("rebalancer-min-voters", 0, "Minimum voters for generated placement plans. 0 keeps the current voter count.")
 		rebalancerApplyTimeout  = flag.Duration("rebalancer-apply-timeout", 0, "Per-plan apply timeout for auto mode. 0 inherits config/default.")
 		rebalancerManualDir     = flag.String("rebalancer-manual-plan-dir", "", "Directory where manual mode writes rebalance plans.")
+
+		// Scheduled backups. Disabled by default; operators must
+		// enable explicitly through flags, env, or YAML.
+		backupSchedulerEnabled             = flag.Bool("backup-scheduler-enabled", false, "Enable scheduled admin-named backups.")
+		backupSchedulerDisabled            = flag.Bool("backup-scheduler-disabled", false, "Disable scheduled backups even when config/env enabled them.")
+		backupSchedulerDryRun              = flag.Bool("backup-scheduler-dry-run", false, "Validate scheduled backup inputs without creating backups.")
+		backupSchedulerInterval            = flag.Duration("backup-scheduler-interval", 0, "Interval between scheduled backups. 0 inherits config/default.")
+		backupSchedulerNameTemplate        = flag.String("backup-scheduler-name-template", "", "Backup name template. Supports {{timestamp}}, {{unix}}, {{unix_nano}}, {{date}}, {{time}}.")
+		backupSchedulerTables              = flag.String("backup-scheduler-tables", "", "Comma-separated tables to back up. Empty captures every table.")
+		backupSchedulerRetentionKeepLatest = flag.Int("backup-scheduler-retention-keep-latest", -1, "Retain this many newest backups after each scheduled run. Negative inherits config/disabled.")
+		backupSchedulerRetentionMaxAge     = flag.Duration("backup-scheduler-retention-max-age", 0, "Delete backups older than this age after each scheduled run. 0 inherits config/disabled.")
+		backupSchedulerRetentionDryRun     = flag.Bool("backup-scheduler-retention-dry-run", false, "Evaluate scheduled retention without deleting backups.")
 	)
 	flag.Parse()
 
@@ -143,7 +155,10 @@ func main() {
 		*metricsOff, *tracingURL, *tracingIns,
 		*rebalancerEnabled, *rebalancerMode, *rebalancerInterval, *rebalancerMinInterval,
 		*rebalancerMaxConcurrent, *rebalancerMaxHotspots, *rebalancerMinVoters,
-		*rebalancerApplyTimeout, *rebalancerManualDir)
+		*rebalancerApplyTimeout, *rebalancerManualDir,
+		*backupSchedulerEnabled, *backupSchedulerDisabled, *backupSchedulerDryRun,
+		*backupSchedulerInterval, *backupSchedulerNameTemplate, *backupSchedulerTables,
+		*backupSchedulerRetentionKeepLatest, *backupSchedulerRetentionMaxAge, *backupSchedulerRetentionDryRun)
 
 	// Initialise tracing first so subsequent setup gets spans on
 	// failure. tracingShutdown is a no-op when no endpoint is set.
@@ -272,6 +287,10 @@ func main() {
 		log.Printf("identity auth enabled: jwks=%s issuer=%q audience=%q", cfg.Identity.JwksURL, cfg.Identity.Issuer, cfg.Identity.Audience)
 	}
 
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	defer runtimeCancel()
+	backupScheduler := storage.NewScheduledBackupRunner(db, scheduledBackupConfigFromConfig(cfg, prom, log.Printf))
+
 	mux := http.NewServeMux()
 	apiSrv := api.New(db, cat)
 	if raftDB != nil {
@@ -295,16 +314,21 @@ func main() {
 	if validator != nil {
 		apiSrv.AttachAuth(validator)
 	}
+	apiSrv.AttachBackupScheduler(backupScheduler)
 	if prom != nil {
 		apiSrv.AttachMetrics(prom)
 		if mgr != nil {
-			go metrics.RunShardCollector(context.Background(), prom, mgr, 5*time.Second)
+			go metrics.RunShardCollector(runtimeCtx, prom, mgr, 5*time.Second)
 		} else if db != nil {
-			go metrics.RunStorageCollector(context.Background(), prom, "0", db, raftDB, 5*time.Second)
+			go metrics.RunStorageCollector(runtimeCtx, prom, "0", db, raftDB, 5*time.Second)
 			if raftStore != nil {
-				go metrics.RunStorageCollector(context.Background(), prom, "raft", raftStore, nil, 5*time.Second)
+				go metrics.RunStorageCollector(runtimeCtx, prom, "raft", raftStore, nil, 5*time.Second)
 			}
 		}
+	}
+	if cfg.BackupScheduler.Enabled {
+		go backupScheduler.Run(runtimeCtx)
+		log.Printf("scheduled backups enabled: interval=%s dryRun=%v template=%q tables=%v", cfg.BackupScheduler.Interval, cfg.BackupScheduler.DryRun, cfg.BackupScheduler.NameTemplate, cfg.BackupScheduler.Tables)
 	}
 	if cfg.Rebalancer.Enabled {
 		if mgr == nil {
@@ -314,7 +338,7 @@ func main() {
 		} else {
 			ctrl := rebalancer.NewController(rebalancerConfigFromConfig(cfg), mgr, prom, nil)
 			ctrl.SetLogger(log.Printf)
-			go ctrl.Run(context.Background())
+			go ctrl.Run(runtimeCtx)
 			log.Printf("rebalancer enabled: mode=%s interval=%s maxConcurrent=%d", cfg.Rebalancer.Mode, cfg.Rebalancer.Interval, cfg.Rebalancer.MaxConcurrentOperations)
 		}
 	}
@@ -360,6 +384,7 @@ func main() {
 		if prom != nil {
 			gsrvImpl.AttachMetrics(prom)
 		}
+		gsrvImpl.AttachBackupScheduler(backupScheduler)
 		if raftDB != nil {
 			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
 		}
@@ -383,6 +408,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Println("shutting down")
+	runtimeCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -498,6 +524,25 @@ func rebalancerConfigFromConfig(cfg config.Config) rebalancer.Config {
 	}
 }
 
+func scheduledBackupConfigFromConfig(cfg config.Config, prom *metrics.Metrics, logger func(string, ...any)) storage.ScheduledBackupConfig {
+	return storage.ScheduledBackupConfig{
+		Enabled:      cfg.BackupScheduler.Enabled,
+		DryRun:       cfg.BackupScheduler.DryRun,
+		Interval:     cfg.BackupScheduler.Interval,
+		NameTemplate: cfg.BackupScheduler.NameTemplate,
+		Tables:       append([]string(nil), cfg.BackupScheduler.Tables...),
+		Retention: storage.BackupRetentionOptions{
+			KeepLatest:    cfg.BackupScheduler.Retention.KeepLatest,
+			KeepLatestSet: cfg.BackupScheduler.Retention.KeepLatestSet,
+			MaxAge:        cfg.BackupScheduler.Retention.MaxAge,
+			MaxAgeSet:     cfg.BackupScheduler.Retention.MaxAgeSet,
+			DryRun:        cfg.BackupScheduler.Retention.DryRun,
+		},
+		Logger:  logger,
+		Metrics: prom,
+	}
+}
+
 func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
 	return storage.BackpressureOptions{
 		Enabled:                     cfg.Storage.BackpressureEnabled,
@@ -588,6 +633,9 @@ func overlayFlags(
 	rebalancerEnabled bool, rebalancerMode string, rebalancerInterval, rebalancerMinInterval time.Duration,
 	rebalancerMaxConcurrent, rebalancerMaxHotspots, rebalancerMinVoters int,
 	rebalancerApplyTimeout time.Duration, rebalancerManualDir string,
+	backupSchedulerEnabled, backupSchedulerDisabled, backupSchedulerDryRun bool,
+	backupSchedulerInterval time.Duration, backupSchedulerNameTemplate, backupSchedulerTables string,
+	backupSchedulerRetentionKeepLatest int, backupSchedulerRetentionMaxAge time.Duration, backupSchedulerRetentionDryRun bool,
 ) {
 	if dataDir != "" && dataDir != "./cefas-data" {
 		cfg.Data = dataDir
@@ -760,7 +808,48 @@ func overlayFlags(
 	if rebalancerManualDir != "" {
 		cfg.Rebalancer.ManualPlanDir = rebalancerManualDir
 	}
-	// Compatibility: keep parsing the old strings to avoid "imported
-	// and not used" diagnostics for strings.
-	_ = strings.TrimSpace("")
+	if backupSchedulerEnabled {
+		cfg.BackupScheduler.Enabled = true
+	}
+	if backupSchedulerDisabled {
+		cfg.BackupScheduler.Enabled = false
+	}
+	if backupSchedulerDryRun {
+		cfg.BackupScheduler.DryRun = true
+	}
+	if backupSchedulerInterval > 0 {
+		cfg.BackupScheduler.Interval = backupSchedulerInterval
+	}
+	if backupSchedulerNameTemplate != "" {
+		cfg.BackupScheduler.NameTemplate = backupSchedulerNameTemplate
+	}
+	if backupSchedulerTables != "" {
+		cfg.BackupScheduler.Tables = splitCSVFlag(backupSchedulerTables)
+	}
+	if backupSchedulerRetentionKeepLatest >= 0 {
+		cfg.BackupScheduler.Retention.KeepLatest = backupSchedulerRetentionKeepLatest
+		cfg.BackupScheduler.Retention.KeepLatestSet = true
+	}
+	if backupSchedulerRetentionMaxAge > 0 {
+		cfg.BackupScheduler.Retention.MaxAge = backupSchedulerRetentionMaxAge
+		cfg.BackupScheduler.Retention.MaxAgeSet = true
+	}
+	if backupSchedulerRetentionDryRun {
+		cfg.BackupScheduler.Retention.DryRun = true
+	}
+}
+
+func splitCSVFlag(in string) []string {
+	if strings.TrimSpace(in) == "" {
+		return nil
+	}
+	parts := strings.Split(in, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

@@ -703,6 +703,33 @@ message ClusterStatusResponse {
   repeated ShardPlacement shards = 10;
   repeated NodeDescriptor nodes  = 11;
   repeated RangeHotspotSummary hot_ranges = 12;
+  ScheduledBackupStatus backup_scheduler = 13;
+}
+
+message ScheduledBackupStatus {
+  bool   enabled                         = 1;
+  bool   dry_run                         = 2;
+  int64  interval_seconds                = 3;
+  string name_template                   = 4;
+  repeated string tables                 = 5;
+  int32  retention_keep_latest           = 6;
+  bool   retention_keep_latest_set       = 7;
+  int64  retention_max_age_seconds       = 8;
+  bool   retention_max_age_set           = 9;
+  bool   retention_dry_run               = 10;
+  bool   running                         = 11;
+  int64  next_run_unix                   = 12;
+  int64  last_started_unix               = 13;
+  int64  last_finished_unix              = 14;
+  double last_duration_seconds           = 15;
+  string last_status                     = 16;
+  string last_backup_name                = 17;
+  string last_error                      = 18;
+  int64  last_rows                       = 19;
+  int64  last_bytes                      = 20;
+  int64  last_success_unix               = 21;
+  int64  last_failure_unix               = 22;
+  ApplyBackupRetentionResponse last_retention = 23;
 }
 
 message TokenRange {

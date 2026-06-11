@@ -69,6 +69,7 @@ Example:
 				"Shards":            st.Shards,
 				"Nodes":             st.Nodes,
 				"HotRanges":         st.HotRanges,
+				"BackupScheduler":   st.BackupScheduler,
 				"DrainProgress":     clusterDrainProgress(st),
 			})
 		},

@@ -26,6 +26,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Rebalancer.Mode != "dry-run" || d.Rebalancer.Interval != 30*time.Second || d.Rebalancer.MaxConcurrentOperations != 1 {
 		t.Errorf("rebalancer defaults not populated: %+v", d.Rebalancer)
 	}
+	if d.BackupScheduler.Enabled || d.BackupScheduler.Interval != time.Hour || d.BackupScheduler.NameTemplate == "" {
+		t.Errorf("backup scheduler defaults not populated: %+v", d.BackupScheduler)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -63,6 +66,18 @@ rebalancer:
   mode: manual
   interval: 10s
   manualPlanDir: /tmp/cefas-rebalance
+backupScheduler:
+  enabled: true
+  dryRun: true
+  interval: 15m
+  nameTemplate: "nightly-{{date}}"
+  tables: [Users, Orders]
+  retention:
+    keepLatest: 7
+    keepLatestSet: true
+    maxAge: 720h
+    maxAgeSet: true
+    dryRun: true
 `
 	if err := os.WriteFile(path, []byte(yamlSrc), 0o644); err != nil {
 		t.Fatal(err)
@@ -86,6 +101,15 @@ rebalancer:
 	if !cfg.Rebalancer.Enabled || cfg.Rebalancer.Mode != "manual" || cfg.Rebalancer.Interval != 10*time.Second || cfg.Rebalancer.ManualPlanDir != "/tmp/cefas-rebalance" {
 		t.Fatalf("rebalancer config not loaded: %+v", cfg.Rebalancer)
 	}
+	if !cfg.BackupScheduler.Enabled || !cfg.BackupScheduler.DryRun || cfg.BackupScheduler.Interval != 15*time.Minute || cfg.BackupScheduler.NameTemplate != "nightly-{{date}}" {
+		t.Fatalf("backup scheduler config not loaded: %+v", cfg.BackupScheduler)
+	}
+	if len(cfg.BackupScheduler.Tables) != 2 || cfg.BackupScheduler.Tables[0] != "Users" || cfg.BackupScheduler.Tables[1] != "Orders" {
+		t.Fatalf("backup scheduler tables not loaded: %+v", cfg.BackupScheduler.Tables)
+	}
+	if cfg.BackupScheduler.Retention.KeepLatest != 7 || !cfg.BackupScheduler.Retention.KeepLatestSet || cfg.BackupScheduler.Retention.MaxAge != 720*time.Hour || !cfg.BackupScheduler.Retention.MaxAgeSet || !cfg.BackupScheduler.Retention.DryRun {
+		t.Fatalf("backup scheduler retention not loaded: %+v", cfg.BackupScheduler.Retention)
+	}
 }
 
 func TestApplyEnv(t *testing.T) {
@@ -100,6 +124,14 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_REBALANCER_MAX_CONCURRENT_OPERATIONS", "2")
 	t.Setenv("CEFAS_REBALANCER_MIN_INTERVAL", "30s")
 	t.Setenv("CEFAS_IDENTITY_CLOCK_SKEW", "1m")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_ENABLED", "true")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_DRY_RUN", "true")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_INTERVAL", "5m")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_NAME_TEMPLATE", "hourly-{{unix}}")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_TABLES", "Users, Orders")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_KEEP_LATEST", "3")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_MAX_AGE", "168h")
+	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_DRY_RUN", "true")
 
 	cfg := config.Defaults()
 	if err := config.ApplyEnv(&cfg); err != nil {
@@ -122,6 +154,15 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Identity.ClockSkew != time.Minute {
 		t.Errorf("clock skew: %v", cfg.Identity.ClockSkew)
+	}
+	if !cfg.BackupScheduler.Enabled || !cfg.BackupScheduler.DryRun || cfg.BackupScheduler.Interval != 5*time.Minute || cfg.BackupScheduler.NameTemplate != "hourly-{{unix}}" {
+		t.Errorf("backup scheduler env not applied: %+v", cfg.BackupScheduler)
+	}
+	if len(cfg.BackupScheduler.Tables) != 2 || cfg.BackupScheduler.Tables[0] != "Users" || cfg.BackupScheduler.Tables[1] != "Orders" {
+		t.Errorf("backup scheduler tables env not applied: %+v", cfg.BackupScheduler.Tables)
+	}
+	if cfg.BackupScheduler.Retention.KeepLatest != 3 || !cfg.BackupScheduler.Retention.KeepLatestSet || cfg.BackupScheduler.Retention.MaxAge != 168*time.Hour || !cfg.BackupScheduler.Retention.MaxAgeSet || !cfg.BackupScheduler.Retention.DryRun {
+		t.Errorf("backup scheduler retention env not applied: %+v", cfg.BackupScheduler.Retention)
 	}
 }
 

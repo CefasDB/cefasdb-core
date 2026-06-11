@@ -1230,6 +1230,33 @@ type ClusterStatus struct {
 	Shards            []ShardPlacement
 	Nodes             []NodeDescriptor
 	HotRanges         []RangeHotspotSummary
+	BackupScheduler   *ScheduledBackupStatus
+}
+
+type ScheduledBackupStatus struct {
+	Enabled                bool
+	DryRun                 bool
+	IntervalSeconds        int64
+	NameTemplate           string
+	Tables                 []string
+	RetentionKeepLatest    int
+	RetentionKeepLatestSet bool
+	RetentionMaxAgeSeconds int64
+	RetentionMaxAgeSet     bool
+	RetentionDryRun        bool
+	Running                bool
+	NextRunUnix            int64
+	LastStartedUnix        int64
+	LastFinishedUnix       int64
+	LastDurationSeconds    float64
+	LastStatus             string
+	LastBackupName         string
+	LastError              string
+	LastRows               int64
+	LastBytes              int64
+	LastSuccessUnix        int64
+	LastFailureUnix        int64
+	LastRetention          *BackupRetentionResult
 }
 
 type TokenRange struct {
@@ -1421,7 +1448,44 @@ func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 		Shards:            shardPlacementsFromPB(resp.GetShards()),
 		Nodes:             nodeDescriptorsFromPB(resp.GetNodes()),
 		HotRanges:         rangeHotspotsFromPB(resp.GetHotRanges()),
+		BackupScheduler:   scheduledBackupStatusFromPB(resp.GetBackupScheduler()),
 	}, nil
+}
+
+func scheduledBackupStatusFromPB(in *cefaspb.ScheduledBackupStatus) *ScheduledBackupStatus {
+	if in == nil {
+		return nil
+	}
+	var retention *BackupRetentionResult
+	if in.GetLastRetention() != nil {
+		cp := backupRetentionFromPB(in.GetLastRetention())
+		retention = &cp
+	}
+	return &ScheduledBackupStatus{
+		Enabled:                in.GetEnabled(),
+		DryRun:                 in.GetDryRun(),
+		IntervalSeconds:        in.GetIntervalSeconds(),
+		NameTemplate:           in.GetNameTemplate(),
+		Tables:                 append([]string(nil), in.GetTables()...),
+		RetentionKeepLatest:    int(in.GetRetentionKeepLatest()),
+		RetentionKeepLatestSet: in.GetRetentionKeepLatestSet(),
+		RetentionMaxAgeSeconds: in.GetRetentionMaxAgeSeconds(),
+		RetentionMaxAgeSet:     in.GetRetentionMaxAgeSet(),
+		RetentionDryRun:        in.GetRetentionDryRun(),
+		Running:                in.GetRunning(),
+		NextRunUnix:            in.GetNextRunUnix(),
+		LastStartedUnix:        in.GetLastStartedUnix(),
+		LastFinishedUnix:       in.GetLastFinishedUnix(),
+		LastDurationSeconds:    in.GetLastDurationSeconds(),
+		LastStatus:             in.GetLastStatus(),
+		LastBackupName:         in.GetLastBackupName(),
+		LastError:              in.GetLastError(),
+		LastRows:               in.GetLastRows(),
+		LastBytes:              in.GetLastBytes(),
+		LastSuccessUnix:        in.GetLastSuccessUnix(),
+		LastFailureUnix:        in.GetLastFailureUnix(),
+		LastRetention:          retention,
+	}
 }
 
 func shardPlacementsFromPB(in []*cefaspb.ShardPlacement) []ShardPlacement {
