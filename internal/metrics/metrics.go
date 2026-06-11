@@ -58,6 +58,12 @@ type Metrics struct {
 
 	AuthRejectedTotal *prometheus.CounterVec // reason{missing_token,invalid_token,bad_scope}
 
+	ScheduledBackupDuration *prometheus.HistogramVec // backup, outcome
+	ScheduledBackupRows     *prometheus.GaugeVec     // backup
+	ScheduledBackupBytes    *prometheus.GaugeVec     // backup
+	ScheduledBackupRuns     *prometheus.CounterVec   // backup, outcome
+	ScheduledBackupFailures *prometheus.CounterVec   // backup, reason
+
 	RangeOpsTotal        *prometheus.CounterVec   // shard, bucket, op{read,write}
 	RangeBytesTotal      *prometheus.CounterVec   // shard, bucket, op{read,write}
 	RangeLatencySeconds  *prometheus.HistogramVec // shard, bucket, op{read,write}
@@ -181,6 +187,27 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 			Name: "cefas_auth_rejected_total",
 			Help: "Authentication / authorisation failures by reason.",
 		}, []string{"reason"}),
+		ScheduledBackupDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "cefas_scheduled_backup_duration_seconds",
+			Help:    "Duration of scheduled backup runs.",
+			Buckets: prometheus.ExponentialBuckets(0.01, 4, 10),
+		}, []string{"backup", "outcome"}),
+		ScheduledBackupRows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_scheduled_backup_rows",
+			Help: "Rows captured by the last scheduled backup run for this backup name.",
+		}, []string{"backup"}),
+		ScheduledBackupBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_scheduled_backup_bytes",
+			Help: "Checkpoint bytes written by the last scheduled backup run for this backup name.",
+		}, []string{"backup"}),
+		ScheduledBackupRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_scheduled_backup_runs_total",
+			Help: "Scheduled backup runs by backup name and outcome.",
+		}, []string{"backup", "outcome"}),
+		ScheduledBackupFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_scheduled_backup_failures_total",
+			Help: "Scheduled backup failures by backup name and reason.",
+		}, []string{"backup", "reason"}),
 		RangeOpsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "cefas_range_ops_total",
 			Help: "Total primary-key operations by shard and bounded token bucket.",
@@ -228,6 +255,11 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.BackpressureState,
 		m.BackpressureReason,
 		m.AuthRejectedTotal,
+		m.ScheduledBackupDuration,
+		m.ScheduledBackupRows,
+		m.ScheduledBackupBytes,
+		m.ScheduledBackupRuns,
+		m.ScheduledBackupFailures,
 		m.RangeOpsTotal,
 		m.RangeBytesTotal,
 		m.RangeLatencySeconds,
@@ -262,6 +294,22 @@ func (m *Metrics) AuthRejected(reason string) {
 		return
 	}
 	m.AuthRejectedTotal.WithLabelValues(reason).Inc()
+}
+
+func (m *Metrics) ObserveScheduledBackup(backupName, outcome, reason string, duration time.Duration, rows, bytes int64) {
+	if m == nil {
+		return
+	}
+	if reason == "" {
+		reason = "none"
+	}
+	m.ScheduledBackupDuration.WithLabelValues(backupName, outcome).Observe(duration.Seconds())
+	m.ScheduledBackupRows.WithLabelValues(backupName).Set(float64(rows))
+	m.ScheduledBackupBytes.WithLabelValues(backupName).Set(float64(bytes))
+	m.ScheduledBackupRuns.WithLabelValues(backupName, outcome).Inc()
+	if outcome == "failed" {
+		m.ScheduledBackupFailures.WithLabelValues(backupName, reason).Inc()
+	}
 }
 
 // ObserveRangeOperation records bounded per-token-bucket read/write

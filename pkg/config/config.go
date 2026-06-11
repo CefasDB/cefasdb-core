@@ -105,6 +105,20 @@ type Config struct {
 		ApplyTimeout            time.Duration `yaml:"applyTimeout"`
 		ManualPlanDir           string        `yaml:"manualPlanDir"`
 	} `yaml:"rebalancer"`
+	BackupScheduler struct {
+		Enabled      bool          `yaml:"enabled"`
+		DryRun       bool          `yaml:"dryRun"`
+		Interval     time.Duration `yaml:"interval"`
+		NameTemplate string        `yaml:"nameTemplate"`
+		Tables       []string      `yaml:"tables"`
+		Retention    struct {
+			KeepLatest    int           `yaml:"keepLatest"`
+			KeepLatestSet bool          `yaml:"keepLatestSet"`
+			MaxAge        time.Duration `yaml:"maxAge"`
+			MaxAgeSet     bool          `yaml:"maxAgeSet"`
+			DryRun        bool          `yaml:"dryRun"`
+		} `yaml:"retention"`
+	} `yaml:"backupScheduler"`
 }
 
 // Defaults returns a Config populated with the same fallbacks every
@@ -131,6 +145,8 @@ func Defaults() Config {
 	c.Rebalancer.MaxConcurrentOperations = 1
 	c.Rebalancer.MaxHotspots = 8
 	c.Rebalancer.ApplyTimeout = 5 * time.Second
+	c.BackupScheduler.Interval = time.Hour
+	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -294,6 +310,29 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Rebalancer.MinVoters = integer("REBALANCER_MIN_VOTERS", cfg.Rebalancer.MinVoters)
 	cfg.Rebalancer.ApplyTimeout = dur("REBALANCER_APPLY_TIMEOUT", cfg.Rebalancer.ApplyTimeout)
 	cfg.Rebalancer.ManualPlanDir = str("REBALANCER_MANUAL_PLAN_DIR", cfg.Rebalancer.ManualPlanDir)
+
+	cfg.BackupScheduler.Enabled = boolean("BACKUP_SCHEDULER_ENABLED", cfg.BackupScheduler.Enabled)
+	cfg.BackupScheduler.DryRun = boolean("BACKUP_SCHEDULER_DRY_RUN", cfg.BackupScheduler.DryRun)
+	cfg.BackupScheduler.Interval = dur("BACKUP_SCHEDULER_INTERVAL", cfg.BackupScheduler.Interval)
+	cfg.BackupScheduler.NameTemplate = str("BACKUP_SCHEDULER_NAME_TEMPLATE", cfg.BackupScheduler.NameTemplate)
+	if v, ok := os.LookupEnv("CEFAS_BACKUP_SCHEDULER_TABLES"); ok {
+		cfg.BackupScheduler.Tables = splitCSV(v)
+	}
+	if v, ok := os.LookupEnv("CEFAS_BACKUP_SCHEDULER_RETENTION_KEEP_LATEST"); ok {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.BackupScheduler.Retention.KeepLatest = parsed
+			cfg.BackupScheduler.Retention.KeepLatestSet = true
+		}
+	}
+	cfg.BackupScheduler.Retention.KeepLatestSet = boolean("BACKUP_SCHEDULER_RETENTION_KEEP_LATEST_SET", cfg.BackupScheduler.Retention.KeepLatestSet)
+	if v, ok := os.LookupEnv("CEFAS_BACKUP_SCHEDULER_RETENTION_MAX_AGE"); ok {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.BackupScheduler.Retention.MaxAge = parsed
+			cfg.BackupScheduler.Retention.MaxAgeSet = true
+		}
+	}
+	cfg.BackupScheduler.Retention.MaxAgeSet = boolean("BACKUP_SCHEDULER_RETENTION_MAX_AGE_SET", cfg.BackupScheduler.Retention.MaxAgeSet)
+	cfg.BackupScheduler.Retention.DryRun = boolean("BACKUP_SCHEDULER_RETENTION_DRY_RUN", cfg.BackupScheduler.Retention.DryRun)
 	return nil
 }
 
@@ -336,4 +375,19 @@ func mergeKV(base map[string]string, override string) map[string]string {
 		base[k] = v
 	}
 	return base
+}
+
+func splitCSV(in string) []string {
+	if strings.TrimSpace(in) == "" {
+		return nil
+	}
+	parts := strings.Split(in, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

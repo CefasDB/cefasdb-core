@@ -79,11 +79,18 @@ type Server struct {
 	manager   *cluster.Manager // nil when single-shard
 	validator *auth.Validator  // nil when auth disabled (dev mode)
 	metrics   *metrics.Metrics // nil when metrics disabled
+	backups   BackupSchedulerStatusProvider
+}
+
+type BackupSchedulerStatusProvider interface {
+	Status() storage.ScheduledBackupStatus
 }
 
 // AttachChangeStream wires the CDC source. Passing nil keeps the
 // stream endpoints off.
 func (s *Server) AttachChangeStream(c ChangeStream) { s.stream = c }
+
+func (s *Server) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.backups = p }
 
 // AttachMetrics wires the Prometheus surface. When attached, every
 // handler records latency + outcome; /metrics serves the registry.
@@ -1148,18 +1155,19 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 // ---------- cluster endpoints ----------
 
 type clusterStatusResponse struct {
-	Mode              string                        `json:"mode"` // "single-node" or "raft"
-	IsLeader          bool                          `json:"isLeader"`
-	SelfID            string                        `json:"selfId,omitempty"`
-	BindAddr          string                        `json:"bindAddr,omitempty"`
-	LeaderHTTP        string                        `json:"leaderHttp,omitempty"`
-	RoutingEpoch      uint64                        `json:"routingEpoch,omitempty"`
-	PlacementVersion  uint64                        `json:"placementVersion,omitempty"`
-	ShardCount        int                           `json:"shardCount,omitempty"`
-	PlacementStrategy string                        `json:"placementStrategy,omitempty"`
-	Shards            []cluster.ShardPlacement      `json:"shards,omitempty"`
-	Nodes             []cluster.NodeDescriptor      `json:"nodes,omitempty"`
-	HotRanges         []metrics.RangeHotspotSummary `json:"hotRanges,omitempty"`
+	Mode              string                         `json:"mode"` // "single-node" or "raft"
+	IsLeader          bool                           `json:"isLeader"`
+	SelfID            string                         `json:"selfId,omitempty"`
+	BindAddr          string                         `json:"bindAddr,omitempty"`
+	LeaderHTTP        string                         `json:"leaderHttp,omitempty"`
+	RoutingEpoch      uint64                         `json:"routingEpoch,omitempty"`
+	PlacementVersion  uint64                         `json:"placementVersion,omitempty"`
+	ShardCount        int                            `json:"shardCount,omitempty"`
+	PlacementStrategy string                         `json:"placementStrategy,omitempty"`
+	Shards            []cluster.ShardPlacement       `json:"shards,omitempty"`
+	Nodes             []cluster.NodeDescriptor       `json:"nodes,omitempty"`
+	HotRanges         []metrics.RangeHotspotSummary  `json:"hotRanges,omitempty"`
+	BackupScheduler   *storage.ScheduledBackupStatus `json:"backupScheduler,omitempty"`
 }
 
 func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
@@ -1183,6 +1191,10 @@ func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.metrics != nil {
 		resp.HotRanges = s.metrics.RangeHotspotSummaries(0)
+	}
+	if s.backups != nil {
+		status := s.backups.Status()
+		resp.BackupScheduler = &status
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

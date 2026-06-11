@@ -37,6 +37,7 @@ type GRPCServer struct {
 	manager *cluster.Manager // nil in single-shard mode
 	plugins *plugin.Registry // nil → uses plugin.Default
 	metrics *metrics.Metrics // nil when metrics disabled
+	backups BackupSchedulerStatusProvider
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
@@ -57,6 +58,8 @@ func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) { s.plugins = r }
 // AttachMetrics wires bounded range-hotspot summaries into gRPC
 // cluster status and records PK-bearing gRPC operations.
 func (s *GRPCServer) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
+
+func (s *GRPCServer) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.backups = p }
 
 func (s *GRPCServer) pluginRegistry() *plugin.Registry {
 	if s.plugins != nil {
@@ -1152,7 +1155,43 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 	if s.metrics != nil {
 		resp.HotRanges = pbRangeHotspotSummaries(s.metrics.RangeHotspotSummaries(0))
 	}
+	if s.backups != nil {
+		status := s.backups.Status()
+		resp.BackupScheduler = scheduledBackupStatusToPB(status)
+	}
 	return resp, nil
+}
+
+func scheduledBackupStatusToPB(status storage.ScheduledBackupStatus) *cefaspb.ScheduledBackupStatus {
+	var retention *cefaspb.ApplyBackupRetentionResponse
+	if status.LastRetention != nil {
+		retention = backupRetentionToPB(*status.LastRetention)
+	}
+	return &cefaspb.ScheduledBackupStatus{
+		Enabled:                status.Enabled,
+		DryRun:                 status.DryRun,
+		IntervalSeconds:        status.IntervalSeconds,
+		NameTemplate:           status.NameTemplate,
+		Tables:                 append([]string(nil), status.Tables...),
+		RetentionKeepLatest:    int32(status.RetentionKeepLatest),
+		RetentionKeepLatestSet: status.RetentionKeepLatestSet,
+		RetentionMaxAgeSeconds: status.RetentionMaxAgeSeconds,
+		RetentionMaxAgeSet:     status.RetentionMaxAgeSet,
+		RetentionDryRun:        status.RetentionDryRun,
+		Running:                status.Running,
+		NextRunUnix:            status.NextRunUnix,
+		LastStartedUnix:        status.LastStartedUnix,
+		LastFinishedUnix:       status.LastFinishedUnix,
+		LastDurationSeconds:    status.LastDurationSeconds,
+		LastStatus:             status.LastStatus,
+		LastBackupName:         status.LastBackupName,
+		LastError:              status.LastError,
+		LastRows:               status.LastRows,
+		LastBytes:              status.LastBytes,
+		LastSuccessUnix:        status.LastSuccessUnix,
+		LastFailureUnix:        status.LastFailureUnix,
+		LastRetention:          retention,
+	}
 }
 
 func pbShardPlacements(in []cluster.ShardPlacement) []*cefaspb.ShardPlacement {

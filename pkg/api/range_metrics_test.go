@@ -68,3 +68,41 @@ func TestHTTPClusterStatusIncludesRangeHotspots(t *testing.T) {
 		t.Fatalf("unexpected hot range: %+v", body.HotRanges[0])
 	}
 }
+
+func TestHTTPClusterStatusIncludesBackupScheduler(t *testing.T) {
+	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat, err := catalog.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(db, cat)
+	srv.AttachBackupScheduler(storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+		Enabled:      true,
+		DryRun:       true,
+		Interval:     time.Minute,
+		NameTemplate: "http-{{unix}}",
+		Tables:       []string{"Users"},
+	}))
+	mux := http.NewServeMux()
+	srv.Routes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/cluster/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		BackupScheduler *storage.ScheduledBackupStatus `json:"backupScheduler"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.BackupScheduler == nil || !body.BackupScheduler.Enabled || body.BackupScheduler.NameTemplate != "http-{{unix}}" || len(body.BackupScheduler.Tables) != 1 {
+		t.Fatalf("backup scheduler status = %+v", body.BackupScheduler)
+	}
+}

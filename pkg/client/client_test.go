@@ -46,6 +46,12 @@ func newFixture(t *testing.T) (*client.Client, *fixture) {
 	gsrv := grpc.NewServer()
 	apiSrv := api.NewGRPCServer(db, cat, nil)
 	apiSrv.AttachMetrics(metrics.New())
+	apiSrv.AttachBackupScheduler(storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+		Enabled:      true,
+		DryRun:       true,
+		Interval:     time.Minute,
+		NameTemplate: "sdk-{{unix}}",
+	}))
 	cefaspb.RegisterCefasServer(gsrv, apiSrv)
 	go func() { _ = gsrv.Serve(ln) }()
 
@@ -216,6 +222,9 @@ func TestSDKClusterStatusOnSingleNode(t *testing.T) {
 	}
 	if st.Mode != "single-node" {
 		t.Fatalf("mode = %q, want single-node", st.Mode)
+	}
+	if st.BackupScheduler == nil || !st.BackupScheduler.Enabled || st.BackupScheduler.NameTemplate != "sdk-{{unix}}" {
+		t.Fatalf("backup scheduler status = %+v", st.BackupScheduler)
 	}
 }
 
