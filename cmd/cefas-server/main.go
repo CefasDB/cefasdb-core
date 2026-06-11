@@ -148,7 +148,7 @@ func main() {
 	// Metrics: always-on unless explicitly disabled.
 	var prom *metrics.Metrics
 	if cfg.Metrics.Enabled {
-		prom = metrics.New()
+		prom = metrics.NewWithRangeHotspots(rangeHotspotConfigFromConfig(cfg))
 	}
 
 	var (
@@ -329,6 +329,9 @@ func main() {
 		if mgr != nil {
 			gsrvImpl.AttachManager(mgr)
 		}
+		if prom != nil {
+			gsrvImpl.AttachMetrics(prom)
+		}
 		if raftDB != nil {
 			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
 		}
@@ -436,6 +439,21 @@ func storageTuningFromConfig(cfg config.Config) storage.PebbleTuning {
 		L0StopWritesThreshold:     cfg.Storage.L0StopWritesThreshold,
 		BytesPerSync:              cfg.Storage.BytesPerSync,
 		WALBytesPerSync:           cfg.Storage.WALBytesPerSync,
+	}
+}
+
+func rangeHotspotConfigFromConfig(cfg config.Config) metrics.RangeHotspotConfig {
+	return metrics.RangeHotspotConfig{
+		Buckets:                      cfg.Metrics.HotspotBuckets,
+		Window:                       cfg.Metrics.HotspotWindow,
+		CoolingWindow:                cfg.Metrics.HotspotCoolingWindow,
+		MaxSummaries:                 cfg.Metrics.HotspotMaxSummaries,
+		ReadThreshold:                cfg.Metrics.HotspotReadThreshold,
+		WriteThreshold:               cfg.Metrics.HotspotWriteThreshold,
+		BytesThreshold:               cfg.Metrics.HotspotBytesThreshold,
+		LatencyThresholdSeconds:      cfg.Metrics.HotspotLatencyThreshold.Seconds(),
+		CompactionDebtThresholdBytes: cfg.Metrics.HotspotCompactionDebtThreshold,
+		ThrottleStateThreshold:       cfg.Metrics.HotspotThrottleStateThreshold,
 	}
 }
 

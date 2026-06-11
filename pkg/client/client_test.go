@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/metrics"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -43,7 +44,9 @@ func newFixture(t *testing.T) (*client.Client, *fixture) {
 		t.Fatalf("listen: %v", err)
 	}
 	gsrv := grpc.NewServer()
-	cefaspb.RegisterCefasServer(gsrv, api.NewGRPCServer(db, cat, nil))
+	apiSrv := api.NewGRPCServer(db, cat, nil)
+	apiSrv.AttachMetrics(metrics.New())
+	cefaspb.RegisterCefasServer(gsrv, apiSrv)
 	go func() { _ = gsrv.Serve(ln) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -213,5 +216,34 @@ func TestSDKClusterStatusOnSingleNode(t *testing.T) {
 	}
 	if st.Mode != "single-node" {
 		t.Fatalf("mode = %q, want single-node", st.Mode)
+	}
+}
+
+func TestSDKClusterStatusIncludesHotRanges(t *testing.T) {
+	c, _ := newFixture(t)
+	ctx := context.Background()
+	if err := c.CreateTable(ctx, types.TableDescriptor{
+		Name:      "events",
+		KeySchema: types.KeySchema{PK: "id"},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := c.PutItem(ctx, "events", types.Item{
+		"id": sAttr("hot-key"),
+		"v":  sAttr("payload"),
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	st, err := c.Status(ctx)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.HotRanges) == 0 {
+		t.Fatalf("expected hot range summaries")
+	}
+	got := st.HotRanges[0]
+	if got.ShardID != "0" || got.BucketCount == 0 || got.Writes != 1 || got.Bytes == 0 {
+		t.Fatalf("unexpected hot range summary: %+v", got)
 	}
 }

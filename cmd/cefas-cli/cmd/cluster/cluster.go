@@ -68,6 +68,7 @@ Example:
 				"PlacementStrategy": st.PlacementStrategy,
 				"Shards":            st.Shards,
 				"Nodes":             st.Nodes,
+				"HotRanges":         st.HotRanges,
 				"DrainProgress":     clusterDrainProgress(st),
 			})
 		},

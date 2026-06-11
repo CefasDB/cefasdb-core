@@ -123,6 +123,8 @@ func collectBackpressure(m *Metrics, label string, st *storage.DB) {
 	}
 	snap := st.WritePressure()
 	m.BackpressureState.WithLabelValues(label).Set(float64(snap.State))
+	pm := st.Metrics()
+	m.ObserveRangePressure(label, pm.Compact.EstimatedDebt, int(snap.State))
 	for _, reason := range storage.BackpressureReasons() {
 		active := 0.0
 		if snap.Enabled && snap.State != storage.PressureNormal && snap.Reason == reason {

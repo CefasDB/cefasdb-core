@@ -162,6 +162,15 @@ Common server flags:
 | `-metrics-disabled` | `false` | Disable Prometheus metrics. |
 | `-tracing-endpoint` | empty | OTLP/gRPC collector endpoint. |
 
+Hot range tracking is configured under `metrics.*` in YAML or `CEFAS_METRICS_*`
+environment variables. The defaults keep Prometheus cardinality bounded at
+`shard_count * 64` buckets. Useful overrides include
+`metrics.hotspotBuckets`, `metrics.hotspotWindow`,
+`metrics.hotspotCoolingWindow`, `metrics.hotspotReadThreshold`,
+`metrics.hotspotWriteThreshold`, `metrics.hotspotBytesThreshold`,
+`metrics.hotspotLatencyThreshold`, and
+`metrics.hotspotCompactionDebtThresholdBytes`.
+
 The CLI reads `~/.cefas/config.yaml`, `CEFAS_*` environment variables, and global
 flags such as `--endpoint`, `--token`, `--token-file`, `--ca`, `--insecure`,
 `--output`, and `--timeout`.
@@ -188,9 +197,10 @@ Split, move, drain, and decommission plans can be applied after review. Drain
 moves shard memberships off the node and leaves it in `draining`; decommission
 is a separate final metadata step that is refused while any active shard voter,
 non-voter, or leader-hint reference remains. `cefas cluster status` includes
-`DrainProgress` with the remaining blockers. Applying a split opens the child
-shard online and publishes the transition catalog; it does not copy or activate
-the child range yet.
+`DrainProgress` with the remaining blockers and `HotRanges` with bounded
+token-bucket read/write, bytes, latency, compaction-debt, and throttling
+summaries. Applying a split opens the child shard online and publishes the
+transition catalog; it does not copy or activate the child range yet.
 
 ```sh
 cefas cluster apply --plan file://split-plan.json --yes

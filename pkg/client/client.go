@@ -1075,6 +1075,7 @@ type ClusterStatus struct {
 	PlacementStrategy string
 	Shards            []ShardPlacement
 	Nodes             []NodeDescriptor
+	HotRanges         []RangeHotspotSummary
 }
 
 type TokenRange struct {
@@ -1090,6 +1091,26 @@ type ShardPlacement struct {
 	Voters     []string
 	NonVoters  []string
 	LeaderHint string
+}
+
+type RangeHotspotSummary struct {
+	ShardID             string
+	Bucket              int
+	BucketCount         int
+	TokenStart          uint64
+	TokenEnd            uint64
+	Reads               uint64
+	Writes              uint64
+	Bytes               uint64
+	AvgLatencySeconds   float64
+	MaxLatencySeconds   float64
+	CompactionDebtBytes uint64
+	ThrottleState       int
+	Status              string
+	Reasons             []string
+	WindowStartedUnix   int64
+	LastSeenUnix        int64
+	HotUntilUnix        int64
 }
 
 type NodeCapacity struct {
@@ -1245,6 +1266,7 @@ func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 		PlacementStrategy: resp.GetPlacementStrategy(),
 		Shards:            shardPlacementsFromPB(resp.GetShards()),
 		Nodes:             nodeDescriptorsFromPB(resp.GetNodes()),
+		HotRanges:         rangeHotspotsFromPB(resp.GetHotRanges()),
 	}, nil
 }
 
@@ -1259,6 +1281,32 @@ func shardPlacementsFromPB(in []*cefaspb.ShardPlacement) []ShardPlacement {
 			Voters:     append([]string(nil), sh.GetVoters()...),
 			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
 			LeaderHint: sh.GetLeaderHint(),
+		})
+	}
+	return out
+}
+
+func rangeHotspotsFromPB(in []*cefaspb.RangeHotspotSummary) []RangeHotspotSummary {
+	out := make([]RangeHotspotSummary, 0, len(in))
+	for _, hs := range in {
+		out = append(out, RangeHotspotSummary{
+			ShardID:             hs.GetShardId(),
+			Bucket:              int(hs.GetBucket()),
+			BucketCount:         int(hs.GetBucketCount()),
+			TokenStart:          hs.GetTokenStart(),
+			TokenEnd:            hs.GetTokenEnd(),
+			Reads:               hs.GetReads(),
+			Writes:              hs.GetWrites(),
+			Bytes:               hs.GetBytes(),
+			AvgLatencySeconds:   hs.GetAvgLatencySeconds(),
+			MaxLatencySeconds:   hs.GetMaxLatencySeconds(),
+			CompactionDebtBytes: hs.GetCompactionDebtBytes(),
+			ThrottleState:       int(hs.GetThrottleState()),
+			Status:              hs.GetStatus(),
+			Reasons:             append([]string(nil), hs.GetReasons()...),
+			WindowStartedUnix:   hs.GetWindowStartedUnix(),
+			LastSeenUnix:        hs.GetLastSeenUnix(),
+			HotUntilUnix:        hs.GetHotUntilUnix(),
 		})
 	}
 	return out

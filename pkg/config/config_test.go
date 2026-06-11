@@ -20,6 +20,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if !d.Metrics.Enabled {
 		t.Errorf("metrics should default on")
 	}
+	if d.Metrics.HotspotBuckets != 64 || d.Metrics.HotspotCoolingWindow != time.Minute {
+		t.Errorf("hotspot defaults not populated: %+v", d.Metrics)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -48,6 +51,10 @@ cluster:
 identity:
   jwksUrl: https://tikti.example.com/jwks.json
   clockSkew: 45s
+metrics:
+  hotspotBuckets: 16
+  hotspotWriteThreshold: 42
+  hotspotLatencyThreshold: 75ms
 `
 	if err := os.WriteFile(path, []byte(yamlSrc), 0o644); err != nil {
 		t.Fatal(err)
@@ -65,12 +72,18 @@ identity:
 	if cfg.Identity.ClockSkew != 45*time.Second {
 		t.Fatalf("clock skew = %v", cfg.Identity.ClockSkew)
 	}
+	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
+		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
+	}
 }
 
 func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_HTTP_ADDR", ":19090")
 	t.Setenv("CEFAS_CLUSTER_SHARDS", "4")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
+	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
+	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
+	t.Setenv("CEFAS_METRICS_HOTSPOT_LATENCY_THRESHOLD", "25ms")
 	t.Setenv("CEFAS_IDENTITY_CLOCK_SKEW", "1m")
 
 	cfg := config.Defaults()
@@ -85,6 +98,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")
+	}
+	if cfg.Metrics.HotspotBuckets != 32 || cfg.Metrics.HotspotWriteThreshold != 99 || cfg.Metrics.HotspotLatencyThreshold != 25*time.Millisecond {
+		t.Errorf("hotspot env not applied: %+v", cfg.Metrics)
 	}
 	if cfg.Identity.ClockSkew != time.Minute {
 		t.Errorf("clock skew: %v", cfg.Identity.ClockSkew)
