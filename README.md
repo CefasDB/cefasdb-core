@@ -1,6 +1,6 @@
-# cefas
+# CefasDB
 
-cefas is a high-performance NoSQL key-value and document database for
+CefasDB is a high-performance NoSQL key-value and document database for
 operational workloads. It is designed for predictable millisecond-class access,
 horizontal scale, and a small operational footprint while still giving teams
 direct control over deployment, storage, replication, and extensions.
