@@ -170,10 +170,18 @@ Cluster placement planning commands return dry-run plans for shard elasticity
 operations:
 
 ```sh
-cefas cluster plan split --shard 0
+cefas cluster plan split --shard 0 --min-voters 3
+cefas cluster plan range-move --source-shard 0 --range-start 0 --range-end 9223372036854775808 --min-voters 3
 cefas cluster plan move --shard 0 --source-node n1 --target-node n4 --min-voters 3
-cefas cluster plan drain --node n1 --target-node n4 --min-voters 3
+cefas cluster plan drain --node n1 --min-voters 3
 ```
+
+When `split`, `range-move`, or `drain` does not receive explicit target voters,
+the planner selects active nodes deterministically from node weight, CPU, memory,
+disk, tags, shard count, range load, and zone anti-affinity. Draining and
+decommissioned nodes are never selected as new targets. Use repeated
+`--target-voter` flags on split/range-move or repeated `--target-node` flags on
+drain to override the policy.
 
 Split, move, and drain plans can be applied after review. Applying a split opens
 the child shard online and publishes the transition catalog; it does not copy or

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,6 +136,170 @@ func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
 	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
 	if got := router.ShardForPK([]byte(key)); got != 0 {
 		t.Fatalf("transition route = %d, want source shard 0", got)
+	}
+}
+
+func TestPlanSplitPolicyAvoidsDrainingAndSpreadsZones(t *testing.T) {
+	cat := plannerCatalog(1)
+	n1 := cat.Nodes["n1"]
+	n1.State = cluster.NodeStateDraining
+	n1.Capacity = cluster.NodeCapacity{Weight: 10, Zone: "az-draining"}
+	cat.Nodes["n1"] = n1
+	n2 := cat.Nodes["n2"]
+	n2.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-a"}
+	cat.Nodes["n2"] = n2
+	n3 := cat.Nodes["n3"]
+	n3.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-b"}
+	cat.Nodes["n3"] = n3
+	n4 := cat.Nodes["n4"]
+	n4.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-c"}
+	cat.Nodes["n4"] = n4
+
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childVoters := plan.After.Shards[1].Voters
+	if contains(childVoters, "n1") || len(childVoters) != 3 {
+		t.Fatalf("child voters = %v, want three active voters without n1", childVoters)
+	}
+	for _, want := range []string{"n2", "n3", "n4"} {
+		if !contains(childVoters, want) {
+			t.Fatalf("child voters = %v, missing %s", childVoters, want)
+		}
+	}
+	if !containsWarning(plan.Warnings, "placement policy applied zone anti-affinity") {
+		t.Fatalf("missing zone anti-affinity warning: %v", plan.Warnings)
+	}
+	if !containsWarning(plan.Warnings, "placement policy ignored inactive nodes: n1=draining") {
+		t.Fatalf("missing inactive-node warning: %v", plan.Warnings)
+	}
+}
+
+func TestPlanRangeMovePolicyPrefersCapacitySkew(t *testing.T) {
+	cat := plannerCatalog(1)
+	cat.Shards[0].Voters = []string{"n1"}
+	n1 := cat.Nodes["n1"]
+	n1.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-a"}
+	cat.Nodes["n1"] = n1
+	n2 := cat.Nodes["n2"]
+	n2.Capacity = cluster.NodeCapacity{
+		Weight:      5,
+		CPU:         32,
+		MemoryBytes: 64 << 30,
+		DiskBytes:   1024 << 30,
+		Zone:        "az-b",
+		Tags:        []string{"ssd"},
+	}
+	cat.Nodes["n2"] = n2
+	n3 := cat.Nodes["n3"]
+	n3.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-c"}
+	cat.Nodes["n3"] = n3
+
+	start := uint64(0)
+	end := uint64(1) << 63
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:  cluster.PlacementOperationRangeMove,
+		ShardID:    0,
+		RangeStart: &start,
+		RangeEnd:   &end,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := plan.After.Shards[1].Voters
+	if len(got) != 1 || got[0] != "n2" {
+		t.Fatalf("target voters = %v, want n2", got)
+	}
+	if !containsWarning(plan.Warnings, "n2(score=") {
+		t.Fatalf("missing selected-node explanation: %v", plan.Warnings)
+	}
+}
+
+func TestPlanSplitPolicyMissingCapacityIsDeterministic(t *testing.T) {
+	cat := plannerCatalog(1)
+	cat.Shards[0].Voters = []string{"n1", "n2"}
+	for id, node := range cat.Nodes {
+		node.Capacity = cluster.NodeCapacity{}
+		cat.Nodes[id] = node
+	}
+
+	plan1, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan2, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got1 := strings.Join(plan1.After.Shards[1].Voters, ",")
+	got2 := strings.Join(plan2.After.Shards[1].Voters, ",")
+	if got1 != got2 {
+		t.Fatalf("target voters are not deterministic: first=%s second=%s", got1, got2)
+	}
+	if len(plan1.After.Shards[1].Voters) != 2 {
+		t.Fatalf("target voters = %v, want two voters", plan1.After.Shards[1].Voters)
+	}
+	if !containsWarning(plan1.Warnings, "memoryGiB=0") {
+		t.Fatalf("missing missing-capacity explanation: %v", plan1.Warnings)
+	}
+}
+
+func TestPlanSplitPolicyRejectsInsufficientActiveNodes(t *testing.T) {
+	cat := plannerCatalog(1)
+	cat.Shards[0].Voters = []string{"n1", "n2"}
+	n2 := cat.Nodes["n2"]
+	n2.State = cluster.NodeStateDraining
+	cat.Nodes["n2"] = n2
+	n3 := cat.Nodes["n3"]
+	n3.State = cluster.NodeStateDecommissioned
+	cat.Nodes["n3"] = n3
+	n4 := cat.Nodes["n4"]
+	n4.State = cluster.NodeStateDecommissioned
+	cat.Nodes["n4"] = n4
+
+	_, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}
+	if !strings.Contains(err.Error(), "placement policy found 1 active nodes; need 2 voters") {
+		t.Fatalf("error = %v, want active-node count", err)
+	}
+}
+
+func TestPlanDrainUsesPlacementPolicyWithoutTargets(t *testing.T) {
+	cat := plannerCatalog(1)
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationDrain,
+		NodeID:    "n1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := plan.After.Shards[0].Voters
+	if contains(got, "n1") || !contains(got, "n4") || len(got) != 3 {
+		t.Fatalf("voters = %v, want n1 replaced by n4", got)
+	}
+	if len(plan.Steps) != 3 || plan.Steps[0].Action != "add_voter" || plan.Steps[1].Action != "wait_catchup" || plan.Steps[2].Action != "remove_voter" {
+		t.Fatalf("unexpected drain steps: %+v", plan.Steps)
+	}
+	if !containsWarning(plan.Warnings, "no target nodes supplied; placement policy selected replacement voters") {
+		t.Fatalf("missing auto-target warning: %v", plan.Warnings)
+	}
+	if !containsWarning(plan.Warnings, "shard 0: placement policy selected target voters") {
+		t.Fatalf("missing shard policy warning: %v", plan.Warnings)
 	}
 }
 
@@ -801,6 +966,15 @@ func countTableDataKeys(t *testing.T, db *storage.DB, table string) int {
 func contains(in []string, v string) bool {
 	for _, existing := range in {
 		if existing == v {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWarning(warnings []string, substr string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, substr) {
 			return true
 		}
 	}
