@@ -16,11 +16,12 @@ const (
 	AttrN             // number (decimal, kept as string for arbitrary precision)
 	AttrB             // binary
 	AttrBOOL
-	AttrSS // string set
-	AttrNS // number set
-	AttrBS // binary set
-	AttrL  // list
-	AttrM  // map
+	AttrSS  // string set
+	AttrNS  // number set
+	AttrBS  // binary set
+	AttrL   // list
+	AttrM   // map
+	AttrVec // native numeric vector
 )
 
 // AttributeValue is the polymorphic attribute carrier. Only one field is
@@ -39,6 +40,7 @@ type AttributeValue struct {
 	BS   [][]byte
 	L    []AttributeValue
 	M    map[string]AttributeValue
+	Vec  []float64
 }
 
 // Item is the unit of storage: a flat map of attribute name to value. The
@@ -118,6 +120,21 @@ type SpatialIndexDescriptor struct {
 	Ranges []NumRange `json:"ranges,omitempty"`
 }
 
+// AttributeDefinition captures optional table-level attribute metadata.
+// Key attributes only need their scalar type. Vector attributes use
+// Type="V" and VectorDimensions > 0 so write paths can fail dimension
+// mismatches before data lands in storage.
+type AttributeDefinition struct {
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	VectorDimensions int    `json:"vectorDimensions,omitempty"`
+}
+
+const (
+	StorageClassDisk   = "disk"
+	StorageClassMemory = "memory"
+)
+
 // NumRange bounds a single numeric dimension for Z-order encoding.
 type NumRange struct {
 	Lo float64 `json:"lo"`
@@ -126,11 +143,14 @@ type NumRange struct {
 
 // TableDescriptor is the persisted schema. Stored under cefas/catalog/<name>.
 type TableDescriptor struct {
-	Name           string                   `json:"name"`
-	KeySchema      KeySchema                `json:"keySchema"`
-	GSIs           []GSIDescriptor          `json:"gsis,omitempty"`
-	LSIs           []LSIDescriptor          `json:"lsis,omitempty"`
-	SpatialIndexes []SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	Name                 string                   `json:"name"`
+	KeySchema            KeySchema                `json:"keySchema"`
+	AttributeDefinitions []AttributeDefinition    `json:"attributeDefinitions,omitempty"`
+	GSIs                 []GSIDescriptor          `json:"gsis,omitempty"`
+	LSIs                 []LSIDescriptor          `json:"lsis,omitempty"`
+	SpatialIndexes       []SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	StorageClass         string                   `json:"storageClass,omitempty"`
+	MemoryFootprintBytes int64                    `json:"memoryFootprintBytes,omitempty"`
 	// TTLAttribute, when non-empty, names a numeric attribute whose
 	// value (Unix epoch seconds) marks the row's expiration. The
 	// background reaper sweeps expired rows lazily; reads of an

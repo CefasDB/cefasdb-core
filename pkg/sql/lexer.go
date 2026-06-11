@@ -36,6 +36,8 @@ const (
 	// Punctuation.
 	tLParen
 	tRParen
+	tLBracket
+	tRBracket
 	tComma
 	tStar
 	tSemicolon
@@ -93,6 +95,10 @@ const (
 	tReturning
 	tNew
 	tOld
+	tAnn
+	tOf
+	tWith
+	tStorage
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -105,35 +111,35 @@ type Token struct {
 }
 
 var keywords = map[string]TokenKind{
-	"SELECT":  tSelect,
-	"FROM":    tFrom,
-	"WHERE":   tWhere,
-	"INSERT":  tInsert,
-	"INTO":    tInto,
-	"VALUES":  tValues,
-	"UPDATE":  tUpdate,
-	"SET":     tSet,
-	"DELETE":  tDelete,
-	"CREATE":  tCreate,
-	"TABLE":   tTable,
-	"PRIMARY": tPrimary,
-	"KEY":     tKey,
-	"DROP":    tDrop,
-	"ORDER":   tOrder,
-	"BY":      tBy,
-	"ASC":     tAsc,
-	"DESC":    tDesc,
-	"LIMIT":   tLimit,
-	"AND":     tAnd,
-	"OR":      tOr,
-	"NOT":     tNot,
-	"BETWEEN": tBetween,
-	"IS":      tIs,
-	"NULL":    tNull,
-	"TRUE":    tTrue,
-	"FALSE":   tFalse,
-	"USE":     tUse,
-	"INDEX":   tIndex,
+	"SELECT":    tSelect,
+	"FROM":      tFrom,
+	"WHERE":     tWhere,
+	"INSERT":    tInsert,
+	"INTO":      tInto,
+	"VALUES":    tValues,
+	"UPDATE":    tUpdate,
+	"SET":       tSet,
+	"DELETE":    tDelete,
+	"CREATE":    tCreate,
+	"TABLE":     tTable,
+	"PRIMARY":   tPrimary,
+	"KEY":       tKey,
+	"DROP":      tDrop,
+	"ORDER":     tOrder,
+	"BY":        tBy,
+	"ASC":       tAsc,
+	"DESC":      tDesc,
+	"LIMIT":     tLimit,
+	"AND":       tAnd,
+	"OR":        tOr,
+	"NOT":       tNot,
+	"BETWEEN":   tBetween,
+	"IS":        tIs,
+	"NULL":      tNull,
+	"TRUE":      tTrue,
+	"FALSE":     tFalse,
+	"USE":       tUse,
+	"INDEX":     tIndex,
 	"IF":        tIf,
 	"EXISTS":    tExists,
 	"ADD":       tAdd,
@@ -142,6 +148,10 @@ var keywords = map[string]TokenKind{
 	"RETURNING": tReturning,
 	"NEW":       tNew,
 	"OLD":       tOld,
+	"ANN":       tAnn,
+	"OF":        tOf,
+	"WITH":      tWith,
+	"STORAGE":   tStorage,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of
@@ -165,6 +175,12 @@ func Tokenize(src string) ([]Token, error) {
 			i++
 		case c == ')':
 			out = append(out, Token{Kind: tRParen, Lit: ")", Pos: i})
+			i++
+		case c == '[':
+			out = append(out, Token{Kind: tLBracket, Lit: "[", Pos: i})
+			i++
+		case c == ']':
+			out = append(out, Token{Kind: tRBracket, Lit: "]", Pos: i})
 			i++
 		case c == ',':
 			out = append(out, Token{Kind: tComma, Lit: ",", Pos: i})

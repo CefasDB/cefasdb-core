@@ -684,12 +684,21 @@ type BackupDescriptor struct {
 	ManifestStatus  string
 	RequestedTables []string
 	TableStats      []BackupTableStats
+	ShardCoverage   []BackupShardCoverage
+	ChangeIndex     uint64
+	ChangeUnixNano  int64
 }
 
 type BackupTableStats struct {
 	Table    string
 	Rows     int64
 	Checksum string
+}
+
+type BackupShardCoverage struct {
+	ShardID        string
+	PlacementEpoch uint64
+	TableStats     []BackupTableStats
 }
 
 type BackupDeletionResult struct {
@@ -778,10 +787,18 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 	}
 	stats := make([]BackupTableStats, 0, len(b.GetTableStats()))
 	for _, stat := range b.GetTableStats() {
-		stats = append(stats, BackupTableStats{
-			Table:    stat.GetTable(),
-			Rows:     stat.GetRows(),
-			Checksum: stat.GetChecksum(),
+		stats = append(stats, backupTableStatsFromPB(stat))
+	}
+	coverage := make([]BackupShardCoverage, 0, len(b.GetShardCoverage()))
+	for _, shard := range b.GetShardCoverage() {
+		shardStats := make([]BackupTableStats, 0, len(shard.GetTableStats()))
+		for _, stat := range shard.GetTableStats() {
+			shardStats = append(shardStats, backupTableStatsFromPB(stat))
+		}
+		coverage = append(coverage, BackupShardCoverage{
+			ShardID:        shard.GetShardId(),
+			PlacementEpoch: shard.GetPlacementEpoch(),
+			TableStats:     shardStats,
 		})
 	}
 	return BackupDescriptor{
@@ -793,6 +810,20 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 		ManifestStatus:  b.GetManifestStatus(),
 		RequestedTables: b.GetRequestedTables(),
 		TableStats:      stats,
+		ShardCoverage:   coverage,
+		ChangeIndex:     b.GetChangeIndex(),
+		ChangeUnixNano:  b.GetChangeUnixNano(),
+	}
+}
+
+func backupTableStatsFromPB(stat *cefaspb.BackupTableStats) BackupTableStats {
+	if stat == nil {
+		return BackupTableStats{}
+	}
+	return BackupTableStats{
+		Table:    stat.GetTable(),
+		Rows:     stat.GetRows(),
+		Checksum: stat.GetChecksum(),
 	}
 }
 
@@ -839,7 +870,9 @@ func backupRetentionFromPB(resp *cefaspb.ApplyBackupRetentionResponse) BackupRet
 }
 
 type RestoreTableFromBackupOptions struct {
-	DryRun bool
+	DryRun            bool
+	TargetChangeIndex uint64
+	TargetUnixNano    int64
 }
 
 type RestoreTableFromBackupResult struct {
@@ -865,10 +898,12 @@ func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceT
 
 func (c *Client) RestoreTableFromBackupWithOptions(ctx context.Context, backupName, sourceTable, targetTable string, opts RestoreTableFromBackupOptions) (RestoreTableFromBackupResult, error) {
 	resp, err := c.stub.RestoreTableFromBackup(c.withAuth(ctx), &cefaspb.RestoreTableFromBackupRequest{
-		BackupName:      backupName,
-		SourceTableName: sourceTable,
-		TargetTableName: targetTable,
-		DryRun:          opts.DryRun,
+		BackupName:        backupName,
+		SourceTableName:   sourceTable,
+		TargetTableName:   targetTable,
+		DryRun:            opts.DryRun,
+		TargetChangeIndex: opts.TargetChangeIndex,
+		TargetUnixNano:    opts.TargetUnixNano,
 	})
 	if err != nil {
 		return RestoreTableFromBackupResult{}, err

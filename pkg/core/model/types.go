@@ -15,7 +15,7 @@ type Item = types.Item
 type AttributeValue = types.AttributeValue
 
 // AttrType enumerates the supported attribute kinds (S / N / B / BOOL
-// / NULL / SS / NS / BS / L / M).
+// / NULL / SS / NS / BS / L / M / V).
 type AttrType = types.AttrType
 
 // KeySchema names the primary partition (PK) and optional sort (SK)
@@ -39,4 +39,5 @@ const (
 	AttrBS   = types.AttrBS
 	AttrL    = types.AttrL
 	AttrM    = types.AttrM
+	AttrVec  = types.AttrVec
 )

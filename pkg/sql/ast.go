@@ -16,6 +16,8 @@ type SelectStmt struct {
 	Where     Expr     // nil → unconditional
 	OrderBy   string
 	OrderDesc bool
+	OrderANN  bool
+	ANNTarget []float64
 	Limit     int
 	// Count = true for SELECT COUNT(*) FROM ... — executor returns
 	// the matching-row total as AffectedRows instead of materialising
@@ -95,9 +97,17 @@ type DeleteStmt struct {
 // SQL surface narrow here avoids a parser blow-up on DDL we already
 // have a structured way to handle.
 type CreateTableStmt struct {
-	Table string
-	PK    string
-	SK    string // "" if no sort key
+	Table                string
+	PK                   string
+	SK                   string // "" if no sort key
+	StorageClass         string
+	AttributeDefinitions []CreateAttributeDefinition
+}
+
+type CreateAttributeDefinition struct {
+	Name             string
+	Type             string
+	VectorDimensions int
 }
 
 // DropTableStmt is DROP TABLE <name>.
@@ -129,6 +139,11 @@ type Literal struct {
 	Kind  LitKind
 	Value string
 	Bool  bool
+}
+
+// VectorLiteral is a native vector literal like [0.1, 0.2].
+type VectorLiteral struct {
+	Values []float64
 }
 
 // LitKind enumerates literal value kinds. Strings and numbers are the
@@ -202,9 +217,10 @@ type ArithExpr struct {
 
 func (*ArithExpr) expr() {}
 
-func (*ColumnRef) expr()   {}
-func (*Literal) expr()     {}
-func (*BinaryExpr) expr()  {}
-func (*NotExpr) expr()     {}
-func (*BetweenExpr) expr() {}
-func (*FuncCall) expr()    {}
+func (*ColumnRef) expr()     {}
+func (*Literal) expr()       {}
+func (*VectorLiteral) expr() {}
+func (*BinaryExpr) expr()    {}
+func (*NotExpr) expr()       {}
+func (*BetweenExpr) expr()   {}
+func (*FuncCall) expr()      {}

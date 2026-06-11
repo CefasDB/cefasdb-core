@@ -59,6 +59,17 @@ type PlanSpatial struct {
 	Descriptor types.TableDescriptor
 }
 
+// PlanANN ranks table rows by a vector distance resolved from an ann
+// index in the execution environment.
+type PlanANN struct {
+	Table      string
+	Field      string
+	Target     types.AttributeValue
+	Limit      int
+	Project    []string
+	Descriptor types.TableDescriptor
+}
+
 // PlanPutItem is INSERT INTO ... VALUES (...) [IF expr]
 // [RETURNING mode].
 type PlanPutItem struct {
@@ -97,6 +108,7 @@ func (*PlanDropTable) plan()   {}
 func (*PlanGetItem) plan()     {}
 func (*PlanQuery) plan()       {}
 func (*PlanSpatial) plan()     {}
+func (*PlanANN) plan()         {}
 func (*PlanPutItem) plan()     {}
 func (*PlanUpdate) plan()      {}
 func (*PlanDelete) plan()      {}

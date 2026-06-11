@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -36,6 +37,15 @@ var pluginIndexBook = struct {
 
 func indexKey(table, name string) string { return table + "/" + name }
 
+type annConfig struct {
+	Field         string `json:"field"`
+	Dim           int    `json:"dim"`
+	Algorithm     string `json:"algorithm,omitempty"`
+	Metric        string `json:"metric,omitempty"`
+	Sketches      int    `json:"sketches,omitempty"`
+	BitsPerSketch int    `json:"bits_per_sketch,omitempty"`
+}
+
 // ---------- CreateIndex / DescribeIndex / RebuildIndex ----------
 
 func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRequest) (*cefaspb.CreateIndexResponse, error) {
@@ -46,26 +56,34 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if d == nil || d.GetTable() == "" || d.GetName() == "" || d.GetPluginName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "table / name / plugin_name required")
 	}
-	if _, err := s.cat.Describe(d.GetTable()); err != nil {
+	td, err := s.cat.Describe(d.GetTable())
+	if err != nil {
 		return nil, mapStorageErr(err)
 	}
 	desc := pbToPluginIndex(d)
+	if desc.KeySchema.PK == "" {
+		desc.KeySchema = td.KeySchema
+	}
+	storedDesc, buildDesc, err := normalizePluginIndexDescriptor(desc, td)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
-	plug, ok := s.pluginRegistry().Lookup(desc.PluginName)
+	plug, ok := s.pluginRegistry().Lookup(buildDesc.PluginName)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "plugin %q not registered", desc.PluginName)
+		return nil, status.Errorf(codes.NotFound, "plugin %q not registered", buildDesc.PluginName)
 	}
 	ip, ok := plug.(plugin.IndexPlugin)
 	if !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", desc.PluginName)
+		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	if err := ip.Build(desc, s.itemSourceFor(desc.Table)); err != nil {
+	if err := ip.Build(buildDesc, s.itemSourceFor(buildDesc.Table)); err != nil {
 		return nil, status.Errorf(codes.Internal, "plugin build: %v", err)
 	}
 	pluginIndexBook.mu.Lock()
-	pluginIndexBook.entries[indexKey(desc.Table, desc.Name)] = desc
+	pluginIndexBook.entries[indexKey(storedDesc.Table, storedDesc.Name)] = storedDesc
 	pluginIndexBook.mu.Unlock()
-	return &cefaspb.CreateIndexResponse{Descriptor_: pluginIndexToPB(desc)}, nil
+	return &cefaspb.CreateIndexResponse{Descriptor_: pluginIndexToPB(storedDesc)}, nil
 }
 
 func (s *GRPCServer) DescribeIndex(ctx context.Context, req *cefaspb.DescribeIndexRequest) (*cefaspb.DescribeIndexResponse, error) {
@@ -91,17 +109,25 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "index %s/%s not found", req.GetTable(), req.GetName())
 	}
-	plug, ok := s.pluginRegistry().Lookup(d.PluginName)
+	td, err := s.cat.Describe(d.Table)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	_, buildDesc, err := normalizePluginIndexDescriptor(d, td)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	plug, ok := s.pluginRegistry().Lookup(buildDesc.PluginName)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "plugin %q not registered", d.PluginName)
+		return nil, status.Errorf(codes.NotFound, "plugin %q not registered", buildDesc.PluginName)
 	}
 	ip, ok := plug.(plugin.IndexPlugin)
 	if !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", d.PluginName)
+		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
 	count := 0
-	if err := ip.Build(d, func(yield func(model.Item) bool) {
-		s.itemSourceFor(d.Table)(func(it model.Item) bool {
+	if err := ip.Build(buildDesc, func(yield func(model.Item) bool) {
+		s.itemSourceFor(buildDesc.Table)(func(it model.Item) bool {
 			count++
 			return yield(it)
 		})
@@ -109,6 +135,82 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 		return nil, status.Errorf(codes.Internal, "rebuild: %v", err)
 	}
 	return &cefaspb.RebuildIndexResponse{ItemsIndexed: int64(count)}, nil
+}
+
+func normalizePluginIndexDescriptor(desc index.Descriptor, td model.TableDescriptor) (index.Descriptor, index.Descriptor, error) {
+	if !strings.EqualFold(desc.PluginName, "ann") {
+		return desc, desc, nil
+	}
+	cfg, err := parseANNConfig(desc.PluginConfig)
+	if err != nil {
+		return index.Descriptor{}, index.Descriptor{}, err
+	}
+	if cfg.Field == "" {
+		return index.Descriptor{}, index.Descriptor{}, fmt.Errorf("ann: config.field required")
+	}
+	if cfg.Algorithm == "" {
+		cfg.Algorithm = "lsh"
+	}
+	if cfg.Metric == "" {
+		cfg.Metric = "cosine"
+	}
+	if cfg.Algorithm != "lsh" && cfg.Algorithm != "vectorlsh" {
+		return index.Descriptor{}, index.Descriptor{}, fmt.Errorf("ann: unsupported algorithm %q", cfg.Algorithm)
+	}
+	if cfg.Dim <= 0 {
+		if dim, ok := tableVectorDim(td, cfg.Field); ok {
+			cfg.Dim = dim
+		}
+	}
+	if cfg.Dim <= 0 {
+		return index.Descriptor{}, index.Descriptor{}, fmt.Errorf("ann: config.dim required")
+	}
+	storedCfg, err := json.Marshal(cfg)
+	if err != nil {
+		return index.Descriptor{}, index.Descriptor{}, err
+	}
+	buildCfg := map[string]any{
+		"field": cfg.Field,
+		"dim":   cfg.Dim,
+	}
+	if cfg.Sketches > 0 {
+		buildCfg["sketches"] = cfg.Sketches
+	}
+	if cfg.BitsPerSketch > 0 {
+		buildCfg["bits_per_sketch"] = cfg.BitsPerSketch
+	}
+	buildRaw, err := json.Marshal(buildCfg)
+	if err != nil {
+		return index.Descriptor{}, index.Descriptor{}, err
+	}
+	stored := desc
+	stored.PluginName = "ann"
+	stored.PluginConfig = storedCfg
+	build := desc
+	build.PluginName = "vectorlsh"
+	build.PluginConfig = buildRaw
+	return stored, build, nil
+}
+
+func parseANNConfig(raw []byte) (annConfig, error) {
+	var cfg annConfig
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return cfg, fmt.Errorf("ann: parse config: %w", err)
+		}
+	}
+	cfg.Algorithm = strings.ToLower(strings.TrimSpace(cfg.Algorithm))
+	cfg.Metric = strings.ToLower(strings.TrimSpace(cfg.Metric))
+	return cfg, nil
+}
+
+func tableVectorDim(td model.TableDescriptor, field string) (int, bool) {
+	for _, def := range td.AttributeDefinitions {
+		if def.Name == field && strings.EqualFold(def.Type, "V") && def.VectorDimensions > 0 {
+			return def.VectorDimensions, true
+		}
+	}
+	return 0, false
 }
 
 // itemSourceFor produces a plugin.ItemSource over the live table.
@@ -143,6 +245,16 @@ func (s *GRPCServer) Explain(ctx context.Context, req *cefaspb.ExplainRequest) (
 			{Op: "ScanTable", Plugin: "core", Detail: req.GetTable()},
 		},
 	}
+	if strings.Contains(strings.ToUpper(req.GetPredicate()), " ANN ") {
+		root = cquery.PlanNode{
+			Op:     "TopK",
+			Plugin: "ann",
+			Detail: fmt.Sprintf("table=%s predicate=%q", req.GetTable(), req.GetPredicate()),
+			Children: []cquery.PlanNode{
+				{Op: "ScanTable", Plugin: "core", Detail: req.GetTable()},
+			},
+		}
+	}
 	fmtKind := cquery.ExplainText
 	if strings.EqualFold(req.GetFormat(), "json") {
 		fmtKind = cquery.ExplainJSON
@@ -161,20 +273,16 @@ func (s *GRPCServer) TopK(ctx context.Context, req *cefaspb.TopKRequest) (*cefas
 	if req.GetK() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "k must be > 0")
 	}
-	if req.GetField() == "" || req.GetDistanceOperator() == "" {
-		return nil, status.Error(codes.InvalidArgument, "field + distance_operator required")
-	}
-	plug, ok := s.pluginRegistry().Lookup(req.GetDistanceOperator())
-	if !ok {
-		return nil, status.Errorf(codes.NotFound, "distance plugin %q not registered", req.GetDistanceOperator())
-	}
-	dist, ok := plug.(plugin.DistancePlugin)
-	if !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not a DistancePlugin", req.GetDistanceOperator())
+	if req.GetField() == "" {
+		return nil, status.Error(codes.InvalidArgument, "field required")
 	}
 	target, err := pbToAttr(req.GetTarget())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("target: %v", err))
+	}
+	dist, err := s.resolveTopKDistance(req.GetTable(), req.GetField(), req.GetDistanceOperator(), target)
+	if err != nil {
+		return nil, err
 	}
 	eng, err := cquery.NewTopK(dist, req.GetField(), target, int(req.GetK()))
 	if err != nil {
@@ -198,6 +306,69 @@ func (s *GRPCServer) TopK(ctx context.Context, req *cefaspb.TopKRequest) (*cefas
 		})
 	}
 	return &cefaspb.TopKResponse{Rows: pbRows}, nil
+}
+
+func (s *GRPCServer) resolveTopKDistance(table, field, explicit string, target model.AttributeValue) (cquery.DistanceOp, error) {
+	name := strings.TrimSpace(explicit)
+	if name == "" {
+		cfg, ok, err := findANNConfig(table, field, target)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if !ok {
+			return nil, status.Errorf(codes.FailedPrecondition, "no ann index for %s.%s", table, field)
+		}
+		name = cfg.Metric
+	}
+	plug, ok := s.pluginRegistry().Lookup(name)
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "distance plugin %q not registered", name)
+	}
+	dist, ok := plug.(plugin.DistancePlugin)
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not a DistancePlugin", name)
+	}
+	return dist, nil
+}
+
+func findANNConfig(table, field string, target model.AttributeValue) (annConfig, bool, error) {
+	pluginIndexBook.mu.RLock()
+	defer pluginIndexBook.mu.RUnlock()
+	for _, desc := range pluginIndexBook.entries {
+		if desc.Table != table || !strings.EqualFold(desc.PluginName, "ann") {
+			continue
+		}
+		cfg, err := parseANNConfig(desc.PluginConfig)
+		if err != nil {
+			return annConfig{}, false, err
+		}
+		if cfg.Field != field {
+			continue
+		}
+		if cfg.Metric == "" {
+			cfg.Metric = "cosine"
+		}
+		if cfg.Dim > 0 {
+			if got := attrVectorDim(target); got > 0 && got != cfg.Dim {
+				return annConfig{}, false, fmt.Errorf("ann: target dim %d != index dim %d", got, cfg.Dim)
+			}
+		}
+		return cfg, true, nil
+	}
+	return annConfig{}, false, nil
+}
+
+func attrVectorDim(av model.AttributeValue) int {
+	switch av.T {
+	case model.AttrVec:
+		return len(av.Vec)
+	case model.AttrL:
+		return len(av.L)
+	case model.AttrNS:
+		return len(av.NS)
+	default:
+		return 0
+	}
 }
 
 // ---------- Cohort ----------

@@ -1,5 +1,5 @@
 // Package cosine is the cosine-distance operator plugin. Inputs are
-// numeric vectors (AttrL of AttrN, or AttrNS); Eval returns the
+// numeric vectors (AttrVec, AttrL of AttrN, or AttrNS); Eval returns the
 // distance 1 - similarity so smaller means closer.
 package cosine
 
@@ -19,7 +19,7 @@ func (Op) Manifest() plugin.Manifest {
 		Name:        "cosine",
 		Kind:        plugin.KindDistance,
 		Version:     "1",
-		Description: "Cosine distance (1 - similarity) over numeric vectors (L of N, or NS)",
+		Description: "Cosine distance (1 - similarity) over numeric vectors (V, L of N, or NS)",
 	}
 }
 
@@ -29,7 +29,9 @@ func (Op) Supports(a, b model.AttrType) bool {
 	return numericVec(a) && numericVec(b)
 }
 
-func numericVec(t model.AttrType) bool { return t == model.AttrL || t == model.AttrNS }
+func numericVec(t model.AttrType) bool {
+	return t == model.AttrVec || t == model.AttrL || t == model.AttrNS
+}
 
 func (Op) Eval(a, b model.AttributeValue) (float64, error) {
 	av, err := vecattr.AsFloats(a)

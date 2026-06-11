@@ -30,6 +30,7 @@ const (
 	Namespace = "cefas/"
 	pCatalog  = Namespace + "catalog/"
 	pTables   = Namespace + "t/"
+	pAdmin    = Namespace + "admin/"
 
 	segPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -38,6 +39,23 @@ const (
 	segZorder  = "/zorder/"
 	segTTL     = "/ttl/"
 )
+
+var changeCounterKey = []byte(pAdmin + "change/counter")
+
+func KeyChangeLog(index uint64) []byte {
+	base := []byte(pAdmin + "change/log/")
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], index)
+	out := make([]byte, 0, len(base)+len(b))
+	out = append(out, base...)
+	out = append(out, b[:]...)
+	return out
+}
+
+func PrefixChangeLog() (lower, upper []byte) {
+	p := []byte(pAdmin + "change/log/")
+	return p, prefixUpper(p)
+}
 
 // KeyCatalog returns the catalog descriptor key for a table.
 func KeyCatalog(table string) []byte {

@@ -273,6 +273,8 @@ func attrSize(av types.AttributeValue) int {
 		return len(av.BS)
 	case types.AttrM:
 		return len(av.M)
+	case types.AttrVec:
+		return len(av.Vec)
 	}
 	return 0
 }
@@ -299,6 +301,8 @@ func attrTypeName(t types.AttrType) string {
 		return "L"
 	case types.AttrM:
 		return "M"
+	case types.AttrVec:
+		return "V"
 	}
 	return ""
 }

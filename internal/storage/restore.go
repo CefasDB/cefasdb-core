@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -21,7 +22,9 @@ type RestoreResult struct {
 }
 
 type RestoreOptions struct {
-	DryRun bool
+	DryRun            bool
+	TargetChangeIndex uint64
+	TargetUnixNano    int64
 }
 
 type RestorePreflightResult struct {
@@ -69,6 +72,9 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 	defer checkpoint.Close()
 
 	if opts.DryRun {
+		if err := d.validatePITRTarget(preflight, opts); err != nil {
+			return RestoreResult{}, err
+		}
 		return RestoreResult{
 			TargetTable:     preflight.TargetTable,
 			RowsCopied:      int(preflight.SourceStats.Rows),
@@ -106,6 +112,13 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 	}
 	if err := iter.Error(); err != nil {
 		return RestoreResult{}, err
+	}
+	if opts.TargetChangeIndex != 0 || opts.TargetUnixNano != 0 {
+		replayed, err := d.replayChangesToTarget(preflight, opts)
+		if err != nil {
+			return RestoreResult{}, err
+		}
+		n += replayed
 	}
 	return RestoreResult{
 		TargetTable:     preflight.TargetTable,
@@ -191,4 +204,96 @@ func (d *DB) restoreTablePreflight(
 		ManifestVersion: meta.ManifestVersion,
 		ManifestStatus:  meta.ManifestStatus,
 	}, checkpoint, nil
+}
+
+func (d *DB) validatePITRTarget(preflight RestorePreflightResult, opts RestoreOptions) error {
+	if opts.TargetChangeIndex == 0 && opts.TargetUnixNano == 0 {
+		return nil
+	}
+	meta, err := d.GetBackup(preflight.BackupName)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return fmt.Errorf("cefas/storage: backup %q not found", preflight.BackupName)
+	}
+	current, err := d.CurrentChangeIndex()
+	if err != nil {
+		return err
+	}
+	if opts.TargetChangeIndex != 0 {
+		if opts.TargetChangeIndex < meta.ChangeIndex {
+			return fmt.Errorf("target change index %d is before backup high-water index %d", opts.TargetChangeIndex, meta.ChangeIndex)
+		}
+		if opts.TargetChangeIndex > current {
+			return fmt.Errorf("target change index %d is outside retained history; current high-water index is %d", opts.TargetChangeIndex, current)
+		}
+	}
+	if opts.TargetUnixNano != 0 {
+		if meta.ChangeUnixNano != 0 && opts.TargetUnixNano < meta.ChangeUnixNano {
+			return fmt.Errorf("target timestamp %d is before backup timestamp %d", opts.TargetUnixNano, meta.ChangeUnixNano)
+		}
+		if opts.TargetUnixNano > time.Now().UnixNano() {
+			return fmt.Errorf("target timestamp %d is outside retained history", opts.TargetUnixNano)
+		}
+	}
+	return nil
+}
+
+func (d *DB) replayChangesToTarget(preflight RestorePreflightResult, opts RestoreOptions) (int, error) {
+	if err := d.validatePITRTarget(preflight, opts); err != nil {
+		return 0, err
+	}
+	meta, err := d.GetBackup(preflight.BackupName)
+	if err != nil {
+		return 0, err
+	}
+	if meta == nil {
+		return 0, fmt.Errorf("cefas/storage: backup %q not found", preflight.BackupName)
+	}
+	toIndex := opts.TargetChangeIndex
+	if toIndex == 0 {
+		toIndex, err = d.CurrentChangeIndex()
+		if err != nil {
+			return 0, err
+		}
+	}
+	records, err := d.changeRecordsAfter(preflight.SourceTableName, meta.ChangeIndex, toIndex, opts.TargetUnixNano)
+	if err != nil {
+		return 0, err
+	}
+	applied := 0
+	for _, rec := range records {
+		switch rec.Op {
+		case ChangePut:
+			item := cloneStorageItem(rec.Item)
+			if err := d.PutItemWith(preflight.TargetTable, item, PutOptions{}); err != nil {
+				return applied, fmt.Errorf("replay put index %d: %w", rec.Index, err)
+			}
+			applied++
+		case ChangeDelete:
+			key := cloneStorageItem(rec.Key)
+			if err := d.DeleteItemWith(preflight.TargetTable, key, DeleteOptions{}); err != nil {
+				if errors.Is(err, types.ErrItemNotFound) {
+					continue
+				}
+				return applied, fmt.Errorf("replay delete index %d: %w", rec.Index, err)
+			}
+			applied++
+		default:
+			return applied, fmt.Errorf("unknown change op %q at index %d", rec.Op, rec.Index)
+		}
+	}
+	return applied, nil
+}
+
+func cloneStorageItem(in types.Item) types.Item {
+	if in == nil {
+		return nil
+	}
+	out := make(types.Item, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

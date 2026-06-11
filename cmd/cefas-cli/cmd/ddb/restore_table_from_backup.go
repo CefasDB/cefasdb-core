@@ -12,10 +12,12 @@ import (
 
 func registerRestoreTableFromBackup(root *cobra.Command) {
 	var (
-		backup string
-		source string
-		target string
-		dryRun bool
+		backup            string
+		source            string
+		target            string
+		dryRun            bool
+		targetChangeIndex uint64
+		targetUnixNano    int64
 	)
 	c := &cobra.Command{
 		Use:   "restore-table-from-backup",
@@ -55,7 +57,11 @@ Example:
 				return err
 			}
 			defer cli.Close()
-			result, err := cli.RestoreTableFromBackupWithOptions(ctx, backup, source, target, client.RestoreTableFromBackupOptions{DryRun: dryRun})
+			result, err := cli.RestoreTableFromBackupWithOptions(ctx, backup, source, target, client.RestoreTableFromBackupOptions{
+				DryRun:            dryRun,
+				TargetChangeIndex: targetChangeIndex,
+				TargetUnixNano:    targetUnixNano,
+			})
 			if err != nil {
 				return fmt.Errorf("restore: %w", err)
 			}
@@ -65,13 +71,15 @@ Example:
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
 				"TableDescription": map[string]any{
-					"TableName":        result.TargetTableName,
-					"TableStatus":      restoreStatus(result.DryRun),
-					"RowsCopied":       result.RowsCopied,
-					"DryRun":           result.DryRun,
-					"SourceTableStats": result.SourceTableStats,
-					"ManifestVersion":  result.ManifestVersion,
-					"ManifestStatus":   result.ManifestStatus,
+					"TableName":         result.TargetTableName,
+					"TableStatus":       restoreStatus(result.DryRun),
+					"RowsCopied":        result.RowsCopied,
+					"DryRun":            result.DryRun,
+					"SourceTableStats":  result.SourceTableStats,
+					"ManifestVersion":   result.ManifestVersion,
+					"ManifestStatus":    result.ManifestStatus,
+					"TargetChangeIndex": targetChangeIndex,
+					"TargetUnixNano":    targetUnixNano,
 				},
 			})
 		},
@@ -81,6 +89,8 @@ Example:
 	f.StringVar(&source, "source-table-name", "", "Table inside the backup to copy (required)")
 	f.StringVar(&target, "target-table-name", "", "New table name in the live catalog (required)")
 	f.BoolVar(&dryRun, "dry-run", false, "Validate restore inputs and manifest without creating the target table")
+	f.Uint64Var(&targetChangeIndex, "target-change-index", 0, "Replay changes through this storage change index")
+	f.Int64Var(&targetUnixNano, "target-unix-nano", 0, "Replay changes through this Unix nanosecond timestamp")
 	_ = c.MarkFlagRequired("backup-name")
 	_ = c.MarkFlagRequired("source-table-name")
 	_ = c.MarkFlagRequired("target-table-name")

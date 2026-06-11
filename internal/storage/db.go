@@ -78,6 +78,13 @@ type DB struct {
 
 	backupMu             sync.Mutex
 	activeBackupRestores map[string]int
+
+	memMu     sync.RWMutex
+	memTables map[string]map[string][]byte
+	memLoaded map[string]bool
+
+	changeMu    sync.Mutex
+	changeIndex uint64
 }
 
 type commitReq struct {
@@ -113,6 +120,8 @@ func Open(opts Options) (*DB, error) {
 		syncOpt:              syncOpt,
 		bp:                   newBackpressureController(opts.Backpressure),
 		activeBackupRestores: make(map[string]int),
+		memTables:            make(map[string]map[string][]byte),
+		memLoaded:            make(map[string]bool),
 	}
 	go wrapper.commitLoop()
 	return wrapper, nil

@@ -13,6 +13,7 @@ import (
 
 // AsFloats returns av's numeric vector in float64 form. Supported
 // kinds:
+//   - AttrVec (native vector)
 //   - AttrL (list of AttrN entries)
 //   - AttrNS (number set on the wire, []string)
 //
@@ -21,6 +22,8 @@ import (
 // time instead of at row time.
 func AsFloats(av model.AttributeValue) ([]float64, error) {
 	switch av.T {
+	case model.AttrVec:
+		return append([]float64(nil), av.Vec...), nil
 	case model.AttrL:
 		out := make([]float64, 0, len(av.L))
 		for i, e := range av.L {
@@ -45,7 +48,7 @@ func AsFloats(av model.AttributeValue) ([]float64, error) {
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("vecattr: kind %v is not a numeric vector (need L or NS)", av.T)
+	return nil, fmt.Errorf("vecattr: kind %v is not a numeric vector (need V, L or NS)", av.T)
 }
 
 // Same returns true iff a and b have identical lengths. The vector

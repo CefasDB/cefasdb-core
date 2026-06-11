@@ -58,6 +58,12 @@ func pbToAttr(av *cefaspb.AttributeValue) (types.AttributeValue, error) {
 			out[k] = cv
 		}
 		return types.AttributeValue{T: types.AttrM, M: out}, nil
+	case *cefaspb.AttributeValue_V:
+		vec := v.V.GetValues()
+		if v.V.GetDim() != 0 && int(v.V.GetDim()) != len(vec) {
+			return types.AttributeValue{}, fmt.Errorf("V dimension %d does not match dim %d", len(vec), v.V.GetDim())
+		}
+		return types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), vec...)}, nil
 	}
 	return types.AttributeValue{}, fmt.Errorf("attribute value has no field set")
 }
@@ -96,6 +102,8 @@ func attrToPB(av types.AttributeValue) *cefaspb.AttributeValue {
 			m[k] = attrToPB(v)
 		}
 		return &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_M{M: &cefaspb.Map{Values: m}}}
+	case types.AttrVec:
+		return &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_V{V: &cefaspb.Vector{Values: append([]float64(nil), av.Vec...), Dim: int32(len(av.Vec))}}}
 	}
 	return nil
 }
@@ -128,7 +136,9 @@ func pbToTableDescriptor(td *cefaspb.TableDescriptor) types.TableDescriptor {
 		return types.TableDescriptor{}
 	}
 	out := types.TableDescriptor{
-		Name: td.GetName(),
+		Name:                 td.GetName(),
+		StorageClass:         td.GetStorageClass(),
+		MemoryFootprintBytes: td.GetMemoryFootprintBytes(),
 	}
 	if ks := td.GetKeySchema(); ks != nil {
 		out.KeySchema = types.KeySchema{PK: ks.GetPk(), SK: ks.GetSk()}
@@ -152,13 +162,22 @@ func pbToTableDescriptor(td *cefaspb.TableDescriptor) types.TableDescriptor {
 		}
 		out.SpatialIndexes = append(out.SpatialIndexes, sd)
 	}
+	for _, a := range td.GetAttributeDefinitions() {
+		out.AttributeDefinitions = append(out.AttributeDefinitions, types.AttributeDefinition{
+			Name:             a.GetName(),
+			Type:             a.GetType(),
+			VectorDimensions: int(a.GetVectorDimensions()),
+		})
+	}
 	return out
 }
 
 func tableDescriptorToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 	out := &cefaspb.TableDescriptor{
-		Name:      td.Name,
-		KeySchema: &cefaspb.KeySchema{Pk: td.KeySchema.PK, Sk: td.KeySchema.SK},
+		Name:                 td.Name,
+		KeySchema:            &cefaspb.KeySchema{Pk: td.KeySchema.PK, Sk: td.KeySchema.SK},
+		StorageClass:         td.StorageClass,
+		MemoryFootprintBytes: td.MemoryFootprintBytes,
 	}
 	for _, g := range td.GSIs {
 		out.Gsis = append(out.Gsis, &cefaspb.GSIDescriptor{
@@ -178,6 +197,13 @@ func tableDescriptorToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 			pb.Ranges = append(pb.Ranges, &cefaspb.NumRange{Lo: r.Lo, Hi: r.Hi})
 		}
 		out.SpatialIndexes = append(out.SpatialIndexes, pb)
+	}
+	for _, a := range td.AttributeDefinitions {
+		out.AttributeDefinitions = append(out.AttributeDefinitions, &cefaspb.AttributeDefinition{
+			Name:             a.Name,
+			Type:             a.Type,
+			VectorDimensions: int32(a.VectorDimensions),
+		})
 	}
 	return out
 }

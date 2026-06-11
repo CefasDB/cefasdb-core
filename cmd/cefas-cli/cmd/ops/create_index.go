@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -13,7 +14,8 @@ import (
 
 func registerCreateIndex(root *cobra.Command) {
 	var (
-		table, name, kind, field, pkAttr, skAttr, config string
+		table, name, kind, field, pkAttr, skAttr, config, metric, algorithm string
+		dim                                                                 int
 	)
 	c := &cobra.Command{
 		Use:   "create-index",
@@ -43,7 +45,25 @@ Example:
 			}
 			cfg := []byte(config)
 			if len(cfg) == 0 && field != "" {
-				cfg = []byte(fmt.Sprintf(`{"field":%q}`, field))
+				if kind == "ann" {
+					m := map[string]any{"field": field}
+					if dim > 0 {
+						m["dim"] = dim
+					}
+					if metric != "" {
+						m["metric"] = metric
+					}
+					if algorithm != "" {
+						m["algorithm"] = algorithm
+					}
+					var err error
+					cfg, err = json.Marshal(m)
+					if err != nil {
+						return err
+					}
+				} else {
+					cfg = []byte(fmt.Sprintf(`{"field":%q}`, field))
+				}
 			}
 			ctx := cmd.Context()
 			cli, profile, err := runtime.Dial(ctx)
@@ -81,6 +101,9 @@ Example:
 	f.StringVar(&kind, "type", "", "Plugin type (e.g. trigram, bloom, geohash) (required)")
 	f.StringVar(&field, "field", "", "Indexed attribute (convenience; populates --config when --config is empty)")
 	f.StringVar(&config, "config", "", "Plugin config JSON (overrides --field)")
+	f.StringVar(&metric, "metric", "", "ANN distance metric, for example cosine or euclidean")
+	f.StringVar(&algorithm, "algorithm", "", "ANN algorithm, defaults to lsh")
+	f.IntVar(&dim, "dim", 0, "ANN vector dimension")
 	f.StringVar(&pkAttr, "pk", "pk", "Table partition key attribute")
 	f.StringVar(&skAttr, "sk", "", "Table sort key attribute (optional)")
 	root.AddCommand(c)

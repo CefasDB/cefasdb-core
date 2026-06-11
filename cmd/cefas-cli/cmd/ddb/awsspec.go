@@ -2,6 +2,7 @@ package ddb
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -27,8 +28,9 @@ func parseKV(s string) (map[string]string, error) {
 
 // AttrDef captures one --attribute-definitions entry.
 type AttrDef struct {
-	Name string
-	Type string // "S" | "N" | "B"
+	Name             string
+	Type             string // "S" | "N" | "B" | "V"
+	VectorDimensions int
 }
 
 func parseAttrDefs(values []string) ([]AttrDef, error) {
@@ -39,11 +41,21 @@ func parseAttrDefs(values []string) ([]AttrDef, error) {
 			return nil, fmt.Errorf("attribute-definitions[%d]: %w", i, err)
 		}
 		name := kv["AttributeName"]
-		typ := kv["AttributeType"]
+		typ := strings.ToUpper(kv["AttributeType"])
 		if name == "" || typ == "" {
 			return nil, fmt.Errorf("attribute-definitions[%d]: AttributeName and AttributeType required", i)
 		}
-		out = append(out, AttrDef{Name: name, Type: typ})
+		def := AttrDef{Name: name, Type: typ}
+		if strings.HasPrefix(typ, "V<") && strings.HasSuffix(typ, ">") {
+			n := strings.TrimSuffix(strings.TrimPrefix(typ, "V<"), ">")
+			dim, err := strconv.Atoi(n)
+			if err != nil || dim <= 0 {
+				return nil, fmt.Errorf("attribute-definitions[%d]: bad vector dimension %q", i, n)
+			}
+			def.Type = "V"
+			def.VectorDimensions = dim
+		}
+		out = append(out, def)
 	}
 	return out, nil
 }

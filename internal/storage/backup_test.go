@@ -48,6 +48,12 @@ func TestCreateBackupWritesCheckpointAndMetadata(t *testing.T) {
 	if len(meta.TableStats) != 2 || meta.TableStats[0].Table != "T1" || meta.TableStats[0].Rows != 2 || meta.TableStats[0].Checksum == "" {
 		t.Fatalf("table stats = %+v", meta.TableStats)
 	}
+	if len(meta.ShardCoverage) != 1 || meta.ShardCoverage[0].ShardID != "0" || len(meta.ShardCoverage[0].TableStats) != 2 {
+		t.Fatalf("shard coverage = %+v", meta.ShardCoverage)
+	}
+	if meta.ChangeIndex == 0 || meta.ChangeUnixNano == 0 {
+		t.Fatalf("change high-water not recorded: %+v", meta)
+	}
 	if _, err := os.Stat(meta.CheckpointAt); err != nil {
 		t.Fatalf("checkpoint dir missing: %v", err)
 	}
@@ -59,6 +65,65 @@ func TestCreateBackupWritesCheckpointAndMetadata(t *testing.T) {
 		if len(entries) == 0 {
 			t.Fatalf("checkpoint dir is empty")
 		}
+	}
+}
+
+func TestRestoreTablePointInTimeReplaysChanges(t *testing.T) {
+	db := openDB(t)
+	cat, err := catalog.New(db)
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	td := types.TableDescriptor{Name: "Users", KeySchema: types.KeySchema{PK: "id"}}
+	if err := cat.Create(td); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("old")}, storage.PutOptions{}); err != nil {
+		t.Fatalf("put old: %v", err)
+	}
+	_, err = db.CreateBackup("snap", []string{"Users"})
+	if err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("new")}, storage.PutOptions{}); err != nil {
+		t.Fatalf("put new: %v", err)
+	}
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u2"), "v": sAttr("second")}, storage.PutOptions{}); err != nil {
+		t.Fatalf("put second: %v", err)
+	}
+	targetIndex, err := db.CurrentChangeIndex()
+	if err != nil {
+		t.Fatalf("change index: %v", err)
+	}
+	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_pitr", storage.RestoreOptions{
+		TargetChangeIndex: targetIndex,
+	}, cat.Create)
+	if err != nil {
+		t.Fatalf("restore pitr: %v", err)
+	}
+	if res.RowsCopied < 2 {
+		t.Fatalf("rows copied = %d, want base + replay", res.RowsCopied)
+	}
+	got, err := db.GetItem("Users_pitr", td.KeySchema, types.Item{"id": sAttr("u1")})
+	if err != nil {
+		t.Fatalf("get restored u1: %v", err)
+	}
+	if got["v"].S != "new" {
+		t.Fatalf("restored u1 = %+v, want new", got)
+	}
+	got, err = db.GetItem("Users_pitr", td.KeySchema, types.Item{"id": sAttr("u2")})
+	if err != nil {
+		t.Fatalf("get restored u2: %v", err)
+	}
+	if got["v"].S != "second" {
+		t.Fatalf("restored u2 = %+v, want second", got)
+	}
+	_, err = db.RestoreTableFromBackupWithOptions("snap", "Users", "before_backup", storage.RestoreOptions{
+		DryRun:            true,
+		TargetChangeIndex: ^uint64(0),
+	}, cat.Create)
+	if err == nil || !strings.Contains(err.Error(), "outside retained history") {
+		t.Fatalf("expected outside-history target rejection, got %v", err)
 	}
 }
 

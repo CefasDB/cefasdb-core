@@ -94,10 +94,14 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
+	if err := validateDescriptorItem(td, item); err != nil {
+		return err
+	}
 	pk, sk, err := extractKeyBytes(item, td.KeySchema)
 	if err != nil {
 		return err
 	}
+	primaryKey := KeyPrimary(td.Name, pk, sk)
 	encoded, err := EncodeItem(item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
@@ -112,7 +116,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	// see a consistent view of the row at the moment we plan the
 	// write. The snapshot is cheap (it's just a sequence number in
 	// Pebble) and we drop it immediately after planning.
-	prior, err := d.snapshotGet(KeyPrimary(td.Name, pk, sk))
+	prior, err := d.snapshotGet(primaryKey)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("read prior: %w", err)
 	}
@@ -153,7 +157,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 
 	b := d.Batch()
 	defer b.Close()
-	if err := b.Set(KeyPrimary(td.Name, pk, sk), encoded, nil); err != nil {
+	if err := b.Set(primaryKey, encoded, nil); err != nil {
 		return fmt.Errorf("batch set primary: %w", err)
 	}
 	if err := applyIndexOps(b, gsiOps); err != nil {
@@ -168,7 +172,21 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	return d.CommitBatch(b)
+	if _, err := d.appendChangeRecord(b, ChangeRecord{
+		Op:    ChangePut,
+		Table: td.Name,
+		Key:   keyItemFromItem(item, td.KeySchema),
+		Item:  item,
+	}); err != nil {
+		return fmt.Errorf("change log: %w", err)
+	}
+	if err := d.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		d.memorySet(td.Name, primaryKey, encoded)
+	}
+	return nil
 }
 
 // DeleteItem removes an item identified by its key attributes (no GSI
@@ -187,12 +205,13 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err != nil {
 		return err
 	}
+	primaryKey := KeyPrimary(td.Name, pk, sk)
 	cond, err := ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
 	}
 
-	prior, err := d.snapshotGet(KeyPrimary(td.Name, pk, sk))
+	prior, err := d.snapshotGet(primaryKey)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("read prior: %w", err)
 	}
@@ -234,7 +253,7 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 
 	b := d.Batch()
 	defer b.Close()
-	if err := b.Delete(KeyPrimary(td.Name, pk, sk), nil); err != nil {
+	if err := b.Delete(primaryKey, nil); err != nil {
 		return fmt.Errorf("batch delete primary: %w", err)
 	}
 	if err := applyIndexOps(b, gsiOps); err != nil {
@@ -249,7 +268,20 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	return d.CommitBatch(b)
+	if _, err := d.appendChangeRecord(b, ChangeRecord{
+		Op:    ChangeDelete,
+		Table: td.Name,
+		Key:   keyItemFromItem(keyAttrs, td.KeySchema),
+	}); err != nil {
+		return fmt.Errorf("change log: %w", err)
+	}
+	if err := d.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		d.memoryDelete(td.Name, primaryKey)
+	}
+	return nil
 }
 
 // snapshotGet performs a single-key read under a Pebble snapshot. The
@@ -293,7 +325,11 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 	if err != nil {
 		return nil, err
 	}
-	v, err := d.Get(KeyPrimary(table, pk, sk))
+	primaryKey := KeyPrimary(table, pk, sk)
+	if v, ok := d.memoryGet(table, primaryKey); ok {
+		return DecodeItem(v)
+	}
+	v, err := d.Get(primaryKey)
 	if errors.Is(err, ErrNotFound) {
 		return nil, types.ErrItemNotFound
 	}
@@ -312,6 +348,9 @@ func (d *DB) QueryByPK(table string, ks types.KeySchema, pkAttr types.AttributeV
 		return nil, fmt.Errorf("PK %q: %w", ks.PK, err)
 	}
 	lower, upper := PrefixPrimaryByPK(table, pk)
+	if d.memoryHasTable(table) {
+		return d.memoryScan(table, lower, upper, limit)
+	}
 	return d.scanItems(lower, upper, limit)
 }
 
@@ -338,6 +377,9 @@ func (d *DB) QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skH
 		}
 	}
 	lower, upper := RangePrimaryBySK(table, pk, lowBytes, highBytes)
+	if d.memoryHasTable(table) {
+		return d.memoryScan(table, lower, upper, limit)
+	}
 	return d.scanItems(lower, upper, limit)
 }
 
@@ -488,6 +530,9 @@ func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) 
 // to scatter the call across each shard's DB.
 func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
 	lower, upper := PrefixPrimaryAll(table)
+	if d.memoryHasTable(table) {
+		return d.memoryScan(table, lower, upper, limit)
+	}
 	return d.scanItems(lower, upper, limit)
 }
 
@@ -536,10 +581,19 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 
 	b := d.Batch()
 	defer b.Close()
+	type memDelta struct {
+		key    []byte
+		value  []byte
+		delete bool
+	}
+	var memDeltas []memDelta
 
 	for i, op := range ops {
 		switch op.Op {
 		case BatchOpPut:
+			if err := validateDescriptorItem(td, op.Item); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
 			pk, sk, err := extractKeyBytes(op.Item, td.KeySchema)
 			if err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
@@ -571,6 +625,17 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			}
 			if err := b.Set(primaryKey, enc, nil); err != nil {
 				return err
+			}
+			if isMemoryTable(td) {
+				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
+			}
+			if _, err := d.appendChangeRecord(b, ChangeRecord{
+				Op:    ChangePut,
+				Table: td.Name,
+				Key:   keyItemFromItem(op.Item, td.KeySchema),
+				Item:  op.Item,
+			}); err != nil {
+				return fmt.Errorf("op %d change log: %w", i, err)
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
@@ -613,6 +678,16 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err := b.Delete(primaryKey, nil); err != nil {
 				return err
 			}
+			if isMemoryTable(td) {
+				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), delete: true})
+			}
+			if _, err := d.appendChangeRecord(b, ChangeRecord{
+				Op:    ChangeDelete,
+				Table: td.Name,
+				Key:   keyItemFromItem(op.Key, td.KeySchema),
+			}); err != nil {
+				return fmt.Errorf("op %d change log: %w", i, err)
+			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
@@ -629,7 +704,19 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			return fmt.Errorf("op %d: unknown kind %d", i, op.Op)
 		}
 	}
-	return d.CommitBatch(b)
+	if err := d.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		for _, delta := range memDeltas {
+			if delta.delete {
+				d.memoryDelete(td.Name, delta.key)
+			} else {
+				d.memorySet(td.Name, delta.key, delta.value)
+			}
+		}
+	}
+	return nil
 }
 
 // BatchGetItem fetches multiple items by primary key in one pass. The
@@ -663,4 +750,17 @@ func readSnapshotItem(snap *pebbledb.Snapshot, key []byte) (types.Item, error) {
 	cp := make([]byte, len(v))
 	copy(cp, v)
 	return DecodeItem(cp)
+}
+
+func keyItemFromItem(item types.Item, ks types.KeySchema) types.Item {
+	out := types.Item{}
+	if v, ok := item[ks.PK]; ok {
+		out[ks.PK] = v
+	}
+	if ks.SK != "" {
+		if v, ok := item[ks.SK]; ok {
+			out[ks.SK] = v
+		}
+	}
+	return out
 }

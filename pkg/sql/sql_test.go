@@ -60,6 +60,34 @@ func TestParserCreateTable(t *testing.T) {
 	}
 }
 
+func TestParserCreateTableStorageAndVector(t *testing.T) {
+	stmt, err := cefassql.Parse("CREATE TABLE docs (PRIMARY KEY (id), emb V<3>) WITH STORAGE = 'memory'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := stmt.(*cefassql.CreateTableStmt)
+	if !ok {
+		t.Fatalf("got %T", stmt)
+	}
+	if c.StorageClass != "memory" || len(c.AttributeDefinitions) != 1 || c.AttributeDefinitions[0].VectorDimensions != 3 {
+		t.Fatalf("unexpected create stmt: %+v", c)
+	}
+}
+
+func TestParserSelectANN(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT id FROM docs ORDER BY emb ANN OF [1,0,0] LIMIT 5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T", stmt)
+	}
+	if !sel.OrderANN || sel.OrderBy != "emb" || len(sel.ANNTarget) != 3 || sel.Limit != 5 {
+		t.Fatalf("unexpected select: %+v", sel)
+	}
+}
+
 func TestParserSpatial(t *testing.T) {
 	src := "SELECT * FROM places USE INDEX (by_loc) WHERE ST_Within(loc, BBox(40.0, -74.0, 41.0, -73.0))"
 	stmt, err := cefassql.Parse(src)
