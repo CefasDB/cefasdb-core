@@ -7,13 +7,15 @@ import (
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
+	"github.com/osvaldoandrade/cefas/pkg/client"
 )
 
 func registerRestoreTableFromBackup(root *cobra.Command) {
 	var (
-		backup   string
-		source   string
-		target   string
+		backup string
+		source string
+		target string
+		dryRun bool
 	)
 	c := &cobra.Command{
 		Use:   "restore-table-from-backup",
@@ -22,13 +24,20 @@ func registerRestoreTableFromBackup(root *cobra.Command) {
 source table's descriptor out of the named backup's pebble checkpoint,
 recreates it under the target name, and streams every row into the new
 table — re-keyed under the target name so the live engine maintains
-indexes + TTL.
+indexes + TTL. Use --dry-run to validate the source manifest and target
+table name without creating the target table or copying rows.
 
 Example:
   cefas restore-table-from-backup \
     --backup-name nightly \
     --source-table-name Users \
-    --target-table-name Users_restored`,
+    --target-table-name Users_restored
+
+  cefas restore-table-from-backup \
+    --backup-name nightly \
+    --source-table-name Users \
+    --target-table-name Users_restored \
+    --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if backup == "" {
@@ -46,7 +55,7 @@ Example:
 				return err
 			}
 			defer cli.Close()
-			rows, err := cli.RestoreTableFromBackup(ctx, backup, source, target)
+			result, err := cli.RestoreTableFromBackupWithOptions(ctx, backup, source, target, client.RestoreTableFromBackupOptions{DryRun: dryRun})
 			if err != nil {
 				return fmt.Errorf("restore: %w", err)
 			}
@@ -56,9 +65,13 @@ Example:
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
 				"TableDescription": map[string]any{
-					"TableName":   target,
-					"TableStatus": "ACTIVE",
-					"RowsCopied":  rows,
+					"TableName":        result.TargetTableName,
+					"TableStatus":      restoreStatus(result.DryRun),
+					"RowsCopied":       result.RowsCopied,
+					"DryRun":           result.DryRun,
+					"SourceTableStats": result.SourceTableStats,
+					"ManifestVersion":  result.ManifestVersion,
+					"ManifestStatus":   result.ManifestStatus,
 				},
 			})
 		},
@@ -67,8 +80,16 @@ Example:
 	f.StringVar(&backup, "backup-name", "", "Backup to restore from (required)")
 	f.StringVar(&source, "source-table-name", "", "Table inside the backup to copy (required)")
 	f.StringVar(&target, "target-table-name", "", "New table name in the live catalog (required)")
+	f.BoolVar(&dryRun, "dry-run", false, "Validate restore inputs and manifest without creating the target table")
 	_ = c.MarkFlagRequired("backup-name")
 	_ = c.MarkFlagRequired("source-table-name")
 	_ = c.MarkFlagRequired("target-table-name")
 	root.AddCommand(c)
+}
+
+func restoreStatus(dryRun bool) string {
+	if dryRun {
+		return "DRY_RUN"
+	}
+	return "ACTIVE"
 }

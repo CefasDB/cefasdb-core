@@ -906,29 +906,41 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 		}
 		return nil
 	}
-	res, err := s.db.RestoreTableFromBackup(
-		req.GetBackupName(),
-		req.GetSourceTableName(),
-		req.GetTargetTableName(),
-		register,
-	)
+	var res storage.RestoreResult
+	var err error
+	if req.GetDryRun() {
+		res, err = s.db.RestoreTableFromBackupWithOptions(
+			req.GetBackupName(),
+			req.GetSourceTableName(),
+			req.GetTargetTableName(),
+			storage.RestoreOptions{DryRun: true},
+			register,
+		)
+	} else {
+		res, err = s.db.RestoreTableFromBackup(
+			req.GetBackupName(),
+			req.GetSourceTableName(),
+			req.GetTargetTableName(),
+			register,
+		)
+	}
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.RestoreTableFromBackupResponse{
-		TargetTableName: res.TargetTable.Name,
-		RowsCopied:      int64(res.RowsCopied),
+		TargetTableName:  res.TargetTable.Name,
+		RowsCopied:       int64(res.RowsCopied),
+		DryRun:           res.DryRun,
+		SourceTableStats: backupTableStatsToPB(res.SourceStats),
+		ManifestVersion:  int32(res.ManifestVersion),
+		ManifestStatus:   res.ManifestStatus,
 	}, nil
 }
 
 func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 	stats := make([]*cefaspb.BackupTableStats, 0, len(m.TableStats))
 	for _, stat := range m.TableStats {
-		stats = append(stats, &cefaspb.BackupTableStats{
-			Table:    stat.Table,
-			Rows:     stat.Rows,
-			Checksum: stat.Checksum,
-		})
+		stats = append(stats, backupTableStatsToPB(stat))
 	}
 	return &cefaspb.BackupDescriptor{
 		Name:            m.Name,
@@ -939,6 +951,17 @@ func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 		ManifestStatus:  m.ManifestStatus,
 		RequestedTables: m.RequestedTables,
 		TableStats:      stats,
+	}
+}
+
+func backupTableStatsToPB(stat storage.BackupTableStats) *cefaspb.BackupTableStats {
+	if stat.Table == "" && stat.Rows == 0 && stat.Checksum == "" {
+		return nil
+	}
+	return &cefaspb.BackupTableStats{
+		Table:    stat.Table,
+		Rows:     stat.Rows,
+		Checksum: stat.Checksum,
 	}
 }
 

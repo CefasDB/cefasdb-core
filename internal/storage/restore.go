@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	pebbledb "github.com/cockroachdb/pebble"
@@ -11,9 +12,26 @@ import (
 
 // RestoreResult describes the outcome of RestoreTableFromBackup.
 type RestoreResult struct {
-	TargetTable types.TableDescriptor
-	RowsCopied  int
-	SourceStats BackupTableStats
+	TargetTable     types.TableDescriptor
+	RowsCopied      int
+	SourceStats     BackupTableStats
+	DryRun          bool
+	ManifestVersion int
+	ManifestStatus  string
+}
+
+type RestoreOptions struct {
+	DryRun bool
+}
+
+type RestorePreflightResult struct {
+	BackupName      string
+	SourceTableName string
+	TargetTableName string
+	TargetTable     types.TableDescriptor
+	SourceStats     BackupTableStats
+	ManifestVersion int
+	ManifestStatus  string
 }
 
 // RestoreTableFromBackup reads the descriptor for `sourceTable` out of
@@ -30,42 +48,32 @@ func (d *DB) RestoreTableFromBackup(
 	backupName, sourceTable, targetTable string,
 	register func(types.TableDescriptor) error,
 ) (RestoreResult, error) {
-	if sourceTable == "" || targetTable == "" {
-		return RestoreResult{}, fmt.Errorf("source and target table names required")
-	}
-	meta, err := d.GetBackup(backupName)
+	return d.RestoreTableFromBackupWithOptions(backupName, sourceTable, targetTable, RestoreOptions{}, register)
+}
+
+func (d *DB) RestoreTableFromBackupWithOptions(
+	backupName, sourceTable, targetTable string,
+	opts RestoreOptions,
+	register func(types.TableDescriptor) error,
+) (RestoreResult, error) {
+	preflight, checkpoint, err := d.restoreTablePreflight(backupName, sourceTable, targetTable)
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	if meta == nil {
-		return RestoreResult{}, fmt.Errorf("cefas/storage: backup %q not found", backupName)
-	}
-
-	checkpoint, err := pebbledb.Open(meta.CheckpointAt, &pebbledb.Options{ReadOnly: true})
-	if err != nil {
-		return RestoreResult{}, fmt.Errorf("open checkpoint: %w", err)
-	}
 	defer checkpoint.Close()
 
-	srcDescBytes, closer, err := checkpoint.Get(KeyCatalog(sourceTable))
-	if err != nil {
-		return RestoreResult{}, fmt.Errorf("read source descriptor: %w", err)
-	}
-	srcDescCopy := append([]byte(nil), srcDescBytes...)
-	_ = closer.Close()
-	var srcTD types.TableDescriptor
-	if err := json.Unmarshal(srcDescCopy, &srcTD); err != nil {
-		return RestoreResult{}, fmt.Errorf("decode source descriptor: %w", err)
-	}
-
-	sourceStats, err := validateBackupManifestTable(*meta, checkpoint, sourceTable)
-	if err != nil {
-		return RestoreResult{}, fmt.Errorf("validate backup manifest: %w", err)
+	if opts.DryRun {
+		return RestoreResult{
+			TargetTable:     preflight.TargetTable,
+			RowsCopied:      int(preflight.SourceStats.Rows),
+			SourceStats:     preflight.SourceStats,
+			DryRun:          true,
+			ManifestVersion: preflight.ManifestVersion,
+			ManifestStatus:  preflight.ManifestStatus,
+		}, nil
 	}
 
-	tgtTD := srcTD
-	tgtTD.Name = targetTable
-	if err := register(tgtTD); err != nil {
+	if err := register(preflight.TargetTable); err != nil {
 		return RestoreResult{}, fmt.Errorf("register target descriptor: %w", err)
 	}
 
@@ -85,7 +93,7 @@ func (d *DB) RestoreTableFromBackup(
 		if err != nil {
 			return RestoreResult{}, fmt.Errorf("decode item at %s: %w", iter.Key(), err)
 		}
-		if err := d.PutItemWith(tgtTD, item, PutOptions{}); err != nil {
+		if err := d.PutItemWith(preflight.TargetTable, item, PutOptions{}); err != nil {
 			return RestoreResult{}, fmt.Errorf("write item %d into target: %w", n, err)
 		}
 		n++
@@ -93,5 +101,82 @@ func (d *DB) RestoreTableFromBackup(
 	if err := iter.Error(); err != nil {
 		return RestoreResult{}, err
 	}
-	return RestoreResult{TargetTable: tgtTD, RowsCopied: n, SourceStats: sourceStats}, nil
+	return RestoreResult{
+		TargetTable:     preflight.TargetTable,
+		RowsCopied:      n,
+		SourceStats:     preflight.SourceStats,
+		ManifestVersion: preflight.ManifestVersion,
+		ManifestStatus:  preflight.ManifestStatus,
+	}, nil
+}
+
+func (d *DB) PreflightRestoreTableFromBackup(backupName, sourceTable, targetTable string) (RestorePreflightResult, error) {
+	preflight, checkpoint, err := d.restoreTablePreflight(backupName, sourceTable, targetTable)
+	if err != nil {
+		return RestorePreflightResult{}, err
+	}
+	_ = checkpoint.Close()
+	return preflight, nil
+}
+
+func (d *DB) restoreTablePreflight(
+	backupName, sourceTable, targetTable string,
+) (RestorePreflightResult, *pebbledb.DB, error) {
+	if sourceTable == "" || targetTable == "" {
+		return RestorePreflightResult{}, nil, fmt.Errorf("source and target table names required")
+	}
+	if backupName == "" {
+		return RestorePreflightResult{}, nil, fmt.Errorf("backup name required")
+	}
+	if exists, err := d.Has(KeyCatalog(targetTable)); err != nil {
+		return RestorePreflightResult{}, nil, err
+	} else if exists {
+		return RestorePreflightResult{}, nil, fmt.Errorf("%w: target table %q", types.ErrTableAlreadyExists, targetTable)
+	}
+	meta, err := d.GetBackup(backupName)
+	if err != nil {
+		return RestorePreflightResult{}, nil, err
+	}
+	if meta == nil {
+		return RestorePreflightResult{}, nil, fmt.Errorf("cefas/storage: backup %q not found", backupName)
+	}
+
+	checkpoint, err := pebbledb.Open(meta.CheckpointAt, &pebbledb.Options{ReadOnly: true})
+	if err != nil {
+		return RestorePreflightResult{}, nil, fmt.Errorf("open checkpoint: %w", err)
+	}
+
+	srcDescBytes, closer, err := checkpoint.Get(KeyCatalog(sourceTable))
+	if err != nil {
+		_ = checkpoint.Close()
+		if errors.Is(err, ErrNotFound) {
+			return RestorePreflightResult{}, nil, fmt.Errorf("%w: source table %q", types.ErrTableNotFound, sourceTable)
+		}
+		return RestorePreflightResult{}, nil, fmt.Errorf("read source descriptor: %w", err)
+	}
+	srcDescCopy := append([]byte(nil), srcDescBytes...)
+	_ = closer.Close()
+	var srcTD types.TableDescriptor
+	if err := json.Unmarshal(srcDescCopy, &srcTD); err != nil {
+		_ = checkpoint.Close()
+		return RestorePreflightResult{}, nil, fmt.Errorf("decode source descriptor: %w", err)
+	}
+
+	sourceStats, err := validateBackupManifestTable(*meta, checkpoint, sourceTable)
+	if err != nil {
+		_ = checkpoint.Close()
+		return RestorePreflightResult{}, nil, fmt.Errorf("validate backup manifest: %w", err)
+	}
+
+	tgtTD := srcTD
+	tgtTD.Name = targetTable
+	return RestorePreflightResult{
+		BackupName:      backupName,
+		SourceTableName: sourceTable,
+		TargetTableName: targetTable,
+		TargetTable:     tgtTD,
+		SourceStats:     sourceStats,
+		ManifestVersion: meta.ManifestVersion,
+		ManifestStatus:  meta.ManifestStatus,
+	}, checkpoint, nil
 }

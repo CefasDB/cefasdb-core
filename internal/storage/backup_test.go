@@ -179,6 +179,53 @@ func TestRestoreValidatesManifestBeforeRegister(t *testing.T) {
 	}
 }
 
+func TestRestoreDryRunValidatesWithoutWritingTarget(t *testing.T) {
+	db := openDB(t)
+	seedBackupTable(t, db, "Users", "u1", "u2")
+	if _, err := db.CreateBackup("snap", []string{"Users"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	called := false
+	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{DryRun: true}, func(types.TableDescriptor) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("dry-run restore: %v", err)
+	}
+	if called {
+		t.Fatal("register called during dry-run")
+	}
+	if !res.DryRun || res.RowsCopied != 2 || res.SourceStats.Rows != 2 || res.SourceStats.Checksum == "" {
+		t.Fatalf("dry-run result = %+v", res)
+	}
+	if ok, err := db.Has(storage.KeyCatalog("Users_restored")); err != nil || ok {
+		t.Fatalf("target descriptor exists=%v err=%v, want absent", ok, err)
+	}
+}
+
+func TestRestorePreflightRejectsExistingTargetBeforeRegister(t *testing.T) {
+	db := openDB(t)
+	seedBackupTable(t, db, "Users", "u1")
+	seedBackupTable(t, db, "Users_restored")
+	if _, err := db.CreateBackup("snap", []string{"Users"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	called := false
+	_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{}, func(types.TableDescriptor) error {
+		called = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected target collision, got %v", err)
+	}
+	if called {
+		t.Fatal("register called after target collision")
+	}
+}
+
 func TestGetBackupAbsent(t *testing.T) {
 	db := openDB(t)
 	got, err := db.GetBackup("ghost")
