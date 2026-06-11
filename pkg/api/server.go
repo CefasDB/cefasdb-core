@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,6 +230,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
 	register("/v1/cluster/placement/plan", s.handleClusterPlacementPlan)
 	register("/v1/cluster/placement/apply", s.handleClusterPlacementApply)
+	register("/v1/cluster/placement/audit", s.handleClusterPlacementAudit)
 	register("/v1/cluster/placement/split/finalize", s.handleClusterSplitFinalize)
 	register("/v1/cluster/placement/split/rollback", s.handleClusterSplitRollback)
 	register("/v1/cluster/placement/range-move/finalize", s.handleClusterRangeMoveFinalize)
@@ -1199,6 +1201,62 @@ func (s *Server) handleClusterPlacementApply(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleClusterPlacementAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	if s.manager == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
+		return
+	}
+	req := cluster.PlacementAuditRequest{IncludeRepairPlan: true}
+	if r.Method == http.MethodPost {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	} else {
+		var err error
+		q := r.URL.Query()
+		if req.MaxPrimaryKeysPerShard, err = queryInt(q.Get("maxPrimaryKeysPerShard")); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.MaxIssues, err = queryInt(q.Get("maxIssues")); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if q.Has("repairPlan") {
+			req.IncludeRepairPlan, err = strconv.ParseBool(q.Get("repairPlan"))
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("repairPlan: %w", err))
+				return
+			}
+		}
+	}
+	report, err := s.manager.AuditPlacement(r.Context(), req)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func queryInt(raw string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
 }
 
 func (s *Server) handleClusterSplitFinalize(w http.ResponseWriter, r *http.Request) {

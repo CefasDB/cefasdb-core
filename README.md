@@ -215,6 +215,20 @@ cefas cluster apply --plan file://split-plan.json --yes
 cefas cluster apply --plan file://move-plan.json --yes
 ```
 
+Placement audit can run online with bounded storage sampling. It reports token
+coverage gaps, overlapping active owners, primary keys stored on the wrong
+shard, and primary rows whose shard is missing the table catalog descriptor.
+The report includes a checksum of the bounded primary-key sample. The emitted
+`repairPlan` is explicit and review-only; repair actions are not applied by the
+audit endpoint.
+
+```sh
+curl -s -X POST "$CEFAS_HTTP/v1/cluster/placement/audit" \
+  -H "Authorization: Bearer $CEFAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"maxPrimaryKeysPerShard":4096,"maxIssues":200,"includeRepairPlan":true}'
+```
+
 Once the child shard is open and writes to the split range are paused, finalize
 the split to copy the child range, activate both shards, and clean the range
 from the parent:
