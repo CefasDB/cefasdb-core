@@ -91,6 +91,29 @@ func TestHTTPPlacementApplyNoopMove(t *testing.T) {
 	}
 }
 
+func TestHTTPPlacementAuditCleanReport(t *testing.T) {
+	mux, cleanup := placementTestMux(t)
+	defer cleanup()
+
+	body := strings.NewReader(`{"maxPrimaryKeysPerShard":8,"includeRepairPlan":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/cluster/placement/audit", body)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var report cluster.PlacementAuditReport
+	if err := json.NewDecoder(rec.Body).Decode(&report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ConsistencyVerdict != "pass" || len(report.Issues) != 0 {
+		t.Fatalf("unexpected audit report: %+v", report)
+	}
+	if report.RepairPlan == nil || report.RepairPlan.ApplySupported {
+		t.Fatalf("repair plan = %+v, want review-only plan", report.RepairPlan)
+	}
+}
+
 func TestHTTPFinalizeSplit(t *testing.T) {
 	mux, cleanup, plan := transitionPlacementTestMux(t)
 	defer cleanup()
