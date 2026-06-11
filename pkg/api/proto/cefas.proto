@@ -105,6 +105,12 @@ service Cefas {
   // set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
   // a follow-up so this ships RPC + operator + CLI only.
   rpc Rerank(RerankRequest) returns (RerankResponse);
+
+  // ===== Bandit (issue #246) =====
+  rpc BanditCreate(BanditCreateRequest) returns (BanditCreateResponse);
+  rpc BanditSample(BanditSampleRequest) returns (BanditSampleResponse);
+  rpc BanditReward(BanditRewardRequest) returns (BanditRewardResponse);
+  rpc BanditDescribe(BanditDescribeRequest) returns (BanditDescribeResponse);
 }
 
 message StreamChangesRequest {
@@ -993,4 +999,73 @@ message RerankResponse {
   // DistanceOperator echoes the resolved operator name so callers
   // can confirm the default they got when they passed an empty one.
   string distance_operator = 2;
+}
+
+// ===== Bandit (issue #246) =====
+
+// BanditArmSpec describes one arm at create time. Family selects the
+// posterior model: "beta-bernoulli" (default) or "gaussian". Prior
+// parameters default sensibly when zero (Alpha=Beta=1 for Bernoulli,
+// Sigma=1 for Gaussian).
+message BanditArmSpec {
+  string arm_id = 1;
+  string family = 2;
+  double alpha  = 3;
+  double beta   = 4;
+  double mu     = 5;
+  double sigma  = 6;
+}
+
+message BanditCreateRequest {
+  string bandit_id = 1;
+  // Strategy is "thompson" (default), "ucb1", or "epsilon-greedy".
+  string strategy  = 2;
+  repeated BanditArmSpec arms = 3;
+  // Optional: epsilon for epsilon-greedy (defaults to 0.1).
+  double epsilon   = 4;
+  // Optional: C for UCB1 (defaults to sqrt(2)).
+  double c         = 5;
+}
+message BanditCreateResponse {}
+
+message BanditSampleRequest {
+  string bandit_id = 1;
+  // Optional context; v1 implementations ignore it. Reserved for
+  // contextual bandit follow-up.
+  map<string, string> context = 2;
+  // n > 1 returns BatchSample.
+  int32 n = 3;
+}
+message BanditSampleResponse {
+  // Repeated so single-sample callers ignore extras; len() always
+  // matches max(n, 1).
+  repeated string arm_id = 1;
+}
+
+message BanditRewardRequest {
+  string bandit_id = 1;
+  string arm_id    = 2;
+  double reward    = 3;
+  map<string, string> context = 4;
+}
+message BanditRewardResponse {}
+
+message BanditDescribeRequest {
+  string bandit_id = 1;
+}
+message BanditArmStats {
+  string arm_id  = 1;
+  string family  = 2;
+  double alpha   = 3;
+  double beta    = 4;
+  double mu      = 5;
+  double sigma   = 6;
+  int64  pulls   = 7;
+  double rewards = 8;
+  double mean    = 9;
+}
+message BanditDescribeResponse {
+  string bandit_id = 1;
+  string strategy  = 2;
+  repeated BanditArmStats arms = 3;
 }

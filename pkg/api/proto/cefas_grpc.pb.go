@@ -73,6 +73,10 @@ const (
 	Cefas_FreqCap_FullMethodName                = "/cefas.v1.Cefas/FreqCap"
 	Cefas_Aggregate_FullMethodName              = "/cefas.v1.Cefas/Aggregate"
 	Cefas_Rerank_FullMethodName                 = "/cefas.v1.Cefas/Rerank"
+	Cefas_BanditCreate_FullMethodName           = "/cefas.v1.Cefas/BanditCreate"
+	Cefas_BanditSample_FullMethodName           = "/cefas.v1.Cefas/BanditSample"
+	Cefas_BanditReward_FullMethodName           = "/cefas.v1.Cefas/BanditReward"
+	Cefas_BanditDescribe_FullMethodName         = "/cefas.v1.Cefas/BanditDescribe"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -155,6 +159,11 @@ type CefasClient interface {
 	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
 	// a follow-up so this ships RPC + operator + CLI only.
 	Rerank(ctx context.Context, in *RerankRequest, opts ...grpc.CallOption) (*RerankResponse, error)
+	// ===== Bandit (issue #246) =====
+	BanditCreate(ctx context.Context, in *BanditCreateRequest, opts ...grpc.CallOption) (*BanditCreateResponse, error)
+	BanditSample(ctx context.Context, in *BanditSampleRequest, opts ...grpc.CallOption) (*BanditSampleResponse, error)
+	BanditReward(ctx context.Context, in *BanditRewardRequest, opts ...grpc.CallOption) (*BanditRewardResponse, error)
+	BanditDescribe(ctx context.Context, in *BanditDescribeRequest, opts ...grpc.CallOption) (*BanditDescribeResponse, error)
 }
 
 type cefasClient struct {
@@ -680,6 +689,46 @@ func (c *cefasClient) Rerank(ctx context.Context, in *RerankRequest, opts ...grp
 	return out, nil
 }
 
+func (c *cefasClient) BanditCreate(ctx context.Context, in *BanditCreateRequest, opts ...grpc.CallOption) (*BanditCreateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BanditCreateResponse)
+	err := c.cc.Invoke(ctx, Cefas_BanditCreate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) BanditSample(ctx context.Context, in *BanditSampleRequest, opts ...grpc.CallOption) (*BanditSampleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BanditSampleResponse)
+	err := c.cc.Invoke(ctx, Cefas_BanditSample_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) BanditReward(ctx context.Context, in *BanditRewardRequest, opts ...grpc.CallOption) (*BanditRewardResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BanditRewardResponse)
+	err := c.cc.Invoke(ctx, Cefas_BanditReward_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) BanditDescribe(ctx context.Context, in *BanditDescribeRequest, opts ...grpc.CallOption) (*BanditDescribeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BanditDescribeResponse)
+	err := c.cc.Invoke(ctx, Cefas_BanditDescribe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -760,6 +809,11 @@ type CefasServer interface {
 	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
 	// a follow-up so this ships RPC + operator + CLI only.
 	Rerank(context.Context, *RerankRequest) (*RerankResponse, error)
+	// ===== Bandit (issue #246) =====
+	BanditCreate(context.Context, *BanditCreateRequest) (*BanditCreateResponse, error)
+	BanditSample(context.Context, *BanditSampleRequest) (*BanditSampleResponse, error)
+	BanditReward(context.Context, *BanditRewardRequest) (*BanditRewardResponse, error)
+	BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -910,6 +964,18 @@ func (UnimplementedCefasServer) Aggregate(context.Context, *AggregateRequest) (*
 }
 func (UnimplementedCefasServer) Rerank(context.Context, *RerankRequest) (*RerankResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Rerank not implemented")
+}
+func (UnimplementedCefasServer) BanditCreate(context.Context, *BanditCreateRequest) (*BanditCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BanditCreate not implemented")
+}
+func (UnimplementedCefasServer) BanditSample(context.Context, *BanditSampleRequest) (*BanditSampleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BanditSample not implemented")
+}
+func (UnimplementedCefasServer) BanditReward(context.Context, *BanditRewardRequest) (*BanditRewardResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BanditReward not implemented")
+}
+func (UnimplementedCefasServer) BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BanditDescribe not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -1743,6 +1809,78 @@ func _Cefas_Rerank_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_BanditCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BanditCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).BanditCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_BanditCreate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).BanditCreate(ctx, req.(*BanditCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_BanditSample_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BanditSampleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).BanditSample(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_BanditSample_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).BanditSample(ctx, req.(*BanditSampleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_BanditReward_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BanditRewardRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).BanditReward(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_BanditReward_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).BanditReward(ctx, req.(*BanditRewardRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_BanditDescribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BanditDescribeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).BanditDescribe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_BanditDescribe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).BanditDescribe(ctx, req.(*BanditDescribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1917,6 +2055,22 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Rerank",
 			Handler:    _Cefas_Rerank_Handler,
+		},
+		{
+			MethodName: "BanditCreate",
+			Handler:    _Cefas_BanditCreate_Handler,
+		},
+		{
+			MethodName: "BanditSample",
+			Handler:    _Cefas_BanditSample_Handler,
+		},
+		{
+			MethodName: "BanditReward",
+			Handler:    _Cefas_BanditReward_Handler,
+		},
+		{
+			MethodName: "BanditDescribe",
+			Handler:    _Cefas_BanditDescribe_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -37,4 +37,7 @@ import (
 	// its init() can look them up from plugin.Default at registration.
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/audience"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/geohash"
+
+	// Bandit operators (issue #246).
+	_ "github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
 )

@@ -34,6 +34,10 @@ const (
 	// KindAudience packs geo + dedup + freqcap + aggregation for
 	// the ads workloads (Epic 6 / #102).
 	KindAudience
+	// KindBandit backs multi-armed bandit operators (Thompson
+	// sampling, UCB1, epsilon-greedy) used by next-best-action
+	// workloads (issue #246).
+	KindBandit
 )
 
 // String returns the canonical lower-case spelling used in manifests
@@ -48,6 +52,8 @@ func (k Kind) String() string {
 		return "estimator"
 	case KindAudience:
 		return "audience"
+	case KindBandit:
+		return "bandit"
 	}
 	return "unspecified"
 }
