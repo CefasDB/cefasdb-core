@@ -5,11 +5,11 @@
 // (#153) and campaign eligibility operator (#154) live alongside it
 // because they compose the same primitives.
 //
-// The plugin keeps its dedup + freqcap state in memory in v1; the
-// reaper-backed pebble store hooked through pkg/core/ttl is wired in
-// follow-up work. The aggregator enforces a server-side
-// min-group-size threshold so a downstream reporting command cannot
-// extract small-cohort information.
+// Dedup + freqcap state lives in a Store (see store.go) which
+// defaults to an in-process map (ModeEphemeral) and accepts a
+// durable Pebble-backed backend (ModeDurable). The aggregator
+// enforces a server-side min-group-size threshold so a downstream
+// reporting command cannot extract small-cohort information.
 package audience
 
 import (
@@ -34,7 +34,10 @@ type IndexBinding struct {
 }
 
 // Plugin wires geo + dedup + freqcap + estimate into one
-// AudiencePlugin face.
+// AudiencePlugin face. Dedup + freqcap state is delegated to a
+// Store so the same plugin can run in ephemeral mode (tests, dev)
+// or durable mode (Pebble + Raft) without branching the business
+// path.
 type Plugin struct {
 	mu sync.Mutex
 
@@ -42,26 +45,19 @@ type Plugin struct {
 	hll  *hll.Plugin
 	bind IndexBinding
 
-	// dedup: scope/key → expiresAt
-	dedupExp map[string]time.Time
-
-	// freqcap sliding window: scope/key → list of timestamps.
-	// Old entries get pruned on every check; for v1 the linear
-	// scan is fine — replace with a circular buffer if it shows up
-	// in benchmarks.
-	freqHits map[string][]time.Time
+	store *Store
 
 	// now is overridable in tests so TTL behaviour is deterministic.
 	now func() time.Time
 }
 
 // NewPlugin wires the audience plugin against the global plugin
-// registry. Tests can supply a custom geohash / HLL instance instead.
+// registry. Defaults to ephemeral mode; switch to durable via
+// SetStore after Open returns.
 func NewPlugin() *Plugin {
 	p := &Plugin{
-		dedupExp: map[string]time.Time{},
-		freqHits: map[string][]time.Time{},
-		now:      time.Now,
+		store: NewMemoryStore(time.Now),
+		now:   time.Now,
 	}
 	if raw, ok := plugin.Default.Lookup("geohash"); ok {
 		p.geo, _ = raw.(*geohash.Plugin)
@@ -80,12 +76,32 @@ func NewPluginWith(geo *geohash.Plugin, h *hll.Plugin, now func() time.Time) *Pl
 		now = time.Now
 	}
 	return &Plugin{
-		geo:      geo,
-		hll:      h,
-		dedupExp: map[string]time.Time{},
-		freqHits: map[string][]time.Time{},
-		now:      now,
+		geo:   geo,
+		hll:   h,
+		store: NewMemoryStore(now),
+		now:   now,
 	}
+}
+
+// SetStore swaps the dedup/freqcap backing. Operators wire a
+// durable store after the storage engine opens; tests wire memory
+// stores with custom clocks. Pass nil to fall back to a fresh
+// ephemeral store.
+func (p *Plugin) SetStore(s *Store) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if s == nil {
+		s = NewMemoryStore(p.now)
+	}
+	p.store = s
+}
+
+// Store returns the current dedup/freqcap backing. Useful for
+// metrics scraping or to drive a store-level Sweep in tests.
+func (p *Plugin) Store() *Store {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.store
 }
 
 // Bind installs the geohash descriptor every subsequent Select /
@@ -207,23 +223,14 @@ func (p *Plugin) Estimate(req plugin.AudienceRequest) (int, error) {
 
 // Dedup records (scope, key) with a TTL. Returns (true, nil) when the
 // key is new in the window — i.e. delivery is allowed — and (false,
-// nil) on a duplicate inside the TTL.
+// nil) on a duplicate inside the TTL. State is held in the
+// configured Store; with a durable backend the answer survives
+// restarts and is visible across replicas.
 func (p *Plugin) Dedup(scope, key string, ttl time.Duration) (bool, error) {
-	if scope == "" || key == "" {
-		return false, fmt.Errorf("audience: dedup needs scope + key")
-	}
-	if ttl <= 0 {
-		return false, fmt.Errorf("audience: dedup ttl must be positive")
-	}
-	bucket := scope + "/" + key
-	now := p.now()
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if exp, ok := p.dedupExp[bucket]; ok && exp.After(now) {
-		return false, nil
-	}
-	p.dedupExp[bucket] = now.Add(ttl)
-	return true, nil
+	s := p.store
+	p.mu.Unlock()
+	return s.CheckDedup(scope, key, ttl)
 }
 
 // FreqCap records one hit against (scope, key) and reports whether
@@ -231,32 +238,10 @@ func (p *Plugin) Dedup(scope, key string, ttl time.Duration) (bool, error) {
 // Returns (true, nil) when the hit is allowed, (false, nil) when it
 // would push past the cap.
 func (p *Plugin) FreqCap(scope, key string, limit int, window time.Duration) (bool, error) {
-	if scope == "" || key == "" {
-		return false, fmt.Errorf("audience: freqcap needs scope + key")
-	}
-	if limit <= 0 || window <= 0 {
-		return false, fmt.Errorf("audience: freqcap limit + window must be positive")
-	}
-	bucket := scope + "/" + key
-	now := p.now()
-	cutoff := now.Add(-window)
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	hits := p.freqHits[bucket]
-	// Prune outside the window.
-	keep := hits[:0]
-	for _, t := range hits {
-		if t.After(cutoff) {
-			keep = append(keep, t)
-		}
-	}
-	if len(keep) >= limit {
-		p.freqHits[bucket] = keep
-		return false, nil
-	}
-	keep = append(keep, now)
-	p.freqHits[bucket] = keep
-	return true, nil
+	s := p.store
+	p.mu.Unlock()
+	return s.CheckFreqCap(scope, key, limit, window)
 }
 
 // ---------- helpers ----------
