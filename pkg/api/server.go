@@ -485,8 +485,13 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	err = s.storageFor(pkBytes).PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds})
+	targets, err := s.writeTargetsForPK(pkBytes)
 	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	defer targets.Release()
+	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds}); err != nil {
 		writeWriteErr(w, r, err)
 		return
 	}
@@ -576,8 +581,13 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	err = s.storageFor(pkBytes).DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds})
+	targets, err := s.writeTargetsForPK(pkBytes)
 	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	defer targets.Release()
+	if err := targets.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds}); err != nil {
 		writeWriteErr(w, r, err)
 		return
 	}
@@ -1243,7 +1253,14 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 	if s.manager == nil {
 		return s.db.BatchWriteItem(td, ops)
 	}
-	buckets := make(map[*storage.DB][]storage.BatchOp)
+	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
+	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	var releases []func()
+	defer func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}()
 	for _, op := range ops {
 		probe := op.Item
 		if op.Op == storage.BatchOpDelete {
@@ -1253,10 +1270,22 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 		if err != nil {
 			return err
 		}
-		db := s.storageFor(pkBytes)
-		buckets[db] = append(buckets[db], op)
+		targets, err := s.writeTargetsForPK(pkBytes)
+		if err != nil {
+			return err
+		}
+		releases = append(releases, targets.Release)
+		primaryBuckets[targets.primary] = append(primaryBuckets[targets.primary], op)
+		for _, mirror := range targets.mirrors {
+			mirrorBuckets[mirror] = append(mirrorBuckets[mirror], op)
+		}
 	}
-	for db, group := range buckets {
+	for db, group := range primaryBuckets {
+		if err := db.BatchWriteItem(td, group); err != nil {
+			return err
+		}
+	}
+	for db, group := range mirrorBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
 		}

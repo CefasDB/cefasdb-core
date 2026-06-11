@@ -365,17 +365,16 @@ func TestFinalizeSplitCopiesRangeAndActivatesChild(t *testing.T) {
 	}
 }
 
-func TestFinalizeSplitRequiresQuiescedWrites(t *testing.T) {
+func TestFinalizeSplitAllowsLiveWriteBarrier(t *testing.T) {
 	mgr, plan := openTransitionSplitManager(t)
 	defer mgr.Close()
 
-	_, err := mgr.FinalizeSplit(context.Background(), cluster.SplitFinalizeRequest{
+	if _, err := mgr.FinalizeSplit(context.Background(), cluster.SplitFinalizeRequest{
 		ParentShardID: 0,
 		ChildShardID:  1,
 		ExpectedEpoch: plan.AfterEpoch,
-	})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
-		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}); err != nil {
+		t.Fatalf("finalize without external quiesce: %v", err)
 	}
 }
 

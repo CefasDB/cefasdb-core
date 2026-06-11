@@ -52,11 +52,34 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 	// commit; single-pebble-process makes it negligible, multi-shard
 	// would need 2PC anyway.
 	batchOps := make([]storage.BatchOp, 0, len(ops))
+	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	var primary *storage.DB
+	var releases []func()
+	defer func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}()
 	for i, op := range ops {
 		key, err := transactKey(op, td.KeySchema)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "ops[%d]: %v", i, err)
 		}
+		pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "ops[%d]: %v", i, err)
+		}
+		targets, err := s.writeTargetsForPK(pkBytes)
+		if err != nil {
+			return nil, mapStorageErr(err)
+		}
+		releases = append(releases, targets.Release)
+		if primary == nil {
+			primary = targets.primary
+		} else if primary != targets.primary {
+			return nil, status.Errorf(codes.FailedPrecondition, "ops[%d]: cross-shard transactions not supported in v1", i)
+		}
+
 		if cond := strings.TrimSpace(op.GetConditionExpression()); cond != "" {
 			c, err := storage.ParseCondition(cond)
 			if err != nil {
@@ -70,7 +93,7 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 			for k, v := range rawBinds {
 				binds[strings.TrimPrefix(k, ":")] = v
 			}
-			prior, err := s.db.GetItem(table, td.KeySchema, key)
+			prior, err := primary.GetItem(table, td.KeySchema, key)
 			if err != nil && err != types.ErrItemNotFound {
 				return nil, mapStorageErr(err)
 			}
@@ -82,24 +105,38 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 				return nil, status.Errorf(codes.FailedPrecondition, "ops[%d]: condition failed", i)
 			}
 		}
+		var batchOp *storage.BatchOp
 		switch x := op.GetOp().(type) {
 		case *cefaspb.TransactWriteOp_Put_:
 			item, err := pbToItem(x.Put.GetItem())
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "ops[%d].put.item: %v", i, err)
 			}
-			batchOps = append(batchOps, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
+			next := storage.BatchOp{Op: storage.BatchOpPut, Item: item}
+			batchOp = &next
 		case *cefaspb.TransactWriteOp_Delete_:
-			batchOps = append(batchOps, storage.BatchOp{Op: storage.BatchOpDelete, Key: key})
+			next := storage.BatchOp{Op: storage.BatchOpDelete, Key: key}
+			batchOp = &next
 		case *cefaspb.TransactWriteOp_ConditionCheck_:
 			// already evaluated above; emits no mutation
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "ops[%d]: missing op", i)
 		}
+		if batchOp != nil {
+			batchOps = append(batchOps, *batchOp)
+			for _, mirror := range targets.mirrors {
+				mirrorBuckets[mirror] = append(mirrorBuckets[mirror], *batchOp)
+			}
+		}
 	}
 	if len(batchOps) > 0 {
-		if err := s.db.BatchWriteItem(td, batchOps); err != nil {
+		if err := primary.BatchWriteItem(td, batchOps); err != nil {
 			return nil, mapStorageErr(err)
+		}
+		for mirror, mirrorOps := range mirrorBuckets {
+			if err := mirror.BatchWriteItem(td, mirrorOps); err != nil {
+				return nil, mapStorageErr(err)
+			}
 		}
 	}
 	return &cefaspb.TransactWriteItemsResponse{}, nil

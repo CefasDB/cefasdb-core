@@ -78,7 +78,7 @@ func TestHTTPFinalizeSplit(t *testing.T) {
 		ParentShardID:  0,
 		ChildShardID:   1,
 		ExpectedEpoch:  plan.AfterEpoch,
-		WritesQuiesced: true,
+		WritesQuiesced: false,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,6 +125,20 @@ func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 
 func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.PlacementPlan) {
 	t.Helper()
+	env := transitionPlacementTestEnv(t)
+	return env.Mux, env.Cleanup, env.Plan
+}
+
+type transitionPlacementEnv struct {
+	Mux     *http.ServeMux
+	Manager *cluster.Manager
+	Catalog *catalog.Catalog
+	Plan    cluster.PlacementPlan
+	Cleanup func()
+}
+
+func transitionPlacementTestEnv(t *testing.T) transitionPlacementEnv {
+	t.Helper()
 	root := t.TempDir()
 	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
 	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
@@ -157,5 +171,11 @@ func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.P
 	srv.AttachManager(mgr)
 	mux := http.NewServeMux()
 	srv.Routes(mux)
-	return mux, func() { _ = mgr.Close() }, plan
+	return transitionPlacementEnv{
+		Mux:     mux,
+		Manager: mgr,
+		Catalog: catStore,
+		Plan:    plan,
+		Cleanup: func() { _ = mgr.Close() },
+	}
 }

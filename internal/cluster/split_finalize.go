@@ -33,6 +33,9 @@ type SplitFinalizeResult struct {
 }
 
 func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (SplitFinalizeResult, error) {
+	m.splitMu.Lock()
+	defer m.splitMu.Unlock()
+
 	if err := m.RefreshPlacement(); err != nil {
 		return SplitFinalizeResult{}, err
 	}
@@ -125,9 +128,6 @@ func (m *Manager) requireSplitFinalizeLeaders(parent, child *Shard) error {
 func validateFinalizeSplit(cat PlacementCatalog, req SplitFinalizeRequest) (int, int, ShardPlacement, ShardPlacement, TokenRange, error) {
 	if cat.Strategy != PlacementStrategyTokenRange {
 		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("finalize split requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
-	}
-	if !req.WritesQuiesced {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("finalize split requires writesQuiesced=true; live split catch-up is not enabled yet")
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != cat.Epoch {
 		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: cat.Epoch}
