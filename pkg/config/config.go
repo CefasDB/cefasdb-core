@@ -94,6 +94,17 @@ type Config struct {
 		HotspotCompactionDebtThreshold uint64        `yaml:"hotspotCompactionDebtThresholdBytes"`
 		HotspotThrottleStateThreshold  int           `yaml:"hotspotThrottleStateThreshold"`
 	} `yaml:"metrics"`
+	Rebalancer struct {
+		Enabled                 bool          `yaml:"enabled"`
+		Mode                    string        `yaml:"mode"`
+		Interval                time.Duration `yaml:"interval"`
+		MinInterval             time.Duration `yaml:"minInterval"`
+		MaxConcurrentOperations int           `yaml:"maxConcurrentOperations"`
+		MaxHotspots             int           `yaml:"maxHotspots"`
+		MinVoters               int           `yaml:"minVoters"`
+		ApplyTimeout            time.Duration `yaml:"applyTimeout"`
+		ManualPlanDir           string        `yaml:"manualPlanDir"`
+	} `yaml:"rebalancer"`
 }
 
 // Defaults returns a Config populated with the same fallbacks every
@@ -114,6 +125,12 @@ func Defaults() Config {
 	c.Metrics.HotspotLatencyThreshold = 50 * time.Millisecond
 	c.Metrics.HotspotCompactionDebtThreshold = 1 << 30
 	c.Metrics.HotspotThrottleStateThreshold = 1
+	c.Rebalancer.Mode = "dry-run"
+	c.Rebalancer.Interval = 30 * time.Second
+	c.Rebalancer.MinInterval = 5 * time.Minute
+	c.Rebalancer.MaxConcurrentOperations = 1
+	c.Rebalancer.MaxHotspots = 8
+	c.Rebalancer.ApplyTimeout = 5 * time.Second
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -267,6 +284,16 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Metrics.HotspotLatencyThreshold = dur("METRICS_HOTSPOT_LATENCY_THRESHOLD", cfg.Metrics.HotspotLatencyThreshold)
 	cfg.Metrics.HotspotCompactionDebtThreshold = unsigned64("METRICS_HOTSPOT_COMPACTION_DEBT_THRESHOLD_BYTES", cfg.Metrics.HotspotCompactionDebtThreshold)
 	cfg.Metrics.HotspotThrottleStateThreshold = integer("METRICS_HOTSPOT_THROTTLE_STATE_THRESHOLD", cfg.Metrics.HotspotThrottleStateThreshold)
+
+	cfg.Rebalancer.Enabled = boolean("REBALANCER_ENABLED", cfg.Rebalancer.Enabled)
+	cfg.Rebalancer.Mode = str("REBALANCER_MODE", cfg.Rebalancer.Mode)
+	cfg.Rebalancer.Interval = dur("REBALANCER_INTERVAL", cfg.Rebalancer.Interval)
+	cfg.Rebalancer.MinInterval = dur("REBALANCER_MIN_INTERVAL", cfg.Rebalancer.MinInterval)
+	cfg.Rebalancer.MaxConcurrentOperations = integer("REBALANCER_MAX_CONCURRENT_OPERATIONS", cfg.Rebalancer.MaxConcurrentOperations)
+	cfg.Rebalancer.MaxHotspots = integer("REBALANCER_MAX_HOTSPOTS", cfg.Rebalancer.MaxHotspots)
+	cfg.Rebalancer.MinVoters = integer("REBALANCER_MIN_VOTERS", cfg.Rebalancer.MinVoters)
+	cfg.Rebalancer.ApplyTimeout = dur("REBALANCER_APPLY_TIMEOUT", cfg.Rebalancer.ApplyTimeout)
+	cfg.Rebalancer.ManualPlanDir = str("REBALANCER_MANUAL_PLAN_DIR", cfg.Rebalancer.ManualPlanDir)
 	return nil
 }
 

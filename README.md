@@ -171,6 +171,14 @@ environment variables. The defaults keep Prometheus cardinality bounded at
 `metrics.hotspotLatencyThreshold`, and
 `metrics.hotspotCompactionDebtThresholdBytes`.
 
+The autonomous rebalancer is opt-in with `rebalancer.enabled` or
+`CEFAS_REBALANCER_ENABLED=true`. It consumes `HotRanges` and placement state on
+a fixed interval, proposes deterministic split/range-move/drain plans, and
+enforces `rebalancer.maxConcurrentOperations` plus `rebalancer.minInterval`.
+Use `rebalancer.mode: dry-run` to log decisions, `manual` with
+`rebalancer.manualPlanDir` to write plans for approval, or `auto` to apply safe
+plans directly.
+
 The CLI reads `~/.cefas/config.yaml`, `CEFAS_*` environment variables, and global
 flags such as `--endpoint`, `--token`, `--token-file`, `--ca`, `--insecure`,
 `--output`, and `--timeout`.

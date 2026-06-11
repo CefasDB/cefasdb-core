@@ -23,6 +23,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Metrics.HotspotBuckets != 64 || d.Metrics.HotspotCoolingWindow != time.Minute {
 		t.Errorf("hotspot defaults not populated: %+v", d.Metrics)
 	}
+	if d.Rebalancer.Mode != "dry-run" || d.Rebalancer.Interval != 30*time.Second || d.Rebalancer.MaxConcurrentOperations != 1 {
+		t.Errorf("rebalancer defaults not populated: %+v", d.Rebalancer)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -55,6 +58,11 @@ metrics:
   hotspotBuckets: 16
   hotspotWriteThreshold: 42
   hotspotLatencyThreshold: 75ms
+rebalancer:
+  enabled: true
+  mode: manual
+  interval: 10s
+  manualPlanDir: /tmp/cefas-rebalance
 `
 	if err := os.WriteFile(path, []byte(yamlSrc), 0o644); err != nil {
 		t.Fatal(err)
@@ -75,6 +83,9 @@ metrics:
 	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
 		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
 	}
+	if !cfg.Rebalancer.Enabled || cfg.Rebalancer.Mode != "manual" || cfg.Rebalancer.Interval != 10*time.Second || cfg.Rebalancer.ManualPlanDir != "/tmp/cefas-rebalance" {
+		t.Fatalf("rebalancer config not loaded: %+v", cfg.Rebalancer)
+	}
 }
 
 func TestApplyEnv(t *testing.T) {
@@ -84,6 +95,10 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_LATENCY_THRESHOLD", "25ms")
+	t.Setenv("CEFAS_REBALANCER_ENABLED", "true")
+	t.Setenv("CEFAS_REBALANCER_MODE", "auto")
+	t.Setenv("CEFAS_REBALANCER_MAX_CONCURRENT_OPERATIONS", "2")
+	t.Setenv("CEFAS_REBALANCER_MIN_INTERVAL", "30s")
 	t.Setenv("CEFAS_IDENTITY_CLOCK_SKEW", "1m")
 
 	cfg := config.Defaults()
@@ -101,6 +116,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Metrics.HotspotBuckets != 32 || cfg.Metrics.HotspotWriteThreshold != 99 || cfg.Metrics.HotspotLatencyThreshold != 25*time.Millisecond {
 		t.Errorf("hotspot env not applied: %+v", cfg.Metrics)
+	}
+	if !cfg.Rebalancer.Enabled || cfg.Rebalancer.Mode != "auto" || cfg.Rebalancer.MaxConcurrentOperations != 2 || cfg.Rebalancer.MinInterval != 30*time.Second {
+		t.Errorf("rebalancer env not applied: %+v", cfg.Rebalancer)
 	}
 	if cfg.Identity.ClockSkew != time.Minute {
 		t.Errorf("clock skew: %v", cfg.Identity.ClockSkew)
