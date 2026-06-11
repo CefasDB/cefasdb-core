@@ -1069,3 +1069,60 @@ message BanditDescribeResponse {
   string strategy  = 2;
   repeated BanditArmStats arms = 3;
 }
+
+// ===== Atomic update (issue #242) =====
+//
+// AtomicUpdate exposes the server-side read-modify-write primitive
+// (counter / CAS) backed by internal/storage.DB.AtomicUpdate. The
+// response carries the post-image so callers never need a follow-up
+// GetItem to read what they just wrote.
+
+service CefasAtomic {
+  rpc AtomicUpdate(AtomicUpdateRequest) returns (AtomicUpdateResponse);
+}
+
+// AtomicActionKind selects the mutator applied to the attribute named
+// in AtomicAction.attribute.
+//
+//   ATOMIC_SET         — overwrite attribute with `value` verbatim
+//   ATOMIC_INCR_RETURN — atomically add `value` (must be numeric); the
+//                        new value is reported in returned_values
+//   ATOMIC_ADD_RETURN  — alias for ATOMIC_INCR_RETURN (DynamoDB-style
+//                        vocabulary for the same primitive)
+//   ATOMIC_APPLY       — evaluate `expression` against the prior item
+//                        and assign the result to `attribute`. Grammar:
+//                        numeric arithmetic (+ - * /), min(a,b),
+//                        max(a,b), clamp(x,lo,hi).
+enum AtomicActionKind {
+  ATOMIC_ACTION_UNSPECIFIED = 0;
+  ATOMIC_SET                = 1;
+  ATOMIC_INCR_RETURN        = 2;
+  ATOMIC_ADD_RETURN         = 3;
+  ATOMIC_APPLY              = 4;
+}
+
+message AtomicAction {
+  AtomicActionKind kind       = 1;
+  string           attribute  = 2;
+  AttributeValue   value      = 3;
+  string           expression = 4; // ATOMIC_APPLY only
+}
+
+message AtomicUpdateRequest {
+  string                       table     = 1;
+  map<string, AttributeValue>  key       = 2;
+  string                       condition = 3;
+  map<string, AttributeValue>  binds     = 4;
+  repeated AtomicAction        actions   = 5;
+}
+
+message AtomicUpdateResponse {
+  // Post-image of the item after every action applied.
+  map<string, AttributeValue>  item             = 1;
+  // Per-action returned value, aligned with the request's `actions`.
+  // For INCR_RETURN / ADD_RETURN / APPLY this is the new attribute
+  // value; for SET it echoes the assigned value.
+  repeated AttributeValue      returned_values  = 2;
+  // True when the item did not exist prior to the call.
+  bool                         created          = 3;
+}

@@ -2102,3 +2102,105 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "cefas.proto",
 }
+
+const (
+	CefasAtomic_AtomicUpdate_FullMethodName = "/cefas.v1.CefasAtomic/AtomicUpdate"
+)
+
+// CefasAtomicClient is the client API for CefasAtomic service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type CefasAtomicClient interface {
+	AtomicUpdate(ctx context.Context, in *AtomicUpdateRequest, opts ...grpc.CallOption) (*AtomicUpdateResponse, error)
+}
+
+type cefasAtomicClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewCefasAtomicClient(cc grpc.ClientConnInterface) CefasAtomicClient {
+	return &cefasAtomicClient{cc}
+}
+
+func (c *cefasAtomicClient) AtomicUpdate(ctx context.Context, in *AtomicUpdateRequest, opts ...grpc.CallOption) (*AtomicUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AtomicUpdateResponse)
+	err := c.cc.Invoke(ctx, CefasAtomic_AtomicUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CefasAtomicServer is the server API for CefasAtomic service.
+// All implementations must embed UnimplementedCefasAtomicServer
+// for forward compatibility.
+type CefasAtomicServer interface {
+	AtomicUpdate(context.Context, *AtomicUpdateRequest) (*AtomicUpdateResponse, error)
+	mustEmbedUnimplementedCefasAtomicServer()
+}
+
+// UnimplementedCefasAtomicServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedCefasAtomicServer struct{}
+
+func (UnimplementedCefasAtomicServer) AtomicUpdate(context.Context, *AtomicUpdateRequest) (*AtomicUpdateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AtomicUpdate not implemented")
+}
+func (UnimplementedCefasAtomicServer) mustEmbedUnimplementedCefasAtomicServer() {}
+func (UnimplementedCefasAtomicServer) testEmbeddedByValue()                     {}
+
+// UnsafeCefasAtomicServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to CefasAtomicServer will
+// result in compilation errors.
+type UnsafeCefasAtomicServer interface {
+	mustEmbedUnimplementedCefasAtomicServer()
+}
+
+func RegisterCefasAtomicServer(s grpc.ServiceRegistrar, srv CefasAtomicServer) {
+	// If the following call pancis, it indicates UnimplementedCefasAtomicServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&CefasAtomic_ServiceDesc, srv)
+}
+
+func _CefasAtomic_AtomicUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AtomicUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasAtomicServer).AtomicUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CefasAtomic_AtomicUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasAtomicServer).AtomicUpdate(ctx, req.(*AtomicUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// CefasAtomic_ServiceDesc is the grpc.ServiceDesc for CefasAtomic service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var CefasAtomic_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cefas.v1.CefasAtomic",
+	HandlerType: (*CefasAtomicServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AtomicUpdate",
+			Handler:    _CefasAtomic_AtomicUpdate_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "cefas.proto",
+}

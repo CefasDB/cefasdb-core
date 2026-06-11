@@ -22,4 +22,5 @@ func Register(root *cobra.Command) {
 	registerAggregate(root)
 	registerRerank(root)
 	registerBandit(root)
+	registerAtomic(root)
 }
