@@ -12,6 +12,8 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/spatial"
+	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -378,6 +380,142 @@ func TestFinalizeSplitAllowsLiveWriteBarrier(t *testing.T) {
 	}
 }
 
+func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
+	mgr, plan := openTransitionSplitManager(t)
+	defer mgr.Close()
+
+	parent, _ := mgr.Shard(0)
+	child, _ := mgr.Shard(1)
+	td := types.TableDescriptor{
+		Name:      "events",
+		KeySchema: types.KeySchema{PK: "user_id", SK: "ts"},
+		GSIs: []types.GSIDescriptor{{
+			Name:      "by_event",
+			KeySchema: types.KeySchema{PK: "event", SK: "ts"},
+		}},
+		LSIs: []types.LSIDescriptor{{
+			Name: "by_author",
+			SK:   "author",
+		}},
+		SpatialIndexes: []types.SpatialIndexDescriptor{{
+			Name:       "by_location",
+			Kind:       storage.SpatialKindGeohash,
+			Attributes: []string{"lat", "lon"},
+			Precision:  5,
+		}},
+		TTLAttribute: "expires_at",
+	}
+	parentCatalog, err := catalog.New(parent.Storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parentCatalog.Create(td); err != nil {
+		t.Fatal(err)
+	}
+
+	keys := keysInRange(t, plan.After.Shards[1].Ranges[0], 3)
+	now := time.Now()
+	moved := types.Item{
+		"user_id":    splitSAttr(keys[0]),
+		"ts":         splitSAttr("001"),
+		"event":      splitSAttr("signup"),
+		"author":     splitSAttr("old-author"),
+		"lat":        splitNAttr("40.7128"),
+		"lon":        splitNAttr("-74.0060"),
+		"expires_at": splitNAttr(fmt.Sprintf("%d", now.Add(time.Hour).Unix())),
+	}
+	if err := parent.Storage.PutItemWith(td, moved, storage.PutOptions{}); err != nil {
+		t.Fatalf("put seed: %v", err)
+	}
+	moved["event"] = splitSAttr("login")
+	moved["author"] = splitSAttr("alice")
+	if err := parent.Storage.PutItemWith(td, moved, storage.PutOptions{}); err != nil {
+		t.Fatalf("update indexed row: %v", err)
+	}
+
+	deleted := types.Item{
+		"user_id": splitSAttr(keys[1]),
+		"ts":      splitSAttr("002"),
+		"event":   splitSAttr("login"),
+		"author":  splitSAttr("deleted"),
+		"lat":     splitNAttr("40.7300"),
+		"lon":     splitNAttr("-73.9900"),
+	}
+	if err := parent.Storage.PutItemWith(td, deleted, storage.PutOptions{}); err != nil {
+		t.Fatalf("put deleted seed: %v", err)
+	}
+	if err := parent.Storage.DeleteItemWith(td, deleted, storage.DeleteOptions{}); err != nil {
+		t.Fatalf("delete seed: %v", err)
+	}
+
+	expired := types.Item{
+		"user_id":    splitSAttr(keys[2]),
+		"ts":         splitSAttr("003"),
+		"event":      splitSAttr("expired"),
+		"author":     splitSAttr("ttl"),
+		"lat":        splitNAttr("40.7000"),
+		"lon":        splitNAttr("-74.0100"),
+		"expires_at": splitNAttr(fmt.Sprintf("%d", now.Add(-time.Hour).Unix())),
+	}
+	if err := parent.Storage.PutItemWith(td, expired, storage.PutOptions{}); err != nil {
+		t.Fatalf("put expired row: %v", err)
+	}
+
+	result, err := mgr.FinalizeSplit(context.Background(), cluster.SplitFinalizeRequest{
+		ParentShardID: 0,
+		ChildShardID:  1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if err != nil {
+		t.Fatalf("finalize indexed split: %v", err)
+	}
+	if result.CopiedKeys != 2 || result.DeletedKeys != 2 || result.CopiedCatalogKeys != 1 {
+		t.Fatalf("unexpected copy/delete counts: %+v", result)
+	}
+
+	gsiHits, err := child.Storage.QueryByGSI(td, "by_event", splitSAttr("login"), storage.QueryOptions{})
+	if err != nil {
+		t.Fatalf("child GSI query: %v", err)
+	}
+	if len(gsiHits) != 1 || gsiHits[0]["user_id"].S != keys[0] || gsiHits[0]["author"].S != "alice" {
+		t.Fatalf("child GSI hits = %+v", gsiHits)
+	}
+	lsiHits, err := child.Storage.QueryByLSI(td, "by_author", splitSAttr(keys[0]), storage.QueryOptions{})
+	if err != nil {
+		t.Fatalf("child LSI query: %v", err)
+	}
+	if len(lsiHits) != 1 || lsiHits[0]["author"].S != "alice" {
+		t.Fatalf("child LSI hits = %+v", lsiHits)
+	}
+	box := spatial.BBox{MinLat: 40.6, MinLon: -74.1, MaxLat: 40.8, MaxLon: -73.9}
+	spatialHits, err := child.Storage.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &box})
+	if err != nil {
+		t.Fatalf("child spatial query: %v", err)
+	}
+	if len(spatialHits) != 2 {
+		t.Fatalf("child spatial hits = %+v, want moved and expired rows", spatialHits)
+	}
+
+	if got := countTableDataKeys(t, parent.Storage, td.Name); got != 0 {
+		t.Fatalf("parent table data keys = %d, want 0", got)
+	}
+
+	reaper := storage.NewReaper(child.Storage, splitCatalog{tables: []types.TableDescriptor{td}}, nil, storage.ReaperConfig{
+		BatchSize: 1024,
+		Now:       func() time.Time { return now },
+	})
+	if err := reaper.Tick(context.Background()); err != nil {
+		t.Fatalf("child TTL reaper: %v", err)
+	}
+	_, err = child.Storage.GetItem(td.Name, td.KeySchema, types.Item{
+		"user_id": splitSAttr(keys[2]),
+		"ts":      splitSAttr("003"),
+	})
+	if !errors.Is(err, types.ErrItemNotFound) {
+		t.Fatalf("expired child row error = %v, want ErrItemNotFound", err)
+	}
+}
+
 func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
@@ -406,15 +544,57 @@ func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.Placeme
 
 func keyInRange(t *testing.T, rng cluster.TokenRange) string {
 	t.Helper()
+	keys := keysInRange(t, rng, 1)
+	return keys[0]
+}
+
+func keysInRange(t *testing.T, rng cluster.TokenRange, n int) []string {
+	t.Helper()
 	router := cluster.NewRouter(1)
+	keys := make([]string, 0, n)
 	for i := 0; i < 100_000; i++ {
 		key := fmt.Sprintf("split-key-%d", i)
 		if rng.Contains(router.TokenForPK([]byte(key))) {
-			return key
+			keys = append(keys, key)
+			if len(keys) == n {
+				return keys
+			}
 		}
 	}
-	t.Fatal("could not find key in range")
-	return ""
+	t.Fatalf("could not find %d keys in range", n)
+	return nil
+}
+
+func splitSAttr(s string) types.AttributeValue {
+	return types.AttributeValue{T: types.AttrS, S: s}
+}
+
+func splitNAttr(n string) types.AttributeValue {
+	return types.AttributeValue{T: types.AttrN, N: n}
+}
+
+type splitCatalog struct {
+	tables []types.TableDescriptor
+}
+
+func (c splitCatalog) List() []types.TableDescriptor { return c.tables }
+
+func countTableDataKeys(t *testing.T, db *storage.DB, table string) int {
+	t.Helper()
+	lower, upper := storage.PrefixTable(table)
+	iter, err := db.Iter(lower, upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+	var count int
+	for valid := iter.First(); valid; valid = iter.Next() {
+		count++
+	}
+	if err := iter.Error(); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func contains(in []string, v string) bool {

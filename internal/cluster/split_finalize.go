@@ -6,6 +6,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 const splitCopyBatchSize = 1024
@@ -55,7 +56,8 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
 		return SplitFinalizeResult{}, err
 	}
-	if err := ensureSplitCopySupported(parentShard.Storage); err != nil {
+	tables, err := loadSplitCopyTables(parentShard.Storage)
+	if err != nil {
 		return SplitFinalizeResult{}, err
 	}
 
@@ -63,7 +65,7 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("copy catalog keys: %w", err)
 	}
-	copied, err := copyPrimaryTokenRange(ctx, parentShard.Storage, childShard.Storage, child.Ranges[0])
+	copied, err := copyPrimaryTokenRangeWithIndexes(ctx, tables, parentShard.Storage, childShard.Storage, child.Ranges[0])
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("copy token range: %w", err)
 	}
@@ -84,7 +86,7 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	if err := m.applyPlacement(after, false); err != nil {
 		return SplitFinalizeResult{}, err
 	}
-	deleted, err := deletePrimaryTokenRange(ctx, parentShard.Storage, child.Ranges[0])
+	deleted, err := deletePrimaryTokenRangeWithIndexes(ctx, tables, parentShard.Storage, child.Ranges[0])
 	if err != nil {
 		return SplitFinalizeResult{}, fmt.Errorf("delete parent token range after final placement epoch %d: %w", after.Epoch, err)
 	}
@@ -164,17 +166,12 @@ func validateFinalizeSplit(cat PlacementCatalog, req SplitFinalizeRequest) (int,
 	return parentIdx, childIdx, parent, child, parentRangeAfter, nil
 }
 
-func ensureSplitCopySupported(db *storage.DB) error {
+func loadSplitCopyTables(db *storage.DB) ([]types.TableDescriptor, error) {
 	cat, err := catalog.New(db)
 	if err != nil {
-		return fmt.Errorf("load catalog before split finalize: %w", err)
+		return nil, fmt.Errorf("load catalog before split finalize: %w", err)
 	}
-	for _, td := range cat.List() {
-		if len(td.GSIs) > 0 || len(td.LSIs) > 0 || len(td.SpatialIndexes) > 0 || td.TTLAttribute != "" {
-			return invalidPlan("split finalize currently supports primary rows only; table %q has secondary indexes, spatial indexes, or TTL", td.Name)
-		}
-	}
-	return nil
+	return cat.List(), nil
 }
 
 func copyCatalogKeys(ctx context.Context, src, dst *storage.DB) (int64, error) {
@@ -190,12 +187,107 @@ func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng TokenR
 	})
 }
 
+func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, src, dst *storage.DB, rng TokenRange) (int64, error) {
+	if src == nil || dst == nil {
+		return 0, fmt.Errorf("storage is not open")
+	}
+	var copied int64
+	for _, td := range tables {
+		lower, upper := storage.PrefixPrimaryAll(td.Name)
+		iter, err := src.Iter(lower, upper)
+		if err != nil {
+			return copied, err
+		}
+		for valid := iter.First(); valid; valid = iter.Next() {
+			if err := ctx.Err(); err != nil {
+				_ = iter.Close()
+				return copied, err
+			}
+			token, ok := storage.PrimaryTokenFromKey(iter.Key())
+			if !ok || !rng.Contains(token) {
+				continue
+			}
+			raw := append([]byte(nil), iter.Value()...)
+			item, err := storage.DecodeItem(raw)
+			if err != nil {
+				_ = iter.Close()
+				return copied, fmt.Errorf("decode %s primary row: %w", td.Name, err)
+			}
+			if err := dst.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+				_ = iter.Close()
+				return copied, fmt.Errorf("put %s primary row on child: %w", td.Name, err)
+			}
+			copied++
+		}
+		if err := iter.Error(); err != nil {
+			_ = iter.Close()
+			return copied, err
+		}
+		if err := iter.Close(); err != nil {
+			return copied, err
+		}
+	}
+	return copied, nil
+}
+
 func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng TokenRange) (int64, error) {
 	lower, upper := storage.PrefixTables()
 	return deleteKeys(ctx, db, lower, upper, func(key []byte) bool {
 		token, ok := storage.PrimaryTokenFromKey(key)
 		return ok && rng.Contains(token)
 	})
+}
+
+func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng TokenRange) (int64, error) {
+	if db == nil {
+		return 0, fmt.Errorf("storage is not open")
+	}
+	var deleted int64
+	for _, td := range tables {
+		items, err := primaryItemsInRange(ctx, db, td, rng)
+		if err != nil {
+			return deleted, err
+		}
+		for _, item := range items {
+			if err := ctx.Err(); err != nil {
+				return deleted, err
+			}
+			if err := db.DeleteItemWith(td, item, storage.DeleteOptions{}); err != nil {
+				return deleted, fmt.Errorf("delete %s primary row from parent: %w", td.Name, err)
+			}
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDescriptor, rng TokenRange) ([]types.Item, error) {
+	lower, upper := storage.PrefixPrimaryAll(td.Name)
+	iter, err := db.Iter(lower, upper)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	var items []types.Item
+	for valid := iter.First(); valid; valid = iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		token, ok := storage.PrimaryTokenFromKey(iter.Key())
+		if !ok || !rng.Contains(token) {
+			continue
+		}
+		raw := append([]byte(nil), iter.Value()...)
+		item, err := storage.DecodeItem(raw)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s primary row: %w", td.Name, err)
+		}
+		items = append(items, item)
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func copyKeys(ctx context.Context, src, dst *storage.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {

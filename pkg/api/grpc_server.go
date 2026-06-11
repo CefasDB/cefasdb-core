@@ -566,7 +566,7 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	limit := int(req.GetLimit())
 	switch {
 	case req.GetIndexName() != "":
-		items, err = queryDB.QueryByGSI(td, req.GetIndexName(), pkVal, storage.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
+		items, err = s.queryByIndex(td, req.GetIndexName(), pkVal, storage.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
 	case req.GetSkLow() == nil && req.GetSkHigh() == nil:
 		items, err = queryDB.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
 	default:
