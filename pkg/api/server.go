@@ -457,6 +457,7 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	started := time.Now()
 	var req putItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -497,6 +498,7 @@ func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
 		writeWriteErr(w, r, err)
 		return
 	}
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
 	writeJSON(w, http.StatusOK, struct{}{})
 }
 
@@ -505,6 +507,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	started := time.Now()
 	var req getItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -536,12 +539,14 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 	item, err := s.storageFor(pkBytes).GetItem(req.Table, td.KeySchema, keyAttrs)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
+			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
 			writeJSON(w, http.StatusOK, map[string]any{"found": false})
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemBytes(item), started)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found": true,
 		"item":  ddbjson.EncodeItem(item),
@@ -553,6 +558,7 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	started := time.Now()
 	var req deleteItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -593,6 +599,7 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		writeWriteErr(w, r, err)
 		return
 	}
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
 	writeJSON(w, http.StatusOK, struct{}{})
 }
 
@@ -601,6 +608,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	started := time.Now()
 	var req queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -662,6 +670,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemsBytes(items), started)
 
 	out := make([]map[string]ddbjson.Attribute, 0, len(items))
 	for _, it := range items {
@@ -990,17 +999,18 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 // ---------- cluster endpoints ----------
 
 type clusterStatusResponse struct {
-	Mode              string                   `json:"mode"` // "single-node" or "raft"
-	IsLeader          bool                     `json:"isLeader"`
-	SelfID            string                   `json:"selfId,omitempty"`
-	BindAddr          string                   `json:"bindAddr,omitempty"`
-	LeaderHTTP        string                   `json:"leaderHttp,omitempty"`
-	RoutingEpoch      uint64                   `json:"routingEpoch,omitempty"`
-	PlacementVersion  uint64                   `json:"placementVersion,omitempty"`
-	ShardCount        int                      `json:"shardCount,omitempty"`
-	PlacementStrategy string                   `json:"placementStrategy,omitempty"`
-	Shards            []cluster.ShardPlacement `json:"shards,omitempty"`
-	Nodes             []cluster.NodeDescriptor `json:"nodes,omitempty"`
+	Mode              string                        `json:"mode"` // "single-node" or "raft"
+	IsLeader          bool                          `json:"isLeader"`
+	SelfID            string                        `json:"selfId,omitempty"`
+	BindAddr          string                        `json:"bindAddr,omitempty"`
+	LeaderHTTP        string                        `json:"leaderHttp,omitempty"`
+	RoutingEpoch      uint64                        `json:"routingEpoch,omitempty"`
+	PlacementVersion  uint64                        `json:"placementVersion,omitempty"`
+	ShardCount        int                           `json:"shardCount,omitempty"`
+	PlacementStrategy string                        `json:"placementStrategy,omitempty"`
+	Shards            []cluster.ShardPlacement      `json:"shards,omitempty"`
+	Nodes             []cluster.NodeDescriptor      `json:"nodes,omitempty"`
+	HotRanges         []metrics.RangeHotspotSummary `json:"hotRanges,omitempty"`
 }
 
 func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
@@ -1021,6 +1031,9 @@ func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		resp.PlacementStrategy = placement.Strategy
 		resp.Shards = append([]cluster.ShardPlacement(nil), placement.Shards...)
 		resp.Nodes = sortedPlacementNodes(placement)
+	}
+	if s.metrics != nil {
+		resp.HotRanges = s.metrics.RangeHotspotSummaries(0)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1303,10 +1316,32 @@ func (s *Server) ensureStrongRead(w http.ResponseWriter, r *http.Request) bool {
 // Single-shard mode collapses to one batch.
 func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.BatchOp) error {
 	if s.manager == nil {
-		return s.db.BatchWriteItem(td, ops)
+		started := time.Now()
+		if err := s.db.BatchWriteItem(td, ops); err != nil {
+			return err
+		}
+		for _, op := range ops {
+			probe := op.Item
+			approxBytes := estimatedItemBytes(op.Item)
+			if op.Op == storage.BatchOpDelete {
+				probe = op.Key
+				approxBytes = estimatedItemBytes(op.Key)
+			}
+			pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
+			if err != nil {
+				return err
+			}
+			s.observeRangeMetric(rangeMetricWrite, pkBytes, approxBytes, started)
+		}
+		return nil
 	}
 	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
 	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	type observation struct {
+		pkBytes     []byte
+		approxBytes uint64
+	}
+	observations := make([]observation, 0, len(ops))
 	var releases []func()
 	defer func() {
 		for i := len(releases) - 1; i >= 0; i-- {
@@ -1315,13 +1350,16 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 	}()
 	for _, op := range ops {
 		probe := op.Item
+		approxBytes := estimatedItemBytes(op.Item)
 		if op.Op == storage.BatchOpDelete {
 			probe = op.Key
+			approxBytes = estimatedItemBytes(op.Key)
 		}
 		pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
 		if err != nil {
 			return err
 		}
+		observations = append(observations, observation{pkBytes: append([]byte(nil), pkBytes...), approxBytes: approxBytes})
 		targets, err := s.writeTargetsForPK(pkBytes)
 		if err != nil {
 			return err
@@ -1332,6 +1370,7 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 			mirrorBuckets[mirror] = append(mirrorBuckets[mirror], op)
 		}
 	}
+	started := time.Now()
 	for db, group := range primaryBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
@@ -1342,6 +1381,9 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 			return err
 		}
 	}
+	for _, obs := range observations {
+		s.observeRangeMetric(rangeMetricWrite, obs.pkBytes, obs.approxBytes, started)
+	}
 	return nil
 }
 
@@ -1349,10 +1391,27 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 // preserves input ordering in the response. Misses stay nil.
 func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
 	if s.manager == nil {
-		return s.db.BatchGetItem(table, ks, keys)
+		started := time.Now()
+		out, err := s.db.BatchGetItem(table, ks, keys)
+		if err != nil {
+			return nil, err
+		}
+		for i, k := range keys {
+			pkBytes, err := pkBytesFromItem(k, ks)
+			if err != nil {
+				return nil, err
+			}
+			approxBytes := uint64(len(pkBytes))
+			if i < len(out) && out[i] != nil {
+				approxBytes = estimatedItemBytes(out[i])
+			}
+			s.observeRangeMetric(rangeMetricRead, pkBytes, approxBytes, started)
+		}
+		return out, nil
 	}
 	out := make([]types.Item, len(keys))
 	for i, k := range keys {
+		started := time.Now()
 		pkBytes, err := pkBytesFromItem(k, ks)
 		if err != nil {
 			return nil, err
@@ -1365,6 +1424,11 @@ func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.
 		if len(single) == 1 {
 			out[i] = single[0]
 		}
+		approxBytes := uint64(len(pkBytes))
+		if out[i] != nil {
+			approxBytes = estimatedItemBytes(out[i])
+		}
+		s.observeRangeMetric(rangeMetricRead, pkBytes, approxBytes, started)
 	}
 	return out, nil
 }
@@ -1413,10 +1477,9 @@ func (s *Server) fanOutCatalog(td types.TableDescriptor) {
 
 // instrument wraps an http.Handler with Prometheus latency +
 // outcome reporting. Op label is the trailing segment of the URL
-// path (e.g. "PutItem"); table label is left empty because we'd
-// need to parse every request body to fill it — per-table metrics
-// can be added in a follow-up by handlers calling s.metrics.Observe
-// directly with the resolved table name.
+// path (e.g. "PutItem"); table label is left empty because the
+// request-body-aware, PK-bearing handlers record bounded range metrics
+// separately after they resolve the table and partition key.
 func (s *Server) instrument(path string, h http.Handler) http.Handler {
 	op := path
 	if idx := strings.LastIndex(path, "/"); idx >= 0 && idx+1 < len(path) {

@@ -13,6 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
@@ -35,6 +36,7 @@ type GRPCServer struct {
 	stream  ChangeStream     // nil when no CDC source attached
 	manager *cluster.Manager // nil in single-shard mode
 	plugins *plugin.Registry // nil → uses plugin.Default
+	metrics *metrics.Metrics // nil when metrics disabled
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
@@ -51,6 +53,10 @@ func (s *GRPCServer) AttachManager(m *cluster.Manager) { s.manager = m }
 // server falls back to plugin.Default when no registry is attached —
 // the same registry built-in plugins register against via init().
 func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) { s.plugins = r }
+
+// AttachMetrics wires bounded range-hotspot summaries into gRPC
+// cluster status and records PK-bearing gRPC operations.
+func (s *GRPCServer) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
 func (s *GRPCServer) pluginRegistry() *plugin.Registry {
 	if s.plugins != nil {
@@ -227,6 +233,7 @@ func (s *GRPCServer) DescribeTimeToLive(ctx context.Context, req *cefaspb.Descri
 // ---------- item ----------
 
 func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (*cefaspb.PutItemResponse, error) {
+	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
@@ -256,10 +263,12 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
 	return &cefaspb.PutItemResponse{}, nil
 }
 
 func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (*cefaspb.GetItemResponse, error) {
+	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -285,14 +294,17 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	item, err := s.storageFor(pkBytes).GetItem(req.GetTable(), td.KeySchema, key)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
+			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
 			return &cefaspb.GetItemResponse{Found: false}, nil
 		}
 		return nil, mapStorageErr(err)
 	}
+	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemBytes(item), started)
 	return &cefaspb.GetItemResponse{Found: true, Item: itemToPB(item)}, nil
 }
 
 func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequest) (*cefaspb.UpdateItemResponse, error) {
+	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
@@ -359,6 +371,11 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	if wantImage != "" && len(res.Rows) > 0 {
 		resp.Attributes = itemToPB(res.Rows[0])
 	}
+	approxBytes := uint64(len(pkBytes))
+	if len(res.Rows) > 0 {
+		approxBytes = estimatedItemBytes(res.Rows[0])
+	}
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, approxBytes, started)
 	return resp, nil
 }
 
@@ -377,6 +394,7 @@ func returnValuesName(v cefaspb.ReturnValues) string {
 }
 
 func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequest) (*cefaspb.DeleteItemResponse, error) {
+	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemDelete, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemDelete)); err != nil {
@@ -406,6 +424,7 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err := targets.DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
 	return &cefaspb.DeleteItemResponse{}, nil
 }
 
@@ -446,10 +465,32 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 
 func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.BatchOp) error {
 	if s.manager == nil {
-		return s.db.BatchWriteItem(td, ops)
+		started := time.Now()
+		if err := s.db.BatchWriteItem(td, ops); err != nil {
+			return err
+		}
+		for _, op := range ops {
+			probe := op.Item
+			approxBytes := estimatedItemBytes(op.Item)
+			if op.Op == storage.BatchOpDelete {
+				probe = op.Key
+				approxBytes = estimatedItemBytes(op.Key)
+			}
+			pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
+			if err != nil {
+				return err
+			}
+			s.observeRangeMetric(rangeMetricWrite, pkBytes, approxBytes, started)
+		}
+		return nil
 	}
 	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
 	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	type observation struct {
+		pkBytes     []byte
+		approxBytes uint64
+	}
+	observations := make([]observation, 0, len(ops))
 	var releases []func()
 	defer func() {
 		for i := len(releases) - 1; i >= 0; i-- {
@@ -458,13 +499,16 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 	}()
 	for _, op := range ops {
 		probe := op.Item
+		approxBytes := estimatedItemBytes(op.Item)
 		if op.Op == storage.BatchOpDelete {
 			probe = op.Key
+			approxBytes = estimatedItemBytes(op.Key)
 		}
 		pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
 		if err != nil {
 			return err
 		}
+		observations = append(observations, observation{pkBytes: append([]byte(nil), pkBytes...), approxBytes: approxBytes})
 		targets, err := s.writeTargetsForPK(pkBytes)
 		if err != nil {
 			return err
@@ -475,6 +519,7 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 			mirrorBuckets[mirror] = append(mirrorBuckets[mirror], op)
 		}
 	}
+	started := time.Now()
 	for db, group := range primaryBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
@@ -484,6 +529,9 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
 		}
+	}
+	for _, obs := range observations {
+		s.observeRangeMetric(rangeMetricWrite, obs.pkBytes, obs.approxBytes, started)
 	}
 	return nil
 }
@@ -524,6 +572,7 @@ func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItem
 // ---------- streaming ----------
 
 func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_QueryServer) error {
+	started := time.Now()
 	ctx := stream.Context()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeQuery, req.GetTable()),
@@ -575,6 +624,7 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	if err != nil {
 		return mapStorageErr(err)
 	}
+	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemsBytes(items), started)
 	for _, it := range items {
 		if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
 			return err
@@ -935,10 +985,27 @@ func (s *GRPCServer) Compact(ctx context.Context, req *cefaspb.CompactRequest) (
 
 func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
 	if s.manager == nil {
-		return s.db.BatchGetItem(table, ks, keys)
+		started := time.Now()
+		out, err := s.db.BatchGetItem(table, ks, keys)
+		if err != nil {
+			return nil, err
+		}
+		for i, k := range keys {
+			pkBytes, err := pkBytesFromItem(k, ks)
+			if err != nil {
+				return nil, err
+			}
+			approxBytes := uint64(len(pkBytes))
+			if i < len(out) && out[i] != nil {
+				approxBytes = estimatedItemBytes(out[i])
+			}
+			s.observeRangeMetric(rangeMetricRead, pkBytes, approxBytes, started)
+		}
+		return out, nil
 	}
 	out := make([]types.Item, len(keys))
 	for i, k := range keys {
+		started := time.Now()
 		pkBytes, err := pkBytesFromItem(k, ks)
 		if err != nil {
 			return nil, err
@@ -951,6 +1018,11 @@ func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []typ
 		if len(single) == 1 {
 			out[i] = single[0]
 		}
+		approxBytes := uint64(len(pkBytes))
+		if out[i] != nil {
+			approxBytes = estimatedItemBytes(out[i])
+		}
+		s.observeRangeMetric(rangeMetricRead, pkBytes, approxBytes, started)
 	}
 	return out, nil
 }
@@ -973,6 +1045,9 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 		resp.PlacementStrategy = placement.Strategy
 		resp.Shards = pbShardPlacements(placement.Shards)
 		resp.Nodes = pbNodeDescriptors(sortedPlacementNodes(placement))
+	}
+	if s.metrics != nil {
+		resp.HotRanges = pbRangeHotspotSummaries(s.metrics.RangeHotspotSummaries(0))
 	}
 	return resp, nil
 }
@@ -1003,6 +1078,32 @@ func pbTokenRanges(in []cluster.TokenRange) []*cefaspb.TokenRange {
 
 func pbTokenRange(r cluster.TokenRange) *cefaspb.TokenRange {
 	return &cefaspb.TokenRange{Start: r.Start, End: r.End}
+}
+
+func pbRangeHotspotSummaries(in []metrics.RangeHotspotSummary) []*cefaspb.RangeHotspotSummary {
+	out := make([]*cefaspb.RangeHotspotSummary, 0, len(in))
+	for _, hs := range in {
+		out = append(out, &cefaspb.RangeHotspotSummary{
+			ShardId:             hs.ShardID,
+			Bucket:              int32(hs.Bucket),
+			BucketCount:         int32(hs.BucketCount),
+			TokenStart:          hs.TokenStart,
+			TokenEnd:            hs.TokenEnd,
+			Reads:               hs.Reads,
+			Writes:              hs.Writes,
+			Bytes:               hs.Bytes,
+			AvgLatencySeconds:   hs.AvgLatencySeconds,
+			MaxLatencySeconds:   hs.MaxLatencySeconds,
+			CompactionDebtBytes: hs.CompactionDebtBytes,
+			ThrottleState:       int32(hs.ThrottleState),
+			Status:              hs.Status,
+			Reasons:             append([]string(nil), hs.Reasons...),
+			WindowStartedUnix:   hs.WindowStartedUnix,
+			LastSeenUnix:        hs.LastSeenUnix,
+			HotUntilUnix:        hs.HotUntilUnix,
+		})
+	}
+	return out
 }
 
 func pbNodeDescriptors(in []cluster.NodeDescriptor) []*cefaspb.NodeDescriptor {

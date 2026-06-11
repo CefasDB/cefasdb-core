@@ -82,7 +82,17 @@ type Config struct {
 		SampleRate float64 `yaml:"sampleRate"`
 	} `yaml:"tracing"`
 	Metrics struct {
-		Enabled bool `yaml:"enabled"`
+		Enabled                        bool          `yaml:"enabled"`
+		HotspotBuckets                 int           `yaml:"hotspotBuckets"`
+		HotspotWindow                  time.Duration `yaml:"hotspotWindow"`
+		HotspotCoolingWindow           time.Duration `yaml:"hotspotCoolingWindow"`
+		HotspotMaxSummaries            int           `yaml:"hotspotMaxSummaries"`
+		HotspotReadThreshold           uint64        `yaml:"hotspotReadThreshold"`
+		HotspotWriteThreshold          uint64        `yaml:"hotspotWriteThreshold"`
+		HotspotBytesThreshold          uint64        `yaml:"hotspotBytesThreshold"`
+		HotspotLatencyThreshold        time.Duration `yaml:"hotspotLatencyThreshold"`
+		HotspotCompactionDebtThreshold uint64        `yaml:"hotspotCompactionDebtThresholdBytes"`
+		HotspotThrottleStateThreshold  int           `yaml:"hotspotThrottleStateThreshold"`
 	} `yaml:"metrics"`
 }
 
@@ -94,6 +104,16 @@ func Defaults() Config {
 	c.HTTP.Addr = ":8080"
 	c.Identity.ClockSkew = 30 * time.Second
 	c.Metrics.Enabled = true
+	c.Metrics.HotspotBuckets = 64
+	c.Metrics.HotspotWindow = time.Minute
+	c.Metrics.HotspotCoolingWindow = time.Minute
+	c.Metrics.HotspotMaxSummaries = 8
+	c.Metrics.HotspotReadThreshold = 10_000
+	c.Metrics.HotspotWriteThreshold = 5_000
+	c.Metrics.HotspotBytesThreshold = 64 << 20
+	c.Metrics.HotspotLatencyThreshold = 50 * time.Millisecond
+	c.Metrics.HotspotCompactionDebtThreshold = 1 << 30
+	c.Metrics.HotspotThrottleStateThreshold = 1
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -237,6 +257,16 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Tracing.SampleRate = flt("TRACING_SAMPLE", cfg.Tracing.SampleRate)
 
 	cfg.Metrics.Enabled = boolean("METRICS_ENABLED", cfg.Metrics.Enabled)
+	cfg.Metrics.HotspotBuckets = integer("METRICS_HOTSPOT_BUCKETS", cfg.Metrics.HotspotBuckets)
+	cfg.Metrics.HotspotWindow = dur("METRICS_HOTSPOT_WINDOW", cfg.Metrics.HotspotWindow)
+	cfg.Metrics.HotspotCoolingWindow = dur("METRICS_HOTSPOT_COOLING_WINDOW", cfg.Metrics.HotspotCoolingWindow)
+	cfg.Metrics.HotspotMaxSummaries = integer("METRICS_HOTSPOT_MAX_SUMMARIES", cfg.Metrics.HotspotMaxSummaries)
+	cfg.Metrics.HotspotReadThreshold = unsigned64("METRICS_HOTSPOT_READ_THRESHOLD", cfg.Metrics.HotspotReadThreshold)
+	cfg.Metrics.HotspotWriteThreshold = unsigned64("METRICS_HOTSPOT_WRITE_THRESHOLD", cfg.Metrics.HotspotWriteThreshold)
+	cfg.Metrics.HotspotBytesThreshold = unsigned64("METRICS_HOTSPOT_BYTES_THRESHOLD", cfg.Metrics.HotspotBytesThreshold)
+	cfg.Metrics.HotspotLatencyThreshold = dur("METRICS_HOTSPOT_LATENCY_THRESHOLD", cfg.Metrics.HotspotLatencyThreshold)
+	cfg.Metrics.HotspotCompactionDebtThreshold = unsigned64("METRICS_HOTSPOT_COMPACTION_DEBT_THRESHOLD_BYTES", cfg.Metrics.HotspotCompactionDebtThreshold)
+	cfg.Metrics.HotspotThrottleStateThreshold = integer("METRICS_HOTSPOT_THROTTLE_STATE_THRESHOLD", cfg.Metrics.HotspotThrottleStateThreshold)
 	return nil
 }
 

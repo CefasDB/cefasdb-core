@@ -16,6 +16,7 @@ package metrics
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -56,11 +57,24 @@ type Metrics struct {
 	BackpressureReason *prometheus.GaugeVec // shard, reason
 
 	AuthRejectedTotal *prometheus.CounterVec // reason{missing_token,invalid_token,bad_scope}
+
+	RangeOpsTotal        *prometheus.CounterVec   // shard, bucket, op{read,write}
+	RangeBytesTotal      *prometheus.CounterVec   // shard, bucket, op{read,write}
+	RangeLatencySeconds  *prometheus.HistogramVec // shard, bucket, op{read,write}
+	RangeCompactionDebt  *prometheus.GaugeVec     // shard, bucket
+	RangeThrottleState   *prometheus.GaugeVec     // shard, bucket
+	RangeHotspotRegistry *RangeHotspotTracker
 }
 
 // New builds a Metrics with every collector pre-registered against a
 // fresh registry. Single-process pattern: one Metrics per cefas-server.
 func New() *Metrics {
+	return NewWithRangeHotspots(DefaultRangeHotspotConfig())
+}
+
+// NewWithRangeHotspots builds a Metrics instance with explicit
+// hotspot bucketing and threshold configuration.
+func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 	reg := prometheus.NewRegistry()
 	// Standard process + go collectors so users get the usual
 	// runtime + GC metrics for free.
@@ -167,6 +181,28 @@ func New() *Metrics {
 			Name: "cefas_auth_rejected_total",
 			Help: "Authentication / authorisation failures by reason.",
 		}, []string{"reason"}),
+		RangeOpsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_range_ops_total",
+			Help: "Total primary-key operations by shard and bounded token bucket.",
+		}, []string{"shard", "bucket", "op"}),
+		RangeBytesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_range_bytes_total",
+			Help: "Approximate payload bytes by shard and bounded token bucket.",
+		}, []string{"shard", "bucket", "op"}),
+		RangeLatencySeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "cefas_range_latency_seconds",
+			Help:    "Primary-key operation latency by shard and bounded token bucket.",
+			Buckets: prometheus.ExponentialBuckets(0.00001, 4, 12),
+		}, []string{"shard", "bucket", "op"}),
+		RangeCompactionDebt: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_range_compaction_debt_bytes",
+			Help: "Shard compaction debt projected onto bounded token buckets for hotspot summaries.",
+		}, []string{"shard", "bucket"}),
+		RangeThrottleState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_range_throttle_state",
+			Help: "Shard write throttle state projected onto bounded token buckets: 0 normal, 1 warning, 2 critical.",
+		}, []string{"shard", "bucket"}),
+		RangeHotspotRegistry: NewRangeHotspotTracker(hotspots),
 	}
 	reg.MustRegister(
 		m.OpDuration,
@@ -192,6 +228,11 @@ func New() *Metrics {
 		m.BackpressureState,
 		m.BackpressureReason,
 		m.AuthRejectedTotal,
+		m.RangeOpsTotal,
+		m.RangeBytesTotal,
+		m.RangeLatencySeconds,
+		m.RangeCompactionDebt,
+		m.RangeThrottleState,
 	)
 	return m
 }
@@ -221,4 +262,50 @@ func (m *Metrics) AuthRejected(reason string) {
 		return
 	}
 	m.AuthRejectedTotal.WithLabelValues(reason).Inc()
+}
+
+// ObserveRangeOperation records bounded per-token-bucket read/write
+// signals. `op` is intentionally limited by callers to read/write to
+// keep Prometheus label cardinality stable.
+func (m *Metrics) ObserveRangeOperation(shardID string, token uint64, op string, bytes uint64, latency time.Duration) {
+	if m == nil || m.RangeHotspotRegistry == nil {
+		return
+	}
+	if op != "write" {
+		op = "read"
+	}
+	bucket := m.RangeHotspotRegistry.BucketForToken(token)
+	bucketLabel := bucketLabel(bucket)
+	m.RangeOpsTotal.WithLabelValues(shardID, bucketLabel, op).Inc()
+	if bytes > 0 {
+		m.RangeBytesTotal.WithLabelValues(shardID, bucketLabel, op).Add(float64(bytes))
+	}
+	if latency > 0 {
+		m.RangeLatencySeconds.WithLabelValues(shardID, bucketLabel, op).Observe(latency.Seconds())
+	}
+	m.RangeHotspotRegistry.RecordOperation(shardID, token, op, bytes, latency)
+}
+
+// ObserveRangePressure records shard-level storage pressure on every
+// bounded bucket for that shard. Pebble exposes these signals per
+// engine, not per token; projecting them keeps status summaries
+// aligned with the bucketed traffic signal without unbounded labels.
+func (m *Metrics) ObserveRangePressure(shardID string, compactionDebtBytes uint64, throttleState int) {
+	if m == nil || m.RangeHotspotRegistry == nil {
+		return
+	}
+	cfg := m.RangeHotspotRegistry.Config()
+	for bucket := 0; bucket < cfg.Buckets; bucket++ {
+		label := bucketLabel(bucket)
+		m.RangeCompactionDebt.WithLabelValues(shardID, label).Set(float64(compactionDebtBytes))
+		m.RangeThrottleState.WithLabelValues(shardID, label).Set(float64(throttleState))
+	}
+	m.RangeHotspotRegistry.RecordShardPressure(shardID, compactionDebtBytes, throttleState)
+}
+
+func (m *Metrics) RangeHotspotSummaries(max int) []RangeHotspotSummary {
+	if m == nil || m.RangeHotspotRegistry == nil {
+		return nil
+	}
+	return m.RangeHotspotRegistry.Snapshot(max)
 }

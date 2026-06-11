@@ -647,6 +647,7 @@ message ClusterStatusResponse {
   string placement_strategy = 9;
   repeated ShardPlacement shards = 10;
   repeated NodeDescriptor nodes  = 11;
+  repeated RangeHotspotSummary hot_ranges = 12;
 }
 
 message TokenRange {
@@ -680,6 +681,26 @@ message ShardPlacement {
   repeated string voters = 5;
   repeated string non_voters = 6;
   string leader_hint     = 7;
+}
+
+message RangeHotspotSummary {
+  string shard_id = 1;
+  int32 bucket = 2;
+  int32 bucket_count = 3;
+  uint64 token_start = 4;
+  uint64 token_end = 5;
+  uint64 reads = 6;
+  uint64 writes = 7;
+  uint64 bytes = 8;
+  double avg_latency_seconds = 9;
+  double max_latency_seconds = 10;
+  uint64 compaction_debt_bytes = 11;
+  int32 throttle_state = 12;
+  string status = 13;
+  repeated string reasons = 14;
+  int64 window_started_unix = 15;
+  int64 last_seen_unix = 16;
+  int64 hot_until_unix = 17;
 }
 
 message AddVoterRequest {
