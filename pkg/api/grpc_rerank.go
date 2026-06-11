@@ -1,9 +1,8 @@
 // MMR Rerank handler (issue #244). The operator + tests live in
 // pkg/core/query/mmr; this file is the gRPC seam that wires the
-// engine into the existing GRPCServer surface — including resolving
+// engine into the existing GRPCServer surface, including resolving
 // the default distance operator from a registered ANN index, the
-// same way TopK does. The SQL `DIVERSIFY BY` clause is deferred to a
-// follow-up; CLI + RPC + operator ship here.
+// same way TopK does.
 package api
 
 import (

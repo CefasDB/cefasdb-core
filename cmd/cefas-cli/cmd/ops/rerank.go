@@ -1,8 +1,6 @@
 // CLI command for the MMR rerank RPC (issue #244). Mirrors the
 // shape of `top-k`: read a DynamoDB-JSON candidate set off disk (or
-// inline), call Rerank server-side, render the resulting slate. The
-// SQL `DIVERSIFY BY` surface is deferred to a follow-up — this
-// command is the v1 user-facing entrypoint to MMR.
+// inline), call Rerank server-side, render the resulting slate.
 package ops
 
 import (

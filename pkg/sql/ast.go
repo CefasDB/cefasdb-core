@@ -18,11 +18,24 @@ type SelectStmt struct {
 	OrderDesc bool
 	OrderANN  bool
 	ANNTarget []float64
+	Diversify *DiversifyClause
 	Limit     int
 	// Count = true for SELECT COUNT(*) FROM ... — executor returns
 	// the matching-row total as AffectedRows instead of materialising
 	// row data.
 	Count bool
+}
+
+// DiversifyClause is the post-ANN diversification suffix:
+//
+//	... LIMIT 100 DIVERSIFY BY mmr(lambda=0.7) TO 10
+//
+// Method is kept open for future diversification operators; today the
+// planner accepts only MMR.
+type DiversifyClause struct {
+	Method     string
+	Lambda     float64
+	TargetSize int
 }
 
 // ReturningMode picks which snapshot of the row to return to the

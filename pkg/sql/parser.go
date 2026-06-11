@@ -204,7 +204,66 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		}
 		stmt.Limit = lim
 	}
+	if p.peek().Kind == tDiversify {
+		div, err := p.parseDiversifyTail()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Diversify = div
+	}
 	return stmt, nil
+}
+
+func (p *parser) parseDiversifyTail() (*DiversifyClause, error) {
+	p.consume() // DIVERSIFY
+	if _, err := p.expect(tBy, "BY"); err != nil {
+		return nil, err
+	}
+	method, err := p.expect(tIdent, "diversify method")
+	if err != nil {
+		return nil, err
+	}
+	div := &DiversifyClause{Method: method.Lit, Lambda: 0.5}
+	if p.peek().Kind == tLParen {
+		p.consume()
+		if p.peek().Kind != tRParen {
+			name, err := p.expect(tIdent, "diversify option")
+			if err != nil {
+				return nil, err
+			}
+			if !strings.EqualFold(name.Lit, "lambda") {
+				return nil, fmt.Errorf("unsupported DIVERSIFY option %q", name.Lit)
+			}
+			if _, err := p.expect(tEq, "="); err != nil {
+				return nil, err
+			}
+			val, err := p.expect(tNumber, "lambda value")
+			if err != nil {
+				return nil, err
+			}
+			f, err := strconv.ParseFloat(val.Lit, 64)
+			if err != nil {
+				return nil, fmt.Errorf("bad lambda %q: %w", val.Lit, err)
+			}
+			div.Lambda = f
+		}
+		if _, err := p.expect(tRParen, ")"); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := p.expect(tTo, "TO"); err != nil {
+		return nil, err
+	}
+	n, err := p.expect(tNumber, "target slate size")
+	if err != nil {
+		return nil, err
+	}
+	target, err := strconv.Atoi(n.Lit)
+	if err != nil || target <= 0 {
+		return nil, fmt.Errorf("bad DIVERSIFY target size %q", n.Lit)
+	}
+	div.TargetSize = target
+	return div, nil
 }
 
 // ---------- INSERT ----------

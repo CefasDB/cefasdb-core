@@ -21,6 +21,8 @@ func Register(root *cobra.Command) {
 	registerFreqCap(root)
 	registerAggregate(root)
 	registerRerank(root)
+	registerRecommend(root)
 	registerBandit(root)
+	registerNBA(root)
 	registerAtomic(root)
 }

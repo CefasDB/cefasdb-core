@@ -1,6 +1,8 @@
 package sql
 
 import (
+	"strconv"
+
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
@@ -82,6 +84,9 @@ type PlanANN struct {
 	// selectivity estimate. The executor updates Filter.Selectivity
 	// with the observed value after the scan.
 	Filter cquery.ANNFilterPlan
+	// Diversify optionally applies a post-rank MMR pass over the ANN
+	// candidate set before projection.
+	Diversify *DiversifyClause
 }
 
 // PlanPutItem is INSERT INTO ... VALUES (...) [IF expr]
@@ -138,7 +143,28 @@ func (p *PlanANN) Explain(fmtKind cquery.ExplainFormat) string {
 	if p.Filter.Strategy != cquery.StrategyUnset {
 		root.Children = append(root.Children, p.Filter.ExplainNode())
 	}
+	if p.Diversify != nil {
+		root.Children = append(root.Children, cquery.PlanNode{
+			Op:     "Diversify",
+			Plugin: p.Diversify.Method,
+			Detail: "lambda=" + p.DiversifyLambdaString() + " to=" + p.DiversifyTargetString(),
+		})
+	}
 	return cquery.RenderExplain(root, fmtKind)
+}
+
+func (p *PlanANN) DiversifyLambdaString() string {
+	if p == nil || p.Diversify == nil {
+		return ""
+	}
+	return strconv.FormatFloat(p.Diversify.Lambda, 'f', -1, 64)
+}
+
+func (p *PlanANN) DiversifyTargetString() string {
+	if p == nil || p.Diversify == nil {
+		return ""
+	}
+	return strconv.Itoa(p.Diversify.TargetSize)
 }
 
 // _ is here so the import stays as a compile-time check that the

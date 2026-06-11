@@ -97,6 +97,8 @@ const (
 	tOld
 	tAnn
 	tOf
+	tDiversify
+	tTo
 	tWith
 	tStorage
 )
@@ -150,6 +152,8 @@ var keywords = map[string]TokenKind{
 	"OLD":       tOld,
 	"ANN":       tAnn,
 	"OF":        tOf,
+	"DIVERSIFY": tDiversify,
+	"TO":        tTo,
 	"WITH":      tWith,
 	"STORAGE":   tStorage,
 }

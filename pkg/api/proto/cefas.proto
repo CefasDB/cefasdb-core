@@ -102,9 +102,14 @@ service Cefas {
   rpc Aggregate(AggregateRequest) returns (AggregateResponse);
 
   // Rerank applies the MMR diversification operator to a candidate
-  // set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
-  // a follow-up so this ships RPC + operator + CLI only.
+  // set (issue #244).
   rpc Rerank(RerankRequest) returns (RerankResponse);
+
+  // Pipeline operators (#247, #248).
+  rpc Recommend(RecommendRequest) returns (RecommendResponse);
+  rpc NextBestAction(NextBestActionRequest) returns (NextBestActionResponse);
+  rpc RecordReward(RecordRewardRequest) returns (RecordRewardResponse);
+  rpc GetDecision(GetDecisionRequest) returns (GetDecisionResponse);
 
   // ===== Bandit (issue #246) =====
   rpc BanditCreate(BanditCreateRequest) returns (BanditCreateResponse);
@@ -999,6 +1004,113 @@ message RerankResponse {
   // DistanceOperator echoes the resolved operator name so callers
   // can confirm the default they got when they passed an empty one.
   string distance_operator = 2;
+}
+
+// ===== Pipeline operators (#247, #248) =====
+
+message PipelineStageTiming {
+  string stage        = 1;
+  int32  input_count  = 2;
+  int32  output_count = 3;
+  double elapsed_ms   = 4;
+  repeated string reason_codes = 5;
+}
+
+message RecommendRequest {
+  string table             = 1;
+  string field             = 2;
+  string distance_operator = 3;
+  AttributeValue target    = 4;
+  // candidate_limit controls the retrieval fan-out before filter and
+  // diversification. Defaults to max(limit*4, limit, 100).
+  int32 candidate_limit    = 5;
+  // SQL predicate evaluated after retrieval; empty disables the stage.
+  string filter_expression = 6;
+  // Final cap after optional MMR/dedup/freqcap.
+  int32 limit              = 7;
+  // MMR is enabled by default when limit < candidate_limit.
+  double mmr_lambda        = 8;
+  bool disable_diversify   = 9;
+  string dedup_scope       = 10;
+  string dedup_key_field   = 11;
+  int64  dedup_ttl_seconds = 12;
+  string freqcap_scope     = 13;
+  string freqcap_key_field = 14;
+  int32  freqcap_limit     = 15;
+  int64  freqcap_window_seconds = 16;
+}
+
+message RecommendRow {
+  Item   item     = 1;
+  double distance = 2;
+  string reason   = 3;
+}
+
+message RecommendResponse {
+  repeated RecommendRow rows = 1;
+  repeated PipelineStageTiming stages = 2;
+  repeated string reason_codes = 3;
+}
+
+message NBAAction {
+  string action_id = 1;
+  bool   disabled  = 2;
+  string reason    = 3;
+  map<string, string> context = 4;
+}
+
+message NextBestActionRequest {
+  string bandit_id = 1;
+  string user_id   = 2;
+  repeated NBAAction actions = 3;
+  string fallback_action_id = 4;
+  map<string, string> context = 5;
+  string cap_scope = 6;
+  int32  cap_limit = 7;
+  int64  cap_window_seconds = 8;
+  int64  decision_ttl_seconds = 9;
+}
+
+message NextBestActionResponse {
+  string decision_id = 1;
+  string action_id   = 2;
+  bool   fallback    = 3;
+  repeated string reason_codes = 4;
+  repeated PipelineStageTiming stages = 5;
+}
+
+message RecordRewardRequest {
+  string decision_id = 1;
+  // bandit_id/action_id are optional when decision_id is set; the
+  // decision log is authoritative so rewards update the original arm.
+  string bandit_id = 2;
+  string action_id = 3;
+  double reward    = 4;
+  map<string, string> context = 5;
+}
+message RecordRewardResponse {
+  string bandit_id = 1;
+  string action_id = 2;
+}
+
+message DecisionRecord {
+  string decision_id = 1;
+  string bandit_id   = 2;
+  string user_id     = 3;
+  string action_id   = 4;
+  bool   fallback    = 5;
+  repeated string reason_codes = 6;
+  map<string, string> context = 7;
+  int64 created_at_unix = 8;
+  int64 expires_at_unix = 9;
+}
+
+message GetDecisionRequest {
+  string decision_id = 1;
+}
+message GetDecisionResponse {
+  bool found = 1;
+  DecisionRecord decision = 2;
 }
 
 // ===== Bandit (issue #246) =====
