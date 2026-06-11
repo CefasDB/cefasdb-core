@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -973,11 +974,17 @@ func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 // ---------- cluster endpoints ----------
 
 type clusterStatusResponse struct {
-	Mode       string `json:"mode"` // "single-node" or "raft"
-	IsLeader   bool   `json:"isLeader"`
-	SelfID     string `json:"selfId,omitempty"`
-	BindAddr   string `json:"bindAddr,omitempty"`
-	LeaderHTTP string `json:"leaderHttp,omitempty"`
+	Mode              string                   `json:"mode"` // "single-node" or "raft"
+	IsLeader          bool                     `json:"isLeader"`
+	SelfID            string                   `json:"selfId,omitempty"`
+	BindAddr          string                   `json:"bindAddr,omitempty"`
+	LeaderHTTP        string                   `json:"leaderHttp,omitempty"`
+	RoutingEpoch      uint64                   `json:"routingEpoch,omitempty"`
+	PlacementVersion  uint64                   `json:"placementVersion,omitempty"`
+	ShardCount        int                      `json:"shardCount,omitempty"`
+	PlacementStrategy string                   `json:"placementStrategy,omitempty"`
+	Shards            []cluster.ShardPlacement `json:"shards,omitempty"`
+	Nodes             []cluster.NodeDescriptor `json:"nodes,omitempty"`
 }
 
 func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
@@ -989,20 +996,38 @@ func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		resp.BindAddr = s.cluster.BindAddr()
 		resp.LeaderHTTP = s.cluster.LeaderHTTPAddr()
 	}
+	if s.manager != nil {
+		_ = s.manager.RefreshPlacement()
+		placement := s.manager.Placement()
+		resp.RoutingEpoch = placement.Epoch
+		resp.PlacementVersion = placement.Version
+		resp.ShardCount = len(placement.Shards)
+		resp.PlacementStrategy = placement.Strategy
+		resp.Shards = append([]cluster.ShardPlacement(nil), placement.Shards...)
+		resp.Nodes = sortedPlacementNodes(placement)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDescriptor {
+	out := make([]cluster.NodeDescriptor, 0, len(placement.Nodes))
+	for _, node := range placement.Nodes {
+		node.Capacity.Tags = append([]string(nil), node.Capacity.Tags...)
+		out = append(out, node)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 type addVoterRequest struct {
-	ID        string `json:"id"`
-	Addr      string `json:"addr"`
-	TimeoutMS int    `json:"timeoutMs,omitempty"`
+	ID        string  `json:"id"`
+	Addr      string  `json:"addr"`
+	TimeoutMS int     `json:"timeoutMs,omitempty"`
+	ShardID   *uint32 `json:"shardId,omitempty"`
+	AllShards bool    `json:"allShards,omitempty"`
 }
 
 func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
-	if s.cluster == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1019,6 +1044,26 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
+	if s.manager != nil && req.AllShards {
+		if err := s.manager.AddVoterAllShards(req.ID, req.Addr, timeout); err != nil {
+			writeWriteErr(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+		return
+	}
+	if s.manager != nil && req.ShardID != nil {
+		if err := s.manager.AddShardVoter(*req.ShardID, req.ID, req.Addr, timeout); err != nil {
+			writeWriteErr(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+		return
+	}
+	if s.cluster == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
+		return
+	}
 	if err := s.cluster.AddVoter(req.ID, req.Addr, timeout); err != nil {
 		writeWriteErr(w, r, err)
 		return
@@ -1027,15 +1072,13 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 }
 
 type removeServerRequest struct {
-	ID        string `json:"id"`
-	TimeoutMS int    `json:"timeoutMs,omitempty"`
+	ID        string  `json:"id"`
+	TimeoutMS int     `json:"timeoutMs,omitempty"`
+	ShardID   *uint32 `json:"shardId,omitempty"`
+	AllShards bool    `json:"allShards,omitempty"`
 }
 
 func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Request) {
-	if s.cluster == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1051,6 +1094,26 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
 	if timeout == 0 {
 		timeout = 5 * time.Second
+	}
+	if s.manager != nil && req.AllShards {
+		if err := s.manager.RemoveServerAllShards(req.ID, timeout); err != nil {
+			writeWriteErr(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+		return
+	}
+	if s.manager != nil && req.ShardID != nil {
+		if err := s.manager.RemoveShardServer(*req.ShardID, req.ID, timeout); err != nil {
+			writeWriteErr(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+		return
+	}
+	if s.cluster == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
+		return
 	}
 	if err := s.cluster.RemoveServer(req.ID, timeout); err != nil {
 		writeWriteErr(w, r, err)

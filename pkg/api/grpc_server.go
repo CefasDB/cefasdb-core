@@ -920,19 +920,87 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 		resp.BindAddr = s.cluster.BindAddr()
 		resp.LeaderHttp = s.cluster.LeaderHTTPAddr()
 	}
+	if s.manager != nil {
+		_ = s.manager.RefreshPlacement()
+		placement := s.manager.Placement()
+		resp.RoutingEpoch = placement.Epoch
+		resp.PlacementVersion = placement.Version
+		resp.ShardCount = int32(len(placement.Shards))
+		resp.PlacementStrategy = placement.Strategy
+		resp.Shards = pbShardPlacements(placement.Shards)
+		resp.Nodes = pbNodeDescriptors(sortedPlacementNodes(placement))
+	}
 	return resp, nil
+}
+
+func pbShardPlacements(in []cluster.ShardPlacement) []*cefaspb.ShardPlacement {
+	out := make([]*cefaspb.ShardPlacement, 0, len(in))
+	for _, sh := range in {
+		out = append(out, &cefaspb.ShardPlacement{
+			Id:         sh.ID,
+			Ranges:     pbTokenRanges(sh.Ranges),
+			State:      string(sh.State),
+			Epoch:      sh.Epoch,
+			Voters:     append([]string(nil), sh.Voters...),
+			NonVoters:  append([]string(nil), sh.NonVoters...),
+			LeaderHint: sh.LeaderHint,
+		})
+	}
+	return out
+}
+
+func pbTokenRanges(in []cluster.TokenRange) []*cefaspb.TokenRange {
+	out := make([]*cefaspb.TokenRange, 0, len(in))
+	for _, r := range in {
+		out = append(out, &cefaspb.TokenRange{Start: r.Start, End: r.End})
+	}
+	return out
+}
+
+func pbNodeDescriptors(in []cluster.NodeDescriptor) []*cefaspb.NodeDescriptor {
+	out := make([]*cefaspb.NodeDescriptor, 0, len(in))
+	for _, node := range in {
+		out = append(out, &cefaspb.NodeDescriptor{
+			Id:       node.ID,
+			RaftAddr: node.RaftAddr,
+			HttpAddr: node.HTTPAddr,
+			State:    string(node.State),
+			Capacity: &cefaspb.NodeCapacity{
+				Weight:      int32(node.Capacity.Weight),
+				Cpu:         int32(node.Capacity.CPU),
+				MemoryBytes: node.Capacity.MemoryBytes,
+				DiskBytes:   node.Capacity.DiskBytes,
+				Zone:        node.Capacity.Zone,
+				Tags:        append([]string(nil), node.Capacity.Tags...),
+			},
+			LastSeenUnix: node.LastSeenUnix,
+		})
+	}
+	return out
 }
 
 func (s *GRPCServer) AddVoter(ctx context.Context, req *cefaspb.AddVoterRequest) (*cefaspb.AddVoterResponse, error) {
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
-	if s.cluster == nil {
-		return nil, status.Error(codes.FailedPrecondition, "cluster not configured")
-	}
 	timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
 	if timeout == 0 {
 		timeout = 5 * time.Second
+	}
+	if s.manager != nil && req.GetAllShards() {
+		if err := s.manager.AddVoterAllShards(req.GetId(), req.GetAddr(), timeout); err != nil {
+			return nil, mapStorageErr(err)
+		}
+		return &cefaspb.AddVoterResponse{}, nil
+	}
+	if s.manager != nil && req.ShardId != nil {
+		if err := s.manager.AddShardVoter(req.GetShardId(), req.GetId(), req.GetAddr(), timeout); err != nil {
+			return nil, mapStorageErr(err)
+		}
+		return &cefaspb.AddVoterResponse{}, nil
+	}
+	if s.cluster == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster not configured")
 	}
 	if err := s.cluster.AddVoter(req.GetId(), req.GetAddr(), timeout); err != nil {
 		return nil, mapStorageErr(err)
@@ -944,12 +1012,24 @@ func (s *GRPCServer) RemoveServer(ctx context.Context, req *cefaspb.RemoveServer
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
-	if s.cluster == nil {
-		return nil, status.Error(codes.FailedPrecondition, "cluster not configured")
-	}
 	timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
 	if timeout == 0 {
 		timeout = 5 * time.Second
+	}
+	if s.manager != nil && req.GetAllShards() {
+		if err := s.manager.RemoveServerAllShards(req.GetId(), timeout); err != nil {
+			return nil, mapStorageErr(err)
+		}
+		return &cefaspb.RemoveServerResponse{}, nil
+	}
+	if s.manager != nil && req.ShardId != nil {
+		if err := s.manager.RemoveShardServer(req.GetShardId(), req.GetId(), timeout); err != nil {
+			return nil, mapStorageErr(err)
+		}
+		return &cefaspb.RemoveServerResponse{}, nil
+	}
+	if s.cluster == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster not configured")
 	}
 	if err := s.cluster.RemoveServer(req.GetId(), timeout); err != nil {
 		return nil, mapStorageErr(err)

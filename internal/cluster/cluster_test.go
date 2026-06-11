@@ -2,9 +2,12 @@ package cluster_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -50,6 +53,131 @@ func TestRouterSingleShard(t *testing.T) {
 		if r.ShardForPK([]byte(fmt.Sprintf("k%d", i))) != 0 {
 			t.Fatalf("single-shard router routed away from 0")
 		}
+	}
+}
+
+func TestRouterUsesTokenRangePlacement(t *testing.T) {
+	cat := cluster.PlacementCatalog{
+		Version:  1,
+		Epoch:    7,
+		Strategy: cluster.PlacementStrategyTokenRange,
+		Shards: []cluster.ShardPlacement{
+			{ID: 0, State: cluster.ShardStateActive, Epoch: 7, Ranges: []cluster.TokenRange{{Start: 0, End: 100}}},
+			{ID: 1, State: cluster.ShardStateActive, Epoch: 7, Ranges: []cluster.TokenRange{{Start: 100, End: 0}}},
+		},
+	}
+	r, err := cluster.NewRouterFromCatalog(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.ShardForUint64(99); got != 0 {
+		t.Fatalf("token 99 routed to shard %d, want 0", got)
+	}
+	if got := r.ShardForUint64(100); got != 1 {
+		t.Fatalf("token 100 routed to shard %d, want 1", got)
+	}
+	if got := r.ShardForUint64(^uint64(0)); got != 1 {
+		t.Fatalf("max token routed to shard %d, want 1", got)
+	}
+	if r.Epoch() != 7 {
+		t.Fatalf("epoch = %d, want 7", r.Epoch())
+	}
+}
+
+func TestPlacementFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "placement.json")
+	cat := cluster.DefaultPlacement(
+		3,
+		"n1",
+		map[string]string{"n1": "127.0.0.1:9101", "n2": "127.0.0.1:9102"},
+		map[string]string{"n1": "http://127.0.0.1:8081", "n2": "http://127.0.0.1:8082"},
+		cluster.NodeCapacity{Weight: 2, CPU: 10, Zone: "az-a", Tags: []string{"hot"}},
+		cluster.PlacementStrategyTokenRange,
+	)
+	if err := cluster.SavePlacementFile(path, cat); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := cluster.LoadPlacementFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Strategy != cluster.PlacementStrategyTokenRange || loaded.Epoch != 1 || len(loaded.Shards) != 3 {
+		t.Fatalf("unexpected placement: %+v", loaded)
+	}
+	if loaded.Nodes["n1"].Capacity.Weight != 2 || loaded.Nodes["n1"].Capacity.Zone != "az-a" {
+		t.Fatalf("node capacity not preserved: %+v", loaded.Nodes["n1"])
+	}
+}
+
+func TestManagerCreatesTokenRangePlacementForFreshRoot(t *testing.T) {
+	root := t.TempDir()
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n0",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	placement := mgr.Placement()
+	if placement.Strategy != cluster.PlacementStrategyTokenRange {
+		t.Fatalf("strategy = %q, want %q", placement.Strategy, cluster.PlacementStrategyTokenRange)
+	}
+	if len(placement.Shards) != 2 || len(placement.Shards[0].Ranges) == 0 {
+		t.Fatalf("missing token ranges: %+v", placement.Shards)
+	}
+	if _, err := os.Stat(filepath.Join(root, "placement.json")); err != nil {
+		t.Fatalf("placement file not created: %v", err)
+	}
+}
+
+func TestManagerPreservesLegacyModuloForExistingShardState(t *testing.T) {
+	root := t.TempDir()
+	st, err := storage.Open(storage.Options{Path: filepath.Join(root, "shards", "0", "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set([]byte("cefas/test"), []byte("present")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n0",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	if got := mgr.Placement().Strategy; got != cluster.PlacementStrategyLegacyModulo {
+		t.Fatalf("strategy = %q, want %q", got, cluster.PlacementStrategyLegacyModulo)
+	}
+}
+
+func TestRouteForPKRejectsStaleEpoch(t *testing.T) {
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      t.TempDir(),
+		Shards:    2,
+		SelfID:    "n0",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	_, err = mgr.RouteForPK([]byte("k"), mgr.RoutingEpoch()+1)
+	if !errors.Is(err, cluster.ErrStaleRoute) {
+		t.Fatalf("error = %v, want ErrStaleRoute", err)
 	}
 }
 

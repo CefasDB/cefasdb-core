@@ -632,22 +632,65 @@ message SpatialQueryRequest {
 
 message ClusterStatusRequest  {}
 message ClusterStatusResponse {
-  string mode        = 1; // "single-node" | "raft"
-  bool   is_leader   = 2;
-  string self_id     = 3;
-  string bind_addr   = 4;
-  string leader_http = 5;
+  string mode               = 1; // "single-node" | "raft"
+  bool   is_leader          = 2;
+  string self_id            = 3;
+  string bind_addr          = 4;
+  string leader_http        = 5;
+  uint64 routing_epoch      = 6;
+  uint64 placement_version  = 7;
+  int32  shard_count        = 8;
+  string placement_strategy = 9;
+  repeated ShardPlacement shards = 10;
+  repeated NodeDescriptor nodes  = 11;
+}
+
+message TokenRange {
+  uint64 start = 1;
+  uint64 end   = 2;
+}
+
+message NodeCapacity {
+  int32  weight       = 1;
+  int32  cpu          = 2;
+  uint64 memory_bytes = 3;
+  uint64 disk_bytes   = 4;
+  string zone         = 5;
+  repeated string tags = 6;
+}
+
+message NodeDescriptor {
+  string id             = 1;
+  string raft_addr      = 2;
+  string http_addr      = 3;
+  string state          = 4;
+  NodeCapacity capacity = 5;
+  int64  last_seen_unix = 6;
+}
+
+message ShardPlacement {
+  uint32 id              = 1;
+  repeated TokenRange ranges = 2;
+  string state           = 3;
+  uint64 epoch           = 4;
+  repeated string voters = 5;
+  repeated string non_voters = 6;
+  string leader_hint     = 7;
 }
 
 message AddVoterRequest {
-  string id         = 1;
-  string addr       = 2;
-  int32  timeout_ms = 3;
+  string id          = 1;
+  string addr        = 2;
+  int32  timeout_ms  = 3;
+  optional uint32 shard_id = 4;
+  bool   all_shards  = 5;
 }
 message AddVoterResponse {}
 
 message RemoveServerRequest {
-  string id         = 1;
-  int32  timeout_ms = 2;
+  string id          = 1;
+  int32  timeout_ms  = 2;
+  optional uint32 shard_id = 3;
+  bool   all_shards  = 4;
 }
 message RemoveServerResponse {}
