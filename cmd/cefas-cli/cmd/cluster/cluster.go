@@ -4,10 +4,12 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
+	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/fileloader"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
 	"github.com/osvaldoandrade/cefas/pkg/client"
@@ -23,6 +25,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(addVoterCmd())
 	c.AddCommand(removeServerCmd())
 	c.AddCommand(planCmd())
+	c.AddCommand(applyCmd())
 	root.AddCommand(c)
 }
 
@@ -324,6 +327,65 @@ func runPlacementPlan(cmd *cobra.Command, req client.PlacementPlanRequest) error
 		return err
 	}
 	return output.New(cmd.OutOrStdout(), fm).Object(plan)
+}
+
+func applyCmd() *cobra.Command {
+	var (
+		planArg       string
+		expectedEpoch uint64
+		timeoutMS     int
+		yes           bool
+	)
+	c := &cobra.Command{
+		Use:   "apply",
+		Short: "Apply an approved shard placement plan",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if planArg == "" {
+				return fmt.Errorf("--plan is required")
+			}
+			if !yes {
+				return fmt.Errorf("--yes is required to apply placement changes")
+			}
+			raw, err := fileloader.Load(planArg)
+			if err != nil {
+				return err
+			}
+			var plan client.PlacementPlan
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				return fmt.Errorf("decode plan: %w", err)
+			}
+			if expectedEpoch == 0 {
+				expectedEpoch = plan.BeforeEpoch
+			}
+			ctx := cmd.Context()
+			cli, profile, err := runtime.Dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cli.Close()
+			result, err := cli.ApplyPlacement(ctx, client.PlacementApplyRequest{
+				Plan:          plan,
+				ExpectedEpoch: expectedEpoch,
+				TimeoutMS:     timeoutMS,
+			})
+			if err != nil {
+				return fmt.Errorf("apply placement: %w", err)
+			}
+			fm, err := output.Validate(profile.Output)
+			if err != nil {
+				return err
+			}
+			return output.New(cmd.OutOrStdout(), fm).Object(result)
+		},
+	}
+	f := c.Flags()
+	f.StringVar(&planArg, "plan", "", "Placement plan JSON or file://path")
+	f.Uint64Var(&expectedEpoch, "expected-epoch", 0, "Expected current routing epoch; defaults to plan beforeEpoch")
+	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-step Raft timeout in milliseconds")
+	f.BoolVar(&yes, "yes", false, "Confirm applying the placement plan")
+	_ = c.MarkFlagRequired("plan")
+	return c
 }
 
 func clientMembershipOptions(shardID uint32, shardSet, allShards bool) client.MembershipOptions {

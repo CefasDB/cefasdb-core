@@ -13,6 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -1051,6 +1052,24 @@ func (s *GRPCServer) PlanPlacement(ctx context.Context, req *cefaspb.PlanPlaceme
 	return &cefaspb.PlanPlacementResponse{Plan: pbPlacementPlan(plan)}, nil
 }
 
+func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlacementRequest) (*cefaspb.ApplyPlacementResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.manager == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
+	}
+	result, err := s.manager.ApplyPlacement(ctx, cluster.PlacementApplyRequest{
+		Plan:          placementPlanFromPB(req.GetPlan()),
+		ExpectedEpoch: req.GetExpectedEpoch(),
+		TimeoutMS:     int(req.GetTimeoutMs()),
+	})
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.ApplyPlacementResponse{Result: pbPlacementApplyResult(result)}, nil
+}
+
 func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.PlacementPlanRequest {
 	out := cluster.PlacementPlanRequest{
 		Operation:    cluster.PlacementOperation(req.GetOperation()),
@@ -1113,6 +1132,126 @@ func pbPlacementPlanSteps(in []cluster.PlacementPlanStep) []*cefaspb.PlacementPl
 	return out
 }
 
+func placementPlanFromPB(in *cefaspb.PlacementPlan) cluster.PlacementPlan {
+	if in == nil {
+		return cluster.PlacementPlan{}
+	}
+	return cluster.PlacementPlan{
+		Operation:        cluster.PlacementOperation(in.GetOperation()),
+		BeforeEpoch:      in.GetBeforeEpoch(),
+		AfterEpoch:       in.GetAfterEpoch(),
+		Before:           placementCatalogFromPB(in.GetBefore()),
+		After:            placementCatalogFromPB(in.GetAfter()),
+		Steps:            placementPlanStepsFromPB(in.GetSteps()),
+		Warnings:         append([]string(nil), in.GetWarnings()...),
+		RequiresDataCopy: in.GetRequiresDataCopy(),
+		RequiresRestart:  in.GetRequiresRestart(),
+		ApplySupported:   in.GetApplySupported(),
+	}
+}
+
+func placementCatalogFromPB(in *cefaspb.PlacementCatalog) cluster.PlacementCatalog {
+	if in == nil {
+		return cluster.PlacementCatalog{}
+	}
+	nodes := make(map[string]cluster.NodeDescriptor, len(in.GetNodes()))
+	for _, node := range in.GetNodes() {
+		desc := cluster.NodeDescriptor{
+			ID:           node.GetId(),
+			RaftAddr:     node.GetRaftAddr(),
+			HTTPAddr:     node.GetHttpAddr(),
+			State:        cluster.NodeState(node.GetState()),
+			LastSeenUnix: node.GetLastSeenUnix(),
+		}
+		if c := node.GetCapacity(); c != nil {
+			desc.Capacity = cluster.NodeCapacity{
+				Weight:      int(c.GetWeight()),
+				CPU:         int(c.GetCpu()),
+				MemoryBytes: c.GetMemoryBytes(),
+				DiskBytes:   c.GetDiskBytes(),
+				Zone:        c.GetZone(),
+				Tags:        append([]string(nil), c.GetTags()...),
+			}
+		}
+		nodes[desc.ID] = desc
+	}
+	return cluster.PlacementCatalog{
+		Version:       in.GetVersion(),
+		Epoch:         in.GetEpoch(),
+		Strategy:      in.GetStrategy(),
+		Shards:        placementShardsFromPB(in.GetShards()),
+		Nodes:         nodes,
+		UpdatedAtUnix: in.GetUpdatedAtUnix(),
+	}
+}
+
+func placementShardsFromPB(in []*cefaspb.ShardPlacement) []cluster.ShardPlacement {
+	out := make([]cluster.ShardPlacement, 0, len(in))
+	for _, sh := range in {
+		out = append(out, cluster.ShardPlacement{
+			ID:         sh.GetId(),
+			Ranges:     placementTokenRangesFromPB(sh.GetRanges()),
+			State:      cluster.ShardState(sh.GetState()),
+			Epoch:      sh.GetEpoch(),
+			Voters:     append([]string(nil), sh.GetVoters()...),
+			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
+			LeaderHint: sh.GetLeaderHint(),
+		})
+	}
+	return out
+}
+
+func placementTokenRangesFromPB(in []*cefaspb.TokenRange) []cluster.TokenRange {
+	out := make([]cluster.TokenRange, 0, len(in))
+	for _, r := range in {
+		out = append(out, cluster.TokenRange{Start: r.GetStart(), End: r.GetEnd()})
+	}
+	return out
+}
+
+func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []cluster.PlacementPlanStep {
+	out := make([]cluster.PlacementPlanStep, 0, len(in))
+	for _, step := range in {
+		var shardID *uint32
+		if step.ShardId != nil {
+			v := step.GetShardId()
+			shardID = &v
+		}
+		out = append(out, cluster.PlacementPlanStep{
+			Action:  step.GetAction(),
+			ShardID: shardID,
+			NodeID:  step.GetNodeId(),
+			Addr:    step.GetAddr(),
+			Detail:  step.GetDetail(),
+		})
+	}
+	return out
+}
+
+func pbPlacementApplyResult(result cluster.PlacementApplyResult) *cefaspb.PlacementApplyResult {
+	return &cefaspb.PlacementApplyResult{
+		Operation:   string(result.Operation),
+		BeforeEpoch: result.BeforeEpoch,
+		AfterEpoch:  result.AfterEpoch,
+		Steps:       pbPlacementApplySteps(result.Steps),
+		Placement:   pbPlacementCatalog(result.Placement),
+	}
+}
+
+func pbPlacementApplySteps(in []cluster.PlacementApplyStep) []*cefaspb.PlacementApplyStep {
+	out := make([]*cefaspb.PlacementApplyStep, 0, len(in))
+	for _, step := range in {
+		out = append(out, &cefaspb.PlacementApplyStep{
+			Action:  step.Action,
+			ShardId: step.ShardID,
+			NodeId:  step.NodeID,
+			Status:  step.Status,
+			Detail:  step.Detail,
+		})
+	}
+	return out
+}
+
 // strongReadGate redirects the caller to the leader and waits for the
 // raft barrier before serving a strong read. Single-node mode is a
 // no-op.
@@ -1150,6 +1289,8 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, cluster.ErrInvalidPlacementPlan):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, cluster.ErrStaleRoute):
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, types.ErrSpatialNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrInvalidSpatial):
@@ -1161,6 +1302,8 @@ func mapStorageErr(err error) error {
 		if errors.As(err, &nle) && nle.LeaderURL != "" {
 			return status.Errorf(codes.FailedPrecondition, "not leader; retry at %s", nle.LeaderURL)
 		}
+		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, craft.ErrNotLeader):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrThrottled):
 		return status.Error(codes.ResourceExhausted, err.Error())

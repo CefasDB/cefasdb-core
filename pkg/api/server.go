@@ -24,6 +24,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
@@ -227,6 +228,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
 	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
 	register("/v1/cluster/placement/plan", s.handleClusterPlacementPlan)
+	register("/v1/cluster/placement/apply", s.handleClusterPlacementApply)
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
@@ -1148,6 +1150,31 @@ func (s *Server) handleClusterPlacementPlan(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, plan)
 }
 
+func (s *Server) handleClusterPlacementApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	if s.manager == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
+		return
+	}
+	var req cluster.PlacementApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.manager.ApplyPlacement(r.Context(), req)
+	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // barrierTimeout is the per-request wait the strong-consistency read
 // path applies when forcing this node to catch up on the log before
 // serving a read.
@@ -1353,6 +1380,12 @@ func mapWriteErr(err error) int {
 	if errors.Is(err, types.ErrMissingKey) || errors.Is(err, types.ErrInvalidKeyType) {
 		return http.StatusBadRequest
 	}
+	if errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, cluster.ErrStaleRoute) {
+		return http.StatusConflict
+	}
 	if errors.Is(err, storage.ErrConditionFailed) {
 		// 412 Precondition Failed is the canonical status for an
 		// optimistic-concurrency check that did not hold.
@@ -1362,6 +1395,9 @@ func mapWriteErr(err error) int {
 		// Handled separately in writeWriteErr — we want 307 with a
 		// Location header, not a JSON body.
 		return http.StatusTemporaryRedirect
+	}
+	if errors.Is(err, craft.ErrNotLeader) {
+		return http.StatusServiceUnavailable
 	}
 	if errors.Is(err, storage.ErrThrottled) {
 		return http.StatusTooManyRequests

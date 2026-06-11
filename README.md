@@ -167,12 +167,19 @@ flags such as `--endpoint`, `--token`, `--token-file`, `--ca`, `--insecure`,
 `--output`, and `--timeout`.
 
 Cluster placement planning commands return dry-run plans for shard elasticity
-operations. They do not apply data movement or Raft membership changes:
+operations:
 
 ```sh
 cefas cluster plan split --shard 0
 cefas cluster plan move --shard 0 --source-node n1 --target-node n4 --min-voters 3
 cefas cluster plan drain --node n1 --target-node n4 --min-voters 3
+```
+
+Move and drain plans can be applied after review; split remains plan-only until
+range data copy is implemented:
+
+```sh
+cefas cluster apply --plan file://move-plan.json --yes
 ```
 
 ## Project Layout

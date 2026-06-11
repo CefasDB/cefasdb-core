@@ -54,6 +54,7 @@ service Cefas {
   rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
   rpc PlanPlacement(PlanPlacementRequest) returns (PlanPlacementResponse);
+  rpc ApplyPlacement(ApplyPlacementRequest) returns (ApplyPlacementResponse);
 
   // Change Data Capture stream. Subscribers receive every committed
   // write in raft log order. Slow consumers may miss events when their
@@ -741,4 +742,30 @@ message PlacementPlan {
 
 message PlanPlacementResponse {
   PlacementPlan plan = 1;
+}
+
+message ApplyPlacementRequest {
+  PlacementPlan plan = 1;
+  uint64 expected_epoch = 2;
+  int32  timeout_ms = 3;
+}
+
+message PlacementApplyStep {
+  string action = 1;
+  optional uint32 shard_id = 2;
+  string node_id = 3;
+  string status  = 4;
+  string detail  = 5;
+}
+
+message PlacementApplyResult {
+  string operation = 1;
+  uint64 before_epoch = 2;
+  uint64 after_epoch  = 3;
+  repeated PlacementApplyStep steps = 4;
+  PlacementCatalog placement = 5;
+}
+
+message ApplyPlacementResponse {
+  PlacementApplyResult result = 1;
 }

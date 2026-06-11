@@ -1158,6 +1158,28 @@ type PlacementPlan struct {
 	ApplySupported   bool
 }
 
+type PlacementApplyRequest struct {
+	Plan          PlacementPlan
+	ExpectedEpoch uint64
+	TimeoutMS     int
+}
+
+type PlacementApplyStep struct {
+	Action  string
+	ShardID *uint32
+	NodeID  string
+	Status  string
+	Detail  string
+}
+
+type PlacementApplyResult struct {
+	Operation   string
+	BeforeEpoch uint64
+	AfterEpoch  uint64
+	Steps       []PlacementApplyStep
+	Placement   PlacementCatalog
+}
+
 // Status fetches the cluster status. Works without a token (public).
 func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 	resp, err := c.stub.ClusterStatus(c.withAuth(ctx), &cefaspb.ClusterStatusRequest{})
@@ -1283,6 +1305,104 @@ func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (P
 	return placementPlanFromPB(resp.GetPlan()), nil
 }
 
+func (c *Client) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) (PlacementApplyResult, error) {
+	resp, err := c.stub.ApplyPlacement(c.withAuth(ctx), &cefaspb.ApplyPlacementRequest{
+		Plan:          placementPlanToPB(req.Plan),
+		ExpectedEpoch: req.ExpectedEpoch,
+		TimeoutMs:     int32(req.TimeoutMS),
+	})
+	if err != nil {
+		return PlacementApplyResult{}, err
+	}
+	return placementApplyResultFromPB(resp.GetResult()), nil
+}
+
+func placementPlanToPB(in PlacementPlan) *cefaspb.PlacementPlan {
+	return &cefaspb.PlacementPlan{
+		Operation:        in.Operation,
+		BeforeEpoch:      in.BeforeEpoch,
+		AfterEpoch:       in.AfterEpoch,
+		Before:           placementCatalogToPB(in.Before),
+		After:            placementCatalogToPB(in.After),
+		Steps:            placementPlanStepsToPB(in.Steps),
+		Warnings:         append([]string(nil), in.Warnings...),
+		RequiresDataCopy: in.RequiresDataCopy,
+		RequiresRestart:  in.RequiresRestart,
+		ApplySupported:   in.ApplySupported,
+	}
+}
+
+func placementCatalogToPB(in PlacementCatalog) *cefaspb.PlacementCatalog {
+	return &cefaspb.PlacementCatalog{
+		Version:       in.Version,
+		Epoch:         in.Epoch,
+		Strategy:      in.Strategy,
+		Shards:        shardPlacementsToPB(in.Shards),
+		Nodes:         nodeDescriptorsToPB(in.Nodes),
+		UpdatedAtUnix: in.UpdatedAtUnix,
+	}
+}
+
+func shardPlacementsToPB(in []ShardPlacement) []*cefaspb.ShardPlacement {
+	out := make([]*cefaspb.ShardPlacement, 0, len(in))
+	for _, sh := range in {
+		out = append(out, &cefaspb.ShardPlacement{
+			Id:         sh.ID,
+			Ranges:     tokenRangesToPB(sh.Ranges),
+			State:      sh.State,
+			Epoch:      sh.Epoch,
+			Voters:     append([]string(nil), sh.Voters...),
+			NonVoters:  append([]string(nil), sh.NonVoters...),
+			LeaderHint: sh.LeaderHint,
+		})
+	}
+	return out
+}
+
+func tokenRangesToPB(in []TokenRange) []*cefaspb.TokenRange {
+	out := make([]*cefaspb.TokenRange, 0, len(in))
+	for _, r := range in {
+		out = append(out, &cefaspb.TokenRange{Start: r.Start, End: r.End})
+	}
+	return out
+}
+
+func nodeDescriptorsToPB(in []NodeDescriptor) []*cefaspb.NodeDescriptor {
+	out := make([]*cefaspb.NodeDescriptor, 0, len(in))
+	for _, node := range in {
+		out = append(out, &cefaspb.NodeDescriptor{
+			Id:       node.ID,
+			RaftAddr: node.RaftAddr,
+			HttpAddr: node.HTTPAddr,
+			State:    node.State,
+			Capacity: &cefaspb.NodeCapacity{
+				Weight:      int32(node.Capacity.Weight),
+				Cpu:         int32(node.Capacity.CPU),
+				MemoryBytes: node.Capacity.MemoryBytes,
+				DiskBytes:   node.Capacity.DiskBytes,
+				Zone:        node.Capacity.Zone,
+				Tags:        append([]string(nil), node.Capacity.Tags...),
+			},
+			LastSeenUnix: node.LastSeenUnix,
+		})
+	}
+	return out
+}
+
+func placementPlanStepsToPB(in []PlacementPlanStep) []*cefaspb.PlacementPlanStep {
+	out := make([]*cefaspb.PlacementPlanStep, 0, len(in))
+	for _, step := range in {
+		out = append(out, &cefaspb.PlacementPlanStep{
+			Action:  step.Action,
+			ShardId: step.ShardID,
+			NodeId:  step.NodeID,
+			Addr:    step.Addr,
+			Detail:  step.Detail,
+		})
+	}
+	return out
+}
+
 func placementPlanFromPB(in *cefaspb.PlacementPlan) PlacementPlan {
 	if in == nil {
 		return PlacementPlan{}
@@ -1328,6 +1448,38 @@ func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []PlacementPlanSt
 			ShardID: shardID,
 			NodeID:  step.GetNodeId(),
 			Addr:    step.GetAddr(),
+			Detail:  step.GetDetail(),
+		})
+	}
+	return out
+}
+
+func placementApplyResultFromPB(in *cefaspb.PlacementApplyResult) PlacementApplyResult {
+	if in == nil {
+		return PlacementApplyResult{}
+	}
+	return PlacementApplyResult{
+		Operation:   in.GetOperation(),
+		BeforeEpoch: in.GetBeforeEpoch(),
+		AfterEpoch:  in.GetAfterEpoch(),
+		Steps:       placementApplyStepsFromPB(in.GetSteps()),
+		Placement:   placementCatalogFromPB(in.GetPlacement()),
+	}
+}
+
+func placementApplyStepsFromPB(in []*cefaspb.PlacementApplyStep) []PlacementApplyStep {
+	out := make([]PlacementApplyStep, 0, len(in))
+	for _, step := range in {
+		var shardID *uint32
+		if step.ShardId != nil {
+			id := step.GetShardId()
+			shardID = &id
+		}
+		out = append(out, PlacementApplyStep{
+			Action:  step.GetAction(),
+			ShardID: shardID,
+			NodeID:  step.GetNodeId(),
+			Status:  step.GetStatus(),
 			Detail:  step.GetDetail(),
 		})
 	}

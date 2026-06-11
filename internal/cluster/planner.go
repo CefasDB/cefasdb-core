@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -49,6 +51,28 @@ type PlacementPlan struct {
 	RequiresDataCopy bool                `json:"requiresDataCopy"`
 	RequiresRestart  bool                `json:"requiresRestart"`
 	ApplySupported   bool                `json:"applySupported"`
+}
+
+type PlacementApplyRequest struct {
+	Plan          PlacementPlan `json:"plan"`
+	ExpectedEpoch uint64        `json:"expectedEpoch,omitempty"`
+	TimeoutMS     int           `json:"timeoutMs,omitempty"`
+}
+
+type PlacementApplyStep struct {
+	Action  string  `json:"action"`
+	ShardID *uint32 `json:"shardId,omitempty"`
+	NodeID  string  `json:"nodeId,omitempty"`
+	Status  string  `json:"status"`
+	Detail  string  `json:"detail,omitempty"`
+}
+
+type PlacementApplyResult struct {
+	Operation   PlacementOperation   `json:"operation"`
+	BeforeEpoch uint64               `json:"beforeEpoch"`
+	AfterEpoch  uint64               `json:"afterEpoch"`
+	Steps       []PlacementApplyStep `json:"steps,omitempty"`
+	Placement   PlacementCatalog     `json:"placement"`
 }
 
 var ErrInvalidPlacementPlan = errors.New("cluster: invalid placement plan")
@@ -172,7 +196,7 @@ func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, er
 		if err := validateNodeSet(cat, voters, minVoters); err != nil {
 			return PlacementPlan{}, err
 		}
-		steps = append(steps, PlacementPlanStep{Action: "set_voters", ShardID: u32ptr(shard.ID), Detail: "replace shard voter set with target voters"})
+		steps = membershipDiffSteps(cat, shard.ID, shard.Voters, voters)
 	} else {
 		if req.SourceNode == "" || req.TargetNode == "" {
 			return PlacementPlan{}, invalidPlan("move requires sourceNode and targetNode when targetVoters is empty")
@@ -198,7 +222,7 @@ func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, er
 	}
 
 	after := nextCatalog(cat)
-	after.Shards[shardIdx].State = ShardStateMoving
+	after.Shards[shardIdx].State = ShardStateActive
 	after.Shards[shardIdx].Epoch = after.Epoch
 	after.Shards[shardIdx].Voters = voters
 	after.Shards[shardIdx].NonVoters = removeAny(after.Shards[shardIdx].NonVoters, voters)
@@ -216,9 +240,9 @@ func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, er
 		Steps:            steps,
 		RequiresDataCopy: false,
 		RequiresRestart:  false,
-		ApplySupported:   false,
+		ApplySupported:   true,
 		Warnings: []string{
-			"move is a plan only; apply each Raft membership step and wait for catch-up before publishing the new epoch",
+			"move applies Raft membership steps first and publishes the new placement epoch only after those steps succeed",
 		},
 	}, nil
 }
@@ -263,7 +287,7 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		if len(sh.Voters) < minVoters {
 			return PlacementPlan{}, invalidPlan("drain would leave shard %d with %d voters; minVoters=%d", sh.ID, len(sh.Voters), minVoters)
 		}
-		sh.State = ShardStateMoving
+		sh.State = ShardStateActive
 		sh.Epoch = after.Epoch
 		steps = append(steps,
 			PlacementPlanStep{Action: "wait_catchup", ShardID: u32ptr(sh.ID), Detail: strings.Join(targets, ",")},
@@ -295,8 +319,127 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		Warnings:         warnings,
 		RequiresDataCopy: false,
 		RequiresRestart:  false,
-		ApplySupported:   false,
+		ApplySupported:   true,
 	}, nil
+}
+
+func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) (PlacementApplyResult, error) {
+	if err := m.RefreshPlacement(); err != nil {
+		return PlacementApplyResult{}, err
+	}
+	current := m.Placement()
+	if err := validateApplyRequest(current, req); err != nil {
+		return PlacementApplyResult{}, err
+	}
+	timeout := applyTimeout(req.TimeoutMS)
+	applied := make([]PlacementApplyStep, 0, len(req.Plan.Steps))
+	for _, step := range req.Plan.Steps {
+		if err := ctx.Err(); err != nil {
+			return PlacementApplyResult{}, err
+		}
+		if err := m.executePlacementStep(step, timeout); err != nil {
+			return PlacementApplyResult{}, err
+		}
+		applied = append(applied, PlacementApplyStep{
+			Action:  step.Action,
+			ShardID: step.ShardID,
+			NodeID:  step.NodeID,
+			Status:  "ok",
+			Detail:  step.Detail,
+		})
+	}
+	if err := m.persistPlacementSnapshotStrict(m.placementPath, req.Plan.After); err != nil {
+		return PlacementApplyResult{}, err
+	}
+	if err := m.applyPlacement(req.Plan.After, false); err != nil {
+		return PlacementApplyResult{}, err
+	}
+	return PlacementApplyResult{
+		Operation:   req.Plan.Operation,
+		BeforeEpoch: current.Epoch,
+		AfterEpoch:  req.Plan.After.Epoch,
+		Steps:       applied,
+		Placement:   req.Plan.After.Clone(),
+	}, nil
+}
+
+func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) error {
+	plan := req.Plan
+	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain {
+		return invalidPlan("apply supports move and drain plans only, got %q", plan.Operation)
+	}
+	if plan.RequiresDataCopy || plan.RequiresRestart {
+		return invalidPlan("plan requires data copy or restart and cannot be applied online")
+	}
+	if !plan.ApplySupported {
+		return invalidPlan("plan is not marked apply-supported")
+	}
+	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != current.Epoch {
+		return &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: current.Epoch}
+	}
+	if plan.BeforeEpoch != current.Epoch || plan.Before.Epoch != current.Epoch {
+		return &StaleRouteError{ClientEpoch: plan.BeforeEpoch, CurrentEpoch: current.Epoch}
+	}
+	if !samePlacement(current, plan.Before) {
+		return invalidPlan("plan before catalog does not match current placement")
+	}
+	if plan.After.Epoch <= current.Epoch {
+		return invalidPlan("after epoch %d must be greater than current epoch %d", plan.After.Epoch, current.Epoch)
+	}
+	if len(plan.After.Shards) != len(current.Shards) {
+		return invalidPlan("apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+	}
+	if err := ValidatePlacement(plan.After); err != nil {
+		return err
+	}
+	return nil
+}
+
+func samePlacement(a, b PlacementCatalog) bool {
+	encA, errA := encodePlacement(a)
+	encB, errB := encodePlacement(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return bytes.Equal(encA, encB)
+}
+
+func applyTimeout(timeoutMS int) time.Duration {
+	if timeoutMS <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func (m *Manager) executePlacementStep(step PlacementPlanStep, timeout time.Duration) error {
+	switch step.Action {
+	case "add_voter", "remove_voter", "wait_catchup":
+	default:
+		return invalidPlan("unsupported apply step %q", step.Action)
+	}
+	if step.ShardID == nil {
+		return invalidPlan("step %q requires shardId", step.Action)
+	}
+	shard, ok := m.Shard(*step.ShardID)
+	if !ok || shard == nil || shard.Raft == nil {
+		return fmt.Errorf("cluster: shard %d has no raft group", *step.ShardID)
+	}
+	switch step.Action {
+	case "add_voter":
+		if step.NodeID == "" || step.Addr == "" {
+			return invalidPlan("add_voter requires nodeId and addr")
+		}
+		return shard.Raft.AddVoter(step.NodeID, step.Addr, timeout)
+	case "remove_voter":
+		if step.NodeID == "" {
+			return invalidPlan("remove_voter requires nodeId")
+		}
+		return shard.Raft.RemoveServer(step.NodeID, timeout)
+	case "wait_catchup":
+		return shard.Raft.Barrier(timeout)
+	default:
+		return nil
+	}
 }
 
 func nextCatalog(cat PlacementCatalog) PlacementCatalog {
@@ -396,6 +539,29 @@ func replaceVoter(voters []string, source, target string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func membershipDiffSteps(cat PlacementCatalog, shardID uint32, current, target []string) []PlacementPlanStep {
+	var steps []PlacementPlanStep
+	for _, nodeID := range target {
+		if containsString(current, nodeID) {
+			continue
+		}
+		node := cat.Nodes[nodeID]
+		steps = append(steps, PlacementPlanStep{Action: "add_voter", ShardID: u32ptr(shardID), NodeID: nodeID, Addr: node.RaftAddr})
+	}
+	for _, nodeID := range target {
+		if !containsString(current, nodeID) {
+			steps = append(steps, PlacementPlanStep{Action: "wait_catchup", ShardID: u32ptr(shardID), NodeID: nodeID})
+		}
+	}
+	for _, nodeID := range current {
+		if containsString(target, nodeID) {
+			continue
+		}
+		steps = append(steps, PlacementPlanStep{Action: "remove_voter", ShardID: u32ptr(shardID), NodeID: nodeID})
+	}
+	return steps
 }
 
 func sortedUnique(in []string) []string {

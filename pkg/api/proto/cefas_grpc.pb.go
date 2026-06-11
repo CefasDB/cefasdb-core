@@ -48,6 +48,7 @@ const (
 	Cefas_AddVoter_FullMethodName               = "/cefas.v1.Cefas/AddVoter"
 	Cefas_RemoveServer_FullMethodName           = "/cefas.v1.Cefas/RemoveServer"
 	Cefas_PlanPlacement_FullMethodName          = "/cefas.v1.Cefas/PlanPlacement"
+	Cefas_ApplyPlacement_FullMethodName         = "/cefas.v1.Cefas/ApplyPlacement"
 	Cefas_StreamChanges_FullMethodName          = "/cefas.v1.Cefas/StreamChanges"
 	Cefas_ListSnapshots_FullMethodName          = "/cefas.v1.Cefas/ListSnapshots"
 	Cefas_Compact_FullMethodName                = "/cefas.v1.Cefas/Compact"
@@ -108,6 +109,7 @@ type CefasClient interface {
 	AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error)
 	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
 	PlanPlacement(ctx context.Context, in *PlanPlacementRequest, opts ...grpc.CallOption) (*PlanPlacementResponse, error)
+	ApplyPlacement(ctx context.Context, in *ApplyPlacementRequest, opts ...grpc.CallOption) (*ApplyPlacementResponse, error)
 	// Change Data Capture stream. Subscribers receive every committed
 	// write in raft log order. Slow consumers may miss events when their
 	// server-side ring buffer fills; at-least-once-in-order for live
@@ -397,6 +399,16 @@ func (c *cefasClient) PlanPlacement(ctx context.Context, in *PlanPlacementReques
 	return out, nil
 }
 
+func (c *cefasClient) ApplyPlacement(ctx context.Context, in *ApplyPlacementRequest, opts ...grpc.CallOption) (*ApplyPlacementResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyPlacementResponse)
+	err := c.cc.Invoke(ctx, Cefas_ApplyPlacement_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[3], Cefas_StreamChanges_FullMethodName, cOpts...)
@@ -644,6 +656,7 @@ type CefasServer interface {
 	AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error)
 	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
 	PlanPlacement(context.Context, *PlanPlacementRequest) (*PlanPlacementResponse, error)
+	ApplyPlacement(context.Context, *ApplyPlacementRequest) (*ApplyPlacementResponse, error)
 	// Change Data Capture stream. Subscribers receive every committed
 	// write in raft log order. Slow consumers may miss events when their
 	// server-side ring buffer fills; at-least-once-in-order for live
@@ -751,6 +764,9 @@ func (UnimplementedCefasServer) RemoveServer(context.Context, *RemoveServerReque
 }
 func (UnimplementedCefasServer) PlanPlacement(context.Context, *PlanPlacementRequest) (*PlanPlacementResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PlanPlacement not implemented")
+}
+func (UnimplementedCefasServer) ApplyPlacement(context.Context, *ApplyPlacementRequest) (*ApplyPlacementResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyPlacement not implemented")
 }
 func (UnimplementedCefasServer) StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamChanges not implemented")
@@ -1205,6 +1221,24 @@ func _Cefas_PlanPlacement_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_ApplyPlacement_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyPlacementRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ApplyPlacement(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ApplyPlacement_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ApplyPlacement(ctx, req.(*ApplyPlacementRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_StreamChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamChangesRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1615,6 +1649,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PlanPlacement",
 			Handler:    _Cefas_PlanPlacement_Handler,
+		},
+		{
+			MethodName: "ApplyPlacement",
+			Handler:    _Cefas_ApplyPlacement_Handler,
 		},
 		{
 			MethodName: "ListSnapshots",
