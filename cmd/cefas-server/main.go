@@ -389,6 +389,7 @@ func main() {
 			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
+		api.RegisterAtomic(gsrv, gsrvImpl)
 		if cfg.GRPC.Reflection {
 			reflection.Register(gsrv)
 		}
