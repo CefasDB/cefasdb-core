@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,8 +24,8 @@ func putKV(t *testing.T, stub cefaspb.CefasClient, table, pk, attr, val string) 
 	if _, err := stub.PutItem(context.Background(), &cefaspb.PutItemRequest{
 		Table: table,
 		Item: map[string]*cefaspb.AttributeValue{
-			"id":  {Value: &cefaspb.AttributeValue_S{S: pk}},
-			attr:  {Value: &cefaspb.AttributeValue_S{S: val}},
+			"id": {Value: &cefaspb.AttributeValue_S{S: pk}},
+			attr: {Value: &cefaspb.AttributeValue_S{S: val}},
 		},
 	}); err != nil {
 		t.Fatalf("put %s: %v", pk, err)
@@ -36,8 +37,8 @@ func putNum(t *testing.T, stub cefaspb.CefasClient, table, pk, attr, val string)
 	if _, err := stub.PutItem(context.Background(), &cefaspb.PutItemRequest{
 		Table: table,
 		Item: map[string]*cefaspb.AttributeValue{
-			"id":  {Value: &cefaspb.AttributeValue_S{S: pk}},
-			attr:  {Value: &cefaspb.AttributeValue_N{N: val}},
+			"id": {Value: &cefaspb.AttributeValue_S{S: pk}},
+			attr: {Value: &cefaspb.AttributeValue_N{N: val}},
 		},
 	}); err != nil {
 		t.Fatalf("put %s: %v", pk, err)
@@ -152,6 +153,91 @@ func TestTopKRanksByDistance(t *testing.T) {
 	if resp.GetRows()[0].GetDistance() != 0 {
 		t.Fatalf("best distance = %g, want 0 (identical to target)", resp.GetRows()[0].GetDistance())
 	}
+}
+
+func TestANNIndexInfersTopKMetricAndSQL(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	table := "ANNDocs"
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      table,
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+			AttributeDefinitions: []*cefaspb.AttributeDefinition{{
+				Name: "emb", Type: "V", VectorDimensions: 3,
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	for _, row := range []struct {
+		id  string
+		vec []float64
+	}{
+		{"a", []float64{1, 0, 0}},
+		{"b", []float64{0.9, 0.1, 0}},
+		{"c", []float64{0, 1, 0}},
+	} {
+		_, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+			Table: table,
+			Item: map[string]*cefaspb.AttributeValue{
+				"id":  {Value: &cefaspb.AttributeValue_S{S: row.id}},
+				"emb": pbVec(row.vec...),
+			},
+		})
+		if err != nil {
+			t.Fatalf("put %s: %v", row.id, err)
+		}
+	}
+	if _, err := stub.CreateIndex(ctx, &cefaspb.CreateIndexRequest{
+		Descriptor_: &cefaspb.PluginIndexDescriptor{
+			Table:        table,
+			Name:         "emb_ann",
+			PluginName:   "ann",
+			PluginConfig: []byte(`{"field":"emb","dim":3,"metric":"cosine","algorithm":"lsh"}`),
+			KeySchema:    &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create ann: %v", err)
+	}
+	desc, err := stub.DescribeIndex(ctx, &cefaspb.DescribeIndexRequest{Table: table, Name: "emb_ann"})
+	if err != nil {
+		t.Fatalf("describe ann: %v", err)
+	}
+	if desc.GetDescriptor_().GetPluginName() != "ann" {
+		t.Fatalf("plugin name = %q, want ann", desc.GetDescriptor_().GetPluginName())
+	}
+	topk, err := stub.TopK(ctx, &cefaspb.TopKRequest{
+		Table:  table,
+		Field:  "emb",
+		Target: pbVec(1, 0, 0),
+		K:      2,
+	})
+	if err != nil {
+		t.Fatalf("topk inferred metric: %v", err)
+	}
+	if len(topk.GetRows()) != 2 || topk.GetRows()[0].GetItem().GetAttributes()["id"].GetS() != "a" {
+		t.Fatalf("unexpected topk rows: %+v", topk.GetRows())
+	}
+	sqlResp, err := stub.Sql(ctx, &cefaspb.SqlRequest{Query: "SELECT id FROM ANNDocs ORDER BY emb ANN OF [1,0,0] LIMIT 2"})
+	if err != nil {
+		t.Fatalf("sql ann: %v", err)
+	}
+	if len(sqlResp.GetRows()) != 2 || sqlResp.GetRows()[0].GetAttributes()["id"].GetS() != "a" {
+		t.Fatalf("unexpected sql rows: %+v", sqlResp.GetRows())
+	}
+	explain, err := stub.Explain(ctx, &cefaspb.ExplainRequest{Table: table, Predicate: "ORDER BY emb ANN OF [1,0,0]", Format: "text"})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if !strings.Contains(explain.GetPlan(), "TopK") {
+		t.Fatalf("explain did not mention TopK: %s", explain.GetPlan())
+	}
+}
+
+func pbVec(xs ...float64) *cefaspb.AttributeValue {
+	return &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_V{V: &cefaspb.Vector{Values: xs, Dim: int32(len(xs))}}}
 }
 
 func TestCohortEstimateApproximate(t *testing.T) {

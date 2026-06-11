@@ -14,6 +14,7 @@
 //	{"BS": ["<b64>"]}        binary set
 //	{"L": [<attr>...]}       list
 //	{"M": {"name": <attr>}}  map
+//	{"V": [0.1,0.2],"D":2}  native numeric vector
 //
 // The shape matches the AWS DynamoDB JSON literal exactly so scripts
 // written against `aws dynamodb` can be ported by replacing the
@@ -41,6 +42,8 @@ type Attribute struct {
 	BS   []string             `json:"BS,omitempty"` // base64 each
 	L    []Attribute          `json:"L,omitempty"`
 	M    map[string]Attribute `json:"M,omitempty"`
+	V    []float64            `json:"V,omitempty"`
+	D    *int                 `json:"D,omitempty"`
 }
 
 // Item is the wire form of a row — a map of attribute name to value.
@@ -99,6 +102,11 @@ func (a Attribute) ToAttr() (types.AttributeValue, error) {
 			m[k] = v
 		}
 		return types.AttributeValue{T: types.AttrM, M: m}, nil
+	case a.V != nil:
+		if a.D != nil && *a.D != len(a.V) {
+			return types.AttributeValue{}, fmt.Errorf("V dimension %d does not match D %d", len(a.V), *a.D)
+		}
+		return types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), a.V...)}, nil
 	}
 	return types.AttributeValue{}, fmt.Errorf("attribute value has no field set")
 }
@@ -145,6 +153,9 @@ func FromAttr(av types.AttributeValue) Attribute {
 			m[k] = FromAttr(v)
 		}
 		return Attribute{M: m}
+	case types.AttrVec:
+		d := len(av.Vec)
+		return Attribute{V: append([]float64(nil), av.Vec...), D: &d}
 	}
 	return Attribute{}
 }

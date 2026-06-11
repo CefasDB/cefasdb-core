@@ -18,14 +18,18 @@ func (Op) Manifest() plugin.Manifest {
 		Name:        "euclidean",
 		Kind:        plugin.KindDistance,
 		Version:     "1",
-		Description: "Euclidean (L2) distance over numeric vectors (L of N, or NS)",
+		Description: "Euclidean (L2) distance over numeric vectors (V, L of N, or NS)",
 	}
 }
 
 func (Op) Name() string { return "euclidean" }
 
 func (Op) Supports(a, b model.AttrType) bool {
-	return (a == model.AttrL || a == model.AttrNS) && (b == model.AttrL || b == model.AttrNS)
+	return numericVec(a) && numericVec(b)
+}
+
+func numericVec(t model.AttrType) bool {
+	return t == model.AttrVec || t == model.AttrL || t == model.AttrNS
 }
 
 func (Op) Eval(a, b model.AttributeValue) (float64, error) {

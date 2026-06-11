@@ -167,12 +167,21 @@ message BackupDescriptor {
   string          manifest_status  = 6;
   repeated string requested_tables = 7;
   repeated BackupTableStats table_stats = 8;
+  repeated BackupShardCoverage shard_coverage = 9;
+  uint64          change_index     = 10;
+  int64           change_unix_nano = 11;
 }
 
 message BackupTableStats {
   string table    = 1;
   int64  rows     = 2;
   string checksum = 3;
+}
+
+message BackupShardCoverage {
+  string shard_id        = 1;
+  uint64 placement_epoch = 2;
+  repeated BackupTableStats table_stats = 3;
 }
 
 message CreateBackupRequest {
@@ -233,6 +242,8 @@ message RestoreTableFromBackupRequest {
   string source_table_name  = 2;
   string target_table_name  = 3;
   bool   dry_run            = 4;
+  uint64 target_change_index = 5;
+  int64  target_unix_nano   = 6;
 }
 message RestoreTableFromBackupResponse {
   string target_table_name = 1;
@@ -406,6 +417,7 @@ message AttributeValue {
     BinarySet      bs       = 8;
     List           l        = 9;
     Map            m        = 10;
+    Vector         v        = 11;
   }
 }
 
@@ -413,6 +425,7 @@ message StringSet { repeated string         values = 1; }
 message BinarySet { repeated bytes          values = 1; }
 message List      { repeated AttributeValue values = 1; }
 message Map       { map<string, AttributeValue> values = 1; }
+message Vector    { repeated double values = 1; int32 dim = 2; }
 
 message Item {
   map<string, AttributeValue> attributes = 1;
@@ -444,11 +457,20 @@ message SpatialIndexDescriptor {
   repeated NumRange  ranges     = 5;
 }
 
+message AttributeDefinition {
+  string name              = 1;
+  string type              = 2;
+  int32  vector_dimensions = 3;
+}
+
 message TableDescriptor {
-  string                          name             = 1;
-  KeySchema                       key_schema       = 2;
-  repeated GSIDescriptor          gsis             = 3;
-  repeated SpatialIndexDescriptor spatial_indexes  = 4;
+  string                          name                   = 1;
+  KeySchema                       key_schema             = 2;
+  repeated GSIDescriptor          gsis                   = 3;
+  repeated SpatialIndexDescriptor spatial_indexes        = 4;
+  repeated AttributeDefinition    attribute_definitions  = 5;
+  string                          storage_class          = 6;
+  int64                           memory_footprint_bytes = 7;
 }
 
 // ---------- schema rpcs ----------

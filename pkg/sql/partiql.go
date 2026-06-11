@@ -3,6 +3,7 @@ package sql
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -13,11 +14,11 @@ import (
 // AttributeValue every other endpoint uses; only the fields that
 // matter for SQL substitution are populated.
 type PartiQLParameter struct {
-	S    *string  `json:"S,omitempty"`
-	N    *string  `json:"N,omitempty"`
-	B    *string  `json:"B,omitempty"` // base64
-	BOOL *bool    `json:"BOOL,omitempty"`
-	NULL *bool    `json:"NULL,omitempty"`
+	S    *string `json:"S,omitempty"`
+	N    *string `json:"N,omitempty"`
+	B    *string `json:"B,omitempty"` // base64
+	BOOL *bool   `json:"BOOL,omitempty"`
+	NULL *bool   `json:"NULL,omitempty"`
 }
 
 // BindPartiQL substitutes `?` placeholders in `statement` with the
@@ -27,7 +28,7 @@ type PartiQLParameter struct {
 // server applies the standard cefas pipeline downstream.
 //
 // String / binary values become single-quoted literals (with proper
-// `''` escaping). Numbers stay unquoted. Booleans become TRUE/FALSE.
+// `”` escaping). Numbers stay unquoted. Booleans become TRUE/FALSE.
 // NULL becomes the SQL keyword NULL.
 func BindPartiQL(statement string, params []PartiQLParameter) (string, error) {
 	if !strings.Contains(statement, "?") {
@@ -97,6 +98,12 @@ func LiteralFromAttr(av types.AttributeValue) (string, error) {
 		return "FALSE", nil
 	case types.AttrNull:
 		return "NULL", nil
+	case types.AttrVec:
+		parts := make([]string, len(av.Vec))
+		for i, v := range av.Vec {
+			parts[i] = strconv.FormatFloat(v, 'g', -1, 64)
+		}
+		return "[" + strings.Join(parts, ",") + "]", nil
 	}
 	return "", fmt.Errorf("cefas SQL has no literal form for attribute type %v", av.T)
 }

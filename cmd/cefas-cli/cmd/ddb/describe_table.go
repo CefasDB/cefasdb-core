@@ -40,13 +40,16 @@ Example:
 			// AWS-style envelope around the cefas TableDescriptor.
 			resp := map[string]any{
 				"Table": map[string]any{
-					"TableName":     td.Name,
-					"TableStatus":   "ACTIVE",
-					"KeySchema":     keySchemaWire(td.KeySchema.PK, td.KeySchema.SK),
-					"GSIs":          td.GSIs,
-					"LSIs":          td.LSIs,
-					"SpatialIndexes": td.SpatialIndexes,
-					"TTLAttribute":  td.TTLAttribute,
+					"TableName":            td.Name,
+					"TableStatus":          "ACTIVE",
+					"KeySchema":            keySchemaWire(td.KeySchema.PK, td.KeySchema.SK),
+					"GSIs":                 td.GSIs,
+					"LSIs":                 td.LSIs,
+					"SpatialIndexes":       td.SpatialIndexes,
+					"TTLAttribute":         td.TTLAttribute,
+					"AttributeDefinitions": td.AttributeDefinitions,
+					"StorageClass":         td.StorageClass,
+					"MemoryFootprintBytes": td.MemoryFootprintBytes,
 				},
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(resp)

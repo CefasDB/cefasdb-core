@@ -44,6 +44,9 @@ Example:
 					"BackupManifestVersion":    b.ManifestVersion,
 					"BackupManifestStatus":     b.ManifestStatus,
 					"BackupManifestTableStats": b.TableStats,
+					"BackupShardCoverage":      b.ShardCoverage,
+					"BackupChangeIndex":        b.ChangeIndex,
+					"BackupChangeUnixNano":     b.ChangeUnixNano,
 				})
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -27,6 +28,7 @@ type Storage interface {
 	QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skHigh types.AttributeValue, limit int) ([]types.Item, error)
 	QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error)
 	SpatialQueryItems(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error)
+	ScanTable(table string, limit int) ([]types.Item, error)
 }
 
 // CatalogMutator is the schema-management surface the executor uses
@@ -39,8 +41,9 @@ type CatalogMutator interface {
 
 // Executor runs a compiled Plan against the storage + catalog.
 type Executor struct {
-	Storage Storage
-	Catalog CatalogMutator
+	Storage          Storage
+	Catalog          CatalogMutator
+	DistanceResolver func(table, field string, target types.AttributeValue) (cquery.DistanceOp, error)
 }
 
 // Execute dispatches to the plan-specific path.
@@ -62,6 +65,8 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execQuery(p)
 	case *PlanSpatial:
 		return e.execSpatial(p)
+	case *PlanANN:
+		return e.execANN(p)
 	}
 	return nil, fmt.Errorf("unsupported plan type %T", plan)
 }
@@ -448,6 +453,38 @@ func (e *Executor) execSpatial(p *PlanSpatial) (*Result, error) {
 		project(items, p.Project)
 	}
 	return &Result{Rows: items}, nil
+}
+
+func (e *Executor) execANN(p *PlanANN) (*Result, error) {
+	if e.DistanceResolver == nil {
+		return nil, fmt.Errorf("ANN distance resolver not configured")
+	}
+	op, err := e.DistanceResolver(p.Table, p.Field, p.Target)
+	if err != nil {
+		return nil, err
+	}
+	eng, err := cquery.NewTopK(op, p.Field, p.Target, p.Limit)
+	if err != nil {
+		return nil, err
+	}
+	items, err := e.Storage.ScanTable(p.Table, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if err := eng.Observe(item); err != nil {
+			return nil, err
+		}
+	}
+	rows := eng.Result()
+	out := make([]types.Item, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Item)
+	}
+	if len(p.Project) > 0 {
+		project(out, p.Project)
+	}
+	return &Result{Rows: out}, nil
 }
 
 func reverse(items []types.Item) {

@@ -51,6 +51,25 @@ func TestRoundTripSetsAndCollections(t *testing.T) {
 	}
 }
 
+func TestVectorAttributeRoundTrip(t *testing.T) {
+	raw := []byte(`{"emb":{"V":[0.1,0.2,0.3],"D":3}}`)
+	item, err := ddbjson.ParseItem(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := item["emb"]; got.T != types.AttrVec || len(got.Vec) != 3 || got.Vec[2] != 0.3 {
+		t.Fatalf("unexpected vector attr: %+v", got)
+	}
+	encoded := ddbjson.EncodeItem(item)
+	if encoded["emb"].D == nil || *encoded["emb"].D != 3 {
+		t.Fatalf("dimension not encoded: %+v", encoded["emb"])
+	}
+	dim := 3
+	if _, err := (ddbjson.Attribute{V: []float64{1, 2}, D: &dim}).ToAttr(); err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+}
+
 func TestParseItemFromJSON(t *testing.T) {
 	raw := []byte(`{"pk":{"S":"USER#1"},"sk":{"S":"PROFILE"},"name":{"S":"Ova"}}`)
 	it, err := ddbjson.ParseItem(raw)

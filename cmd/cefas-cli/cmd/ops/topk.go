@@ -48,6 +48,9 @@ Example:
 				return fmt.Errorf("--by must look like 'op(field, :bind)'")
 			}
 			op, field, bind := m[1], m[2], m[3]
+			if strings.EqualFold(op, "ann") {
+				op = ""
+			}
 			if queryArg == "" {
 				return fmt.Errorf("--query is required (DDB-JSON value for the operator's right-hand side)")
 			}

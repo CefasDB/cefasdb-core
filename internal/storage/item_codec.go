@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -181,6 +182,12 @@ func appendAttr(buf []byte, av types.AttributeValue) ([]byte, error) {
 			}
 		}
 		return buf, nil
+	case types.AttrVec:
+		buf = appendUvarint(buf, uint64(len(av.Vec)))
+		for _, f := range av.Vec {
+			buf = binary.BigEndian.AppendUint64(buf, math.Float64bits(f))
+		}
+		return buf, nil
 	}
 	return nil, fmt.Errorf("unknown attr type %d", av.T)
 }
@@ -298,6 +305,22 @@ func readAttr(p []byte) (types.AttributeValue, []byte, error) {
 			m[string(name)] = v
 		}
 		av.M = m
+		return av, p, nil
+	case types.AttrVec:
+		n, rest, err := readUvarint(p)
+		if err != nil {
+			return av, nil, err
+		}
+		p = rest
+		if uint64(len(p)) < n*8 {
+			return av, nil, fmt.Errorf("attr V: short")
+		}
+		out := make([]float64, n)
+		for i := uint64(0); i < n; i++ {
+			out[i] = math.Float64frombits(binary.BigEndian.Uint64(p[:8]))
+			p = p[8:]
+		}
+		av.Vec = out
 		return av, p, nil
 	}
 	return av, nil, fmt.Errorf("unknown attr type %d", t)

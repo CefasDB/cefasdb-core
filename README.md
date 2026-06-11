@@ -125,6 +125,72 @@ cefas --endpoint localhost:9090 --insecure create-index \
 Operational commands include `topk`, `aggregate`, `cohort`, `geo audience`,
 `dedup`, `freqcap`, `explain`, `describe-index`, and `rebuild-index`.
 
+## Vectors, ANN, Memory Tables, And PITR
+
+Native vector attributes use the `V` tag with an optional dimension marker:
+
+```json
+{"id":{"S":"d1"},"emb":{"V":[0.1,0.2,0.3],"D":3}}
+```
+
+Declare vector dimensions at table creation time to make writes fail fast on
+dimension mismatches. Use `--storage-class memory` for a Raft-replicated table
+that keeps a process-local in-memory read copy while preserving the normal
+write-ahead batch path for replication, backups, and restart recovery.
+
+```sh
+cefas --endpoint localhost:9090 --insecure create-table \
+  --table-name Documents \
+  --attribute-definitions AttributeName=id,AttributeType=S \
+  --attribute-definitions 'AttributeName=emb,AttributeType=V<3>' \
+  --key-schema AttributeName=id,KeyType=HASH \
+  --storage-class memory
+```
+
+Create a unified ANN index with explicit algorithm and metric parameters. The
+`ann` descriptor uses the vector LSH index internally today and keeps the metric
+available for `top-k` and SQL planning.
+
+```sh
+cefas --endpoint localhost:9090 --insecure create-index \
+  --table Documents \
+  --name emb_ann \
+  --type ann \
+  --field emb \
+  --dim 3 \
+  --algorithm lsh \
+  --metric cosine
+
+cefas --endpoint localhost:9090 --insecure top-k \
+  --table Documents \
+  --by "ann(emb, :q)" \
+  --k 10 \
+  --query '{"V":[0.1,0.2,0.3],"D":3}'
+```
+
+SQL can rank by the ANN index directly:
+
+```sql
+SELECT id FROM Documents ORDER BY emb ANN OF [0.1,0.2,0.3] LIMIT 10;
+```
+
+Backups record table stats, shard coverage, placement epoch, and the storage
+change index captured at checkpoint time. Point-in-time restore uses the backup
+checkpoint plus retained local changelog entries. Retain both the backup
+checkpoint directory and the live `cefas/admin/change/log/` history for every
+target point you need to restore; a target change index or timestamp before the
+backup high-water mark or beyond retained history is rejected.
+
+```sh
+cefas --endpoint localhost:9090 --insecure create-backup --backup-name nightly
+
+cefas --endpoint localhost:9090 --insecure restore-table-from-backup \
+  --backup-name nightly \
+  --source-table-name Documents \
+  --target-table-name Documents_recovered \
+  --target-change-index 12345
+```
+
 ## Run With Docker
 
 The demo Compose stack runs `cefas-server`, Prometheus, and Grafana:

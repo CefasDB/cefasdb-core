@@ -28,20 +28,29 @@ var (
 // One metadata blob per backup, persisted under cefas/admin/backups/<name>
 // and listed by ListBackups.
 type BackupMetadata struct {
-	Name            string             `json:"name"`
-	CreatedAt       int64              `json:"createdAtUnix"`
-	Tables          []string           `json:"tables"`
-	CheckpointAt    string             `json:"checkpointAt"` // on-disk path of the pebble checkpoint
-	ManifestVersion int                `json:"manifestVersion,omitempty"`
-	ManifestStatus  string             `json:"manifestStatus,omitempty"`
-	RequestedTables []string           `json:"requestedTables,omitempty"`
-	TableStats      []BackupTableStats `json:"tableStats,omitempty"`
+	Name            string                `json:"name"`
+	CreatedAt       int64                 `json:"createdAtUnix"`
+	Tables          []string              `json:"tables"`
+	CheckpointAt    string                `json:"checkpointAt"` // on-disk path of the pebble checkpoint
+	ManifestVersion int                   `json:"manifestVersion,omitempty"`
+	ManifestStatus  string                `json:"manifestStatus,omitempty"`
+	RequestedTables []string              `json:"requestedTables,omitempty"`
+	TableStats      []BackupTableStats    `json:"tableStats,omitempty"`
+	ShardCoverage   []BackupShardCoverage `json:"shardCoverage,omitempty"`
+	ChangeIndex     uint64                `json:"changeIndex,omitempty"`
+	ChangeUnixNano  int64                 `json:"changeUnixNano,omitempty"`
 }
 
 type BackupTableStats struct {
 	Table    string `json:"table"`
 	Rows     int64  `json:"rows"`
 	Checksum string `json:"checksum"`
+}
+
+type BackupShardCoverage struct {
+	ShardID        string             `json:"shardId"`
+	PlacementEpoch uint64             `json:"placementEpoch,omitempty"`
+	TableStats     []BackupTableStats `json:"tableStats,omitempty"`
 }
 
 type BackupDeletionResult struct {
@@ -89,6 +98,10 @@ func backupKey(name string) []byte { return []byte(backupKeyPrefix + name) }
 // contains a path separator, or is already taken. The checkpoint
 // directory must not already exist — pebble refuses to overwrite.
 func (d *DB) CreateBackup(name string, tables []string) (BackupMetadata, error) {
+	return d.CreateBackupForShard(name, tables, "0", 0)
+}
+
+func (d *DB) CreateBackupForShard(name string, tables []string, shardID string, placementEpoch uint64) (BackupMetadata, error) {
 	if err := validateBackupName(name); err != nil {
 		return BackupMetadata{}, err
 	}
@@ -121,16 +134,29 @@ func (d *DB) CreateBackup(name string, tables []string) (BackupMetadata, error) 
 		_ = os.RemoveAll(checkpointDir)
 		return BackupMetadata{}, err
 	}
+	changeIndex, err := d.CurrentChangeIndex()
+	if err != nil {
+		_ = os.RemoveAll(checkpointDir)
+		return BackupMetadata{}, fmt.Errorf("read change index: %w", err)
+	}
+	now := time.Now()
 
 	meta := BackupMetadata{
 		Name:            name,
-		CreatedAt:       time.Now().Unix(),
+		CreatedAt:       now.Unix(),
 		Tables:          capturedTables,
 		CheckpointAt:    checkpointDir,
 		ManifestVersion: BackupManifestVersion,
 		ManifestStatus:  "ok",
 		RequestedTables: sortedUniqueStrings(tables),
 		TableStats:      tableStats,
+		ShardCoverage: []BackupShardCoverage{{
+			ShardID:        shardID,
+			PlacementEpoch: placementEpoch,
+			TableStats:     tableStats,
+		}},
+		ChangeIndex:    changeIndex,
+		ChangeUnixNano: now.UnixNano(),
 	}
 	raw, err := json.Marshal(meta)
 	if err != nil {
@@ -143,6 +169,17 @@ func (d *DB) CreateBackup(name string, tables []string) (BackupMetadata, error) 
 		return BackupMetadata{}, fmt.Errorf("persist metadata: %w", err)
 	}
 	return meta, nil
+}
+
+func (d *DB) StoreBackupMetadata(meta BackupMetadata) error {
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+	if err := d.Set(backupKey(meta.Name), raw); err != nil {
+		return fmt.Errorf("persist metadata: %w", err)
+	}
+	return nil
 }
 
 // ListBackups returns every recorded backup in ascending name order.
@@ -500,6 +537,9 @@ func validateBackupManifestTable(meta BackupMetadata, checkpoint *pebbledb.DB, t
 	if !containsString(meta.Tables, table) {
 		return BackupTableStats{}, fmt.Errorf("backup %q did not capture table %q", meta.Name, table)
 	}
+	if len(meta.ShardCoverage) > 0 && !coverageContainsTable(meta.ShardCoverage, table) {
+		return BackupTableStats{}, fmt.Errorf("backup %q shard coverage did not capture table %q", meta.Name, table)
+	}
 	expected, ok := backupTableStat(meta.TableStats, table)
 	if !ok {
 		return BackupTableStats{}, fmt.Errorf("backup %q manifest has no stats for table %q", meta.Name, table)
@@ -530,6 +570,12 @@ func normalizeBackupMetadata(meta *BackupMetadata) {
 	meta.Tables = sortedUniqueStrings(meta.Tables)
 	meta.RequestedTables = sortedUniqueStrings(meta.RequestedTables)
 	sort.Slice(meta.TableStats, func(i, j int) bool { return meta.TableStats[i].Table < meta.TableStats[j].Table })
+	sort.Slice(meta.ShardCoverage, func(i, j int) bool { return meta.ShardCoverage[i].ShardID < meta.ShardCoverage[j].ShardID })
+	for i := range meta.ShardCoverage {
+		sort.Slice(meta.ShardCoverage[i].TableStats, func(a, b int) bool {
+			return meta.ShardCoverage[i].TableStats[a].Table < meta.ShardCoverage[i].TableStats[b].Table
+		})
+	}
 	if meta.ManifestVersion == 0 {
 		meta.ManifestStatus = "legacy"
 		return
@@ -539,6 +585,17 @@ func normalizeBackupMetadata(meta *BackupMetadata) {
 		return
 	}
 	meta.ManifestStatus = "unsupported"
+}
+
+func coverageContainsTable(coverage []BackupShardCoverage, table string) bool {
+	for _, shard := range coverage {
+		for _, stat := range shard.TableStats {
+			if stat.Table == table {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sortedUniqueStrings(in []string) []string {

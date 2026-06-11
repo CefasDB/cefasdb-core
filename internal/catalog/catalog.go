@@ -6,6 +6,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
@@ -41,6 +42,7 @@ func (c *Catalog) loadAll() error {
 		if err := json.Unmarshal(v, &td); err != nil {
 			return fmt.Errorf("decode descriptor at %s: %w", it.Key(), err)
 		}
+		normalizeDescriptor(&td)
 		c.tables[td.Name] = td
 	}
 	return it.Error()
@@ -64,6 +66,9 @@ func (c *Catalog) Create(td types.TableDescriptor) error {
 	}
 	if td.KeySchema.PK == "" {
 		return fmt.Errorf("KeySchema.PK required")
+	}
+	if err := normalizeDescriptor(&td); err != nil {
+		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,6 +108,9 @@ func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	if err := json.Unmarshal(raw, &fresh); err != nil {
 		return types.TableDescriptor{}, fmt.Errorf("decode descriptor: %w", err)
 	}
+	if err := normalizeDescriptor(&fresh); err != nil {
+		return types.TableDescriptor{}, err
+	}
 	c.mu.Lock()
 	c.tables[fresh.Name] = fresh
 	c.mu.Unlock()
@@ -130,6 +138,9 @@ func (c *Catalog) UpdateTable(td types.TableDescriptor) error {
 	if td.Name == "" {
 		return fmt.Errorf("table name required")
 	}
+	if err := normalizeDescriptor(&td); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.tables[td.Name]; !ok {
@@ -143,6 +154,24 @@ func (c *Catalog) UpdateTable(td types.TableDescriptor) error {
 		return fmt.Errorf("persist descriptor: %w", err)
 	}
 	c.tables[td.Name] = td
+	return nil
+}
+
+func normalizeDescriptor(td *types.TableDescriptor) error {
+	switch strings.ToLower(strings.TrimSpace(td.StorageClass)) {
+	case "", types.StorageClassDisk:
+		td.StorageClass = types.StorageClassDisk
+	case types.StorageClassMemory:
+		td.StorageClass = types.StorageClassMemory
+	default:
+		return fmt.Errorf("storageClass %q must be %q or %q", td.StorageClass, types.StorageClassDisk, types.StorageClassMemory)
+	}
+	for i := range td.AttributeDefinitions {
+		td.AttributeDefinitions[i].Type = strings.ToUpper(strings.TrimSpace(td.AttributeDefinitions[i].Type))
+		if td.AttributeDefinitions[i].Type == "V" && td.AttributeDefinitions[i].VectorDimensions <= 0 {
+			return fmt.Errorf("attributeDefinitions[%d]: V requires vectorDimensions > 0", i)
+		}
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package sql
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -168,12 +169,25 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 			return nil, err
 		}
 		stmt.OrderBy = id.Lit
-		switch p.peek().Kind {
-		case tAsc:
+		if p.peek().Kind == tAnn {
 			p.consume()
-		case tDesc:
-			p.consume()
-			stmt.OrderDesc = true
+			if _, err := p.expect(tOf, "OF"); err != nil {
+				return nil, err
+			}
+			target, err := p.parseVectorLiteral()
+			if err != nil {
+				return nil, err
+			}
+			stmt.OrderANN = true
+			stmt.ANNTarget = target.Values
+		} else {
+			switch p.peek().Kind {
+			case tAsc:
+				p.consume()
+			case tDesc:
+				p.consume()
+				stmt.OrderDesc = true
+			}
 		}
 	}
 
@@ -508,10 +522,63 @@ func (p *parser) parseCreate() (*CreateTableStmt, error) {
 	if _, err := p.expect(tRParen, ")"); err != nil {
 		return nil, err
 	}
+	for p.peek().Kind == tComma {
+		p.consume()
+		col, err := p.expect(tIdent, "column name")
+		if err != nil {
+			return nil, err
+		}
+		def, err := p.parseColumnDefinition(col.Lit)
+		if err != nil {
+			return nil, err
+		}
+		stmt.AttributeDefinitions = append(stmt.AttributeDefinitions, def)
+	}
 	if _, err := p.expect(tRParen, ")"); err != nil {
 		return nil, err
 	}
+	if p.peek().Kind == tWith {
+		p.consume()
+		if _, err := p.expect(tStorage, "STORAGE"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tEq, "="); err != nil {
+			return nil, err
+		}
+		switch p.peek().Kind {
+		case tString, tIdent:
+			stmt.StorageClass = p.consume().Lit
+		default:
+			return nil, fmt.Errorf("expected storage class after WITH STORAGE =")
+		}
+	}
 	return stmt, nil
+}
+
+func (p *parser) parseColumnDefinition(name string) (CreateAttributeDefinition, error) {
+	typ, err := p.expect(tIdent, "attribute type")
+	if err != nil {
+		return CreateAttributeDefinition{}, err
+	}
+	def := CreateAttributeDefinition{Name: name, Type: strings.ToUpper(typ.Lit)}
+	if strings.EqualFold(def.Type, "V") {
+		if _, err := p.expect(tLt, "<"); err != nil {
+			return CreateAttributeDefinition{}, err
+		}
+		n, err := p.expect(tNumber, "vector dimension")
+		if err != nil {
+			return CreateAttributeDefinition{}, err
+		}
+		dim, err := strconv.Atoi(n.Lit)
+		if err != nil || dim <= 0 {
+			return CreateAttributeDefinition{}, fmt.Errorf("bad vector dimension %q", n.Lit)
+		}
+		def.VectorDimensions = dim
+		if _, err := p.expect(tGt, ">"); err != nil {
+			return CreateAttributeDefinition{}, err
+		}
+	}
+	return def, nil
 }
 
 // ---------- DROP TABLE ----------
@@ -710,6 +777,8 @@ func (p *parser) parseFuncCallTail(name string) (Expr, error) {
 func (p *parser) parseValue() (Expr, error) {
 	t := p.peek()
 	switch t.Kind {
+	case tLBracket:
+		return p.parseVectorLiteral()
 	case tString:
 		p.consume()
 		return &Literal{Kind: LitString, Value: t.Lit}, nil
@@ -736,4 +805,35 @@ func (p *parser) parseValue() (Expr, error) {
 		return &ColumnRef{Name: t.Lit}, nil
 	}
 	return nil, fmt.Errorf("expected value at %d, got %q", t.Pos, t.Lit)
+}
+
+func (p *parser) parseVectorLiteral() (*VectorLiteral, error) {
+	if _, err := p.expect(tLBracket, "["); err != nil {
+		return nil, err
+	}
+	var out []float64
+	if p.peek().Kind == tRBracket {
+		p.consume()
+		return &VectorLiteral{Values: out}, nil
+	}
+	for {
+		tok, err := p.expect(tNumber, "vector number")
+		if err != nil {
+			return nil, err
+		}
+		f, err := strconv.ParseFloat(tok.Lit, 64)
+		if err != nil {
+			return nil, fmt.Errorf("bad vector number %q: %w", tok.Lit, err)
+		}
+		out = append(out, f)
+		if p.peek().Kind == tComma {
+			p.consume()
+			continue
+		}
+		break
+	}
+	if _, err := p.expect(tRBracket, "]"); err != nil {
+		return nil, err
+	}
+	return &VectorLiteral{Values: out}, nil
 }

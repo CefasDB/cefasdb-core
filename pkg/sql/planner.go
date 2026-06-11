@@ -41,10 +41,20 @@ func PlanStmt(stmt Stmt, cat Catalog) (Plan, error) {
 }
 
 func planCreateTable(s *CreateTableStmt) (*PlanCreateTable, error) {
+	defs := make([]types.AttributeDefinition, 0, len(s.AttributeDefinitions))
+	for _, def := range s.AttributeDefinitions {
+		defs = append(defs, types.AttributeDefinition{
+			Name:             def.Name,
+			Type:             strings.ToUpper(def.Type),
+			VectorDimensions: def.VectorDimensions,
+		})
+	}
 	return &PlanCreateTable{
 		Descriptor: types.TableDescriptor{
-			Name:      s.Table,
-			KeySchema: types.KeySchema{PK: s.PK, SK: s.SK},
+			Name:                 s.Table,
+			KeySchema:            types.KeySchema{PK: s.PK, SK: s.SK},
+			StorageClass:         s.StorageClass,
+			AttributeDefinitions: defs,
 		},
 	}, nil
 }
@@ -127,6 +137,22 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.OrderANN {
+		if s.Limit <= 0 {
+			return nil, fmt.Errorf("ANN ORDER BY requires LIMIT")
+		}
+		if dim, ok := vectorDimension(td, s.OrderBy); ok && dim != len(s.ANNTarget) {
+			return nil, fmt.Errorf("ANN target dimension %d != declared dimension %d for %q", len(s.ANNTarget), dim, s.OrderBy)
+		}
+		return &PlanANN{
+			Table:      s.Table,
+			Field:      s.OrderBy,
+			Target:     types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), s.ANNTarget...)},
+			Limit:      s.Limit,
+			Project:    s.Columns,
+			Descriptor: td,
+		}, nil
+	}
 
 	// Spatial path: WHERE includes a ST_Within / ST_DWithin call.
 	if spq, indexName, ok := extractSpatialQuery(s.Where, td, s.IndexName); ok {
@@ -184,6 +210,15 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		PostFilter: postFilter,
 		Count:      s.Count,
 	}, nil
+}
+
+func vectorDimension(td types.TableDescriptor, field string) (int, bool) {
+	for _, def := range td.AttributeDefinitions {
+		if def.Name == field && strings.EqualFold(def.Type, "V") && def.VectorDimensions > 0 {
+			return def.VectorDimensions, true
+		}
+	}
+	return 0, false
 }
 
 // ---------- WHERE-clause analysis ----------
@@ -502,19 +537,21 @@ func nextLex(v types.AttributeValue) types.AttributeValue {
 // AttributeValue. Numbers stay as canonical text to preserve
 // arbitrary precision.
 func evalLiteral(e Expr) (types.AttributeValue, error) {
-	lit, ok := e.(*Literal)
-	if !ok {
-		return types.AttributeValue{}, fmt.Errorf("expected literal, got %T", e)
+	switch lit := e.(type) {
+	case *Literal:
+		switch lit.Kind {
+		case LitString:
+			return types.AttributeValue{T: types.AttrS, S: lit.Value}, nil
+		case LitNumber:
+			return types.AttributeValue{T: types.AttrN, N: strings.TrimSpace(lit.Value)}, nil
+		case LitBool:
+			return types.AttributeValue{T: types.AttrBOOL, BOOL: lit.Bool}, nil
+		case LitNull:
+			return types.AttributeValue{T: types.AttrNull}, nil
+		}
+		return types.AttributeValue{}, fmt.Errorf("unsupported literal kind %d", lit.Kind)
+	case *VectorLiteral:
+		return types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), lit.Values...)}, nil
 	}
-	switch lit.Kind {
-	case LitString:
-		return types.AttributeValue{T: types.AttrS, S: lit.Value}, nil
-	case LitNumber:
-		return types.AttributeValue{T: types.AttrN, N: strings.TrimSpace(lit.Value)}, nil
-	case LitBool:
-		return types.AttributeValue{T: types.AttrBOOL, BOOL: lit.Bool}, nil
-	case LitNull:
-		return types.AttributeValue{T: types.AttrNull}, nil
-	}
-	return types.AttributeValue{}, fmt.Errorf("unsupported literal kind %d", lit.Kind)
+	return types.AttributeValue{}, fmt.Errorf("expected literal, got %T", e)
 }

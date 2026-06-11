@@ -18,6 +18,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -151,6 +152,7 @@ func (s *GRPCServer) DescribeTable(ctx context.Context, req *cefaspb.DescribeTab
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
+	td = s.enrichTableDescriptor(td)
 	return &cefaspb.DescribeTableResponse{Descriptor_: tableDescriptorToPB(td)}, nil
 }
 
@@ -161,9 +163,23 @@ func (s *GRPCServer) ListTables(ctx context.Context, _ *cefaspb.ListTablesReques
 	all := s.cat.List()
 	out := make([]*cefaspb.TableDescriptor, 0, len(all))
 	for _, td := range all {
+		td = s.enrichTableDescriptor(td)
 		out = append(out, tableDescriptorToPB(td))
 	}
 	return &cefaspb.ListTablesResponse{Tables: out}, nil
+}
+
+func (s *GRPCServer) enrichTableDescriptor(td types.TableDescriptor) types.TableDescriptor {
+	if td.StorageClass != types.StorageClassMemory {
+		return td
+	}
+	var bytes int64
+	for _, db := range s.allShards() {
+		_ = db.LoadMemoryTable(td.Name)
+		bytes += db.MemoryTableFootprint(td.Name)
+	}
+	td.MemoryFootprintBytes = bytes
+	return td
 }
 
 func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableRequest) (*cefaspb.DropTableResponse, error) {
@@ -778,7 +794,7 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
+	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat, DistanceResolver: s.sqlDistanceResolver}
 	res, err := ex.Execute(plan)
 	if err != nil {
 		return nil, mapStorageErr(err)
@@ -788,6 +804,10 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 		out.Rows = append(out.Rows, &cefaspb.Item{Attributes: itemToPB(row)})
 	}
 	return out, nil
+}
+
+func (s *GRPCServer) sqlDistanceResolver(table, field string, target types.AttributeValue) (cquery.DistanceOp, error) {
+	return s.resolveTopKDistance(table, field, "", target)
 }
 
 func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {
@@ -867,11 +887,42 @@ func (s *GRPCServer) CreateBackup(ctx context.Context, req *cefaspb.CreateBackup
 			tables = append(tables, td.Name)
 		}
 	}
-	meta, err := s.db.CreateBackup(req.GetName(), tables)
+	meta, err := s.createBackupAcrossShards(req.GetName(), tables)
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.CreateBackupResponse{Backup: backupMetaToPB(meta)}, nil
+}
+
+func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (storage.BackupMetadata, error) {
+	if s.manager == nil {
+		return s.db.CreateBackupForShard(name, tables, "0", 0)
+	}
+	var primary storage.BackupMetadata
+	coverage := make([]storage.BackupShardCoverage, 0, len(s.manager.Shards()))
+	for i, sh := range s.manager.Shards() {
+		meta, err := sh.Storage.CreateBackupForShard(name, tables, fmt.Sprint(sh.ID), sh.Epoch)
+		if err != nil {
+			return storage.BackupMetadata{}, err
+		}
+		if i == 0 {
+			primary = meta
+		}
+		if len(meta.ShardCoverage) > 0 {
+			coverage = append(coverage, meta.ShardCoverage[0])
+		} else {
+			coverage = append(coverage, storage.BackupShardCoverage{
+				ShardID:        fmt.Sprint(sh.ID),
+				PlacementEpoch: sh.Epoch,
+				TableStats:     meta.TableStats,
+			})
+		}
+	}
+	primary.ShardCoverage = coverage
+	if err := s.db.StoreBackupMetadata(primary); err != nil {
+		return storage.BackupMetadata{}, err
+	}
+	return primary, nil
 }
 
 func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequest) (*cefaspb.ListBackupsResponse, error) {
@@ -944,14 +995,22 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
-			storage.RestoreOptions{DryRun: true},
+			storage.RestoreOptions{
+				DryRun:            true,
+				TargetChangeIndex: req.GetTargetChangeIndex(),
+				TargetUnixNano:    req.GetTargetUnixNano(),
+			},
 			register,
 		)
 	} else {
-		res, err = s.db.RestoreTableFromBackup(
+		res, err = s.db.RestoreTableFromBackupWithOptions(
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
+			storage.RestoreOptions{
+				TargetChangeIndex: req.GetTargetChangeIndex(),
+				TargetUnixNano:    req.GetTargetUnixNano(),
+			},
 			register,
 		)
 	}
@@ -973,6 +1032,18 @@ func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 	for _, stat := range m.TableStats {
 		stats = append(stats, backupTableStatsToPB(stat))
 	}
+	coverage := make([]*cefaspb.BackupShardCoverage, 0, len(m.ShardCoverage))
+	for _, shard := range m.ShardCoverage {
+		shardStats := make([]*cefaspb.BackupTableStats, 0, len(shard.TableStats))
+		for _, stat := range shard.TableStats {
+			shardStats = append(shardStats, backupTableStatsToPB(stat))
+		}
+		coverage = append(coverage, &cefaspb.BackupShardCoverage{
+			ShardId:        shard.ShardID,
+			PlacementEpoch: shard.PlacementEpoch,
+			TableStats:     shardStats,
+		})
+	}
 	return &cefaspb.BackupDescriptor{
 		Name:            m.Name,
 		CreatedAtUnix:   m.CreatedAt,
@@ -982,6 +1053,9 @@ func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 		ManifestStatus:  m.ManifestStatus,
 		RequestedTables: m.RequestedTables,
 		TableStats:      stats,
+		ShardCoverage:   coverage,
+		ChangeIndex:     m.ChangeIndex,
+		ChangeUnixNano:  m.ChangeUnixNano,
 	}
 }
 

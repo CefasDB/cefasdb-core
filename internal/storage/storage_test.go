@@ -183,6 +183,7 @@ func TestEncodeDecodeItemRoundTrip(t *testing.T) {
 		"ss":   {T: types.AttrSS, SS: []string{"a", "b", "c"}},
 		"l":    {T: types.AttrL, L: []types.AttributeValue{sAttr("x"), nAttr("1")}},
 		"m":    {T: types.AttrM, M: map[string]types.AttributeValue{"inner": sAttr("v")}},
+		"vec":  {T: types.AttrVec, Vec: []float64{0.1, 0.2, 0.3}},
 	}
 	enc, err := storage.EncodeItem(item)
 	if err != nil {
@@ -202,6 +203,46 @@ func TestEncodeDecodeItemRoundTrip(t *testing.T) {
 	}
 	if dec["m"].M["inner"].S != "v" {
 		t.Fatalf("nested map lost: %+v", dec["m"])
+	}
+	if dec["vec"].T != types.AttrVec || len(dec["vec"].Vec) != 3 || dec["vec"].Vec[1] != 0.2 {
+		t.Fatalf("vector lost: %+v", dec["vec"])
+	}
+}
+
+func TestMemoryStorageClassValidatesVectorDimAndReportsFootprint(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{
+		Name:         "docs",
+		KeySchema:    types.KeySchema{PK: "id"},
+		StorageClass: types.StorageClassMemory,
+		AttributeDefinitions: []types.AttributeDefinition{{
+			Name:             "emb",
+			Type:             "V",
+			VectorDimensions: 3,
+		}},
+	}
+	if err := db.PutItemWith(td, types.Item{
+		"id":  sAttr("a"),
+		"emb": {T: types.AttrVec, Vec: []float64{1, 0, 0}},
+	}, storage.PutOptions{}); err != nil {
+		t.Fatalf("put memory vector: %v", err)
+	}
+	if db.MemoryTableFootprint("docs") <= 0 {
+		t.Fatal("expected positive memory footprint")
+	}
+	got, err := db.GetItem("docs", td.KeySchema, types.Item{"id": sAttr("a")})
+	if err != nil {
+		t.Fatalf("get memory vector: %v", err)
+	}
+	if got["emb"].T != types.AttrVec || len(got["emb"].Vec) != 3 {
+		t.Fatalf("unexpected item: %+v", got)
+	}
+	err = db.PutItemWith(td, types.Item{
+		"id":  sAttr("bad"),
+		"emb": {T: types.AttrVec, Vec: []float64{1, 0}},
+	}, storage.PutOptions{})
+	if err == nil {
+		t.Fatal("expected vector dimension validation error")
 	}
 }
 

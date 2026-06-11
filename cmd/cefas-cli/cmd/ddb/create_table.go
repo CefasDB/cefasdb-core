@@ -12,10 +12,11 @@ import (
 
 func registerCreateTable(root *cobra.Command) {
 	var (
-		table       string
-		attrDefs    []string
-		keySchema   []string
-		billingMode string
+		table        string
+		attrDefs     []string
+		keySchema    []string
+		billingMode  string
+		storageClass string
 	)
 	c := &cobra.Command{
 		Use:   "create-table",
@@ -50,14 +51,23 @@ ignored.`,
 			if err != nil {
 				return err
 			}
-			if _, err := parseAttrDefs(attrDefs); err != nil {
+			defs, err := parseAttrDefs(attrDefs)
+			if err != nil {
 				return err
 			}
 			_ = billingMode // aws-cli compat; cefas has no billing tier
 
 			td := types.TableDescriptor{
-				Name:      table,
-				KeySchema: types.KeySchema{PK: pk, SK: sk},
+				Name:         table,
+				KeySchema:    types.KeySchema{PK: pk, SK: sk},
+				StorageClass: storageClass,
+			}
+			for _, def := range defs {
+				td.AttributeDefinitions = append(td.AttributeDefinitions, types.AttributeDefinition{
+					Name:             def.Name,
+					Type:             def.Type,
+					VectorDimensions: def.VectorDimensions,
+				})
 			}
 			ctx := cmd.Context()
 			cli, profile, err := runtime.Dial(ctx)
@@ -74,18 +84,20 @@ ignored.`,
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
 				"TableDescription": map[string]any{
-					"TableName":   td.Name,
-					"TableStatus": "ACTIVE",
-					"KeySchema":   keySchemaWire(pk, sk),
+					"TableName":    td.Name,
+					"TableStatus":  "ACTIVE",
+					"KeySchema":    keySchemaWire(pk, sk),
+					"StorageClass": td.StorageClass,
 				},
 			})
 		},
 	}
 	f := c.Flags()
 	f.StringVar(&table, "table-name", "", "Table name (required)")
-	f.StringArrayVar(&attrDefs, "attribute-definitions", nil, "AttributeName=<n>,AttributeType=<S|N|B> (repeatable)")
+	f.StringArrayVar(&attrDefs, "attribute-definitions", nil, "AttributeName=<n>,AttributeType=<S|N|B|V<dim>> (repeatable)")
 	f.StringArrayVar(&keySchema, "key-schema", nil, "AttributeName=<n>,KeyType=<HASH|RANGE> (repeatable)")
 	f.StringVar(&billingMode, "billing-mode", "", "Accepted for aws-cli compat; cefas ignores it")
+	f.StringVar(&storageClass, "storage-class", "", "Storage class: disk or memory")
 	_ = c.MarkFlagRequired("table-name")
 	root.AddCommand(c)
 }
