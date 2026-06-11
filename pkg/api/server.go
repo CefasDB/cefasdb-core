@@ -646,7 +646,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	queryDB := s.storageFor(pkBytes)
 	var items []types.Item
 	if req.IndexName != "" {
-		items, err = queryDB.QueryByGSI(td, req.IndexName, pkVal, storage.QueryOptions{
+		items, err = s.queryByIndex(td, req.IndexName, pkVal, storage.QueryOptions{
 			SKLow:  lo,
 			SKHigh: hi,
 			Limit:  req.Limit,
