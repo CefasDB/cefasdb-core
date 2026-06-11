@@ -94,6 +94,50 @@ func TestPlanMoveReplacesVoter(t *testing.T) {
 	}
 }
 
+func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
+	cat := plannerCatalog(1)
+	start := uint64(0)
+	end := uint64(1) << 63
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:  cluster.PlacementOperationRangeMove,
+		ShardID:    0,
+		RangeStart: &start,
+		RangeEnd:   &end,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.RequiresDataCopy || plan.RequiresRestart || !plan.ApplySupported {
+		t.Fatalf("unexpected range move flags: %+v", plan)
+	}
+	if len(plan.After.Shards) != 2 {
+		t.Fatalf("after shard count = %d, want 2", len(plan.After.Shards))
+	}
+	if plan.After.Shards[0].State != cluster.ShardStateMoving {
+		t.Fatalf("source state = %s", plan.After.Shards[0].State)
+	}
+	if plan.After.Shards[1].State != cluster.ShardStateCreating {
+		t.Fatalf("target state = %s", plan.After.Shards[1].State)
+	}
+	if len(plan.After.Shards[1].Ranges) != 1 || plan.After.Shards[1].Ranges[0] != (cluster.TokenRange{Start: start, End: end}) {
+		t.Fatalf("target range = %+v", plan.After.Shards[1].Ranges)
+	}
+	if len(plan.Steps) != 6 || plan.Steps[0].Action != "create_shard" || plan.Steps[1].Action != "target_membership" || plan.Steps[2].Action != "copy_range" || plan.Steps[4].Action != "publish_cutover" {
+		t.Fatalf("unexpected range move steps: %+v", plan.Steps)
+	}
+	if err := cluster.ValidatePlacement(plan.After); err != nil {
+		t.Fatalf("planned placement invalid: %v", err)
+	}
+	router, err := cluster.NewRouterFromCatalog(plan.After)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
+	if got := router.ShardForPK([]byte(key)); got != 0 {
+		t.Fatalf("transition route = %d, want source shard 0", got)
+	}
+}
+
 func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 	cat := plannerCatalog(3)
 	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
@@ -225,6 +269,59 @@ func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
 	}
 	if len(retry.Steps) != 1 || retry.Steps[0].Status != "already_applied" {
 		t.Fatalf("unexpected retry result: %+v", retry)
+	}
+}
+
+func TestApplyPlacementPreparesRangeMoveOnline(t *testing.T) {
+	root := t.TempDir()
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    1,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	start := uint64(0)
+	end := uint64(1) << 63
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation:  cluster.PlacementOperationRangeMove,
+		ShardID:    0,
+		RangeStart: &start,
+		RangeEnd:   &end,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch || mgr.RoutingEpoch() != plan.AfterEpoch {
+		t.Fatalf("epoch not advanced: result=%d manager=%d plan=%d", result.AfterEpoch, mgr.RoutingEpoch(), plan.AfterEpoch)
+	}
+	if len(mgr.Shards()) != 2 {
+		t.Fatalf("open shards = %d, want 2", len(mgr.Shards()))
+	}
+	target, ok := mgr.Shard(1)
+	if !ok || target.State != cluster.ShardStateCreating {
+		t.Fatalf("target shard not creating: %#v", target)
+	}
+	if len(result.Steps) != 6 || result.Steps[0].Status != "ok" || result.Steps[1].Status != "ok" || result.Steps[2].Status != "pending_finalize" {
+		t.Fatalf("unexpected apply steps: %+v", result.Steps)
+	}
+	if _, err := os.Stat(filepath.Join(root, "shards", "1", "state")); err != nil {
+		t.Fatalf("target state dir not created: %v", err)
+	}
+	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
+	if got := mgr.Router().ShardForPK([]byte(key)); got != 0 {
+		t.Fatalf("transition route = %d, want source shard 0", got)
 	}
 }
 
@@ -516,6 +613,80 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 	}
 }
 
+func TestFinalizeRangeMoveCopiesRangeAndActivatesTarget(t *testing.T) {
+	mgr, plan := openTransitionRangeMoveManager(t)
+	defer mgr.Close()
+
+	source, _ := mgr.Shard(0)
+	target, _ := mgr.Shard(1)
+	td := types.TableDescriptor{Name: "events", KeySchema: types.KeySchema{PK: "id"}}
+	sourceCatalog, err := catalog.New(source.Storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sourceCatalog.Create(td); err != nil {
+		t.Fatal(err)
+	}
+
+	moveRange := plan.After.Shards[1].Ranges[0]
+	stayRange := cluster.TokenRange{Start: moveRange.End, End: 0}
+	movedKey := keyInRange(t, moveRange)
+	stayKey := keyInRange(t, stayRange)
+	if err := source.Storage.PutItem(td.Name, td.KeySchema, types.Item{
+		"id": {T: types.AttrS, S: movedKey},
+		"v":  {T: types.AttrS, S: "moved"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Storage.PutItem(td.Name, td.KeySchema, types.Item{
+		"id": {T: types.AttrS, S: stayKey},
+		"v":  {T: types.AttrS, S: "stay"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := mgr.FinalizeRangeMove(context.Background(), cluster.RangeMoveFinalizeRequest{
+		SourceShardID: 0,
+		TargetShardID: 1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CopiedKeys != 1 || result.DeletedKeys != 1 || result.CopiedCatalogKeys != 1 {
+		t.Fatalf("unexpected copy/delete counts: %+v", result)
+	}
+	if result.Placement.Shards[0].State != cluster.ShardStateActive || result.Placement.Shards[1].State != cluster.ShardStateActive {
+		t.Fatalf("unexpected shard states: %+v", result.Placement.Shards)
+	}
+	if len(result.SourceRangesAfter) != 1 || result.SourceRangesAfter[0] != stayRange {
+		t.Fatalf("source ranges after = %+v, want %+v", result.SourceRangesAfter, stayRange)
+	}
+	if got := mgr.Router().ShardForPK([]byte(movedKey)); got != 1 {
+		t.Fatalf("moved key routes to shard %d, want target shard 1", got)
+	}
+	if got := mgr.Router().ShardForPK([]byte(stayKey)); got != 0 {
+		t.Fatalf("stay key routes to shard %d, want source shard 0", got)
+	}
+	got, err := target.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: movedKey}})
+	if err != nil {
+		t.Fatalf("target get: %v", err)
+	}
+	if got["v"].S != "moved" {
+		t.Fatalf("target value = %q", got["v"].S)
+	}
+	if _, err := source.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: movedKey}}); !errors.Is(err, types.ErrItemNotFound) {
+		t.Fatalf("source moved get error = %v, want ErrItemNotFound", err)
+	}
+	got, err = source.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: stayKey}})
+	if err != nil {
+		t.Fatalf("source stay get: %v", err)
+	}
+	if got["v"].S != "stay" {
+		t.Fatalf("source stay value = %q", got["v"].S)
+	}
+}
+
 func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
@@ -523,6 +694,36 @@ func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.Placeme
 	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
 		Operation: cluster.PlacementOperationSplit,
 		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr, plan
+}
+
+func openTransitionRangeMoveManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
+	t.Helper()
+	root := t.TempDir()
+	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	start := uint64(0)
+	end := uint64(1) << 63
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:  cluster.PlacementOperationRangeMove,
+		ShardID:    0,
+		RangeStart: &start,
+		RangeEnd:   &end,
 	})
 	if err != nil {
 		t.Fatal(err)

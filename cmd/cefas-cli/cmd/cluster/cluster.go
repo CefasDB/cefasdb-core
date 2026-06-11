@@ -27,6 +27,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(planCmd())
 	c.AddCommand(applyCmd())
 	c.AddCommand(splitCmd())
+	c.AddCommand(rangeMoveCmd())
 	root.AddCommand(c)
 }
 
@@ -201,6 +202,7 @@ func planCmd() *cobra.Command {
 		Short: "Plan shard placement changes",
 	}
 	c.AddCommand(planSplitCmd())
+	c.AddCommand(planRangeMoveCmd())
 	c.AddCommand(planMoveCmd())
 	c.AddCommand(planDrainCmd())
 	return c
@@ -239,6 +241,50 @@ func planSplitCmd() *cobra.Command {
 	f.Uint32Var(&shardID, "shard", 0, "Shard ID to split")
 	f.Uint64Var(&splitToken, "split-token", 0, "Optional split token; default is midpoint")
 	f.Uint32Var(&newShardID, "new-shard", 0, "Optional new shard ID; must be next contiguous ID")
+	return c
+}
+
+func planRangeMoveCmd() *cobra.Command {
+	var (
+		sourceShardID uint32
+		targetShardID uint32
+		rangeStart    uint64
+		rangeEnd      uint64
+		targetVoters  []string
+	)
+	c := &cobra.Command{
+		Use:   "range-move",
+		Short: "Plan moving a token range to a new shard",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("source-shard") {
+				return fmt.Errorf("--source-shard is required")
+			}
+			if !cmd.Flags().Changed("range-start") || !cmd.Flags().Changed("range-end") {
+				return fmt.Errorf("--range-start and --range-end are required")
+			}
+			start := rangeStart
+			end := rangeEnd
+			req := client.PlacementPlanRequest{
+				Operation:    "range_move",
+				ShardID:      sourceShardID,
+				RangeStart:   &start,
+				RangeEnd:     &end,
+				TargetVoters: targetVoters,
+			}
+			if cmd.Flags().Changed("target-shard") {
+				v := targetShardID
+				req.TargetShardID = &v
+			}
+			return runPlacementPlan(cmd, req)
+		},
+	}
+	f := c.Flags()
+	f.Uint32Var(&sourceShardID, "source-shard", 0, "Source shard ID that currently owns the range")
+	f.Uint32Var(&targetShardID, "target-shard", 0, "Optional target shard ID; must be next contiguous ID")
+	f.Uint64Var(&rangeStart, "range-start", 0, "Inclusive token range start")
+	f.Uint64Var(&rangeEnd, "range-end", 0, "Exclusive token range end; equal to start means full ring")
+	f.StringArrayVar(&targetVoters, "target-voter", nil, "Target shard voter; repeat for multiple nodes")
 	return c
 }
 
@@ -395,6 +441,71 @@ func splitCmd() *cobra.Command {
 		Short: "Manage prepared shard splits",
 	}
 	c.AddCommand(splitFinalizeCmd())
+	return c
+}
+
+func rangeMoveCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "range-move",
+		Short: "Manage prepared token range moves",
+	}
+	c.AddCommand(rangeMoveFinalizeCmd())
+	return c
+}
+
+func rangeMoveFinalizeCmd() *cobra.Command {
+	var (
+		sourceShardID uint32
+		targetShardID uint32
+		expectedEpoch uint64
+		timeoutMS     int
+		yes           bool
+	)
+	c := &cobra.Command{
+		Use:   "finalize",
+		Short: "Copy, verify, cut over, and clean up a prepared range move",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("source-shard") {
+				return fmt.Errorf("--source-shard is required")
+			}
+			if !cmd.Flags().Changed("target-shard") {
+				return fmt.Errorf("--target-shard is required")
+			}
+			if !cmd.Flags().Changed("expected-epoch") {
+				return fmt.Errorf("--expected-epoch is required")
+			}
+			if !yes {
+				return fmt.Errorf("--yes is required to finalize a range move")
+			}
+			ctx := cmd.Context()
+			cli, profile, err := runtime.Dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cli.Close()
+			result, err := cli.FinalizeRangeMove(ctx, client.RangeMoveFinalizeRequest{
+				SourceShardID: sourceShardID,
+				TargetShardID: targetShardID,
+				ExpectedEpoch: expectedEpoch,
+				TimeoutMS:     timeoutMS,
+			})
+			if err != nil {
+				return fmt.Errorf("finalize range move: %w", err)
+			}
+			fm, err := output.Validate(profile.Output)
+			if err != nil {
+				return err
+			}
+			return output.New(cmd.OutOrStdout(), fm).Object(result)
+		},
+	}
+	f := c.Flags()
+	f.Uint32Var(&sourceShardID, "source-shard", 0, "Moving source shard ID")
+	f.Uint32Var(&targetShardID, "target-shard", 0, "Prepared target shard ID")
+	f.Uint64Var(&expectedEpoch, "expected-epoch", 0, "Expected current routing epoch")
+	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-write timeout in milliseconds")
+	f.BoolVar(&yes, "yes", false, "Confirm finalizing the range move")
 	return c
 }
 

@@ -36,6 +36,27 @@ func TestHTTPPlacementPlanSplit(t *testing.T) {
 	}
 }
 
+func TestHTTPPlacementPlanRangeMove(t *testing.T) {
+	mux, cleanup := placementTestMux(t)
+	defer cleanup()
+
+	body := strings.NewReader(`{"operation":"range_move","shardId":0,"rangeStart":0,"rangeEnd":9223372036854775808}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/cluster/placement/plan", body)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var plan cluster.PlacementPlan
+	if err := json.NewDecoder(rec.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Operation != cluster.PlacementOperationRangeMove || len(plan.After.Shards) != 2 || plan.After.Shards[0].State != cluster.ShardStateMoving {
+		t.Fatalf("unexpected plan: %+v", plan)
+	}
+}
+
 func TestHTTPPlacementApplyNoopMove(t *testing.T) {
 	mux, cleanup := placementTestMux(t)
 	defer cleanup()
@@ -125,6 +146,33 @@ func TestHTTPRollbackSplit(t *testing.T) {
 	}
 }
 
+func TestHTTPFinalizeRangeMove(t *testing.T) {
+	mux, cleanup, plan := transitionRangeMovePlacementTestMux(t)
+	defer cleanup()
+
+	raw, err := json.Marshal(cluster.RangeMoveFinalizeRequest{
+		SourceShardID: 0,
+		TargetShardID: 1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/cluster/placement/range-move/finalize", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var result cluster.RangeMoveFinalizeResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch+1 || len(result.Placement.Shards) != 2 || result.Placement.Shards[1].State != cluster.ShardStateActive {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
 func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 	t.Helper()
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -156,12 +204,65 @@ func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.P
 	return env.Mux, env.Cleanup, env.Plan
 }
 
+func transitionRangeMovePlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.PlacementPlan) {
+	t.Helper()
+	env := transitionRangeMovePlacementTestEnv(t)
+	return env.Mux, env.Cleanup, env.Plan
+}
+
 type transitionPlacementEnv struct {
 	Mux     *http.ServeMux
 	Manager *cluster.Manager
 	Catalog *catalog.Catalog
 	Plan    cluster.PlacementPlan
 	Cleanup func()
+}
+
+func transitionRangeMovePlacementTestEnv(t *testing.T) transitionPlacementEnv {
+	t.Helper()
+	root := t.TempDir()
+	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	start := uint64(0)
+	end := uint64(1) << 63
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:  cluster.PlacementOperationRangeMove,
+		ShardID:    0,
+		RangeStart: &start,
+		RangeEnd:   &end,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:   root,
+		Shards: 2,
+		SelfID: "n1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shard0, ok := mgr.Shard(0)
+	if !ok {
+		t.Fatal("missing shard 0")
+	}
+	catStore, err := catalog.New(shard0.Storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(shard0.Storage, catStore)
+	srv.AttachManager(mgr)
+	mux := http.NewServeMux()
+	srv.Routes(mux)
+	return transitionPlacementEnv{
+		Mux:     mux,
+		Manager: mgr,
+		Catalog: catStore,
+		Plan:    plan,
+		Cleanup: func() { _ = mgr.Close() },
+	}
 }
 
 func transitionPlacementTestEnv(t *testing.T) transitionPlacementEnv {

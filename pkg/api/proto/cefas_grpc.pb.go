@@ -50,6 +50,7 @@ const (
 	Cefas_PlanPlacement_FullMethodName          = "/cefas.v1.Cefas/PlanPlacement"
 	Cefas_ApplyPlacement_FullMethodName         = "/cefas.v1.Cefas/ApplyPlacement"
 	Cefas_FinalizeSplit_FullMethodName          = "/cefas.v1.Cefas/FinalizeSplit"
+	Cefas_FinalizeRangeMove_FullMethodName      = "/cefas.v1.Cefas/FinalizeRangeMove"
 	Cefas_StreamChanges_FullMethodName          = "/cefas.v1.Cefas/StreamChanges"
 	Cefas_ListSnapshots_FullMethodName          = "/cefas.v1.Cefas/ListSnapshots"
 	Cefas_Compact_FullMethodName                = "/cefas.v1.Cefas/Compact"
@@ -112,6 +113,7 @@ type CefasClient interface {
 	PlanPlacement(ctx context.Context, in *PlanPlacementRequest, opts ...grpc.CallOption) (*PlanPlacementResponse, error)
 	ApplyPlacement(ctx context.Context, in *ApplyPlacementRequest, opts ...grpc.CallOption) (*ApplyPlacementResponse, error)
 	FinalizeSplit(ctx context.Context, in *FinalizeSplitRequest, opts ...grpc.CallOption) (*FinalizeSplitResponse, error)
+	FinalizeRangeMove(ctx context.Context, in *FinalizeRangeMoveRequest, opts ...grpc.CallOption) (*FinalizeRangeMoveResponse, error)
 	// Change Data Capture stream. Subscribers receive every committed
 	// write in raft log order. Slow consumers may miss events when their
 	// server-side ring buffer fills; at-least-once-in-order for live
@@ -421,6 +423,16 @@ func (c *cefasClient) FinalizeSplit(ctx context.Context, in *FinalizeSplitReques
 	return out, nil
 }
 
+func (c *cefasClient) FinalizeRangeMove(ctx context.Context, in *FinalizeRangeMoveRequest, opts ...grpc.CallOption) (*FinalizeRangeMoveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinalizeRangeMoveResponse)
+	err := c.cc.Invoke(ctx, Cefas_FinalizeRangeMove_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) StreamChanges(ctx context.Context, in *StreamChangesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChangeEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Cefas_ServiceDesc.Streams[3], Cefas_StreamChanges_FullMethodName, cOpts...)
@@ -670,6 +682,7 @@ type CefasServer interface {
 	PlanPlacement(context.Context, *PlanPlacementRequest) (*PlanPlacementResponse, error)
 	ApplyPlacement(context.Context, *ApplyPlacementRequest) (*ApplyPlacementResponse, error)
 	FinalizeSplit(context.Context, *FinalizeSplitRequest) (*FinalizeSplitResponse, error)
+	FinalizeRangeMove(context.Context, *FinalizeRangeMoveRequest) (*FinalizeRangeMoveResponse, error)
 	// Change Data Capture stream. Subscribers receive every committed
 	// write in raft log order. Slow consumers may miss events when their
 	// server-side ring buffer fills; at-least-once-in-order for live
@@ -783,6 +796,9 @@ func (UnimplementedCefasServer) ApplyPlacement(context.Context, *ApplyPlacementR
 }
 func (UnimplementedCefasServer) FinalizeSplit(context.Context, *FinalizeSplitRequest) (*FinalizeSplitResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FinalizeSplit not implemented")
+}
+func (UnimplementedCefasServer) FinalizeRangeMove(context.Context, *FinalizeRangeMoveRequest) (*FinalizeRangeMoveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FinalizeRangeMove not implemented")
 }
 func (UnimplementedCefasServer) StreamChanges(*StreamChangesRequest, grpc.ServerStreamingServer[ChangeEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamChanges not implemented")
@@ -1273,6 +1289,24 @@ func _Cefas_FinalizeSplit_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_FinalizeRangeMove_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinalizeRangeMoveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).FinalizeRangeMove(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_FinalizeRangeMove_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).FinalizeRangeMove(ctx, req.(*FinalizeRangeMoveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_StreamChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamChangesRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1691,6 +1725,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FinalizeSplit",
 			Handler:    _Cefas_FinalizeSplit_Handler,
+		},
+		{
+			MethodName: "FinalizeRangeMove",
+			Handler:    _Cefas_FinalizeRangeMove_Handler,
 		},
 		{
 			MethodName: "ListSnapshots",

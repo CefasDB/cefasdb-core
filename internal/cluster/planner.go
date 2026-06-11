@@ -14,22 +14,26 @@ import (
 type PlacementOperation string
 
 const (
-	PlacementOperationSplit PlacementOperation = "split"
-	PlacementOperationMove  PlacementOperation = "move"
-	PlacementOperationDrain PlacementOperation = "drain"
+	PlacementOperationSplit     PlacementOperation = "split"
+	PlacementOperationMove      PlacementOperation = "move"
+	PlacementOperationRangeMove PlacementOperation = "range_move"
+	PlacementOperationDrain     PlacementOperation = "drain"
 )
 
 type PlacementPlanRequest struct {
-	Operation    PlacementOperation `json:"operation"`
-	ShardID      uint32             `json:"shardId,omitempty"`
-	SplitToken   *uint64            `json:"splitToken,omitempty"`
-	NewShardID   *uint32            `json:"newShardId,omitempty"`
-	SourceNode   string             `json:"sourceNode,omitempty"`
-	TargetNode   string             `json:"targetNode,omitempty"`
-	TargetNodes  []string           `json:"targetNodes,omitempty"`
-	TargetVoters []string           `json:"targetVoters,omitempty"`
-	NodeID       string             `json:"nodeId,omitempty"`
-	MinVoters    int                `json:"minVoters,omitempty"`
+	Operation     PlacementOperation `json:"operation"`
+	ShardID       uint32             `json:"shardId,omitempty"`
+	SplitToken    *uint64            `json:"splitToken,omitempty"`
+	NewShardID    *uint32            `json:"newShardId,omitempty"`
+	TargetShardID *uint32            `json:"targetShardId,omitempty"`
+	RangeStart    *uint64            `json:"rangeStart,omitempty"`
+	RangeEnd      *uint64            `json:"rangeEnd,omitempty"`
+	SourceNode    string             `json:"sourceNode,omitempty"`
+	TargetNode    string             `json:"targetNode,omitempty"`
+	TargetNodes   []string           `json:"targetNodes,omitempty"`
+	TargetVoters  []string           `json:"targetVoters,omitempty"`
+	NodeID        string             `json:"nodeId,omitempty"`
+	MinVoters     int                `json:"minVoters,omitempty"`
 }
 
 type PlacementPlanStep struct {
@@ -94,6 +98,8 @@ func BuildPlacementPlan(cat PlacementCatalog, req PlacementPlanRequest) (Placeme
 		return planSplit(cat, req)
 	case PlacementOperationMove:
 		return planMove(cat, req)
+	case PlacementOperationRangeMove:
+		return planRangeMove(cat, req)
 	case PlacementOperationDrain:
 		return planDrain(cat, req)
 	default:
@@ -172,6 +178,86 @@ func planSplit(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		},
 		Steps: []PlacementPlanStep{
 			{Action: "create_shard", ShardID: u32ptr(newShardID), Detail: fmt.Sprintf("open shard %d online with range [%d,%d)", newShardID, childRange.Start, childRange.End)},
+		},
+	}, nil
+}
+
+func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
+	if cat.Strategy != PlacementStrategyTokenRange {
+		return PlacementPlan{}, invalidPlan("range move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+	}
+	if req.RangeStart == nil || req.RangeEnd == nil {
+		return PlacementPlan{}, invalidPlan("range move requires rangeStart and rangeEnd")
+	}
+	sourceIdx, source, err := findShard(cat, req.ShardID)
+	if err != nil {
+		return PlacementPlan{}, err
+	}
+	if source.State != ShardStateActive {
+		return PlacementPlan{}, invalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateActive, source.State)
+	}
+	moveRange := TokenRange{Start: *req.RangeStart, End: *req.RangeEnd}
+	sourceRangesAfter, err := subtractTokenRanges(source.Ranges, moveRange)
+	if err != nil {
+		return PlacementPlan{}, fmt.Errorf("%w: range move source shard %d: %v", ErrInvalidPlacementPlan, source.ID, err)
+	}
+	if len(sourceRangesAfter) == len(source.Ranges) && sameTokenRanges(sourceRangesAfter, source.Ranges) {
+		return PlacementPlan{}, invalidPlan("range [%d,%d) is not owned by source shard %d", moveRange.Start, moveRange.End, source.ID)
+	}
+
+	targetShardID := uint32(len(cat.Shards))
+	if req.TargetShardID != nil {
+		targetShardID = *req.TargetShardID
+	}
+	if int(targetShardID) != len(cat.Shards) {
+		return PlacementPlan{}, invalidPlan("range move target shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
+	}
+
+	voters := append([]string(nil), source.Voters...)
+	if len(req.TargetVoters) > 0 {
+		if err := validateNodeSet(cat, req.TargetVoters, 1); err != nil {
+			return PlacementPlan{}, err
+		}
+		voters = sortedUnique(req.TargetVoters)
+	}
+	if len(voters) == 0 {
+		return PlacementPlan{}, invalidPlan("range move target shard %d needs at least one voter", targetShardID)
+	}
+
+	after := nextCatalog(cat)
+	after.Shards[sourceIdx].State = ShardStateMoving
+	after.Shards[sourceIdx].Epoch = after.Epoch
+	after.Shards = append(after.Shards, ShardPlacement{
+		ID:     targetShardID,
+		Ranges: []TokenRange{moveRange},
+		State:  ShardStateCreating,
+		Epoch:  after.Epoch,
+		Voters: voters,
+	})
+	after.normalize()
+	if err := ValidatePlacement(after); err != nil {
+		return PlacementPlan{}, err
+	}
+
+	return PlacementPlan{
+		Operation:        PlacementOperationRangeMove,
+		BeforeEpoch:      cat.Epoch,
+		AfterEpoch:       after.Epoch,
+		Before:           cat.Clone(),
+		After:            after,
+		RequiresDataCopy: true,
+		RequiresRestart:  false,
+		ApplySupported:   true,
+		Warnings: []string{
+			"range-move apply opens the target shard online and publishes a transition placement; source routing stays active until range-move finalize verifies data and publishes cutover",
+		},
+		Steps: []PlacementPlanStep{
+			{Action: "create_shard", ShardID: u32ptr(targetShardID), Detail: fmt.Sprintf("open target shard %d online with pending range [%d,%d)", targetShardID, moveRange.Start, moveRange.End)},
+			{Action: "target_membership", ShardID: u32ptr(targetShardID), Detail: fmt.Sprintf("target shard voters: %s", strings.Join(voters, ","))},
+			{Action: "copy_range", ShardID: u32ptr(source.ID), Detail: fmt.Sprintf("copy range [%d,%d) from shard %d to shard %d", moveRange.Start, moveRange.End, source.ID, targetShardID)},
+			{Action: "wait_catchup", ShardID: u32ptr(targetShardID), Detail: "dual-write catch-up fence for writes accepted during range movement"},
+			{Action: "publish_cutover", ShardID: u32ptr(targetShardID), Detail: fmt.Sprintf("publish routing cutover for range [%d,%d)", moveRange.Start, moveRange.End)},
+			{Action: "cleanup_source", ShardID: u32ptr(source.ID), Detail: fmt.Sprintf("delete moved range [%d,%d) from source shard %d", moveRange.Start, moveRange.End, source.ID)},
 		},
 	}, nil
 }
@@ -325,7 +411,7 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 		return PlacementApplyResult{}, err
 	}
 	current := m.Placement()
-	if result, ok, err := m.applyAlreadyPreparedSplit(ctx, current, req); ok || err != nil {
+	if result, ok, err := m.applyAlreadyPreparedTransition(ctx, current, req); ok || err != nil {
 		return result, err
 	}
 	if err := validateApplyRequest(current, req); err != nil {
@@ -333,16 +419,23 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 	}
 	timeout := applyTimeout(req.TimeoutMS)
 	applied := make([]PlacementApplyStep, 0, len(req.Plan.Steps))
-	if req.Plan.Operation == PlacementOperationSplit {
+	if req.Plan.Operation == PlacementOperationSplit || req.Plan.Operation == PlacementOperationRangeMove {
 		if err := m.openMissingShardsForPlacement(ctx, req.Plan.After); err != nil {
 			return PlacementApplyResult{}, err
 		}
 		for _, step := range req.Plan.Steps {
+			status := "ok"
+			if req.Plan.Operation == PlacementOperationRangeMove {
+				status = "pending_finalize"
+				if step.Action == "create_shard" || step.Action == "target_membership" {
+					status = "ok"
+				}
+			}
 			applied = append(applied, PlacementApplyStep{
 				Action:  step.Action,
 				ShardID: step.ShardID,
 				NodeID:  step.NodeID,
-				Status:  "ok",
+				Status:  status,
 				Detail:  step.Detail,
 			})
 		}
@@ -380,13 +473,13 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 
 func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) error {
 	plan := req.Plan
-	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain && plan.Operation != PlacementOperationSplit {
-		return invalidPlan("apply supports split, move and drain plans only, got %q", plan.Operation)
+	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove {
+		return invalidPlan("apply supports split, move, range_move and drain plans only, got %q", plan.Operation)
 	}
 	if plan.RequiresRestart {
 		return invalidPlan("plan requires restart and cannot be applied online")
 	}
-	if plan.RequiresDataCopy && plan.Operation != PlacementOperationSplit {
+	if plan.RequiresDataCopy && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove {
 		return invalidPlan("plan requires data copy and cannot be applied online")
 	}
 	if !plan.ApplySupported {
@@ -407,8 +500,62 @@ func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) e
 	if plan.Operation == PlacementOperationSplit {
 		return validateSplitApplyRequest(current, plan)
 	}
+	if plan.Operation == PlacementOperationRangeMove {
+		return validateRangeMoveApplyRequest(current, plan)
+	}
 	if len(plan.After.Shards) != len(current.Shards) {
 		return invalidPlan("apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+	}
+	if err := ValidatePlacement(plan.After); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRangeMoveApplyRequest(current PlacementCatalog, plan PlacementPlan) error {
+	if !plan.RequiresDataCopy {
+		return invalidPlan("range_move apply expects a transition plan that still requires data copy")
+	}
+	if len(plan.After.Shards) != len(current.Shards)+1 {
+		return invalidPlan("range_move apply expects exactly one target shard: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+	}
+	sourceIdx := -1
+	var sourceBefore, sourceAfter ShardPlacement
+	for i, before := range current.Shards {
+		after := plan.After.Shards[i]
+		if before.ID != after.ID {
+			return invalidPlan("range_move apply requires existing shard order to remain stable")
+		}
+		if after.State == ShardStateMoving {
+			if sourceIdx >= 0 {
+				return invalidPlan("range_move apply found more than one moving source")
+			}
+			sourceIdx = i
+			sourceBefore = before
+			sourceAfter = after
+		}
+	}
+	if sourceIdx < 0 {
+		return invalidPlan("range_move apply requires one source shard in %s state", ShardStateMoving)
+	}
+	target := plan.After.Shards[len(plan.After.Shards)-1]
+	if target.ID != uint32(len(current.Shards)) {
+		return invalidPlan("range_move target shard id must be %d, got %d", len(current.Shards), target.ID)
+	}
+	if sourceAfter.ID != sourceBefore.ID || sourceAfter.State != ShardStateMoving {
+		return invalidPlan("range_move source shard %d must transition to %s", sourceBefore.ID, ShardStateMoving)
+	}
+	if !sameTokenRanges(sourceAfter.Ranges, sourceBefore.Ranges) {
+		return invalidPlan("range_move source ranges must not shrink before finalization")
+	}
+	if target.State != ShardStateCreating {
+		return invalidPlan("range_move target shard %d must be %s, got %s", target.ID, ShardStateCreating, target.State)
+	}
+	if len(target.Ranges) != 1 {
+		return invalidPlan("range_move target shard %d requires exactly one pending range", target.ID)
+	}
+	if _, err := subtractTokenRanges(sourceBefore.Ranges, target.Ranges[0]); err != nil {
+		return fmt.Errorf("%w: range_move target range [%d,%d) is not owned by source shard %d", ErrInvalidPlacementPlan, target.Ranges[0].Start, target.Ranges[0].End, sourceBefore.ID)
 	}
 	if err := ValidatePlacement(plan.After); err != nil {
 		return err
@@ -467,8 +614,8 @@ func validateSplitApplyRequest(current PlacementCatalog, plan PlacementPlan) err
 	return nil
 }
 
-func (m *Manager) applyAlreadyPreparedSplit(ctx context.Context, current PlacementCatalog, req PlacementApplyRequest) (PlacementApplyResult, bool, error) {
-	if req.Plan.Operation != PlacementOperationSplit || !samePlacement(current, req.Plan.After) {
+func (m *Manager) applyAlreadyPreparedTransition(ctx context.Context, current PlacementCatalog, req PlacementApplyRequest) (PlacementApplyResult, bool, error) {
+	if (req.Plan.Operation != PlacementOperationSplit && req.Plan.Operation != PlacementOperationRangeMove) || !samePlacement(current, req.Plan.After) {
 		return PlacementApplyResult{}, false, nil
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != current.Epoch && req.ExpectedEpoch != req.Plan.BeforeEpoch {
@@ -479,11 +626,18 @@ func (m *Manager) applyAlreadyPreparedSplit(ctx context.Context, current Placeme
 	}
 	steps := make([]PlacementApplyStep, 0, len(req.Plan.Steps))
 	for _, step := range req.Plan.Steps {
+		status := "already_applied"
+		if req.Plan.Operation == PlacementOperationRangeMove {
+			status = "pending_finalize"
+			if step.Action == "create_shard" || step.Action == "target_membership" {
+				status = "already_applied"
+			}
+		}
 		steps = append(steps, PlacementApplyStep{
 			Action:  step.Action,
 			ShardID: step.ShardID,
 			NodeID:  step.NodeID,
-			Status:  "already_applied",
+			Status:  status,
 			Detail:  step.Detail,
 		})
 	}
@@ -503,6 +657,18 @@ func samePlacement(a, b PlacementCatalog) bool {
 		return false
 	}
 	return bytes.Equal(encA, encB)
+}
+
+func sameTokenRanges(a, b []TokenRange) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func applyTimeout(timeoutMS int) time.Duration {
@@ -617,6 +783,139 @@ func tokenStrictlyInside(r TokenRange, token uint64) bool {
 
 func splitRange(r TokenRange, token uint64) (TokenRange, TokenRange) {
 	return TokenRange{Start: r.Start, End: token}, TokenRange{Start: token, End: r.End}
+}
+
+func subtractTokenRanges(ranges []TokenRange, remove TokenRange) ([]TokenRange, error) {
+	if len(ranges) == 0 {
+		return nil, fmt.Errorf("source has no ranges")
+	}
+	owners := make([]tokenSegment, 0, len(ranges)*2)
+	for _, rng := range ranges {
+		owners = append(owners, tokenRangeSegments(rng)...)
+	}
+	sortTokenSegments(owners)
+	removeSegs := tokenRangeSegments(remove)
+	sortTokenSegments(removeSegs)
+	for _, seg := range removeSegs {
+		if !segmentCoveredBySegments(seg, owners) {
+			return nil, fmt.Errorf("range [%d,%d) is not fully owned", remove.Start, remove.End)
+		}
+	}
+
+	remaining := cloneTokenSegments(owners)
+	for _, rm := range removeSegs {
+		next := make([]tokenSegment, 0, len(remaining)+1)
+		for _, seg := range remaining {
+			next = append(next, subtractTokenSegment(seg, rm)...)
+		}
+		remaining = next
+	}
+	sortTokenSegments(remaining)
+	remaining = mergeAdjacentTokenSegments(remaining)
+	return tokenSegmentsToRanges(remaining), nil
+}
+
+func subtractTokenSegment(seg, remove tokenSegment) []tokenSegment {
+	if remove.end.Cmp(seg.start) <= 0 || remove.start.Cmp(seg.end) >= 0 {
+		return []tokenSegment{cloneTokenSegment(seg)}
+	}
+	var out []tokenSegment
+	if remove.start.Cmp(seg.start) > 0 {
+		out = append(out, tokenSegment{
+			start: new(big.Int).Set(seg.start),
+			end:   minBig(remove.start, seg.end),
+		})
+	}
+	if remove.end.Cmp(seg.end) < 0 {
+		out = append(out, tokenSegment{
+			start: maxBig(remove.end, seg.start),
+			end:   new(big.Int).Set(seg.end),
+		})
+	}
+	return out
+}
+
+func segmentCoveredBySegments(seg tokenSegment, owners []tokenSegment) bool {
+	coveredUntil := new(big.Int).Set(seg.start)
+	for _, owner := range owners {
+		if owner.end.Cmp(coveredUntil) <= 0 {
+			continue
+		}
+		if owner.start.Cmp(coveredUntil) > 0 {
+			return false
+		}
+		if owner.end.Cmp(seg.end) >= 0 {
+			return true
+		}
+		coveredUntil.Set(owner.end)
+	}
+	return false
+}
+
+func tokenSegmentsToRanges(segs []tokenSegment) []TokenRange {
+	out := make([]TokenRange, 0, len(segs))
+	for _, seg := range segs {
+		if seg.start.Cmp(seg.end) == 0 {
+			continue
+		}
+		out = append(out, TokenRange{Start: bigTokenToUint64(seg.start), End: bigTokenToUint64(seg.end)})
+	}
+	return out
+}
+
+func bigTokenToUint64(v *big.Int) uint64 {
+	if v.Cmp(bigTokenSpace) == 0 {
+		return 0
+	}
+	return v.Uint64()
+}
+
+func sortTokenSegments(segs []tokenSegment) {
+	sort.Slice(segs, func(i, j int) bool { return segs[i].start.Cmp(segs[j].start) < 0 })
+}
+
+func mergeAdjacentTokenSegments(segs []tokenSegment) []tokenSegment {
+	if len(segs) <= 1 {
+		return segs
+	}
+	out := make([]tokenSegment, 0, len(segs))
+	current := cloneTokenSegment(segs[0])
+	for _, seg := range segs[1:] {
+		if current.end.Cmp(seg.start) == 0 {
+			current.end = new(big.Int).Set(seg.end)
+			continue
+		}
+		out = append(out, current)
+		current = cloneTokenSegment(seg)
+	}
+	out = append(out, current)
+	return out
+}
+
+func cloneTokenSegments(in []tokenSegment) []tokenSegment {
+	out := make([]tokenSegment, 0, len(in))
+	for _, seg := range in {
+		out = append(out, cloneTokenSegment(seg))
+	}
+	return out
+}
+
+func cloneTokenSegment(seg tokenSegment) tokenSegment {
+	return tokenSegment{start: new(big.Int).Set(seg.start), end: new(big.Int).Set(seg.end)}
+}
+
+func minBig(a, b *big.Int) *big.Int {
+	if a.Cmp(b) <= 0 {
+		return new(big.Int).Set(a)
+	}
+	return new(big.Int).Set(b)
+}
+
+func maxBig(a, b *big.Int) *big.Int {
+	if a.Cmp(b) >= 0 {
+		return new(big.Int).Set(a)
+	}
+	return new(big.Int).Set(b)
 }
 
 func replaceVoter(voters []string, source, target string) []string {

@@ -1116,16 +1116,19 @@ type MembershipOptions struct {
 }
 
 type PlacementPlanRequest struct {
-	Operation    string
-	ShardID      uint32
-	SplitToken   *uint64
-	NewShardID   *uint32
-	SourceNode   string
-	TargetNode   string
-	TargetNodes  []string
-	TargetVoters []string
-	NodeID       string
-	MinVoters    int
+	Operation     string
+	ShardID       uint32
+	SplitToken    *uint64
+	NewShardID    *uint32
+	TargetShardID *uint32
+	RangeStart    *uint64
+	RangeEnd      *uint64
+	SourceNode    string
+	TargetNode    string
+	TargetNodes   []string
+	TargetVoters  []string
+	NodeID        string
+	MinVoters     int
 }
 
 type PlacementCatalog struct {
@@ -1200,6 +1203,28 @@ type SplitFinalizeResult struct {
 	CopiedCatalogKeys int64
 	DeletedKeys       int64
 	Placement         PlacementCatalog
+}
+
+type RangeMoveFinalizeRequest struct {
+	SourceShardID uint32
+	TargetShardID uint32
+	ExpectedEpoch uint64
+	TimeoutMS     int
+}
+
+type RangeMoveFinalizeResult struct {
+	SourceShardID      uint32
+	TargetShardID      uint32
+	BeforeEpoch        uint64
+	AfterEpoch         uint64
+	SourceRangesBefore []TokenRange
+	SourceRangesAfter  []TokenRange
+	MovedRange         TokenRange
+	CopiedKeys         int64
+	CopiedCatalogKeys  int64
+	DeletedKeys        int64
+	Phase              string
+	Placement          PlacementCatalog
 }
 
 // Status fetches the cluster status. Works without a token (public).
@@ -1320,6 +1345,15 @@ func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (P
 	if req.NewShardID != nil {
 		pbReq.NewShardId = req.NewShardID
 	}
+	if req.TargetShardID != nil {
+		pbReq.TargetShardId = req.TargetShardID
+	}
+	if req.RangeStart != nil {
+		pbReq.RangeStart = req.RangeStart
+	}
+	if req.RangeEnd != nil {
+		pbReq.RangeEnd = req.RangeEnd
+	}
 	resp, err := c.stub.PlanPlacement(c.withAuth(ctx), pbReq)
 	if err != nil {
 		return PlacementPlan{}, err
@@ -1351,6 +1385,19 @@ func (c *Client) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (S
 		return SplitFinalizeResult{}, err
 	}
 	return splitFinalizeResultFromPB(resp.GetResult()), nil
+}
+
+func (c *Client) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRequest) (RangeMoveFinalizeResult, error) {
+	resp, err := c.stub.FinalizeRangeMove(c.withAuth(ctx), &cefaspb.FinalizeRangeMoveRequest{
+		SourceShardId: req.SourceShardID,
+		TargetShardId: req.TargetShardID,
+		ExpectedEpoch: req.ExpectedEpoch,
+		TimeoutMs:     int32(req.TimeoutMS),
+	})
+	if err != nil {
+		return RangeMoveFinalizeResult{}, err
+	}
+	return rangeMoveFinalizeResultFromPB(resp.GetResult()), nil
 }
 
 func placementPlanToPB(in PlacementPlan) *cefaspb.PlacementPlan {
@@ -1523,6 +1570,26 @@ func splitFinalizeResultFromPB(in *cefaspb.FinalizeSplitResult) SplitFinalizeRes
 		CopiedCatalogKeys: in.GetCopiedCatalogKeys(),
 		DeletedKeys:       in.GetDeletedKeys(),
 		Placement:         placementCatalogFromPB(in.GetPlacement()),
+	}
+}
+
+func rangeMoveFinalizeResultFromPB(in *cefaspb.FinalizeRangeMoveResult) RangeMoveFinalizeResult {
+	if in == nil {
+		return RangeMoveFinalizeResult{}
+	}
+	return RangeMoveFinalizeResult{
+		SourceShardID:      in.GetSourceShardId(),
+		TargetShardID:      in.GetTargetShardId(),
+		BeforeEpoch:        in.GetBeforeEpoch(),
+		AfterEpoch:         in.GetAfterEpoch(),
+		SourceRangesBefore: tokenRangesFromPB(in.GetSourceRangesBefore()),
+		SourceRangesAfter:  tokenRangesFromPB(in.GetSourceRangesAfter()),
+		MovedRange:         tokenRangeFromPB(in.GetMovedRange()),
+		CopiedKeys:         in.GetCopiedKeys(),
+		CopiedCatalogKeys:  in.GetCopiedCatalogKeys(),
+		DeletedKeys:        in.GetDeletedKeys(),
+		Phase:              in.GetPhase(),
+		Placement:          placementCatalogFromPB(in.GetPlacement()),
 	}
 }
 
