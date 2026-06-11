@@ -9,6 +9,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -144,14 +145,19 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		if dim, ok := vectorDimension(td, s.OrderBy); ok && dim != len(s.ANNTarget) {
 			return nil, fmt.Errorf("ANN target dimension %d != declared dimension %d for %q", len(s.ANNTarget), dim, s.OrderBy)
 		}
-		return &PlanANN{
+		plan := &PlanANN{
 			Table:      s.Table,
 			Field:      s.OrderBy,
 			Target:     types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), s.ANNTarget...)},
 			Limit:      s.Limit,
 			Project:    s.Columns,
 			Descriptor: td,
-		}, nil
+			Predicate:  s.Where,
+		}
+		if s.Where != nil {
+			plan.Filter = chooseANNFilterPlan(s.Where, td)
+		}
+		return plan, nil
 	}
 
 	// Spatial path: WHERE includes a ST_Within / ST_DWithin call.
@@ -210,6 +216,211 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		PostFilter: postFilter,
 		Count:      s.Count,
 	}, nil
+}
+
+// chooseANNFilterPlan inspects the WHERE clause of an ANN query and
+// produces the planner-side strategy description: which index (if
+// any) backs the cohort, the estimated selectivity, and the chosen
+// strategy.
+//
+// Predicate pushdown is rule-based: equality / IN / range comparisons
+// against indexed columns (the table PK, any GSI PK) can be folded
+// into a cohort intersection; everything else stays as a post-filter
+// for the executor.
+func chooseANNFilterPlan(where Expr, td types.TableDescriptor) cquery.ANNFilterPlan {
+	plan := cquery.ANNFilterPlan{
+		PredicateDescription: describePredicate(where),
+	}
+	col, indexName, indexed := indexedPredicateColumn(where, td)
+	plan.IndexedColumn = col
+	plan.IndexUsed = indexName
+
+	sel := estimateSelectivity(where, td)
+	plan.Selectivity.Predicted = sel
+
+	plan.Strategy = cquery.ChooseStrategy(sel, indexed)
+	switch plan.Strategy {
+	case cquery.StrategyFilterFirst:
+		plan.OverscanFactor = 1
+	default:
+		plan.OverscanFactor = cquery.OverscanFactor(sel)
+	}
+	return plan
+}
+
+// indexedPredicateColumn walks the WHERE conjuncts and returns the
+// first column reference that the table has an index on, plus the
+// resolved index name. The caller uses the name in EXPLAIN.
+//
+// Returned `indexed` is true only when at least one conjunct binds an
+// indexed attribute to a literal via equality / IN / range. Without
+// such a binding the filter-first strategy has nothing to intersect
+// and the planner falls back to overscan.
+func indexedPredicateColumn(where Expr, td types.TableDescriptor) (col, idx string, indexed bool) {
+	for _, c := range flattenAnd(where) {
+		name, ok := predicateColumn(c)
+		if !ok {
+			continue
+		}
+		if name == td.KeySchema.PK {
+			return name, "primary", true
+		}
+		for _, gsi := range td.GSIs {
+			if gsi.KeySchema.PK == name {
+				return name, gsi.Name, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// predicateColumn extracts the column name from a single conjunct,
+// when the conjunct is one of the pushdownable shapes (equality,
+// range comparison, BETWEEN, or IN-style equality chain).
+func predicateColumn(e Expr) (string, bool) {
+	switch n := e.(type) {
+	case *BinaryExpr:
+		switch n.Op {
+		case BinEq, BinNeq, BinLt, BinLte, BinGt, BinGte:
+			if cr, ok := n.Left.(*ColumnRef); ok {
+				return cr.Name, true
+			}
+			if cr, ok := n.Right.(*ColumnRef); ok {
+				return cr.Name, true
+			}
+		}
+	case *BetweenExpr:
+		if cr, ok := n.Value.(*ColumnRef); ok {
+			return cr.Name, true
+		}
+	}
+	return "", false
+}
+
+// estimateSelectivity returns a rule-of-thumb fraction of rows the
+// WHERE clause is expected to retain. We don't carry per-attribute
+// histograms today; the heuristic is:
+//
+//   - equality on any column: 0.10
+//   - IN-style equality chain (OR of equalities on the same column):
+//     min(0.10 * N, 0.80)
+//   - range comparison: 0.30
+//   - BETWEEN: 0.20
+//
+// Conjuncts multiply (independence assumption). Unknown shapes
+// contribute 1.0 so they don't accidentally drive selectivity to 0.
+//
+// The estimate is bounded to [0.001, 1.0] so the overscan factor
+// stays finite.
+func estimateSelectivity(where Expr, _ types.TableDescriptor) float64 {
+	if where == nil {
+		return 1.0
+	}
+	sel := 1.0
+	for _, c := range flattenAnd(where) {
+		sel *= conjunctSelectivity(c)
+	}
+	if sel < 0.001 {
+		sel = 0.001
+	}
+	if sel > 1.0 {
+		sel = 1.0
+	}
+	return sel
+}
+
+func conjunctSelectivity(e Expr) float64 {
+	switch n := e.(type) {
+	case *BinaryExpr:
+		switch n.Op {
+		case BinEq:
+			return 0.10
+		case BinNeq:
+			return 0.90
+		case BinLt, BinLte, BinGt, BinGte:
+			return 0.30
+		case BinOr:
+			// OR-of-equalities on the same column is the closest we
+			// get to an IN list. Conservative: 0.10 per disjunct,
+			// capped at 0.80.
+			n2 := countDisjuncts(n)
+			s := 0.10 * float64(n2)
+			if s > 0.80 {
+				s = 0.80
+			}
+			return s
+		case BinAnd:
+			return conjunctSelectivity(n.Left) * conjunctSelectivity(n.Right)
+		}
+	case *BetweenExpr:
+		return 0.20
+	case *NotExpr:
+		return 1 - conjunctSelectivity(n.Inner)
+	}
+	return 1.0
+}
+
+func countDisjuncts(e Expr) int {
+	bin, ok := e.(*BinaryExpr)
+	if !ok || bin.Op != BinOr {
+		return 1
+	}
+	return countDisjuncts(bin.Left) + countDisjuncts(bin.Right)
+}
+
+// describePredicate renders a short, human-readable form of the
+// WHERE clause for EXPLAIN output. It is best-effort: nodes the
+// renderer does not know about fall through as "<expr>".
+func describePredicate(e Expr) string {
+	switch n := e.(type) {
+	case nil:
+		return ""
+	case *BinaryExpr:
+		return describePredicate(n.Left) + " " + binOpString(n.Op) + " " + describePredicate(n.Right)
+	case *BetweenExpr:
+		return describePredicate(n.Value) + " BETWEEN " + describePredicate(n.Lo) + " AND " + describePredicate(n.Hi)
+	case *NotExpr:
+		return "NOT " + describePredicate(n.Inner)
+	case *ColumnRef:
+		return n.Name
+	case *Literal:
+		if n.Kind == LitString {
+			return "'" + n.Value + "'"
+		}
+		return n.Value
+	case *FuncCall:
+		args := ""
+		for i, a := range n.Args {
+			if i > 0 {
+				args += ", "
+			}
+			args += describePredicate(a)
+		}
+		return n.Name + "(" + args + ")"
+	}
+	return "<expr>"
+}
+
+func binOpString(op BinOp) string {
+	switch op {
+	case BinAnd:
+		return "AND"
+	case BinOr:
+		return "OR"
+	case BinEq:
+		return "="
+	case BinNeq:
+		return "!="
+	case BinLt:
+		return "<"
+	case BinLte:
+		return "<="
+	case BinGt:
+		return ">"
+	case BinGte:
+		return ">="
+	}
+	return "?"
 }
 
 func vectorDimension(td types.TableDescriptor, field string) (int, bool) {

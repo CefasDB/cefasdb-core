@@ -3,6 +3,7 @@ package sql
 import (
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -61,6 +62,12 @@ type PlanSpatial struct {
 
 // PlanANN ranks table rows by a vector distance resolved from an ann
 // index in the execution environment.
+//
+// When the SELECT carries a WHERE clause, the planner populates
+// Filter so the executor can pick between the two hybrid strategies
+// (filter-first vs ANN-first-with-overscan). Filter.Strategy ==
+// StrategyUnset means there was no WHERE clause and the executor
+// runs the plain ANN scan.
 type PlanANN struct {
 	Table      string
 	Field      string
@@ -68,6 +75,13 @@ type PlanANN struct {
 	Limit      int
 	Project    []string
 	Descriptor types.TableDescriptor
+	// Predicate is the WHERE expression the executor must enforce on
+	// each ANN candidate. nil when the SELECT has no WHERE clause.
+	Predicate Expr
+	// Filter carries the planner's chosen hybrid strategy plus the
+	// selectivity estimate. The executor updates Filter.Selectivity
+	// with the observed value after the scan.
+	Filter cquery.ANNFilterPlan
 }
 
 // PlanPutItem is INSERT INTO ... VALUES (...) [IF expr]
@@ -112,6 +126,20 @@ func (*PlanANN) plan()         {}
 func (*PlanPutItem) plan()     {}
 func (*PlanUpdate) plan()      {}
 func (*PlanDelete) plan()      {}
+
+// Explain renders the ANN plan for EXPLAIN output. The hybrid
+// filter node is stitched under the ANN scan so callers see both
+// the chosen strategy and the index that backs the cohort.
+func (p *PlanANN) Explain(fmtKind cquery.ExplainFormat) string {
+	root := cquery.PlanNode{
+		Op:     "ANN",
+		Detail: "table=" + p.Table + " field=" + p.Field,
+	}
+	if p.Filter.Strategy != cquery.StrategyUnset {
+		root.Children = append(root.Children, p.Filter.ExplainNode())
+	}
+	return cquery.RenderExplain(root, fmtKind)
+}
 
 // _ is here so the import stays as a compile-time check that the
 // spatial package is reachable from the SQL layer.
