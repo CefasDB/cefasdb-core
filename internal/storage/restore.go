@@ -13,6 +13,7 @@ import (
 type RestoreResult struct {
 	TargetTable types.TableDescriptor
 	RowsCopied  int
+	SourceStats BackupTableStats
 }
 
 // RestoreTableFromBackup reads the descriptor for `sourceTable` out of
@@ -57,6 +58,11 @@ func (d *DB) RestoreTableFromBackup(
 		return RestoreResult{}, fmt.Errorf("decode source descriptor: %w", err)
 	}
 
+	sourceStats, err := validateBackupManifestTable(*meta, checkpoint, sourceTable)
+	if err != nil {
+		return RestoreResult{}, fmt.Errorf("validate backup manifest: %w", err)
+	}
+
 	tgtTD := srcTD
 	tgtTD.Name = targetTable
 	if err := register(tgtTD); err != nil {
@@ -87,5 +93,5 @@ func (d *DB) RestoreTableFromBackup(
 	if err := iter.Error(); err != nil {
 		return RestoreResult{}, err
 	}
-	return RestoreResult{TargetTable: tgtTD, RowsCopied: n}, nil
+	return RestoreResult{TargetTable: tgtTD, RowsCopied: n, SourceStats: sourceStats}, nil
 }

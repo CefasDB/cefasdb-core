@@ -922,11 +922,23 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 }
 
 func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
+	stats := make([]*cefaspb.BackupTableStats, 0, len(m.TableStats))
+	for _, stat := range m.TableStats {
+		stats = append(stats, &cefaspb.BackupTableStats{
+			Table:    stat.Table,
+			Rows:     stat.Rows,
+			Checksum: stat.Checksum,
+		})
+	}
 	return &cefaspb.BackupDescriptor{
-		Name:           m.Name,
-		CreatedAtUnix:  m.CreatedAt,
-		Tables:         m.Tables,
-		CheckpointPath: m.CheckpointAt,
+		Name:            m.Name,
+		CreatedAtUnix:   m.CreatedAt,
+		Tables:          m.Tables,
+		CheckpointPath:  m.CheckpointAt,
+		ManifestVersion: int32(m.ManifestVersion),
+		ManifestStatus:  m.ManifestStatus,
+		RequestedTables: m.RequestedTables,
+		TableStats:      stats,
 	}
 }
 

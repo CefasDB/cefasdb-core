@@ -34,6 +34,12 @@ func TestCreateAndListBackups(t *testing.T) {
 	if len(got.GetBackup().GetTables()) != 2 {
 		t.Fatalf("tables = %v, want 2", got.GetBackup().GetTables())
 	}
+	if got.GetBackup().GetManifestVersion() != 1 || got.GetBackup().GetManifestStatus() != "ok" {
+		t.Fatalf("manifest = version %d status %q", got.GetBackup().GetManifestVersion(), got.GetBackup().GetManifestStatus())
+	}
+	if len(got.GetBackup().GetTableStats()) != 2 {
+		t.Fatalf("table stats = %v, want 2 entries", got.GetBackup().GetTableStats())
+	}
 
 	// Scoped backup.
 	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "just-t1", Tables: []string{"T1"}}); err != nil {
@@ -50,6 +56,9 @@ func TestCreateAndListBackups(t *testing.T) {
 	// Sorted by name: "all", "just-t1".
 	if lst.GetBackups()[0].GetName() != "all" || lst.GetBackups()[1].GetName() != "just-t1" {
 		t.Fatalf("order: %v", lst.GetBackups())
+	}
+	if len(lst.GetBackups()[1].GetRequestedTables()) != 1 || lst.GetBackups()[1].GetRequestedTables()[0] != "T1" {
+		t.Fatalf("scoped requested tables = %v", lst.GetBackups()[1].GetRequestedTables())
 	}
 }
 

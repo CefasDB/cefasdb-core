@@ -673,13 +673,23 @@ func (c *Client) Sql(ctx context.Context, query string) (*SqlResult, error) {
 
 // ---------- backups ----------
 
-// BackupDescriptor mirrors the wire shape — name + creation time +
-// table list + on-disk path.
+// BackupDescriptor mirrors the wire shape — name, creation time,
+// captured tables, local checkpoint path, and manifest diagnostics.
 type BackupDescriptor struct {
-	Name         string
-	CreatedAt    int64
-	Tables       []string
-	CheckpointAt string
+	Name            string
+	CreatedAt       int64
+	Tables          []string
+	CheckpointAt    string
+	ManifestVersion int
+	ManifestStatus  string
+	RequestedTables []string
+	TableStats      []BackupTableStats
+}
+
+type BackupTableStats struct {
+	Table    string
+	Rows     int64
+	Checksum string
 }
 
 // CreateBackup snapshots the live keyspace into a pebble checkpoint
@@ -710,11 +720,23 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 	if b == nil {
 		return BackupDescriptor{}
 	}
+	stats := make([]BackupTableStats, 0, len(b.GetTableStats()))
+	for _, stat := range b.GetTableStats() {
+		stats = append(stats, BackupTableStats{
+			Table:    stat.GetTable(),
+			Rows:     stat.GetRows(),
+			Checksum: stat.GetChecksum(),
+		})
+	}
 	return BackupDescriptor{
-		Name:         b.GetName(),
-		CreatedAt:    b.GetCreatedAtUnix(),
-		Tables:       b.GetTables(),
-		CheckpointAt: b.GetCheckpointPath(),
+		Name:            b.GetName(),
+		CreatedAt:       b.GetCreatedAtUnix(),
+		Tables:          b.GetTables(),
+		CheckpointAt:    b.GetCheckpointPath(),
+		ManifestVersion: int(b.GetManifestVersion()),
+		ManifestStatus:  b.GetManifestStatus(),
+		RequestedTables: b.GetRequestedTables(),
+		TableStats:      stats,
 	}
 }
 
