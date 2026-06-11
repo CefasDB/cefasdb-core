@@ -223,6 +223,19 @@ from the parent:
 cefas cluster split finalize --parent-shard 0 --child-shard 1 --expected-epoch 2 --writes-quiesced --yes
 ```
 
+Elasticity chaos/load validation runs locally through `go test` and does not
+require external services. The suite exercises live split, live range move, and
+node drain while writes are active, injects restart-style failures in copy,
+catch-up, catalog publish, and cleanup phases, and verifies routed reads, item
+counts, checksums, GSI query results, routing epochs, p99 latency, throughput,
+errors, and a consistency verdict. Set `CEFAS_ELASTICITY_REPORT` to persist the
+repeatable JSON report for CI artifacts:
+
+```sh
+CEFAS_ELASTICITY_REPORT=reports/elasticity-chaos-load.json \
+  go test ./internal/cluster -run TestElasticityChaosLoadSuite -count=1 -v
+```
+
 ## Project Layout
 
 ```text
