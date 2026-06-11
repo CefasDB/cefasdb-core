@@ -20,4 +20,5 @@ func Register(root *cobra.Command) {
 	registerDedup(root)
 	registerFreqCap(root)
 	registerAggregate(root)
+	registerRerank(root)
 }

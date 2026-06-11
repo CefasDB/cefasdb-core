@@ -72,6 +72,7 @@ const (
 	Cefas_Dedup_FullMethodName                  = "/cefas.v1.Cefas/Dedup"
 	Cefas_FreqCap_FullMethodName                = "/cefas.v1.Cefas/FreqCap"
 	Cefas_Aggregate_FullMethodName              = "/cefas.v1.Cefas/Aggregate"
+	Cefas_Rerank_FullMethodName                 = "/cefas.v1.Cefas/Rerank"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -150,6 +151,10 @@ type CefasClient interface {
 	Dedup(ctx context.Context, in *DedupRequest, opts ...grpc.CallOption) (*DedupResponse, error)
 	FreqCap(ctx context.Context, in *FreqCapRequest, opts ...grpc.CallOption) (*FreqCapResponse, error)
 	Aggregate(ctx context.Context, in *AggregateRequest, opts ...grpc.CallOption) (*AggregateResponse, error)
+	// Rerank applies the MMR diversification operator to a candidate
+	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
+	// a follow-up so this ships RPC + operator + CLI only.
+	Rerank(ctx context.Context, in *RerankRequest, opts ...grpc.CallOption) (*RerankResponse, error)
 }
 
 type cefasClient struct {
@@ -665,6 +670,16 @@ func (c *cefasClient) Aggregate(ctx context.Context, in *AggregateRequest, opts 
 	return out, nil
 }
 
+func (c *cefasClient) Rerank(ctx context.Context, in *RerankRequest, opts ...grpc.CallOption) (*RerankResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RerankResponse)
+	err := c.cc.Invoke(ctx, Cefas_Rerank_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -741,6 +756,10 @@ type CefasServer interface {
 	Dedup(context.Context, *DedupRequest) (*DedupResponse, error)
 	FreqCap(context.Context, *FreqCapRequest) (*FreqCapResponse, error)
 	Aggregate(context.Context, *AggregateRequest) (*AggregateResponse, error)
+	// Rerank applies the MMR diversification operator to a candidate
+	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
+	// a follow-up so this ships RPC + operator + CLI only.
+	Rerank(context.Context, *RerankRequest) (*RerankResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -888,6 +907,9 @@ func (UnimplementedCefasServer) FreqCap(context.Context, *FreqCapRequest) (*Freq
 }
 func (UnimplementedCefasServer) Aggregate(context.Context, *AggregateRequest) (*AggregateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Aggregate not implemented")
+}
+func (UnimplementedCefasServer) Rerank(context.Context, *RerankRequest) (*RerankResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Rerank not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -1703,6 +1725,24 @@ func _Cefas_Aggregate_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_Rerank_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RerankRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Rerank(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Rerank_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Rerank(ctx, req.(*RerankRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1873,6 +1913,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Aggregate",
 			Handler:    _Cefas_Aggregate_Handler,
+		},
+		{
+			MethodName: "Rerank",
+			Handler:    _Cefas_Rerank_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

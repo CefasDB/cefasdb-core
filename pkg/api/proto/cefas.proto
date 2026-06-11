@@ -100,6 +100,11 @@ service Cefas {
   rpc Dedup(DedupRequest) returns (DedupResponse);
   rpc FreqCap(FreqCapRequest) returns (FreqCapResponse);
   rpc Aggregate(AggregateRequest) returns (AggregateResponse);
+
+  // Rerank applies the MMR diversification operator to a candidate
+  // set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
+  // a follow-up so this ships RPC + operator + CLI only.
+  rpc Rerank(RerankRequest) returns (RerankResponse);
 }
 
 message StreamChangesRequest {
@@ -950,4 +955,42 @@ message FinalizeRangeMoveResult {
 
 message FinalizeRangeMoveResponse {
   FinalizeRangeMoveResult result = 1;
+}
+
+// ===== Rerank / MMR (issue #244) =====
+//
+// RerankCandidate is one input row to the MMR re-ranker. `distance`
+// carries the upstream relevance distance (smaller-is-better, the
+// TopK convention); the engine rank-normalises it internally so the
+// scoring rule is invariant to the distance operator's absolute
+// scale. `field` on the request points at the attribute on `item`
+// the similarity function reads — typically the embedding vector.
+message RerankCandidate {
+  Item   item     = 1;
+  double distance = 2;
+}
+
+// RerankRequest carries the inputs to the MMR diversification
+// operator. `field` defaults to "embedding" when empty.
+// `distance_operator` defaults to the metric the ANN index uses for
+// `table`/`field` (when one is registered) and falls back to
+// "cosine". `lambda` is the relevance/diversity trade-off in [0, 1].
+// `target_size` caps the returned slate; values larger than the
+// input set are clamped to len(candidates).
+message RerankRequest {
+  string                   table             = 1;
+  string                   field             = 2;
+  string                   distance_operator = 3;
+  double                   lambda            = 4;
+  int32                    target_size       = 5;
+  repeated RerankCandidate candidates        = 6;
+}
+
+message RerankResponse {
+  // Selected slate, in pick order. Length is min(target_size,
+  // len(candidates)).
+  repeated RerankCandidate slate = 1;
+  // DistanceOperator echoes the resolved operator name so callers
+  // can confirm the default they got when they passed an empty one.
+  string distance_operator = 2;
 }
