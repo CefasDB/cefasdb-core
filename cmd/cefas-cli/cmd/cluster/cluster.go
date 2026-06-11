@@ -22,6 +22,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(statusCmd())
 	c.AddCommand(addVoterCmd())
 	c.AddCommand(removeServerCmd())
+	c.AddCommand(planCmd())
 	root.AddCommand(c)
 }
 
@@ -188,6 +189,141 @@ Example:
 	}
 	_ = c.MarkFlagRequired("id")
 	return c
+}
+
+func planCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "plan",
+		Short: "Plan shard placement changes",
+	}
+	c.AddCommand(planSplitCmd())
+	c.AddCommand(planMoveCmd())
+	c.AddCommand(planDrainCmd())
+	return c
+}
+
+func planSplitCmd() *cobra.Command {
+	var (
+		shardID    uint32
+		splitToken uint64
+		newShardID uint32
+	)
+	c := &cobra.Command{
+		Use:   "split",
+		Short: "Plan a token-range shard split",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("shard") {
+				return fmt.Errorf("--shard is required")
+			}
+			req := client.PlacementPlanRequest{
+				Operation: "split",
+				ShardID:   shardID,
+			}
+			if cmd.Flags().Changed("split-token") {
+				v := splitToken
+				req.SplitToken = &v
+			}
+			if cmd.Flags().Changed("new-shard") {
+				v := newShardID
+				req.NewShardID = &v
+			}
+			return runPlacementPlan(cmd, req)
+		},
+	}
+	f := c.Flags()
+	f.Uint32Var(&shardID, "shard", 0, "Shard ID to split")
+	f.Uint64Var(&splitToken, "split-token", 0, "Optional split token; default is midpoint")
+	f.Uint32Var(&newShardID, "new-shard", 0, "Optional new shard ID; must be next contiguous ID")
+	return c
+}
+
+func planMoveCmd() *cobra.Command {
+	var (
+		shardID      uint32
+		sourceNode   string
+		targetNode   string
+		targetVoters []string
+		minVoters    int
+	)
+	c := &cobra.Command{
+		Use:   "move",
+		Short: "Plan moving a shard Raft membership placement",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("shard") {
+				return fmt.Errorf("--shard is required")
+			}
+			if len(targetVoters) == 0 && (sourceNode == "" || targetNode == "") {
+				return fmt.Errorf("--source-node and --target-node are required unless --target-voter is supplied")
+			}
+			req := client.PlacementPlanRequest{
+				Operation:    "move",
+				ShardID:      shardID,
+				SourceNode:   sourceNode,
+				TargetNode:   targetNode,
+				TargetVoters: targetVoters,
+				MinVoters:    minVoters,
+			}
+			return runPlacementPlan(cmd, req)
+		},
+	}
+	f := c.Flags()
+	f.Uint32Var(&shardID, "shard", 0, "Shard ID to move")
+	f.StringVar(&sourceNode, "source-node", "", "Existing voter node to replace")
+	f.StringVar(&targetNode, "target-node", "", "Replacement node")
+	f.StringArrayVar(&targetVoters, "target-voter", nil, "Full target voter set; repeat for multiple nodes")
+	f.IntVar(&minVoters, "min-voters", 1, "Minimum voters allowed after the move")
+	return c
+}
+
+func planDrainCmd() *cobra.Command {
+	var (
+		nodeID      string
+		targetNodes []string
+		minVoters   int
+	)
+	c := &cobra.Command{
+		Use:   "drain",
+		Short: "Plan draining a node from shard memberships",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if nodeID == "" {
+				return fmt.Errorf("--node is required")
+			}
+			req := client.PlacementPlanRequest{
+				Operation:   "drain",
+				NodeID:      nodeID,
+				TargetNodes: targetNodes,
+				MinVoters:   minVoters,
+			}
+			return runPlacementPlan(cmd, req)
+		},
+	}
+	f := c.Flags()
+	f.StringVar(&nodeID, "node", "", "Node ID to drain")
+	f.StringArrayVar(&targetNodes, "target-node", nil, "Replacement node; repeat for multiple nodes")
+	f.IntVar(&minVoters, "min-voters", 1, "Minimum voters allowed after drain")
+	_ = c.MarkFlagRequired("node")
+	return c
+}
+
+func runPlacementPlan(cmd *cobra.Command, req client.PlacementPlanRequest) error {
+	ctx := cmd.Context()
+	cli, profile, err := runtime.Dial(ctx)
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+	plan, err := cli.PlanPlacement(ctx, req)
+	if err != nil {
+		return fmt.Errorf("plan placement: %w", err)
+	}
+	fm, err := output.Validate(profile.Output)
+	if err != nil {
+		return err
+	}
+	return output.New(cmd.OutOrStdout(), fm).Object(plan)
 }
 
 func clientMembershipOptions(shardID uint32, shardSet, allShards bool) client.MembershipOptions {

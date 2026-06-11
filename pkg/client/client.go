@@ -1115,6 +1115,49 @@ type MembershipOptions struct {
 	AllShards bool
 }
 
+type PlacementPlanRequest struct {
+	Operation    string
+	ShardID      uint32
+	SplitToken   *uint64
+	NewShardID   *uint32
+	SourceNode   string
+	TargetNode   string
+	TargetNodes  []string
+	TargetVoters []string
+	NodeID       string
+	MinVoters    int
+}
+
+type PlacementCatalog struct {
+	Version       uint64
+	Epoch         uint64
+	Strategy      string
+	Shards        []ShardPlacement
+	Nodes         []NodeDescriptor
+	UpdatedAtUnix int64
+}
+
+type PlacementPlanStep struct {
+	Action  string
+	ShardID *uint32
+	NodeID  string
+	Addr    string
+	Detail  string
+}
+
+type PlacementPlan struct {
+	Operation        string
+	BeforeEpoch      uint64
+	AfterEpoch       uint64
+	Before           PlacementCatalog
+	After            PlacementCatalog
+	Steps            []PlacementPlanStep
+	Warnings         []string
+	RequiresDataCopy bool
+	RequiresRestart  bool
+	ApplySupported   bool
+}
+
 // Status fetches the cluster status. Works without a token (public).
 func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 	resp, err := c.stub.ClusterStatus(c.withAuth(ctx), &cefaspb.ClusterStatusRequest{})
@@ -1214,4 +1257,79 @@ func (c *Client) RemoveServerWithOptions(ctx context.Context, id string, opts Me
 	}
 	_, err := c.stub.RemoveServer(c.withAuth(ctx), req)
 	return err
+}
+
+func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (PlacementPlan, error) {
+	pbReq := &cefaspb.PlanPlacementRequest{
+		Operation:    req.Operation,
+		ShardId:      req.ShardID,
+		SourceNode:   req.SourceNode,
+		TargetNode:   req.TargetNode,
+		TargetNodes:  append([]string(nil), req.TargetNodes...),
+		TargetVoters: append([]string(nil), req.TargetVoters...),
+		NodeId:       req.NodeID,
+		MinVoters:    int32(req.MinVoters),
+	}
+	if req.SplitToken != nil {
+		pbReq.SplitToken = req.SplitToken
+	}
+	if req.NewShardID != nil {
+		pbReq.NewShardId = req.NewShardID
+	}
+	resp, err := c.stub.PlanPlacement(c.withAuth(ctx), pbReq)
+	if err != nil {
+		return PlacementPlan{}, err
+	}
+	return placementPlanFromPB(resp.GetPlan()), nil
+}
+
+func placementPlanFromPB(in *cefaspb.PlacementPlan) PlacementPlan {
+	if in == nil {
+		return PlacementPlan{}
+	}
+	return PlacementPlan{
+		Operation:        in.GetOperation(),
+		BeforeEpoch:      in.GetBeforeEpoch(),
+		AfterEpoch:       in.GetAfterEpoch(),
+		Before:           placementCatalogFromPB(in.GetBefore()),
+		After:            placementCatalogFromPB(in.GetAfter()),
+		Steps:            placementPlanStepsFromPB(in.GetSteps()),
+		Warnings:         append([]string(nil), in.GetWarnings()...),
+		RequiresDataCopy: in.GetRequiresDataCopy(),
+		RequiresRestart:  in.GetRequiresRestart(),
+		ApplySupported:   in.GetApplySupported(),
+	}
+}
+
+func placementCatalogFromPB(in *cefaspb.PlacementCatalog) PlacementCatalog {
+	if in == nil {
+		return PlacementCatalog{}
+	}
+	return PlacementCatalog{
+		Version:       in.GetVersion(),
+		Epoch:         in.GetEpoch(),
+		Strategy:      in.GetStrategy(),
+		Shards:        shardPlacementsFromPB(in.GetShards()),
+		Nodes:         nodeDescriptorsFromPB(in.GetNodes()),
+		UpdatedAtUnix: in.GetUpdatedAtUnix(),
+	}
+}
+
+func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []PlacementPlanStep {
+	out := make([]PlacementPlanStep, 0, len(in))
+	for _, step := range in {
+		var shardID *uint32
+		if step.ShardId != nil {
+			id := step.GetShardId()
+			shardID = &id
+		}
+		out = append(out, PlacementPlanStep{
+			Action:  step.GetAction(),
+			ShardID: shardID,
+			NodeID:  step.GetNodeId(),
+			Addr:    step.GetAddr(),
+			Detail:  step.GetDetail(),
+		})
+	}
+	return out
 }

@@ -166,6 +166,15 @@ The CLI reads `~/.cefas/config.yaml`, `CEFAS_*` environment variables, and globa
 flags such as `--endpoint`, `--token`, `--token-file`, `--ca`, `--insecure`,
 `--output`, and `--timeout`.
 
+Cluster placement planning commands return dry-run plans for shard elasticity
+operations. They do not apply data movement or Raft membership changes:
+
+```sh
+cefas cluster plan split --shard 0
+cefas cluster plan move --shard 0 --source-node n1 --target-node n4 --min-voters 3
+cefas cluster plan drain --node n1 --target-node n4 --min-voters 3
+```
+
 ## Project Layout
 
 ```text

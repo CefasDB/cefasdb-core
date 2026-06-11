@@ -226,6 +226,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
 	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
+	register("/v1/cluster/placement/plan", s.handleClusterPlacementPlan)
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
@@ -1120,6 +1121,31 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+func (s *Server) handleClusterPlacementPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	if s.manager == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
+		return
+	}
+	var req cluster.PlacementPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	plan, err := s.manager.PlanPlacement(req)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
 }
 
 // barrierTimeout is the per-request wait the strong-consistency read
