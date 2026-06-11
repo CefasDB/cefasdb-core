@@ -53,6 +53,7 @@ service Cefas {
   rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
   rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
+  rpc PlanPlacement(PlanPlacementRequest) returns (PlanPlacementResponse);
 
   // Change Data Capture stream. Subscribers receive every committed
   // write in raft log order. Slow consumers may miss events when their
@@ -694,3 +695,50 @@ message RemoveServerRequest {
   bool   all_shards  = 4;
 }
 message RemoveServerResponse {}
+
+message PlacementCatalog {
+  uint64 version       = 1;
+  uint64 epoch         = 2;
+  string strategy      = 3;
+  repeated ShardPlacement shards = 4;
+  repeated NodeDescriptor nodes  = 5;
+  int64  updated_at_unix = 6;
+}
+
+message PlanPlacementRequest {
+  string operation        = 1; // "split" | "move" | "drain"
+  uint32 shard_id         = 2;
+  optional uint64 split_token = 3;
+  optional uint32 new_shard_id = 4;
+  string source_node      = 5;
+  string target_node      = 6;
+  repeated string target_nodes = 7;
+  repeated string target_voters = 8;
+  string node_id          = 9;
+  int32  min_voters       = 10;
+}
+
+message PlacementPlanStep {
+  string action = 1;
+  optional uint32 shard_id = 2;
+  string node_id = 3;
+  string addr    = 4;
+  string detail  = 5;
+}
+
+message PlacementPlan {
+  string operation = 1;
+  uint64 before_epoch = 2;
+  uint64 after_epoch  = 3;
+  PlacementCatalog before = 4;
+  PlacementCatalog after  = 5;
+  repeated PlacementPlanStep steps = 6;
+  repeated string warnings = 7;
+  bool requires_data_copy = 8;
+  bool requires_restart = 9;
+  bool apply_supported = 10;
+}
+
+message PlanPlacementResponse {
+  PlacementPlan plan = 1;
+}

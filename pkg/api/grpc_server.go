@@ -1037,6 +1037,82 @@ func (s *GRPCServer) RemoveServer(ctx context.Context, req *cefaspb.RemoveServer
 	return &cefaspb.RemoveServerResponse{}, nil
 }
 
+func (s *GRPCServer) PlanPlacement(ctx context.Context, req *cefaspb.PlanPlacementRequest) (*cefaspb.PlanPlacementResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.manager == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
+	}
+	plan, err := s.manager.PlanPlacement(placementPlanRequestFromPB(req))
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.PlanPlacementResponse{Plan: pbPlacementPlan(plan)}, nil
+}
+
+func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.PlacementPlanRequest {
+	out := cluster.PlacementPlanRequest{
+		Operation:    cluster.PlacementOperation(req.GetOperation()),
+		ShardID:      req.GetShardId(),
+		SourceNode:   req.GetSourceNode(),
+		TargetNode:   req.GetTargetNode(),
+		TargetNodes:  append([]string(nil), req.GetTargetNodes()...),
+		TargetVoters: append([]string(nil), req.GetTargetVoters()...),
+		NodeID:       req.GetNodeId(),
+		MinVoters:    int(req.GetMinVoters()),
+	}
+	if req.SplitToken != nil {
+		v := req.GetSplitToken()
+		out.SplitToken = &v
+	}
+	if req.NewShardId != nil {
+		v := req.GetNewShardId()
+		out.NewShardID = &v
+	}
+	return out
+}
+
+func pbPlacementPlan(plan cluster.PlacementPlan) *cefaspb.PlacementPlan {
+	return &cefaspb.PlacementPlan{
+		Operation:        string(plan.Operation),
+		BeforeEpoch:      plan.BeforeEpoch,
+		AfterEpoch:       plan.AfterEpoch,
+		Before:           pbPlacementCatalog(plan.Before),
+		After:            pbPlacementCatalog(plan.After),
+		Steps:            pbPlacementPlanSteps(plan.Steps),
+		Warnings:         append([]string(nil), plan.Warnings...),
+		RequiresDataCopy: plan.RequiresDataCopy,
+		RequiresRestart:  plan.RequiresRestart,
+		ApplySupported:   plan.ApplySupported,
+	}
+}
+
+func pbPlacementCatalog(cat cluster.PlacementCatalog) *cefaspb.PlacementCatalog {
+	return &cefaspb.PlacementCatalog{
+		Version:       cat.Version,
+		Epoch:         cat.Epoch,
+		Strategy:      cat.Strategy,
+		Shards:        pbShardPlacements(cat.Shards),
+		Nodes:         pbNodeDescriptors(sortedPlacementNodes(cat)),
+		UpdatedAtUnix: cat.UpdatedAtUnix,
+	}
+}
+
+func pbPlacementPlanSteps(in []cluster.PlacementPlanStep) []*cefaspb.PlacementPlanStep {
+	out := make([]*cefaspb.PlacementPlanStep, 0, len(in))
+	for _, step := range in {
+		out = append(out, &cefaspb.PlacementPlanStep{
+			Action:  step.Action,
+			ShardId: step.ShardID,
+			NodeId:  step.NodeID,
+			Addr:    step.Addr,
+			Detail:  step.Detail,
+		})
+	}
+	return out
+}
+
 // strongReadGate redirects the caller to the leader and waits for the
 // raft barrier before serving a strong read. Single-node mode is a
 // no-op.
@@ -1071,6 +1147,8 @@ func mapStorageErr(err error) error {
 	case errors.Is(err, types.ErrItemNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMissingKey), errors.Is(err, types.ErrInvalidKeyType):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, cluster.ErrInvalidPlacementPlan):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, types.ErrSpatialNotFound):
 		return status.Error(codes.NotFound, err.Error())
