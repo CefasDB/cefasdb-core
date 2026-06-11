@@ -92,6 +92,26 @@ func (a *MuxAcceptor) RegisterGroup(groupID uint32) (hraft.StreamLayer, error) {
 	return sl, nil
 }
 
+// UnregisterGroup removes and closes a previously registered group.
+// It is used when a shard fails to finish opening after reserving its
+// mux group.
+func (a *MuxAcceptor) UnregisterGroup(groupID uint32) error {
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return errors.New("mux: acceptor closed")
+	}
+	sl, ok := a.groups[groupID]
+	if ok {
+		delete(a.groups, groupID)
+	}
+	a.mu.Unlock()
+	if ok {
+		sl.closeQueue()
+	}
+	return nil
+}
+
 func (a *MuxAcceptor) acceptLoop() {
 	for {
 		conn, err := a.listener.Accept()
