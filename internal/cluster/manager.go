@@ -606,6 +606,20 @@ func (m *Manager) persistPlacementSnapshot(path string, snapshot PlacementCatalo
 	return nil
 }
 
+func (m *Manager) persistPlacementSnapshotStrict(path string, snapshot PlacementCatalog) error {
+	raw, err := encodePlacement(snapshot)
+	if err != nil {
+		return err
+	}
+	if len(m.shards) == 0 || m.shards[0] == nil || m.shards[0].Storage == nil {
+		return fmt.Errorf("cluster: shard 0 unavailable")
+	}
+	if err := m.shards[0].Storage.Set(placementSystemKey, raw); err != nil {
+		return err
+	}
+	return SavePlacementFile(path, snapshot)
+}
+
 func appendUnique(in []string, v string) []string {
 	for _, existing := range in {
 		if existing == v {

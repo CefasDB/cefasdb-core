@@ -1,7 +1,9 @@
 package cluster_test
 
 import (
+	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
@@ -73,10 +75,10 @@ func TestPlanMoveReplacesVoter(t *testing.T) {
 	if contains(got, "n1") || !contains(got, "n4") || len(got) != 3 {
 		t.Fatalf("voters = %v, want n1 replaced by n4", got)
 	}
-	if plan.After.Shards[0].State != cluster.ShardStateMoving {
+	if plan.After.Shards[0].State != cluster.ShardStateActive {
 		t.Fatalf("state = %s", plan.After.Shards[0].State)
 	}
-	if plan.RequiresDataCopy || plan.RequiresRestart || len(plan.Steps) != 3 {
+	if plan.RequiresDataCopy || plan.RequiresRestart || !plan.ApplySupported || len(plan.Steps) != 3 {
 		t.Fatalf("unexpected move plan: %+v", plan)
 	}
 }
@@ -102,6 +104,12 @@ func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 		if !contains(sh.Voters, "n4") {
 			t.Fatalf("shard %d missing replacement n4: %v", sh.ID, sh.Voters)
 		}
+		if sh.State != cluster.ShardStateActive {
+			t.Fatalf("shard %d state = %s", sh.ID, sh.State)
+		}
+	}
+	if !plan.ApplySupported {
+		t.Fatalf("drain should be apply-supported")
 	}
 }
 
@@ -111,6 +119,94 @@ func TestPlanSplitRejectsLegacyModuloPlacement(t *testing.T) {
 		Operation: cluster.PlacementOperationSplit,
 		ShardID:   0,
 	})
+	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}
+}
+
+func TestApplyPlacementPublishesNoopMove(t *testing.T) {
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      t.TempDir(),
+		Shards:    1,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation:    cluster.PlacementOperationMove,
+		ShardID:      0,
+		TargetVoters: []string{"n1"},
+		MinVoters:    1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 0 {
+		t.Fatalf("expected no membership steps, got %+v", plan.Steps)
+	}
+	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch || mgr.RoutingEpoch() != plan.AfterEpoch {
+		t.Fatalf("epoch not advanced: result=%d manager=%d plan=%d", result.AfterEpoch, mgr.RoutingEpoch(), plan.AfterEpoch)
+	}
+}
+
+func TestApplyPlacementRejectsSplitPlan(t *testing.T) {
+	cat := plannerCatalog(1)
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      t.TempDir(),
+		Shards:    1,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	_, err = mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{Plan: plan})
+	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}
+}
+
+func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      t.TempDir(),
+		Shards:    1,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation:    cluster.PlacementOperationMove,
+		ShardID:      0,
+		TargetVoters: []string{"n1"},
+		MinVoters:    1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Before.UpdatedAtUnix++
+	_, err = mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{Plan: plan})
 	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
