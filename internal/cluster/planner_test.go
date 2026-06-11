@@ -3,10 +3,14 @@ package cluster_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"path/filepath"
 	"testing"
 
+	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func plannerCatalog(shards int) cluster.PlacementCatalog {
@@ -210,6 +214,114 @@ func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {
 	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
+}
+
+func TestFinalizeSplitCopiesRangeAndActivatesChild(t *testing.T) {
+	mgr, plan := openTransitionSplitManager(t)
+	defer mgr.Close()
+
+	parent, _ := mgr.Shard(0)
+	child, _ := mgr.Shard(1)
+	td := types.TableDescriptor{Name: "events", KeySchema: types.KeySchema{PK: "id"}}
+	parentCatalog, err := catalog.New(parent.Storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parentCatalog.Create(td); err != nil {
+		t.Fatal(err)
+	}
+
+	childRange := plan.After.Shards[1].Ranges[0]
+	key := keyInRange(t, childRange)
+	item := types.Item{
+		"id": {T: types.AttrS, S: key},
+		"v":  {T: types.AttrS, S: "moved"},
+	}
+	if err := parent.Storage.PutItem(td.Name, td.KeySchema, item); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := mgr.FinalizeSplit(context.Background(), cluster.SplitFinalizeRequest{
+		ParentShardID:  0,
+		ChildShardID:   1,
+		ExpectedEpoch:  plan.AfterEpoch,
+		WritesQuiesced: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CopiedKeys != 1 || result.DeletedKeys != 1 || result.CopiedCatalogKeys != 1 {
+		t.Fatalf("unexpected copy/delete counts: %+v", result)
+	}
+	if result.Placement.Shards[0].State != cluster.ShardStateActive || result.Placement.Shards[1].State != cluster.ShardStateActive {
+		t.Fatalf("unexpected shard states: %+v", result.Placement.Shards)
+	}
+	if got := mgr.Router().ShardForPK([]byte(key)); got != 1 {
+		t.Fatalf("key routes to shard %d, want child shard 1", got)
+	}
+	got, err := child.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: key}})
+	if err != nil {
+		t.Fatalf("child get: %v", err)
+	}
+	if got["v"].S != "moved" {
+		t.Fatalf("child value = %q", got["v"].S)
+	}
+	if _, err := parent.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: key}}); !errors.Is(err, types.ErrItemNotFound) {
+		t.Fatalf("parent get error = %v, want ErrItemNotFound", err)
+	}
+}
+
+func TestFinalizeSplitRequiresQuiescedWrites(t *testing.T) {
+	mgr, plan := openTransitionSplitManager(t)
+	defer mgr.Close()
+
+	_, err := mgr.FinalizeSplit(context.Background(), cluster.SplitFinalizeRequest{
+		ParentShardID: 0,
+		ChildShardID:  1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}
+}
+
+func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
+	t.Helper()
+	root := t.TempDir()
+	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr, plan
+}
+
+func keyInRange(t *testing.T, rng cluster.TokenRange) string {
+	t.Helper()
+	router := cluster.NewRouter(1)
+	for i := 0; i < 100_000; i++ {
+		key := fmt.Sprintf("split-key-%d", i)
+		if rng.Contains(router.TokenForPK([]byte(key))) {
+			return key
+		}
+	}
+	t.Fatal("could not find key in range")
+	return ""
 }
 
 func contains(in []string, v string) bool {

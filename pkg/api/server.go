@@ -229,6 +229,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
 	register("/v1/cluster/placement/plan", s.handleClusterPlacementPlan)
 	register("/v1/cluster/placement/apply", s.handleClusterPlacementApply)
+	register("/v1/cluster/placement/split/finalize", s.handleClusterSplitFinalize)
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
@@ -1168,6 +1169,31 @@ func (s *Server) handleClusterPlacementApply(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	result, err := s.manager.ApplyPlacement(r.Context(), req)
+	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleClusterSplitFinalize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	if s.manager == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
+		return
+	}
+	var req cluster.SplitFinalizeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.manager.FinalizeSplit(r.Context(), req)
 	if err != nil {
 		writeWriteErr(w, r, err)
 		return

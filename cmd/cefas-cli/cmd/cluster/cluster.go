@@ -26,6 +26,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(removeServerCmd())
 	c.AddCommand(planCmd())
 	c.AddCommand(applyCmd())
+	c.AddCommand(splitCmd())
 	root.AddCommand(c)
 }
 
@@ -385,6 +386,77 @@ func applyCmd() *cobra.Command {
 	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-step Raft timeout in milliseconds")
 	f.BoolVar(&yes, "yes", false, "Confirm applying the placement plan")
 	_ = c.MarkFlagRequired("plan")
+	return c
+}
+
+func splitCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "split",
+		Short: "Manage prepared shard splits",
+	}
+	c.AddCommand(splitFinalizeCmd())
+	return c
+}
+
+func splitFinalizeCmd() *cobra.Command {
+	var (
+		parentShardID  uint32
+		childShardID   uint32
+		expectedEpoch  uint64
+		timeoutMS      int
+		writesQuiesced bool
+		yes            bool
+	)
+	c := &cobra.Command{
+		Use:   "finalize",
+		Short: "Copy a prepared split range and activate the child shard",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("parent-shard") {
+				return fmt.Errorf("--parent-shard is required")
+			}
+			if !cmd.Flags().Changed("child-shard") {
+				return fmt.Errorf("--child-shard is required")
+			}
+			if !cmd.Flags().Changed("expected-epoch") {
+				return fmt.Errorf("--expected-epoch is required")
+			}
+			if !writesQuiesced {
+				return fmt.Errorf("--writes-quiesced is required")
+			}
+			if !yes {
+				return fmt.Errorf("--yes is required to finalize a split")
+			}
+			ctx := cmd.Context()
+			cli, profile, err := runtime.Dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cli.Close()
+			result, err := cli.FinalizeSplit(ctx, client.SplitFinalizeRequest{
+				ParentShardID:  parentShardID,
+				ChildShardID:   childShardID,
+				ExpectedEpoch:  expectedEpoch,
+				TimeoutMS:      timeoutMS,
+				WritesQuiesced: writesQuiesced,
+			})
+			if err != nil {
+				return fmt.Errorf("finalize split: %w", err)
+			}
+			fm, err := output.Validate(profile.Output)
+			if err != nil {
+				return err
+			}
+			return output.New(cmd.OutOrStdout(), fm).Object(result)
+		},
+	}
+	f := c.Flags()
+	f.Uint32Var(&parentShardID, "parent-shard", 0, "Splitting parent shard ID")
+	f.Uint32Var(&childShardID, "child-shard", 0, "Prepared child shard ID")
+	f.Uint64Var(&expectedEpoch, "expected-epoch", 0, "Expected current routing epoch")
+	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-write timeout in milliseconds")
+	f.BoolVar(&writesQuiesced, "writes-quiesced", false, "Confirm writes to the split range are paused")
+	f.BoolVar(&yes, "yes", false, "Confirm finalizing the split")
 	return c
 }
 

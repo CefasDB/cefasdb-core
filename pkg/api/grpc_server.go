@@ -953,9 +953,13 @@ func pbShardPlacements(in []cluster.ShardPlacement) []*cefaspb.ShardPlacement {
 func pbTokenRanges(in []cluster.TokenRange) []*cefaspb.TokenRange {
 	out := make([]*cefaspb.TokenRange, 0, len(in))
 	for _, r := range in {
-		out = append(out, &cefaspb.TokenRange{Start: r.Start, End: r.End})
+		out = append(out, pbTokenRange(r))
 	}
 	return out
+}
+
+func pbTokenRange(r cluster.TokenRange) *cefaspb.TokenRange {
+	return &cefaspb.TokenRange{Start: r.Start, End: r.End}
 }
 
 func pbNodeDescriptors(in []cluster.NodeDescriptor) []*cefaspb.NodeDescriptor {
@@ -1068,6 +1072,26 @@ func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlace
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.ApplyPlacementResponse{Result: pbPlacementApplyResult(result)}, nil
+}
+
+func (s *GRPCServer) FinalizeSplit(ctx context.Context, req *cefaspb.FinalizeSplitRequest) (*cefaspb.FinalizeSplitResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.manager == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
+	}
+	result, err := s.manager.FinalizeSplit(ctx, cluster.SplitFinalizeRequest{
+		ParentShardID:  req.GetParentShardId(),
+		ChildShardID:   req.GetChildShardId(),
+		ExpectedEpoch:  req.GetExpectedEpoch(),
+		TimeoutMS:      int(req.GetTimeoutMs()),
+		WritesQuiesced: req.GetWritesQuiesced(),
+	})
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.FinalizeSplitResponse{Result: pbSplitFinalizeResult(result)}, nil
 }
 
 func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.PlacementPlanRequest {
@@ -1235,6 +1259,22 @@ func pbPlacementApplyResult(result cluster.PlacementApplyResult) *cefaspb.Placem
 		AfterEpoch:  result.AfterEpoch,
 		Steps:       pbPlacementApplySteps(result.Steps),
 		Placement:   pbPlacementCatalog(result.Placement),
+	}
+}
+
+func pbSplitFinalizeResult(result cluster.SplitFinalizeResult) *cefaspb.FinalizeSplitResult {
+	return &cefaspb.FinalizeSplitResult{
+		ParentShardId:     result.ParentShardID,
+		ChildShardId:      result.ChildShardID,
+		BeforeEpoch:       result.BeforeEpoch,
+		AfterEpoch:        result.AfterEpoch,
+		ParentRangeBefore: pbTokenRange(result.ParentRangeBefore),
+		ParentRangeAfter:  pbTokenRange(result.ParentRangeAfter),
+		ChildRange:        pbTokenRange(result.ChildRange),
+		CopiedKeys:        result.CopiedKeys,
+		CopiedCatalogKeys: result.CopiedCatalogKeys,
+		DeletedKeys:       result.DeletedKeys,
+		Placement:         pbPlacementCatalog(result.Placement),
 	}
 }
 

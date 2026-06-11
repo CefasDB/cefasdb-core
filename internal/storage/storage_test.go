@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
+
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -25,6 +27,21 @@ func sAttr(s string) types.AttributeValue {
 
 func nAttr(n string) types.AttributeValue {
 	return types.AttributeValue{T: types.AttrN, N: n}
+}
+
+func TestPrimaryTokenFromKey(t *testing.T) {
+	pk := []byte("alice")
+	key := storage.KeyPrimary("events", pk, nil)
+	got, ok := storage.PrimaryTokenFromKey(key)
+	if !ok {
+		t.Fatal("expected primary token")
+	}
+	if want := xxhash.Sum64(pk); got != want {
+		t.Fatalf("token = %d, want %d", got, want)
+	}
+	if _, ok := storage.PrimaryTokenFromKey(storage.KeyCatalog("events")); ok {
+		t.Fatal("catalog key reported as primary")
+	}
 }
 
 func TestPutGetDelete(t *testing.T) {
