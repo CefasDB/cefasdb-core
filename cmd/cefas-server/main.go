@@ -28,6 +28,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	"github.com/osvaldoandrade/cefas/internal/rebalancer"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/api"
@@ -103,6 +104,18 @@ func main() {
 		metricsOff = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
 		tracingURL = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
 		tracingIns = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
+
+		// Autonomous rebalancer. Disabled by default; dry-run/manual
+		// modes are intended for rollout before automatic apply.
+		rebalancerEnabled       = flag.Bool("rebalancer-enabled", false, "Enable the hotspot-driven placement rebalancer.")
+		rebalancerMode          = flag.String("rebalancer-mode", "", "Rebalancer mode: dry-run, manual, or auto.")
+		rebalancerInterval      = flag.Duration("rebalancer-interval", 0, "Interval between rebalancer evaluations. 0 inherits config/default.")
+		rebalancerMinInterval   = flag.Duration("rebalancer-min-interval", 0, "Minimum time between rebalance operations. 0 inherits config/default.")
+		rebalancerMaxConcurrent = flag.Int("rebalancer-max-concurrent", 0, "Maximum concurrent automatic rebalance operations. 0 inherits config/default.")
+		rebalancerMaxHotspots   = flag.Int("rebalancer-max-hotspots", 0, "Maximum hot ranges to inspect per rebalancer tick. 0 inherits config/default.")
+		rebalancerMinVoters     = flag.Int("rebalancer-min-voters", 0, "Minimum voters for generated placement plans. 0 keeps the current voter count.")
+		rebalancerApplyTimeout  = flag.Duration("rebalancer-apply-timeout", 0, "Per-plan apply timeout for auto mode. 0 inherits config/default.")
+		rebalancerManualDir     = flag.String("rebalancer-manual-plan-dir", "", "Directory where manual mode writes rebalance plans.")
 	)
 	flag.Parse()
 
@@ -127,7 +140,10 @@ func main() {
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
-		*metricsOff, *tracingURL, *tracingIns)
+		*metricsOff, *tracingURL, *tracingIns,
+		*rebalancerEnabled, *rebalancerMode, *rebalancerInterval, *rebalancerMinInterval,
+		*rebalancerMaxConcurrent, *rebalancerMaxHotspots, *rebalancerMinVoters,
+		*rebalancerApplyTimeout, *rebalancerManualDir)
 
 	// Initialise tracing first so subsequent setup gets spans on
 	// failure. tracingShutdown is a no-op when no endpoint is set.
@@ -288,6 +304,18 @@ func main() {
 			if raftStore != nil {
 				go metrics.RunStorageCollector(context.Background(), prom, "raft", raftStore, nil, 5*time.Second)
 			}
+		}
+	}
+	if cfg.Rebalancer.Enabled {
+		if mgr == nil {
+			log.Printf("rebalancer disabled: multi-Raft cluster manager is not configured")
+		} else if prom == nil {
+			log.Printf("rebalancer disabled: metrics must be enabled for hotspot input")
+		} else {
+			ctrl := rebalancer.NewController(rebalancerConfigFromConfig(cfg), mgr, prom, nil)
+			ctrl.SetLogger(log.Printf)
+			go ctrl.Run(context.Background())
+			log.Printf("rebalancer enabled: mode=%s interval=%s maxConcurrent=%d", cfg.Rebalancer.Mode, cfg.Rebalancer.Interval, cfg.Rebalancer.MaxConcurrentOperations)
 		}
 	}
 	apiSrv.Routes(mux)
@@ -457,6 +485,19 @@ func rangeHotspotConfigFromConfig(cfg config.Config) metrics.RangeHotspotConfig 
 	}
 }
 
+func rebalancerConfigFromConfig(cfg config.Config) rebalancer.Config {
+	return rebalancer.Config{
+		Mode:                    rebalancer.Mode(cfg.Rebalancer.Mode),
+		Interval:                cfg.Rebalancer.Interval,
+		MinInterval:             cfg.Rebalancer.MinInterval,
+		MaxConcurrentOperations: cfg.Rebalancer.MaxConcurrentOperations,
+		MaxHotspots:             cfg.Rebalancer.MaxHotspots,
+		MinVoters:               cfg.Rebalancer.MinVoters,
+		ApplyTimeoutMS:          int(cfg.Rebalancer.ApplyTimeout / time.Millisecond),
+		ManualPlanDir:           cfg.Rebalancer.ManualPlanDir,
+	}
+}
+
 func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
 	return storage.BackpressureOptions{
 		Enabled:                     cfg.Storage.BackpressureEnabled,
@@ -544,6 +585,9 @@ func overlayFlags(
 	shardsN int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
 	metricsOff bool, tracingURL string, tracingInsecure bool,
+	rebalancerEnabled bool, rebalancerMode string, rebalancerInterval, rebalancerMinInterval time.Duration,
+	rebalancerMaxConcurrent, rebalancerMaxHotspots, rebalancerMinVoters int,
+	rebalancerApplyTimeout time.Duration, rebalancerManualDir string,
 ) {
 	if dataDir != "" && dataDir != "./cefas-data" {
 		cfg.Data = dataDir
@@ -688,6 +732,33 @@ func overlayFlags(
 	}
 	if !tracingInsecure {
 		cfg.Tracing.Insecure = false
+	}
+	if rebalancerEnabled {
+		cfg.Rebalancer.Enabled = true
+	}
+	if rebalancerMode != "" {
+		cfg.Rebalancer.Mode = rebalancerMode
+	}
+	if rebalancerInterval > 0 {
+		cfg.Rebalancer.Interval = rebalancerInterval
+	}
+	if rebalancerMinInterval > 0 {
+		cfg.Rebalancer.MinInterval = rebalancerMinInterval
+	}
+	if rebalancerMaxConcurrent > 0 {
+		cfg.Rebalancer.MaxConcurrentOperations = rebalancerMaxConcurrent
+	}
+	if rebalancerMaxHotspots > 0 {
+		cfg.Rebalancer.MaxHotspots = rebalancerMaxHotspots
+	}
+	if rebalancerMinVoters > 0 {
+		cfg.Rebalancer.MinVoters = rebalancerMinVoters
+	}
+	if rebalancerApplyTimeout > 0 {
+		cfg.Rebalancer.ApplyTimeout = rebalancerApplyTimeout
+	}
+	if rebalancerManualDir != "" {
+		cfg.Rebalancer.ManualPlanDir = rebalancerManualDir
 	}
 	// Compatibility: keep parsing the old strings to avoid "imported
 	// and not used" diagnostics for strings.
