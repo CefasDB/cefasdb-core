@@ -14,10 +14,11 @@ import (
 type PlacementOperation string
 
 const (
-	PlacementOperationSplit     PlacementOperation = "split"
-	PlacementOperationMove      PlacementOperation = "move"
-	PlacementOperationRangeMove PlacementOperation = "range_move"
-	PlacementOperationDrain     PlacementOperation = "drain"
+	PlacementOperationSplit        PlacementOperation = "split"
+	PlacementOperationMove         PlacementOperation = "move"
+	PlacementOperationRangeMove    PlacementOperation = "range_move"
+	PlacementOperationDrain        PlacementOperation = "drain"
+	PlacementOperationDecommission PlacementOperation = "decommission"
 )
 
 type PlacementPlanRequest struct {
@@ -102,6 +103,8 @@ func BuildPlacementPlan(cat PlacementCatalog, req PlacementPlanRequest) (Placeme
 		return planRangeMove(cat, req)
 	case PlacementOperationDrain:
 		return planDrain(cat, req)
+	case PlacementOperationDecommission:
+		return planDecommission(cat, req)
 	default:
 		return PlacementPlan{}, invalidPlan("unknown placement operation %q", req.Operation)
 	}
@@ -378,7 +381,7 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 	affected := 0
 	for i := range after.Shards {
 		sh := &after.Shards[i]
-		if !containsString(sh.Voters, req.NodeID) && !containsString(sh.NonVoters, req.NodeID) {
+		if !containsString(sh.Voters, req.NodeID) && !containsString(sh.NonVoters, req.NodeID) && sh.LeaderHint != req.NodeID {
 			continue
 		}
 		affected++
@@ -411,6 +414,9 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		steps = append(steps, membershipDiffSteps(after, sh.ID, currentVoters, voters)...)
 		sh.Voters = voters
 		sh.NonVoters = removeString(sh.NonVoters, req.NodeID)
+		if sh.LeaderHint == req.NodeID {
+			sh.LeaderHint = ""
+		}
 		sh.State = ShardStateActive
 		sh.Epoch = after.Epoch
 	}
@@ -438,6 +444,55 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		After:            after,
 		Steps:            steps,
 		Warnings:         warnings,
+		RequiresDataCopy: false,
+		RequiresRestart:  false,
+		ApplySupported:   true,
+	}, nil
+}
+
+func planDecommission(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
+	if req.NodeID == "" {
+		return PlacementPlan{}, invalidPlan("decommission requires nodeId")
+	}
+	node, ok := cat.Nodes[req.NodeID]
+	if !ok {
+		return PlacementPlan{}, invalidPlan("node %q does not exist in placement", req.NodeID)
+	}
+	if node.State == NodeStateDecommissioned {
+		return PlacementPlan{}, invalidPlan("node %q is already decommissioned", req.NodeID)
+	}
+	if node.State != NodeStateDraining {
+		return PlacementPlan{}, invalidPlan("node %q must be draining before decommission; current state=%s", req.NodeID, node.State)
+	}
+	blockers := placementNodeActiveReferences(cat, req.NodeID)
+	if len(blockers) > 0 {
+		return PlacementPlan{}, invalidPlan("node %q still has active placement references: %s", req.NodeID, strings.Join(blockers, "; "))
+	}
+
+	after := nextCatalog(cat)
+	node = after.Nodes[req.NodeID]
+	node.State = NodeStateDecommissioned
+	after.Nodes[req.NodeID] = node
+	after.normalize()
+	if err := ValidatePlacement(after); err != nil {
+		return PlacementPlan{}, err
+	}
+
+	return PlacementPlan{
+		Operation:   PlacementOperationDecommission,
+		BeforeEpoch: cat.Epoch,
+		AfterEpoch:  after.Epoch,
+		Before:      cat.Clone(),
+		After:       after,
+		Steps: []PlacementPlanStep{
+			{Action: "verify_no_active_references", NodeID: req.NodeID, Detail: "drain complete: no active voter, non-voter, leader hint, or range ownership references remain"},
+			{Action: "cleanup_unowned_data", NodeID: req.NodeID, Detail: "local data cleanup hook for ranges no longer owned by this node"},
+			{Action: "compact_unowned_data", NodeID: req.NodeID, Detail: "local compaction hook after unowned range cleanup"},
+			{Action: "decommission_node", NodeID: req.NodeID, Detail: "mark node decommissioned and exclude it from future placement"},
+		},
+		Warnings: []string{
+			"decommission only marks placement metadata after drain has removed all active references; run cleanup hooks on the decommissioned node before stopping it permanently",
+		},
 		RequiresDataCopy: false,
 		RequiresRestart:  false,
 		ApplySupported:   true,
@@ -477,6 +532,19 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 				Detail:  step.Detail,
 			})
 		}
+	} else if req.Plan.Operation == PlacementOperationDecommission {
+		for _, step := range req.Plan.Steps {
+			if err := ctx.Err(); err != nil {
+				return PlacementApplyResult{}, err
+			}
+			applied = append(applied, PlacementApplyStep{
+				Action:  step.Action,
+				ShardID: step.ShardID,
+				NodeID:  step.NodeID,
+				Status:  "ok",
+				Detail:  step.Detail,
+			})
+		}
 	} else {
 		for _, step := range req.Plan.Steps {
 			if err := ctx.Err(); err != nil {
@@ -511,8 +579,8 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 
 func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) error {
 	plan := req.Plan
-	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove {
-		return invalidPlan("apply supports split, move, range_move and drain plans only, got %q", plan.Operation)
+	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove && plan.Operation != PlacementOperationDecommission {
+		return invalidPlan("apply supports split, move, range_move, drain and decommission plans only, got %q", plan.Operation)
 	}
 	if plan.RequiresRestart {
 		return invalidPlan("plan requires restart and cannot be applied online")
@@ -541,11 +609,62 @@ func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) e
 	if plan.Operation == PlacementOperationRangeMove {
 		return validateRangeMoveApplyRequest(current, plan)
 	}
+	if plan.Operation == PlacementOperationDecommission {
+		return validateDecommissionApplyRequest(current, plan)
+	}
 	if len(plan.After.Shards) != len(current.Shards) {
 		return invalidPlan("apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
 	}
 	if err := ValidatePlacement(plan.After); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateDecommissionApplyRequest(current PlacementCatalog, plan PlacementPlan) error {
+	if plan.RequiresDataCopy {
+		return invalidPlan("decommission apply must not require data copy")
+	}
+	if len(plan.After.Shards) != len(current.Shards) {
+		return invalidPlan("decommission apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+	}
+	if err := ValidatePlacement(plan.After); err != nil {
+		return err
+	}
+
+	var target string
+	for id, beforeNode := range current.Nodes {
+		afterNode, ok := plan.After.Nodes[id]
+		if !ok {
+			return invalidPlan("decommission apply cannot remove node %q from placement", id)
+		}
+		if beforeNode.State == afterNode.State {
+			continue
+		}
+		if target != "" {
+			return invalidPlan("decommission apply can change one node state only")
+		}
+		if beforeNode.State != NodeStateDraining || afterNode.State != NodeStateDecommissioned {
+			return invalidPlan("decommission apply requires node %q to transition %s -> %s, got %s -> %s", id, NodeStateDraining, NodeStateDecommissioned, beforeNode.State, afterNode.State)
+		}
+		target = id
+	}
+	for id := range plan.After.Nodes {
+		if _, ok := current.Nodes[id]; !ok {
+			return invalidPlan("decommission apply cannot add node %q", id)
+		}
+	}
+	if target == "" {
+		return invalidPlan("decommission apply found no node state transition")
+	}
+	if blockers := placementNodeActiveReferences(current, target); len(blockers) > 0 {
+		return invalidPlan("node %q still has active placement references: %s", target, strings.Join(blockers, "; "))
+	}
+	for i, before := range current.Shards {
+		after := plan.After.Shards[i]
+		if before.ID != after.ID || before.State != after.State || before.Epoch != after.Epoch || before.LeaderHint != after.LeaderHint || !sameTokenRanges(before.Ranges, after.Ranges) || !sameStringSet(before.Voters, after.Voters) || !sameStringSet(before.NonVoters, after.NonVoters) {
+			return invalidPlan("decommission apply cannot change shard %d placement", before.ID)
+		}
 	}
 	return nil
 }
@@ -709,6 +828,22 @@ func sameTokenRanges(a, b []TokenRange) bool {
 	return true
 }
 
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	a = append([]string(nil), a...)
+	b = append([]string(nil), b...)
+	sort.Strings(a)
+	sort.Strings(b)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func applyTimeout(timeoutMS int) time.Duration {
 	if timeoutMS <= 0 {
 		return 5 * time.Second
@@ -785,6 +920,26 @@ func validateNodeSet(cat PlacementCatalog, ids []string, min int) error {
 		}
 	}
 	return nil
+}
+
+func placementNodeActiveReferences(cat PlacementCatalog, nodeID string) []string {
+	var blockers []string
+	for _, shard := range cat.Shards {
+		if shard.State == ShardStateDecommissioned {
+			continue
+		}
+		if containsString(shard.Voters, nodeID) {
+			blockers = append(blockers, fmt.Sprintf("shard %d voter state=%s ranges=%d", shard.ID, shard.State, len(shard.Ranges)))
+		}
+		if containsString(shard.NonVoters, nodeID) {
+			blockers = append(blockers, fmt.Sprintf("shard %d non-voter state=%s", shard.ID, shard.State))
+		}
+		if shard.LeaderHint == nodeID {
+			blockers = append(blockers, fmt.Sprintf("shard %d leader hint state=%s", shard.ID, shard.State))
+		}
+	}
+	sort.Strings(blockers)
+	return blockers
 }
 
 func minVoters(v int) int {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -330,6 +331,140 @@ func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 	}
 	if !plan.ApplySupported {
 		t.Fatalf("drain should be apply-supported")
+	}
+}
+
+func TestPlanDrainClearsLeaderHintBlocker(t *testing.T) {
+	cat := plannerCatalog(1)
+	cat.Shards[0].LeaderHint = "n1"
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:   cluster.PlacementOperationDrain,
+		NodeID:      "n1",
+		TargetNodes: []string{"n4"},
+		MinVoters:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.After.Shards[0].LeaderHint != "" {
+		t.Fatalf("leader hint = %q, want cleared", plan.After.Shards[0].LeaderHint)
+	}
+}
+
+func TestPlanDecommissionRejectsActiveReferences(t *testing.T) {
+	cat := plannerCatalog(1)
+	n1 := cat.Nodes["n1"]
+	n1.State = cluster.NodeStateDraining
+	cat.Nodes["n1"] = n1
+
+	_, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationDecommission,
+		NodeID:    "n1",
+	})
+	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	}
+	if !strings.Contains(err.Error(), "still has active placement references") || !strings.Contains(err.Error(), "shard 0 voter") {
+		t.Fatalf("error = %v, want active reference blocker", err)
+	}
+}
+
+func TestPlanDecommissionAfterDrainMarksNode(t *testing.T) {
+	cat := plannerCatalog(2)
+	drain, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation:   cluster.PlacementOperationDrain,
+		NodeID:      "n1",
+		TargetNodes: []string{"n4"},
+		MinVoters:   3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := cluster.BuildPlacementPlan(drain.After, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationDecommission,
+		NodeID:    "n1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.After.Nodes["n1"].State != cluster.NodeStateDecommissioned {
+		t.Fatalf("node state = %s", plan.After.Nodes["n1"].State)
+	}
+	if len(plan.Steps) != 4 || plan.Steps[0].Action != "verify_no_active_references" || plan.Steps[3].Action != "decommission_node" {
+		t.Fatalf("unexpected decommission steps: %+v", plan.Steps)
+	}
+	for i, sh := range drain.After.Shards {
+		got := plan.After.Shards[i]
+		if !sameStrings(got.Voters, sh.Voters) || !sameStrings(got.NonVoters, sh.NonVoters) || got.LeaderHint != sh.LeaderHint || got.State != sh.State {
+			t.Fatalf("shard %d changed during decommission: before=%+v after=%+v", sh.ID, sh, got)
+		}
+	}
+}
+
+func TestApplyPlacementDecommissionsDrainedNode(t *testing.T) {
+	root := t.TempDir()
+	cat := plannerCatalog(1)
+	n1 := cat.Nodes["n1"]
+	n1.State = cluster.NodeStateDraining
+	cat.Nodes["n1"] = n1
+	cat.Shards[0].Voters = []string{"n2", "n3", "n4"}
+	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    1,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationDecommission,
+		NodeID:    "n1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Placement.Nodes["n1"].State != cluster.NodeStateDecommissioned || mgr.Placement().Nodes["n1"].State != cluster.NodeStateDecommissioned {
+		t.Fatalf("node not decommissioned: result=%s manager=%s", result.Placement.Nodes["n1"].State, mgr.Placement().Nodes["n1"].State)
+	}
+	if len(result.Steps) != 4 || result.Steps[1].Action != "cleanup_unowned_data" || result.Steps[1].Status != "ok" {
+		t.Fatalf("unexpected apply steps: %+v", result.Steps)
+	}
+}
+
+func TestDecommissionedNodeExcludedFromFuturePlacement(t *testing.T) {
+	cat := plannerCatalog(1)
+	n1 := cat.Nodes["n1"]
+	n1.State = cluster.NodeStateDecommissioned
+	n1.Capacity = cluster.NodeCapacity{Weight: 100, Zone: "az-a"}
+	cat.Nodes["n1"] = n1
+	cat.Shards[0].Voters = []string{"n2", "n3", "n4"}
+
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+		MinVoters: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(plan.After.Shards[1].Voters, "n1") {
+		t.Fatalf("decommissioned node selected as voter: %v", plan.After.Shards[1].Voters)
+	}
+	if !containsWarning(plan.Warnings, "n1=decommissioned") {
+		t.Fatalf("missing decommissioned exclusion warning: %v", plan.Warnings)
 	}
 }
 
@@ -979,4 +1114,20 @@ func containsWarning(warnings []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	a = append([]string(nil), a...)
+	b = append([]string(nil), b...)
+	sort.Strings(a)
+	sort.Strings(b)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
