@@ -6,6 +6,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -67,6 +68,7 @@ Example:
 				"PlacementStrategy": st.PlacementStrategy,
 				"Shards":            st.Shards,
 				"Nodes":             st.Nodes,
+				"DrainProgress":     clusterDrainProgress(st),
 			})
 		},
 	}
@@ -205,6 +207,7 @@ func planCmd() *cobra.Command {
 	c.AddCommand(planRangeMoveCmd())
 	c.AddCommand(planMoveCmd())
 	c.AddCommand(planDrainCmd())
+	c.AddCommand(planDecommissionCmd())
 	return c
 }
 
@@ -367,6 +370,28 @@ func planDrainCmd() *cobra.Command {
 	return c
 }
 
+func planDecommissionCmd() *cobra.Command {
+	var nodeID string
+	c := &cobra.Command{
+		Use:   "decommission",
+		Short: "Plan final decommission after a node drain",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if nodeID == "" {
+				return fmt.Errorf("--node is required")
+			}
+			return runPlacementPlan(cmd, client.PlacementPlanRequest{
+				Operation: "decommission",
+				NodeID:    nodeID,
+			})
+		},
+	}
+	f := c.Flags()
+	f.StringVar(&nodeID, "node", "", "Drained node ID to mark decommissioned")
+	_ = c.MarkFlagRequired("node")
+	return c
+}
+
 func runPlacementPlan(cmd *cobra.Command, req client.PlacementPlanRequest) error {
 	ctx := cmd.Context()
 	cli, profile, err := runtime.Dial(ctx)
@@ -442,6 +467,70 @@ func applyCmd() *cobra.Command {
 	f.BoolVar(&yes, "yes", false, "Confirm applying the placement plan")
 	_ = c.MarkFlagRequired("plan")
 	return c
+}
+
+type DrainProgress struct {
+	NodeID           string
+	State            string
+	Status           string
+	ActiveReferences int
+	Blockers         []string
+}
+
+func clusterDrainProgress(st client.ClusterStatus) []DrainProgress {
+	nodes := append([]client.NodeDescriptor(nil), st.Nodes...)
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	progress := make([]DrainProgress, 0)
+	for _, node := range nodes {
+		if node.State != "draining" && node.State != "decommissioned" {
+			continue
+		}
+		blockers := clusterDrainBlockers(st.Shards, node.ID)
+		status := "blocked"
+		if node.State == "decommissioned" {
+			status = "decommissioned"
+			blockers = nil
+		} else if len(blockers) == 0 {
+			status = "ready_for_decommission"
+		}
+		progress = append(progress, DrainProgress{
+			NodeID:           node.ID,
+			State:            node.State,
+			Status:           status,
+			ActiveReferences: len(blockers),
+			Blockers:         blockers,
+		})
+	}
+	return progress
+}
+
+func clusterDrainBlockers(shards []client.ShardPlacement, nodeID string) []string {
+	var blockers []string
+	for _, shard := range shards {
+		if shard.State == "decommissioned" {
+			continue
+		}
+		if containsClientString(shard.Voters, nodeID) {
+			blockers = append(blockers, fmt.Sprintf("shard %d voter state=%s ranges=%d", shard.ID, shard.State, len(shard.Ranges)))
+		}
+		if containsClientString(shard.NonVoters, nodeID) {
+			blockers = append(blockers, fmt.Sprintf("shard %d non-voter state=%s", shard.ID, shard.State))
+		}
+		if shard.LeaderHint == nodeID {
+			blockers = append(blockers, fmt.Sprintf("shard %d leader hint state=%s", shard.ID, shard.State))
+		}
+	}
+	sort.Strings(blockers)
+	return blockers
+}
+
+func containsClientString(in []string, v string) bool {
+	for _, existing := range in {
+		if existing == v {
+			return true
+		}
+	}
+	return false
 }
 
 func splitCmd() *cobra.Command {

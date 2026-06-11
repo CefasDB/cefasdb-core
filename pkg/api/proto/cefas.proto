@@ -709,7 +709,7 @@ message PlacementCatalog {
 }
 
 message PlanPlacementRequest {
-  string operation        = 1; // "split" | "move" | "range_move" | "drain"
+  string operation        = 1; // "split" | "move" | "range_move" | "drain" | "decommission"
   uint32 shard_id         = 2;
   optional uint64 split_token = 3;
   optional uint32 new_shard_id = 4;
