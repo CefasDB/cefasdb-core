@@ -88,6 +88,20 @@ func TestParserSelectANN(t *testing.T) {
 	}
 }
 
+func TestParserSelectANNDiversify(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT id FROM docs ORDER BY emb ANN OF [1,0,0] LIMIT 100 DIVERSIFY BY mmr(lambda=0.7) TO 10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T", stmt)
+	}
+	if sel.Diversify == nil || sel.Diversify.Method != "mmr" || sel.Diversify.Lambda != 0.7 || sel.Diversify.TargetSize != 10 {
+		t.Fatalf("unexpected diversify clause: %+v", sel.Diversify)
+	}
+}
+
 func TestParserSpatial(t *testing.T) {
 	src := "SELECT * FROM places USE INDEX (by_loc) WHERE ST_Within(loc, BBox(40.0, -74.0, 41.0, -73.0))"
 	stmt, err := cefassql.Parse(src)

@@ -45,8 +45,8 @@ func annDocsTable() types.TableDescriptor {
 // up the real distance plugin registry.
 type euclidOp struct{}
 
-func (euclidOp) Name() string                          { return "euclid" }
-func (euclidOp) Supports(a, b model.AttrType) bool     { return a == model.AttrVec && b == model.AttrVec }
+func (euclidOp) Name() string                      { return "euclid" }
+func (euclidOp) Supports(a, b model.AttrType) bool { return a == model.AttrVec && b == model.AttrVec }
 func (euclidOp) Eval(a, b model.AttributeValue) (float64, error) {
 	if a.T != types.AttrVec || b.T != types.AttrVec {
 		return 0, fmt.Errorf("euclid: non-vector input")
@@ -262,6 +262,37 @@ func TestExecutorOverscanWarnsWhenInsufficient(t *testing.T) {
 	p := plan.(*cefassql.PlanANN)
 	if p.Filter.Warning != cquery.FewerThanKWarning {
 		t.Fatalf("expected warning %q, got %q", cquery.FewerThanKWarning, p.Filter.Warning)
+	}
+}
+
+func TestExecutorANNDiversifyUsesLimitAsCandidateFanout(t *testing.T) {
+	exec, cat := newANNExecutor(t, annDocsTable())
+	for _, src := range []string{
+		"INSERT INTO docs (id, emb) VALUES ('a', [1, 0, 0])",
+		"INSERT INTO docs (id, emb) VALUES ('b', [0.99, 0, 0])",
+		"INSERT INTO docs (id, emb) VALUES ('c', [0, 1, 0])",
+	} {
+		plan, err := cefassql.Compile(src, cat)
+		if err != nil {
+			t.Fatalf("compile insert: %v", err)
+		}
+		if _, err := exec.Execute(plan); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	plan, err := cefassql.Compile("SELECT id FROM docs ORDER BY emb ANN OF [1,0,0] LIMIT 3 DIVERSIFY BY mmr(lambda=0.1) TO 2", cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := exec.Execute(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(res.Rows))
+	}
+	if got := []string{res.Rows[0]["id"].S, res.Rows[1]["id"].S}; got[0] != "a" || got[1] != "c" {
+		t.Fatalf("diversified rows = %v, want [a c]", got)
 	}
 }
 

@@ -73,6 +73,10 @@ const (
 	Cefas_FreqCap_FullMethodName                = "/cefas.v1.Cefas/FreqCap"
 	Cefas_Aggregate_FullMethodName              = "/cefas.v1.Cefas/Aggregate"
 	Cefas_Rerank_FullMethodName                 = "/cefas.v1.Cefas/Rerank"
+	Cefas_Recommend_FullMethodName              = "/cefas.v1.Cefas/Recommend"
+	Cefas_NextBestAction_FullMethodName         = "/cefas.v1.Cefas/NextBestAction"
+	Cefas_RecordReward_FullMethodName           = "/cefas.v1.Cefas/RecordReward"
+	Cefas_GetDecision_FullMethodName            = "/cefas.v1.Cefas/GetDecision"
 	Cefas_BanditCreate_FullMethodName           = "/cefas.v1.Cefas/BanditCreate"
 	Cefas_BanditSample_FullMethodName           = "/cefas.v1.Cefas/BanditSample"
 	Cefas_BanditReward_FullMethodName           = "/cefas.v1.Cefas/BanditReward"
@@ -156,9 +160,13 @@ type CefasClient interface {
 	FreqCap(ctx context.Context, in *FreqCapRequest, opts ...grpc.CallOption) (*FreqCapResponse, error)
 	Aggregate(ctx context.Context, in *AggregateRequest, opts ...grpc.CallOption) (*AggregateResponse, error)
 	// Rerank applies the MMR diversification operator to a candidate
-	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
-	// a follow-up so this ships RPC + operator + CLI only.
+	// set (issue #244).
 	Rerank(ctx context.Context, in *RerankRequest, opts ...grpc.CallOption) (*RerankResponse, error)
+	// Pipeline operators (#247, #248).
+	Recommend(ctx context.Context, in *RecommendRequest, opts ...grpc.CallOption) (*RecommendResponse, error)
+	NextBestAction(ctx context.Context, in *NextBestActionRequest, opts ...grpc.CallOption) (*NextBestActionResponse, error)
+	RecordReward(ctx context.Context, in *RecordRewardRequest, opts ...grpc.CallOption) (*RecordRewardResponse, error)
+	GetDecision(ctx context.Context, in *GetDecisionRequest, opts ...grpc.CallOption) (*GetDecisionResponse, error)
 	// ===== Bandit (issue #246) =====
 	BanditCreate(ctx context.Context, in *BanditCreateRequest, opts ...grpc.CallOption) (*BanditCreateResponse, error)
 	BanditSample(ctx context.Context, in *BanditSampleRequest, opts ...grpc.CallOption) (*BanditSampleResponse, error)
@@ -689,6 +697,46 @@ func (c *cefasClient) Rerank(ctx context.Context, in *RerankRequest, opts ...grp
 	return out, nil
 }
 
+func (c *cefasClient) Recommend(ctx context.Context, in *RecommendRequest, opts ...grpc.CallOption) (*RecommendResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecommendResponse)
+	err := c.cc.Invoke(ctx, Cefas_Recommend_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) NextBestAction(ctx context.Context, in *NextBestActionRequest, opts ...grpc.CallOption) (*NextBestActionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NextBestActionResponse)
+	err := c.cc.Invoke(ctx, Cefas_NextBestAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) RecordReward(ctx context.Context, in *RecordRewardRequest, opts ...grpc.CallOption) (*RecordRewardResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecordRewardResponse)
+	err := c.cc.Invoke(ctx, Cefas_RecordReward_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) GetDecision(ctx context.Context, in *GetDecisionRequest, opts ...grpc.CallOption) (*GetDecisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDecisionResponse)
+	err := c.cc.Invoke(ctx, Cefas_GetDecision_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) BanditCreate(ctx context.Context, in *BanditCreateRequest, opts ...grpc.CallOption) (*BanditCreateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BanditCreateResponse)
@@ -806,9 +854,13 @@ type CefasServer interface {
 	FreqCap(context.Context, *FreqCapRequest) (*FreqCapResponse, error)
 	Aggregate(context.Context, *AggregateRequest) (*AggregateResponse, error)
 	// Rerank applies the MMR diversification operator to a candidate
-	// set (issue #244). The SQL surface (`DIVERSIFY BY`) is deferred to
-	// a follow-up so this ships RPC + operator + CLI only.
+	// set (issue #244).
 	Rerank(context.Context, *RerankRequest) (*RerankResponse, error)
+	// Pipeline operators (#247, #248).
+	Recommend(context.Context, *RecommendRequest) (*RecommendResponse, error)
+	NextBestAction(context.Context, *NextBestActionRequest) (*NextBestActionResponse, error)
+	RecordReward(context.Context, *RecordRewardRequest) (*RecordRewardResponse, error)
+	GetDecision(context.Context, *GetDecisionRequest) (*GetDecisionResponse, error)
 	// ===== Bandit (issue #246) =====
 	BanditCreate(context.Context, *BanditCreateRequest) (*BanditCreateResponse, error)
 	BanditSample(context.Context, *BanditSampleRequest) (*BanditSampleResponse, error)
@@ -964,6 +1016,18 @@ func (UnimplementedCefasServer) Aggregate(context.Context, *AggregateRequest) (*
 }
 func (UnimplementedCefasServer) Rerank(context.Context, *RerankRequest) (*RerankResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Rerank not implemented")
+}
+func (UnimplementedCefasServer) Recommend(context.Context, *RecommendRequest) (*RecommendResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Recommend not implemented")
+}
+func (UnimplementedCefasServer) NextBestAction(context.Context, *NextBestActionRequest) (*NextBestActionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NextBestAction not implemented")
+}
+func (UnimplementedCefasServer) RecordReward(context.Context, *RecordRewardRequest) (*RecordRewardResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecordReward not implemented")
+}
+func (UnimplementedCefasServer) GetDecision(context.Context, *GetDecisionRequest) (*GetDecisionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDecision not implemented")
 }
 func (UnimplementedCefasServer) BanditCreate(context.Context, *BanditCreateRequest) (*BanditCreateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BanditCreate not implemented")
@@ -1809,6 +1873,78 @@ func _Cefas_Rerank_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_Recommend_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecommendRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).Recommend(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_Recommend_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).Recommend(ctx, req.(*RecommendRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_NextBestAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NextBestActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).NextBestAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_NextBestAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).NextBestAction(ctx, req.(*NextBestActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_RecordReward_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecordRewardRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RecordReward(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RecordReward_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RecordReward(ctx, req.(*RecordRewardRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_GetDecision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDecisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).GetDecision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_GetDecision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).GetDecision(ctx, req.(*GetDecisionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_BanditCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BanditCreateRequest)
 	if err := dec(in); err != nil {
@@ -2055,6 +2191,22 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Rerank",
 			Handler:    _Cefas_Rerank_Handler,
+		},
+		{
+			MethodName: "Recommend",
+			Handler:    _Cefas_Recommend_Handler,
+		},
+		{
+			MethodName: "NextBestAction",
+			Handler:    _Cefas_NextBestAction_Handler,
+		},
+		{
+			MethodName: "RecordReward",
+			Handler:    _Cefas_RecordReward_Handler,
+		},
+		{
+			MethodName: "GetDecision",
+			Handler:    _Cefas_GetDecision_Handler,
 		},
 		{
 			MethodName: "BanditCreate",

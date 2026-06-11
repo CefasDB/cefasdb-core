@@ -8,6 +8,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
+	"github.com/osvaldoandrade/cefas/pkg/core/query/mmr"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -478,7 +479,7 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 				return nil, err
 			}
 		}
-		return e.finishANN(p, eng.Result()), nil
+		return e.finishANN(p, eng.Result(), op)
 	}
 
 	pred := cquery.PredicateFunc(func(it types.Item) (bool, error) {
@@ -525,10 +526,33 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 	if len(rows) < p.Limit {
 		p.Filter.Warning = cquery.FewerThanKWarning
 	}
-	return e.finishANN(p, rows), nil
+	return e.finishANN(p, rows, op)
 }
 
-func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult) *Result {
+func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult, op cquery.DistanceOp) (*Result, error) {
+	if p.Diversify != nil {
+		cands := make([]mmr.Candidate, 0, len(rows))
+		for _, row := range rows {
+			cands = append(cands, mmr.Candidate{
+				Item:     row.Item,
+				Distance: row.Distance,
+				Vector:   row.Item[p.Field],
+			})
+		}
+		slate, err := mmr.Rerank(mmr.Request{
+			Candidates: cands,
+			Sim:        mmr.SimilarityFromDistance(op, p.Field),
+			Lambda:     p.Diversify.Lambda,
+			N:          p.Diversify.TargetSize,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]cquery.TopKResult, 0, len(slate))
+		for _, pick := range slate {
+			rows = append(rows, cquery.TopKResult{Item: pick.Item, Distance: pick.Distance})
+		}
+	}
 	out := make([]types.Item, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.Item)
@@ -536,7 +560,7 @@ func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult) *Result {
 	if len(p.Project) > 0 {
 		project(out, p.Project)
 	}
-	return &Result{Rows: out}
+	return &Result{Rows: out}, nil
 }
 
 func reverse(items []types.Item) {

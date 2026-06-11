@@ -145,6 +145,20 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		if dim, ok := vectorDimension(td, s.OrderBy); ok && dim != len(s.ANNTarget) {
 			return nil, fmt.Errorf("ANN target dimension %d != declared dimension %d for %q", len(s.ANNTarget), dim, s.OrderBy)
 		}
+		if s.Diversify != nil {
+			if !strings.EqualFold(s.Diversify.Method, "mmr") {
+				return nil, fmt.Errorf("unsupported DIVERSIFY method %q", s.Diversify.Method)
+			}
+			if s.Diversify.Lambda < 0 || s.Diversify.Lambda > 1 {
+				return nil, fmt.Errorf("DIVERSIFY lambda %.3f out of [0,1]", s.Diversify.Lambda)
+			}
+			if s.Diversify.TargetSize <= 0 {
+				return nil, fmt.Errorf("DIVERSIFY target size must be > 0")
+			}
+			if s.Diversify.TargetSize > s.Limit {
+				return nil, fmt.Errorf("DIVERSIFY target size %d cannot exceed LIMIT %d", s.Diversify.TargetSize, s.Limit)
+			}
+		}
 		plan := &PlanANN{
 			Table:      s.Table,
 			Field:      s.OrderBy,
@@ -153,6 +167,7 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 			Project:    s.Columns,
 			Descriptor: td,
 			Predicate:  s.Where,
+			Diversify:  s.Diversify,
 		}
 		if s.Where != nil {
 			plan.Filter = chooseANNFilterPlan(s.Where, td)

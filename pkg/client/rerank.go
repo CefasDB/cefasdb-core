@@ -1,7 +1,5 @@
 // MMR rerank client surface (issue #244). Lives in its own file so
-// the implementation does not touch client.go and so the SDK can be
-// extended with a follow-up SQL `DIVERSIFY BY` helper without
-// recombining the two.
+// the implementation does not touch client.go.
 package client
 
 import (
