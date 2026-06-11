@@ -242,12 +242,16 @@ require external services. The suite exercises live split, live range move, and
 node drain while writes are active, injects restart-style failures in copy,
 catch-up, catalog publish, and cleanup phases, and verifies routed reads, item
 counts, checksums, GSI query results, routing epochs, p99 latency, throughput,
-errors, and a consistency verdict. Set `CEFAS_ELASTICITY_REPORT` to persist the
-repeatable JSON report for CI artifacts:
+errors, and a consistency verdict. The autonomous rebalancer gate runs a fixed
+skewed workload before and after the hotspot-driven split, then fails unless the
+max shard share drops from full concentration to a balanced post-rebalance
+distribution. Set `CEFAS_ELASTICITY_REPORT` and `CEFAS_REBALANCER_REPORT` to
+persist repeatable JSON reports for CI artifacts:
 
 ```sh
 CEFAS_ELASTICITY_REPORT=reports/elasticity-chaos-load.json \
-  go test ./internal/cluster -run TestElasticityChaosLoadSuite -count=1 -v
+CEFAS_REBALANCER_REPORT=reports/rebalancer-skew.json \
+  go test ./internal/cluster -run 'TestElasticityChaosLoadSuite|TestAutonomousRebalancerSkewReductionGate' -count=1 -v
 ```
 
 ## Project Layout
