@@ -77,9 +77,9 @@ func (r TokenRange) Contains(token uint64) bool {
 	return token >= r.Start || token < r.End
 }
 
-// NodeCapacity is advisory metadata used by placement decisions. The
-// current manager records it; automated balancing will consume it in a
-// later PR.
+// NodeCapacity is advisory metadata used by placement decisions. Zero
+// values are accepted; the placement policy treats missing weight as 1
+// and missing resource dimensions as unknown capacity.
 type NodeCapacity struct {
 	Weight      int      `json:"weight,omitempty"`
 	CPU         int      `json:"cpu,omitempty"`

@@ -140,12 +140,19 @@ func planSplit(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 	}
 	_, childRange := splitRange(rng, split)
 
+	var policyWarnings []string
 	voters := append([]string(nil), shard.Voters...)
 	if len(req.TargetVoters) > 0 {
-		if err := validateNodeSet(cat, req.TargetVoters, 1); err != nil {
+		if err := validateNodeSet(cat, req.TargetVoters, minVoters(req.MinVoters)); err != nil {
 			return PlacementPlan{}, err
 		}
 		voters = sortedUnique(req.TargetVoters)
+	} else {
+		voterCount := targetVoterCount(req.MinVoters, shard.Voters)
+		voters, policyWarnings, err = selectPlacementVoters(cat, voterCount, nil)
+		if err != nil {
+			return PlacementPlan{}, err
+		}
 	}
 
 	after := nextCatalog(cat)
@@ -163,6 +170,12 @@ func planSplit(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		return PlacementPlan{}, err
 	}
 
+	warnings := []string{
+		"split apply opens the child shard online and publishes a transition placement; the parent keeps serving the full range until split finalize copies data and activates the child",
+		"split finalize still requires writesQuiesced=true until live split catch-up is implemented",
+	}
+	warnings = append(warnings, policyWarnings...)
+
 	return PlacementPlan{
 		Operation:        PlacementOperationSplit,
 		BeforeEpoch:      cat.Epoch,
@@ -172,10 +185,7 @@ func planSplit(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		RequiresDataCopy: true,
 		RequiresRestart:  false,
 		ApplySupported:   true,
-		Warnings: []string{
-			"split apply opens the child shard online and publishes a transition placement; the parent keeps serving the full range until split finalize copies data and activates the child",
-			"split finalize still requires writesQuiesced=true until live split catch-up is implemented",
-		},
+		Warnings:         warnings,
 		Steps: []PlacementPlanStep{
 			{Action: "create_shard", ShardID: u32ptr(newShardID), Detail: fmt.Sprintf("open shard %d online with range [%d,%d)", newShardID, childRange.Start, childRange.End)},
 		},
@@ -213,12 +223,19 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 		return PlacementPlan{}, invalidPlan("range move target shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
 	}
 
+	var policyWarnings []string
 	voters := append([]string(nil), source.Voters...)
 	if len(req.TargetVoters) > 0 {
-		if err := validateNodeSet(cat, req.TargetVoters, 1); err != nil {
+		if err := validateNodeSet(cat, req.TargetVoters, minVoters(req.MinVoters)); err != nil {
 			return PlacementPlan{}, err
 		}
 		voters = sortedUnique(req.TargetVoters)
+	} else {
+		voterCount := targetVoterCount(req.MinVoters, source.Voters)
+		voters, policyWarnings, err = selectPlacementVoters(cat, voterCount, nil)
+		if err != nil {
+			return PlacementPlan{}, err
+		}
 	}
 	if len(voters) == 0 {
 		return PlacementPlan{}, invalidPlan("range move target shard %d needs at least one voter", targetShardID)
@@ -239,6 +256,11 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 		return PlacementPlan{}, err
 	}
 
+	warnings := []string{
+		"range-move apply opens the target shard online and publishes a transition placement; source routing stays active until range-move finalize verifies data and publishes cutover",
+	}
+	warnings = append(warnings, policyWarnings...)
+
 	return PlacementPlan{
 		Operation:        PlacementOperationRangeMove,
 		BeforeEpoch:      cat.Epoch,
@@ -248,9 +270,7 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 		RequiresDataCopy: true,
 		RequiresRestart:  false,
 		ApplySupported:   true,
-		Warnings: []string{
-			"range-move apply opens the target shard online and publishes a transition placement; source routing stays active until range-move finalize verifies data and publishes cutover",
-		},
+		Warnings:         warnings,
 		Steps: []PlacementPlanStep{
 			{Action: "create_shard", ShardID: u32ptr(targetShardID), Detail: fmt.Sprintf("open target shard %d online with pending range [%d,%d)", targetShardID, moveRange.Start, moveRange.End)},
 			{Action: "target_membership", ShardID: u32ptr(targetShardID), Detail: fmt.Sprintf("target shard voters: %s", strings.Join(voters, ","))},
@@ -344,14 +364,17 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 	if err := validateNodeSet(cat, targets, 0); err != nil {
 		return PlacementPlan{}, err
 	}
+	if containsString(targets, req.NodeID) {
+		return PlacementPlan{}, invalidPlan("drain target nodes cannot include draining node %q", req.NodeID)
+	}
 
-	minVoters := minVoters(req.MinVoters)
 	after := nextCatalog(cat)
 	node := after.Nodes[req.NodeID]
 	node.State = NodeStateDraining
 	after.Nodes[req.NodeID] = node
 
 	var steps []PlacementPlanStep
+	var policyWarnings []string
 	affected := 0
 	for i := range after.Shards {
 		sh := &after.Shards[i]
@@ -359,23 +382,37 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 			continue
 		}
 		affected++
-		for _, target := range targets {
-			if !containsString(sh.Voters, target) {
-				sh.Voters = append(sh.Voters, target)
-				steps = append(steps, PlacementPlanStep{Action: "add_voter", ShardID: u32ptr(sh.ID), NodeID: target, Addr: after.Nodes[target].RaftAddr})
+		currentVoters := append([]string(nil), sh.Voters...)
+		remainingVoters := removeString(append([]string(nil), sh.Voters...), req.NodeID)
+		var voters []string
+		if len(targets) > 0 {
+			voters = append([]string(nil), remainingVoters...)
+			for _, target := range targets {
+				if !containsString(voters, target) {
+					voters = append(voters, target)
+				}
+			}
+			sort.Strings(voters)
+			if len(voters) < minVoters(req.MinVoters) {
+				return PlacementPlan{}, invalidPlan("drain would leave shard %d with %d voters; minVoters=%d", sh.ID, len(voters), minVoters(req.MinVoters))
+			}
+		} else {
+			voterCount := targetVoterCount(req.MinVoters, currentVoters)
+			var shardWarnings []string
+			var err error
+			voters, shardWarnings, err = selectPlacementVoters(after, voterCount, remainingVoters)
+			if err != nil {
+				return PlacementPlan{}, fmt.Errorf("drain shard %d: %w", sh.ID, err)
+			}
+			for _, warning := range shardWarnings {
+				policyWarnings = append(policyWarnings, fmt.Sprintf("shard %d: %s", sh.ID, warning))
 			}
 		}
-		sh.Voters = removeString(sh.Voters, req.NodeID)
+		steps = append(steps, membershipDiffSteps(after, sh.ID, currentVoters, voters)...)
+		sh.Voters = voters
 		sh.NonVoters = removeString(sh.NonVoters, req.NodeID)
-		if len(sh.Voters) < minVoters {
-			return PlacementPlan{}, invalidPlan("drain would leave shard %d with %d voters; minVoters=%d", sh.ID, len(sh.Voters), minVoters)
-		}
 		sh.State = ShardStateActive
 		sh.Epoch = after.Epoch
-		steps = append(steps,
-			PlacementPlanStep{Action: "wait_catchup", ShardID: u32ptr(sh.ID), Detail: strings.Join(targets, ",")},
-			PlacementPlanStep{Action: "remove_voter", ShardID: u32ptr(sh.ID), NodeID: req.NodeID},
-		)
 	}
 	if affected == 0 {
 		return PlacementPlan{}, invalidPlan("node %q is not present in any shard membership", req.NodeID)
@@ -389,8 +426,9 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 		"drain is a plan only; apply Raft membership changes shard by shard before stopping the node",
 	}
 	if len(targets) == 0 {
-		warnings = append(warnings, "no target nodes supplied; this plan only removes the draining node and may reduce fault tolerance")
+		warnings = append(warnings, "no target nodes supplied; placement policy selected replacement voters for affected shards")
 	}
+	warnings = append(warnings, policyWarnings...)
 
 	return PlacementPlan{
 		Operation:        PlacementOperationDrain,

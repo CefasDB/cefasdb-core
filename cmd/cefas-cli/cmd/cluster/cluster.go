@@ -210,9 +210,11 @@ func planCmd() *cobra.Command {
 
 func planSplitCmd() *cobra.Command {
 	var (
-		shardID    uint32
-		splitToken uint64
-		newShardID uint32
+		shardID      uint32
+		splitToken   uint64
+		newShardID   uint32
+		targetVoters []string
+		minVoters    int
 	)
 	c := &cobra.Command{
 		Use:   "split",
@@ -223,8 +225,10 @@ func planSplitCmd() *cobra.Command {
 				return fmt.Errorf("--shard is required")
 			}
 			req := client.PlacementPlanRequest{
-				Operation: "split",
-				ShardID:   shardID,
+				Operation:    "split",
+				ShardID:      shardID,
+				TargetVoters: targetVoters,
+				MinVoters:    minVoters,
 			}
 			if cmd.Flags().Changed("split-token") {
 				v := splitToken
@@ -241,6 +245,8 @@ func planSplitCmd() *cobra.Command {
 	f.Uint32Var(&shardID, "shard", 0, "Shard ID to split")
 	f.Uint64Var(&splitToken, "split-token", 0, "Optional split token; default is midpoint")
 	f.Uint32Var(&newShardID, "new-shard", 0, "Optional new shard ID; must be next contiguous ID")
+	f.StringArrayVar(&targetVoters, "target-voter", nil, "Target child shard voter; repeat for multiple nodes")
+	f.IntVar(&minVoters, "min-voters", 0, "Minimum voters for the child shard; default preserves current voter count")
 	return c
 }
 
@@ -251,6 +257,7 @@ func planRangeMoveCmd() *cobra.Command {
 		rangeStart    uint64
 		rangeEnd      uint64
 		targetVoters  []string
+		minVoters     int
 	)
 	c := &cobra.Command{
 		Use:   "range-move",
@@ -271,6 +278,7 @@ func planRangeMoveCmd() *cobra.Command {
 				RangeStart:   &start,
 				RangeEnd:     &end,
 				TargetVoters: targetVoters,
+				MinVoters:    minVoters,
 			}
 			if cmd.Flags().Changed("target-shard") {
 				v := targetShardID
@@ -285,6 +293,7 @@ func planRangeMoveCmd() *cobra.Command {
 	f.Uint64Var(&rangeStart, "range-start", 0, "Inclusive token range start")
 	f.Uint64Var(&rangeEnd, "range-end", 0, "Exclusive token range end; equal to start means full ring")
 	f.StringArrayVar(&targetVoters, "target-voter", nil, "Target shard voter; repeat for multiple nodes")
+	f.IntVar(&minVoters, "min-voters", 0, "Minimum voters for the target shard; default preserves current voter count")
 	return c
 }
 
