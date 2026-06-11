@@ -98,3 +98,71 @@ type AudiencePlugin interface {
 	Dedup(scope, key string, ttl time.Duration) (allowed bool, err error)
 	FreqCap(scope, key string, limit int, window time.Duration) (allowed bool, err error)
 }
+
+// ===== Bandit (issue #246) =====
+
+// BanditArmSpec describes one arm at registration time. Family selects
+// the posterior model: "beta-bernoulli" (default) for click/no-click
+// rewards, "gaussian" for continuous bounded rewards. Prior gives the
+// initial parameters; for Beta-Bernoulli (Alpha, Beta) default to
+// (1, 1); for Gaussian (Mu, Sigma) default to (0, 1). UCB1 and
+// epsilon-greedy ignore Family but still use Alpha/Beta to seed pull
+// counts and reward sums when warm-starting from a snapshot.
+type BanditArmSpec struct {
+	ArmID  string
+	Family string // "beta-bernoulli" | "gaussian" | ""
+	Alpha  float64
+	Beta   float64
+	Mu     float64
+	Sigma  float64
+}
+
+// BanditSpec is the one-shot Init payload. Strategy is "thompson",
+// "ucb1", or "epsilon-greedy". Epsilon applies to epsilon-greedy
+// only; UCB1 uses C (exploration constant; default sqrt(2)).
+type BanditSpec struct {
+	BanditID string
+	Strategy string
+	Arms     []BanditArmSpec
+	Epsilon  float64
+	C        float64
+}
+
+// BanditArmStats is the posterior snapshot for one arm. Pulls /
+// Rewards are cumulative since Init. For Beta-Bernoulli Alpha/Beta are
+// the posterior parameters; Mean = Alpha / (Alpha + Beta). For
+// Gaussian, Mu/Sigma describe the posterior; Mean = Mu.
+type BanditArmStats struct {
+	ArmID   string
+	Family  string
+	Alpha   float64
+	Beta    float64
+	Mu      float64
+	Sigma   float64
+	Pulls   int64
+	Rewards float64
+	Mean    float64
+}
+
+// BanditSnapshot is the per-bandit posterior payload returned by
+// Snapshot. Strategy mirrors the value Init was called with.
+type BanditSnapshot struct {
+	BanditID string
+	Strategy string
+	Arms     []BanditArmStats
+}
+
+// BanditPlugin is the operator face every bandit strategy implements.
+// Init must be called once per bandit-id before Sample / Reward.
+// Posterior state lives in storage so updates survive restart; the
+// plugin is otherwise free of in-process state for a given bandit-id.
+// Context is an opaque map the caller threads through for future
+// contextual variants — v1 implementations ignore it.
+type BanditPlugin interface {
+	Plugin
+	Init(spec BanditSpec) error
+	Sample(banditID string, context map[string]string) (armID string, err error)
+	BatchSample(banditID string, context map[string]string, n int) ([]string, error)
+	Reward(banditID, armID string, reward float64, context map[string]string) error
+	Snapshot(banditID string) (BanditSnapshot, error)
+}
