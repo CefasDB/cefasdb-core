@@ -98,6 +98,33 @@ func TestHTTPFinalizeSplit(t *testing.T) {
 	}
 }
 
+func TestHTTPRollbackSplit(t *testing.T) {
+	mux, cleanup, plan := transitionPlacementTestMux(t)
+	defer cleanup()
+
+	raw, err := json.Marshal(cluster.SplitRollbackRequest{
+		ParentShardID: 0,
+		ChildShardID:  1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/cluster/placement/split/rollback", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var result cluster.SplitRollbackResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch+1 || result.Phase != string(cluster.SplitFinalizePhaseRolledBack) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
 func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 	t.Helper()
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
