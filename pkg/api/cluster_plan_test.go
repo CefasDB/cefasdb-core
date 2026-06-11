@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,6 +70,34 @@ func TestHTTPPlacementApplyNoopMove(t *testing.T) {
 	}
 }
 
+func TestHTTPFinalizeSplit(t *testing.T) {
+	mux, cleanup, plan := transitionPlacementTestMux(t)
+	defer cleanup()
+
+	raw, err := json.Marshal(cluster.SplitFinalizeRequest{
+		ParentShardID:  0,
+		ChildShardID:   1,
+		ExpectedEpoch:  plan.AfterEpoch,
+		WritesQuiesced: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/cluster/placement/split/finalize", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var result cluster.SplitFinalizeResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch+1 || len(result.Placement.Shards) != 2 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
 func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 	t.Helper()
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -92,4 +121,41 @@ func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 	mux := http.NewServeMux()
 	srv.Routes(mux)
 	return mux, func() { _ = mgr.Close() }
+}
+
+func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.PlacementPlan) {
+	t.Helper()
+	root := t.TempDir()
+	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:   root,
+		Shards: 2,
+		SelfID: "n1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shard0, ok := mgr.Shard(0)
+	if !ok {
+		t.Fatal("missing shard 0")
+	}
+	catStore, err := catalog.New(shard0.Storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := api.New(shard0.Storage, catStore)
+	srv.AttachManager(mgr)
+	mux := http.NewServeMux()
+	srv.Routes(mux)
+	return mux, func() { _ = mgr.Close() }, plan
 }

@@ -19,6 +19,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -73,11 +74,36 @@ func PrefixPrimaryAll(table string) (lower, upper []byte) {
 	return p, prefixUpper(p)
 }
 
+// PrefixTables returns the [lower, upper) bound covering every table-scoped
+// data key, across all tables.
+func PrefixTables() (lower, upper []byte) {
+	p := []byte(pTables)
+	return p, prefixUpper(p)
+}
+
 // PrefixTable returns the [lower, upper) bound covering every key that belongs
 // to a table, including primary rows and secondary index entries.
 func PrefixTable(table string) (lower, upper []byte) {
 	p := []byte(tableBase(table) + "/")
 	return p, prefixUpper(p)
+}
+
+// PrimaryTokenFromKey extracts the uint64 partition token from a primary-row
+// storage key. It returns false for catalog, index, TTL, and malformed keys.
+func PrimaryTokenFromKey(key []byte) (uint64, bool) {
+	if !bytes.HasPrefix(key, []byte(pTables)) {
+		return 0, false
+	}
+	rest := key[len(pTables):]
+	pos := bytes.Index(rest, []byte(segPrimary))
+	if pos < 0 {
+		return 0, false
+	}
+	tokenStart := len(pTables) + pos + len(segPrimary)
+	if len(key) < tokenStart+8 {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64(key[tokenStart : tokenStart+8]), true
 }
 
 // PrefixPrimaryByPK returns the [lower, upper) bound covering every SK

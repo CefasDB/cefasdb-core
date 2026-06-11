@@ -1180,6 +1180,28 @@ type PlacementApplyResult struct {
 	Placement   PlacementCatalog
 }
 
+type SplitFinalizeRequest struct {
+	ParentShardID  uint32
+	ChildShardID   uint32
+	ExpectedEpoch  uint64
+	TimeoutMS      int
+	WritesQuiesced bool
+}
+
+type SplitFinalizeResult struct {
+	ParentShardID     uint32
+	ChildShardID      uint32
+	BeforeEpoch       uint64
+	AfterEpoch        uint64
+	ParentRangeBefore TokenRange
+	ParentRangeAfter  TokenRange
+	ChildRange        TokenRange
+	CopiedKeys        int64
+	CopiedCatalogKeys int64
+	DeletedKeys       int64
+	Placement         PlacementCatalog
+}
+
 // Status fetches the cluster status. Works without a token (public).
 func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 	resp, err := c.stub.ClusterStatus(c.withAuth(ctx), &cefaspb.ClusterStatusRequest{})
@@ -1317,6 +1339,20 @@ func (c *Client) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) 
 	return placementApplyResultFromPB(resp.GetResult()), nil
 }
 
+func (c *Client) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (SplitFinalizeResult, error) {
+	resp, err := c.stub.FinalizeSplit(c.withAuth(ctx), &cefaspb.FinalizeSplitRequest{
+		ParentShardId:  req.ParentShardID,
+		ChildShardId:   req.ChildShardID,
+		ExpectedEpoch:  req.ExpectedEpoch,
+		TimeoutMs:      int32(req.TimeoutMS),
+		WritesQuiesced: req.WritesQuiesced,
+	})
+	if err != nil {
+		return SplitFinalizeResult{}, err
+	}
+	return splitFinalizeResultFromPB(resp.GetResult()), nil
+}
+
 func placementPlanToPB(in PlacementPlan) *cefaspb.PlacementPlan {
 	return &cefaspb.PlacementPlan{
 		Operation:        in.Operation,
@@ -1362,9 +1398,13 @@ func shardPlacementsToPB(in []ShardPlacement) []*cefaspb.ShardPlacement {
 func tokenRangesToPB(in []TokenRange) []*cefaspb.TokenRange {
 	out := make([]*cefaspb.TokenRange, 0, len(in))
 	for _, r := range in {
-		out = append(out, &cefaspb.TokenRange{Start: r.Start, End: r.End})
+		out = append(out, tokenRangeToPB(r))
 	}
 	return out
+}
+
+func tokenRangeToPB(r TokenRange) *cefaspb.TokenRange {
+	return &cefaspb.TokenRange{Start: r.Start, End: r.End}
 }
 
 func nodeDescriptorsToPB(in []NodeDescriptor) []*cefaspb.NodeDescriptor {
@@ -1465,6 +1505,32 @@ func placementApplyResultFromPB(in *cefaspb.PlacementApplyResult) PlacementApply
 		Steps:       placementApplyStepsFromPB(in.GetSteps()),
 		Placement:   placementCatalogFromPB(in.GetPlacement()),
 	}
+}
+
+func splitFinalizeResultFromPB(in *cefaspb.FinalizeSplitResult) SplitFinalizeResult {
+	if in == nil {
+		return SplitFinalizeResult{}
+	}
+	return SplitFinalizeResult{
+		ParentShardID:     in.GetParentShardId(),
+		ChildShardID:      in.GetChildShardId(),
+		BeforeEpoch:       in.GetBeforeEpoch(),
+		AfterEpoch:        in.GetAfterEpoch(),
+		ParentRangeBefore: tokenRangeFromPB(in.GetParentRangeBefore()),
+		ParentRangeAfter:  tokenRangeFromPB(in.GetParentRangeAfter()),
+		ChildRange:        tokenRangeFromPB(in.GetChildRange()),
+		CopiedKeys:        in.GetCopiedKeys(),
+		CopiedCatalogKeys: in.GetCopiedCatalogKeys(),
+		DeletedKeys:       in.GetDeletedKeys(),
+		Placement:         placementCatalogFromPB(in.GetPlacement()),
+	}
+}
+
+func tokenRangeFromPB(in *cefaspb.TokenRange) TokenRange {
+	if in == nil {
+		return TokenRange{}
+	}
+	return TokenRange{Start: in.GetStart(), End: in.GetEnd()}
 }
 
 func placementApplyStepsFromPB(in []*cefaspb.PlacementApplyStep) []PlacementApplyStep {

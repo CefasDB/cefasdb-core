@@ -55,6 +55,7 @@ service Cefas {
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
   rpc PlanPlacement(PlanPlacementRequest) returns (PlanPlacementResponse);
   rpc ApplyPlacement(ApplyPlacementRequest) returns (ApplyPlacementResponse);
+  rpc FinalizeSplit(FinalizeSplitRequest) returns (FinalizeSplitResponse);
 
   // Change Data Capture stream. Subscribers receive every committed
   // write in raft log order. Slow consumers may miss events when their
@@ -768,4 +769,30 @@ message PlacementApplyResult {
 
 message ApplyPlacementResponse {
   PlacementApplyResult result = 1;
+}
+
+message FinalizeSplitRequest {
+  uint32 parent_shard_id = 1;
+  uint32 child_shard_id  = 2;
+  uint64 expected_epoch  = 3;
+  int32  timeout_ms      = 4;
+  bool   writes_quiesced = 5;
+}
+
+message FinalizeSplitResult {
+  uint32 parent_shard_id = 1;
+  uint32 child_shard_id  = 2;
+  uint64 before_epoch    = 3;
+  uint64 after_epoch     = 4;
+  TokenRange parent_range_before = 5;
+  TokenRange parent_range_after  = 6;
+  TokenRange child_range         = 7;
+  int64 copied_keys              = 8;
+  int64 copied_catalog_keys      = 9;
+  int64 deleted_keys             = 10;
+  PlacementCatalog placement     = 11;
+}
+
+message FinalizeSplitResponse {
+  FinalizeSplitResult result = 1;
 }
