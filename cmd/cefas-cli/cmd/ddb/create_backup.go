@@ -46,10 +46,14 @@ Example:
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
 				"BackupDetails": map[string]any{
-					"BackupName":          b.Name,
-					"BackupCreationUnix":  b.CreatedAt,
-					"BackupCheckpointAt":  b.CheckpointAt,
-					"BackupTables":        b.Tables,
+					"BackupName":               b.Name,
+					"BackupCreationUnix":       b.CreatedAt,
+					"BackupCheckpointAt":       b.CheckpointAt,
+					"BackupTables":             b.Tables,
+					"BackupRequestedTables":    b.RequestedTables,
+					"BackupManifestVersion":    b.ManifestVersion,
+					"BackupManifestStatus":     b.ManifestStatus,
+					"BackupManifestTableStats": b.TableStats,
 				},
 			})
 		},

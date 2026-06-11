@@ -161,6 +161,16 @@ message BackupDescriptor {
   repeated string tables           = 3;
   // Server-local on-disk path; clients use it only for diagnostics.
   string          checkpoint_path  = 4;
+  int32           manifest_version = 5;
+  string          manifest_status  = 6;
+  repeated string requested_tables = 7;
+  repeated BackupTableStats table_stats = 8;
+}
+
+message BackupTableStats {
+  string table    = 1;
+  int64  rows     = 2;
+  string checksum = 3;
 }
 
 message CreateBackupRequest {

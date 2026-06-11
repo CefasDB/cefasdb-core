@@ -36,10 +36,14 @@ Example:
 			summaries := make([]map[string]any, 0, len(backups))
 			for _, b := range backups {
 				summaries = append(summaries, map[string]any{
-					"BackupName":         b.Name,
-					"BackupCreationUnix": b.CreatedAt,
-					"BackupCheckpointAt": b.CheckpointAt,
-					"BackupTables":       b.Tables,
+					"BackupName":               b.Name,
+					"BackupCreationUnix":       b.CreatedAt,
+					"BackupCheckpointAt":       b.CheckpointAt,
+					"BackupTables":             b.Tables,
+					"BackupRequestedTables":    b.RequestedTables,
+					"BackupManifestVersion":    b.ManifestVersion,
+					"BackupManifestStatus":     b.ManifestStatus,
+					"BackupManifestTableStats": b.TableStats,
 				})
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{

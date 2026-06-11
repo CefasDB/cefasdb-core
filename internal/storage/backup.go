@@ -3,21 +3,38 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	pebbledb "github.com/cockroachdb/pebble"
+
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
+
+const BackupManifestVersion = 1
 
 // BackupMetadata describes an admin-named backup of the live keyspace.
 // One metadata blob per backup, persisted under cefas/admin/backups/<name>
 // and listed by ListBackups.
 type BackupMetadata struct {
-	Name         string   `json:"name"`
-	CreatedAt    int64    `json:"createdAtUnix"`
-	Tables       []string `json:"tables"`
-	CheckpointAt string   `json:"checkpointAt"` // on-disk path of the pebble checkpoint
+	Name            string             `json:"name"`
+	CreatedAt       int64              `json:"createdAtUnix"`
+	Tables          []string           `json:"tables"`
+	CheckpointAt    string             `json:"checkpointAt"` // on-disk path of the pebble checkpoint
+	ManifestVersion int                `json:"manifestVersion,omitempty"`
+	ManifestStatus  string             `json:"manifestStatus,omitempty"`
+	RequestedTables []string           `json:"requestedTables,omitempty"`
+	TableStats      []BackupTableStats `json:"tableStats,omitempty"`
+}
+
+type BackupTableStats struct {
+	Table    string `json:"table"`
+	Rows     int64  `json:"rows"`
+	Checksum string `json:"checksum"`
 }
 
 const backupKeyPrefix = "cefas/admin/backups/"
@@ -57,11 +74,21 @@ func (d *DB) CreateBackup(name string, tables []string) (BackupMetadata, error) 
 		return BackupMetadata{}, fmt.Errorf("pebble checkpoint: %w", err)
 	}
 
+	capturedTables, tableStats, err := buildBackupManifest(checkpointDir, tables)
+	if err != nil {
+		_ = os.RemoveAll(checkpointDir)
+		return BackupMetadata{}, err
+	}
+
 	meta := BackupMetadata{
-		Name:         name,
-		CreatedAt:    time.Now().Unix(),
-		Tables:       append([]string(nil), tables...),
-		CheckpointAt: checkpointDir,
+		Name:            name,
+		CreatedAt:       time.Now().Unix(),
+		Tables:          capturedTables,
+		CheckpointAt:    checkpointDir,
+		ManifestVersion: BackupManifestVersion,
+		ManifestStatus:  "ok",
+		RequestedTables: sortedUniqueStrings(tables),
+		TableStats:      tableStats,
 	}
 	raw, err := json.Marshal(meta)
 	if err != nil {
@@ -94,6 +121,7 @@ func (d *DB) ListBackups() ([]BackupMetadata, error) {
 		if err := json.Unmarshal(cp, &meta); err != nil {
 			return nil, fmt.Errorf("decode backup at %s: %w", it.Key(), err)
 		}
+		normalizeBackupMetadata(&meta)
 		out = append(out, meta)
 	}
 	if err := it.Error(); err != nil {
@@ -117,7 +145,190 @@ func (d *DB) GetBackup(name string) (*BackupMetadata, error) {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil, fmt.Errorf("decode metadata: %w", err)
 	}
+	normalizeBackupMetadata(&meta)
 	return &meta, nil
+}
+
+func buildBackupManifest(checkpointDir string, requested []string) ([]string, []BackupTableStats, error) {
+	checkpoint, err := pebbledb.Open(checkpointDir, &pebbledb.Options{ReadOnly: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("open checkpoint for manifest: %w", err)
+	}
+	defer checkpoint.Close()
+
+	tables := sortedUniqueStrings(requested)
+	if len(tables) == 0 {
+		tables, err = listCheckpointCatalogTables(checkpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		for _, table := range tables {
+			if err := requireCheckpointTable(checkpoint, table); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	stats := make([]BackupTableStats, 0, len(tables))
+	for _, table := range tables {
+		stat, err := checkpointTableStats(checkpoint, table)
+		if err != nil {
+			return nil, nil, err
+		}
+		stats = append(stats, stat)
+	}
+	return tables, stats, nil
+}
+
+func listCheckpointCatalogTables(checkpoint *pebbledb.DB) ([]string, error) {
+	lower, upper := PrefixCatalog()
+	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint catalog iter: %w", err)
+	}
+	defer iter.Close()
+
+	var tables []string
+	for valid := iter.First(); valid; valid = iter.Next() {
+		raw := iter.Value()
+		cp := make([]byte, len(raw))
+		copy(cp, raw)
+		var td types.TableDescriptor
+		if err := json.Unmarshal(cp, &td); err != nil {
+			return nil, fmt.Errorf("decode catalog descriptor at %s: %w", iter.Key(), err)
+		}
+		if td.Name != "" {
+			tables = append(tables, td.Name)
+		}
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	sort.Strings(tables)
+	return tables, nil
+}
+
+func requireCheckpointTable(checkpoint *pebbledb.DB, table string) error {
+	raw, closer, err := checkpoint.Get(KeyCatalog(table))
+	if err != nil {
+		return fmt.Errorf("backup manifest: table %q descriptor missing in checkpoint: %w", table, err)
+	}
+	cp := append([]byte(nil), raw...)
+	_ = closer.Close()
+	var td types.TableDescriptor
+	if err := json.Unmarshal(cp, &td); err != nil {
+		return fmt.Errorf("backup manifest: decode table %q descriptor: %w", table, err)
+	}
+	if td.Name != table {
+		return fmt.Errorf("backup manifest: descriptor key %q contains table %q", table, td.Name)
+	}
+	return nil
+}
+
+func checkpointTableStats(checkpoint *pebbledb.DB, table string) (BackupTableStats, error) {
+	lower, upper := PrefixPrimaryAll(table)
+	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return BackupTableStats{}, fmt.Errorf("checkpoint table iter %q: %w", table, err)
+	}
+	defer iter.Close()
+
+	h := fnv.New64a()
+	var rows int64
+	for valid := iter.First(); valid; valid = iter.Next() {
+		_, _ = h.Write(iter.Key())
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(iter.Value())
+		_, _ = h.Write([]byte{0xff})
+		rows++
+	}
+	if err := iter.Error(); err != nil {
+		return BackupTableStats{}, err
+	}
+	return BackupTableStats{
+		Table:    table,
+		Rows:     rows,
+		Checksum: fmt.Sprintf("%016x", h.Sum64()),
+	}, nil
+}
+
+func validateBackupManifestTable(meta BackupMetadata, checkpoint *pebbledb.DB, table string) (BackupTableStats, error) {
+	if meta.ManifestVersion == 0 {
+		return checkpointTableStats(checkpoint, table)
+	}
+	if meta.ManifestVersion != BackupManifestVersion {
+		return BackupTableStats{}, fmt.Errorf("backup %q manifest version %d is not supported", meta.Name, meta.ManifestVersion)
+	}
+	if !containsString(meta.Tables, table) {
+		return BackupTableStats{}, fmt.Errorf("backup %q did not capture table %q", meta.Name, table)
+	}
+	expected, ok := backupTableStat(meta.TableStats, table)
+	if !ok {
+		return BackupTableStats{}, fmt.Errorf("backup %q manifest has no stats for table %q", meta.Name, table)
+	}
+	actual, err := checkpointTableStats(checkpoint, table)
+	if err != nil {
+		return BackupTableStats{}, err
+	}
+	if actual.Rows != expected.Rows || actual.Checksum != expected.Checksum {
+		return BackupTableStats{}, fmt.Errorf(
+			"backup %q manifest mismatch for table %q: rows %d/%d checksum %s/%s",
+			meta.Name, table, actual.Rows, expected.Rows, actual.Checksum, expected.Checksum,
+		)
+	}
+	return actual, nil
+}
+
+func backupTableStat(stats []BackupTableStats, table string) (BackupTableStats, bool) {
+	for _, stat := range stats {
+		if stat.Table == table {
+			return stat, true
+		}
+	}
+	return BackupTableStats{}, false
+}
+
+func normalizeBackupMetadata(meta *BackupMetadata) {
+	meta.Tables = sortedUniqueStrings(meta.Tables)
+	meta.RequestedTables = sortedUniqueStrings(meta.RequestedTables)
+	sort.Slice(meta.TableStats, func(i, j int) bool { return meta.TableStats[i].Table < meta.TableStats[j].Table })
+	if meta.ManifestVersion == 0 {
+		meta.ManifestStatus = "legacy"
+		return
+	}
+	if meta.ManifestVersion == BackupManifestVersion {
+		meta.ManifestStatus = "ok"
+		return
+	}
+	meta.ManifestStatus = "unsupported"
+}
+
+func sortedUniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	cp := append([]string(nil), in...)
+	sort.Strings(cp)
+	out := cp[:0]
+	for _, v := range cp {
+		if v == "" {
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1] != v {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func containsString(in []string, want string) bool {
+	for _, v := range in {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBackupName(name string) error {

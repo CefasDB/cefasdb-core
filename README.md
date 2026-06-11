@@ -254,6 +254,22 @@ CEFAS_REBALANCER_REPORT=reports/rebalancer-skew.json \
   go test ./internal/cluster -run 'TestElasticityChaosLoadSuite|TestAutonomousRebalancerSkewReductionGate' -count=1 -v
 ```
 
+Admin-named backups include a versioned manifest. The manifest records the
+requested table set, the captured table set, and a deterministic row
+count/checksum for each table in the checkpoint. Restore validates the source
+table against that manifest before creating the target catalog entry or copying
+rows. Backups created before manifests remain listable with
+`manifest_status=legacy`.
+
+```sh
+cefas create-backup --backup-name before-maintenance
+cefas list-backups
+cefas restore-table-from-backup \
+  --backup-name before-maintenance \
+  --source-table Users \
+  --target-table Users_restored
+```
+
 ## Project Layout
 
 ```text
