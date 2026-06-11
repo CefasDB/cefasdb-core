@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
@@ -43,8 +45,11 @@ func TestPlanSplitCreatesSafeTransition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.RequiresDataCopy || !plan.RequiresRestart || plan.ApplySupported {
+	if !plan.RequiresDataCopy || plan.RequiresRestart || !plan.ApplySupported {
 		t.Fatalf("unexpected split flags: %+v", plan)
+	}
+	if len(plan.Steps) != 1 || plan.Steps[0].Action != "create_shard" {
+		t.Fatalf("unexpected split steps: %+v", plan.Steps)
 	}
 	if len(plan.After.Shards) != 2 {
 		t.Fatalf("after shard count = %d, want 2", len(plan.After.Shards))
@@ -164,17 +169,10 @@ func TestApplyPlacementPublishesNoopMove(t *testing.T) {
 	}
 }
 
-func TestApplyPlacementRejectsSplitPlan(t *testing.T) {
-	cat := plannerCatalog(1)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
-		ShardID:   0,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
+	root := t.TempDir()
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
-		Root:      t.TempDir(),
+		Root:      root,
 		Shards:    1,
 		SelfID:    "n1",
 		LogOutput: io.Discard,
@@ -183,10 +181,106 @@ func TestApplyPlacementRejectsSplitPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mgr.Close()
-	_, err = mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{Plan: plan})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
-		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AfterEpoch != plan.AfterEpoch || mgr.RoutingEpoch() != plan.AfterEpoch {
+		t.Fatalf("epoch not advanced: result=%d manager=%d plan=%d", result.AfterEpoch, mgr.RoutingEpoch(), plan.AfterEpoch)
+	}
+	if len(mgr.Shards()) != 2 {
+		t.Fatalf("open shards = %d, want 2", len(mgr.Shards()))
+	}
+	child, ok := mgr.Shard(1)
+	if !ok || child.State != cluster.ShardStateCreating {
+		t.Fatalf("child shard not creating: %#v", child)
+	}
+	if _, err := os.Stat(filepath.Join(root, "shards", "1", "state")); err != nil {
+		t.Fatalf("child state dir not created: %v", err)
+	}
+	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
+	if got := mgr.Router().ShardForPK([]byte(key)); got != 0 {
+		t.Fatalf("transition route = %d, want parent shard 0", got)
+	}
+
+	retry, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retry.Steps) != 1 || retry.Steps[0].Status != "already_applied" {
+		t.Fatalf("unexpected retry result: %+v", retry)
+	}
+}
+
+func TestApplyPlacementPreparesSplitWithRaft(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	addr := pickPort(t)
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:          t.TempDir(),
+		Shards:        1,
+		SelfID:        "n1",
+		MuxAddr:       addr,
+		Peers:         map[string]string{"n1": addr},
+		Bootstrap:     true,
+		HeartbeatMS:   50,
+		ElectionMS:    150,
+		LeaderLeaseMS: 50,
+		CommitMS:      10,
+		LogOutput:     io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	waitShardLeader(t, mgr, 0)
+
+	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
+		Operation: cluster.PlacementOperationSplit,
+		ShardID:   0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+		Plan:          plan,
+		ExpectedEpoch: plan.BeforeEpoch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	child, ok := mgr.Shard(1)
+	if !ok || child.Raft == nil || child.RaftStorage == nil || child.State != cluster.ShardStateCreating {
+		t.Fatalf("child raft shard not open: %#v", child)
+	}
+	waitShardLeader(t, mgr, 1)
+}
+
+func waitShardLeader(t *testing.T, mgr *cluster.Manager, shardID uint32) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		sh, ok := mgr.Shard(shardID)
+		if ok && sh != nil && sh.Raft != nil && sh.Raft.IsLeader() {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("shard %d did not become leader", shardID)
 }
 
 func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {

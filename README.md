@@ -175,16 +175,18 @@ cefas cluster plan move --shard 0 --source-node n1 --target-node n4 --min-voters
 cefas cluster plan drain --node n1 --target-node n4 --min-voters 3
 ```
 
-Move and drain plans can be applied after review:
+Split, move, and drain plans can be applied after review. Applying a split opens
+the child shard online and publishes the transition catalog; it does not copy or
+activate the child range yet.
 
 ```sh
+cefas cluster apply --plan file://split-plan.json --yes
 cefas cluster apply --plan file://move-plan.json --yes
 ```
 
-Split plans still create a transition catalog that opens the child shard after
-restart. Once the child shard is open and writes to the split range are paused,
-finalize the split to copy the child range, activate both shards, and clean the
-range from the parent:
+Once the child shard is open and writes to the split range are paused, finalize
+the split to copy the child range, activate both shards, and clean the range
+from the parent:
 
 ```sh
 cefas cluster split finalize --parent-shard 0 --child-shard 1 --expected-epoch 2 --writes-quiesced --yes
