@@ -1137,6 +1137,25 @@ func (s *GRPCServer) FinalizeSplit(ctx context.Context, req *cefaspb.FinalizeSpl
 	return &cefaspb.FinalizeSplitResponse{Result: pbSplitFinalizeResult(result)}, nil
 }
 
+func (s *GRPCServer) FinalizeRangeMove(ctx context.Context, req *cefaspb.FinalizeRangeMoveRequest) (*cefaspb.FinalizeRangeMoveResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.manager == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
+	}
+	result, err := s.manager.FinalizeRangeMove(ctx, cluster.RangeMoveFinalizeRequest{
+		SourceShardID: req.GetSourceShardId(),
+		TargetShardID: req.GetTargetShardId(),
+		ExpectedEpoch: req.GetExpectedEpoch(),
+		TimeoutMS:     int(req.GetTimeoutMs()),
+	})
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.FinalizeRangeMoveResponse{Result: pbRangeMoveFinalizeResult(result)}, nil
+}
+
 func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.PlacementPlanRequest {
 	out := cluster.PlacementPlanRequest{
 		Operation:    cluster.PlacementOperation(req.GetOperation()),
@@ -1155,6 +1174,18 @@ func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.Place
 	if req.NewShardId != nil {
 		v := req.GetNewShardId()
 		out.NewShardID = &v
+	}
+	if req.TargetShardId != nil {
+		v := req.GetTargetShardId()
+		out.TargetShardID = &v
+	}
+	if req.RangeStart != nil {
+		v := req.GetRangeStart()
+		out.RangeStart = &v
+	}
+	if req.RangeEnd != nil {
+		v := req.GetRangeEnd()
+		out.RangeEnd = &v
 	}
 	return out
 }
@@ -1318,6 +1349,23 @@ func pbSplitFinalizeResult(result cluster.SplitFinalizeResult) *cefaspb.Finalize
 		CopiedCatalogKeys: result.CopiedCatalogKeys,
 		DeletedKeys:       result.DeletedKeys,
 		Placement:         pbPlacementCatalog(result.Placement),
+	}
+}
+
+func pbRangeMoveFinalizeResult(result cluster.RangeMoveFinalizeResult) *cefaspb.FinalizeRangeMoveResult {
+	return &cefaspb.FinalizeRangeMoveResult{
+		SourceShardId:      result.SourceShardID,
+		TargetShardId:      result.TargetShardID,
+		BeforeEpoch:        result.BeforeEpoch,
+		AfterEpoch:         result.AfterEpoch,
+		SourceRangesBefore: pbTokenRanges(result.SourceRangesBefore),
+		SourceRangesAfter:  pbTokenRanges(result.SourceRangesAfter),
+		MovedRange:         pbTokenRange(result.MovedRange),
+		CopiedKeys:         result.CopiedKeys,
+		CopiedCatalogKeys:  result.CopiedCatalogKeys,
+		DeletedKeys:        result.DeletedKeys,
+		Placement:          pbPlacementCatalog(result.Placement),
+		Phase:              result.Phase,
 	}
 }
 

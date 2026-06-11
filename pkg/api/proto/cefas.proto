@@ -56,6 +56,7 @@ service Cefas {
   rpc PlanPlacement(PlanPlacementRequest) returns (PlanPlacementResponse);
   rpc ApplyPlacement(ApplyPlacementRequest) returns (ApplyPlacementResponse);
   rpc FinalizeSplit(FinalizeSplitRequest) returns (FinalizeSplitResponse);
+  rpc FinalizeRangeMove(FinalizeRangeMoveRequest) returns (FinalizeRangeMoveResponse);
 
   // Change Data Capture stream. Subscribers receive every committed
   // write in raft log order. Slow consumers may miss events when their
@@ -708,7 +709,7 @@ message PlacementCatalog {
 }
 
 message PlanPlacementRequest {
-  string operation        = 1; // "split" | "move" | "drain"
+  string operation        = 1; // "split" | "move" | "range_move" | "drain"
   uint32 shard_id         = 2;
   optional uint64 split_token = 3;
   optional uint32 new_shard_id = 4;
@@ -718,6 +719,9 @@ message PlanPlacementRequest {
   repeated string target_voters = 8;
   string node_id          = 9;
   int32  min_voters       = 10;
+  optional uint32 target_shard_id = 11;
+  optional uint64 range_start = 12;
+  optional uint64 range_end   = 13;
 }
 
 message PlacementPlanStep {
@@ -795,4 +799,30 @@ message FinalizeSplitResult {
 
 message FinalizeSplitResponse {
   FinalizeSplitResult result = 1;
+}
+
+message FinalizeRangeMoveRequest {
+  uint32 source_shard_id = 1;
+  uint32 target_shard_id = 2;
+  uint64 expected_epoch  = 3;
+  int32  timeout_ms      = 4;
+}
+
+message FinalizeRangeMoveResult {
+  uint32 source_shard_id = 1;
+  uint32 target_shard_id = 2;
+  uint64 before_epoch    = 3;
+  uint64 after_epoch     = 4;
+  repeated TokenRange source_ranges_before = 5;
+  repeated TokenRange source_ranges_after  = 6;
+  TokenRange moved_range                   = 7;
+  int64 copied_keys                        = 8;
+  int64 copied_catalog_keys                = 9;
+  int64 deleted_keys                       = 10;
+  PlacementCatalog placement               = 11;
+  string phase                             = 12;
+}
+
+message FinalizeRangeMoveResponse {
+  FinalizeRangeMoveResult result = 1;
 }

@@ -140,9 +140,112 @@ func TestGRPCSplitDualWriteCatchupAndFinalize(t *testing.T) {
 	}
 }
 
+func TestGRPCRangeMoveDualWriteCatchupAndFinalize(t *testing.T) {
+	stub, mgr, plan, cleanup := startRangeMoveGRPCFixture(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	const table = "RangeMoveLive"
+	ks := types.KeySchema{PK: "id"}
+	createTable(t, stub, table)
+
+	keys := childRangeKeys(t, mgr, plan, 2)
+	putKey := keys[0]
+	deleteKey := keys[1]
+
+	putGRPCItem(t, ctx, stub, table, putKey, "put")
+	putGRPCItem(t, ctx, stub, table, deleteKey, "delete-me")
+	if _, err := stub.DeleteItem(ctx, &cefaspb.DeleteItemRequest{
+		Table: table,
+		Key:   map[string]*cefaspb.AttributeValue{"id": pbString(deleteKey)},
+	}); err != nil {
+		t.Fatalf("delete during range move: %v", err)
+	}
+
+	source, target := splitShards(t, mgr)
+	assertStoredValue(t, target.Storage, table, ks, putKey, "put")
+	assertMissing(t, target.Storage, table, ks, deleteKey)
+
+	resp, err := stub.FinalizeRangeMove(ctx, &cefaspb.FinalizeRangeMoveRequest{
+		SourceShardId: 0,
+		TargetShardId: 1,
+		ExpectedEpoch: plan.AfterEpoch,
+	})
+	if err != nil {
+		t.Fatalf("finalize range move: %v", err)
+	}
+	if resp.GetResult().GetAfterEpoch() != plan.AfterEpoch+1 {
+		t.Fatalf("after epoch = %d, want %d", resp.GetResult().GetAfterEpoch(), plan.AfterEpoch+1)
+	}
+
+	assertRoutedGRPCValue(t, ctx, stub, table, putKey, "put")
+	assertMissing(t, source.Storage, table, ks, putKey)
+	assertMissing(t, target.Storage, table, ks, deleteKey)
+}
+
+func TestGRPCRangeMoveWriteBurstDuringMovement(t *testing.T) {
+	stub, mgr, plan, cleanup := startRangeMoveGRPCFixture(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	const table = "RangeMoveBurst"
+	createTable(t, stub, table)
+
+	keys := childRangeKeys(t, mgr, plan, 64)
+	for i, key := range keys {
+		putGRPCItem(t, ctx, stub, table, key, fmt.Sprintf("burst-%02d", i))
+	}
+
+	if _, err := stub.FinalizeRangeMove(ctx, &cefaspb.FinalizeRangeMoveRequest{
+		SourceShardId: 0,
+		TargetShardId: 1,
+		ExpectedEpoch: plan.AfterEpoch,
+	}); err != nil {
+		t.Fatalf("finalize range move: %v", err)
+	}
+	for i, key := range keys {
+		assertRoutedGRPCValue(t, ctx, stub, table, key, fmt.Sprintf("burst-%02d", i))
+	}
+}
+
 func startSplitGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, cluster.PlacementPlan, func()) {
 	t.Helper()
 	env := transitionPlacementTestEnv(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		env.Cleanup()
+		t.Fatalf("listen: %v", err)
+	}
+	shard0, ok := env.Manager.Shard(0)
+	if !ok {
+		env.Cleanup()
+		t.Fatal("missing shard 0")
+	}
+	server := api.NewGRPCServer(shard0.Storage, env.Catalog, nil)
+	server.AttachManager(env.Manager)
+	gsrv := grpc.NewServer()
+	cefaspb.RegisterCefasServer(gsrv, server)
+	go func() { _ = gsrv.Serve(ln) }()
+
+	conn, err := grpc.NewClient(ln.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		gsrv.Stop()
+		_ = ln.Close()
+		env.Cleanup()
+		t.Fatalf("dial: %v", err)
+	}
+	cleanup := func() {
+		_ = conn.Close()
+		gsrv.GracefulStop()
+		_ = ln.Close()
+		env.Cleanup()
+	}
+	return cefaspb.NewCefasClient(conn), env.Manager, env.Plan, cleanup
+}
+
+func startRangeMoveGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, cluster.PlacementPlan, func()) {
+	t.Helper()
+	env := transitionRangeMovePlacementTestEnv(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		env.Cleanup()

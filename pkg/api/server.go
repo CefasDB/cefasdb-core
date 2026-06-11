@@ -231,6 +231,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/cluster/placement/apply", s.handleClusterPlacementApply)
 	register("/v1/cluster/placement/split/finalize", s.handleClusterSplitFinalize)
 	register("/v1/cluster/placement/split/rollback", s.handleClusterSplitRollback)
+	register("/v1/cluster/placement/range-move/finalize", s.handleClusterRangeMoveFinalize)
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
@@ -1230,6 +1231,31 @@ func (s *Server) handleClusterSplitRollback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	result, err := s.manager.RollbackSplit(r.Context(), req)
+	if err != nil {
+		writeWriteErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleClusterRangeMoveFinalize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	if s.manager == nil {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
+		return
+	}
+	var req cluster.RangeMoveFinalizeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.manager.FinalizeRangeMove(r.Context(), req)
 	if err != nil {
 		writeWriteErr(w, r, err)
 		return

@@ -125,8 +125,8 @@ type Manager struct {
 }
 
 // WriteTargets is the routing decision for a mutating request. Primary
-// is the shard that currently owns the key; Mirrors are split children
-// that must receive the same write before cutover can complete.
+// is the shard that currently owns the key; Mirrors are transition
+// targets that must receive the same write before cutover can complete.
 type WriteTargets struct {
 	Primary *Shard
 	Mirrors []*Shard
@@ -474,8 +474,8 @@ func (m *Manager) RouteForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
 }
 
 // WriteTargetsForPK selects the primary owner for a write and any
-// split-child mirrors that must receive the same mutation while a
-// parent shard is in the splitting state.
+// transition mirrors that must receive the same mutation while a
+// source shard is splitting or moving.
 func (m *Manager) WriteTargetsForPK(pkBytes []byte, epoch uint64) (WriteTargets, error) {
 	m.splitMu.RLock()
 	targets, err := m.writeTargetsForPKLocked(pkBytes, epoch)
@@ -507,7 +507,7 @@ func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTa
 	}
 
 	out := WriteTargets{Primary: primary}
-	if primary.State != ShardStateSplitting || m.placement.Strategy != PlacementStrategyTokenRange {
+	if (primary.State != ShardStateSplitting && primary.State != ShardStateMoving) || m.placement.Strategy != PlacementStrategyTokenRange {
 		return out, nil
 	}
 	seen := map[uint32]struct{}{primary.ID: {}}
@@ -523,7 +523,7 @@ func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTa
 				break
 			}
 			if int(meta.ID) >= len(m.shards) || m.shards[meta.ID] == nil {
-				return WriteTargets{}, fmt.Errorf("cluster: split child shard %d is not open locally", meta.ID)
+				return WriteTargets{}, fmt.Errorf("cluster: transition target shard %d is not open locally", meta.ID)
 			}
 			out.Mirrors = append(out.Mirrors, m.shards[meta.ID])
 			seen[meta.ID] = struct{}{}
