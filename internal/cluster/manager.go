@@ -115,12 +115,32 @@ type Config struct {
 // the shared MuxAcceptor when multi-Raft mode is enabled.
 type Manager struct {
 	mu            sync.RWMutex
+	splitMu       sync.RWMutex
 	cfg           Config
 	router        *Router
 	placement     PlacementCatalog
 	placementPath string
 	mux           *craft.MuxAcceptor
 	shards        []*Shard
+}
+
+// WriteTargets is the routing decision for a mutating request. Primary
+// is the shard that currently owns the key; Mirrors are split children
+// that must receive the same write before cutover can complete.
+type WriteTargets struct {
+	Primary *Shard
+	Mirrors []*Shard
+
+	release func()
+}
+
+// Release drops the split write fence held while the targets were
+// selected. Callers must keep the fence until the write has landed on
+// primary and mirrors.
+func (t WriteTargets) Release() {
+	if t.release != nil {
+		t.release()
+	}
 }
 
 var placementSystemKey = []byte(storage.Namespace + "cluster/placement")
@@ -451,6 +471,66 @@ func (m *Manager) RouteForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
 		return nil, fmt.Errorf("cluster: routed to non-routable shard %d state=%s", id, sh.State)
 	}
 	return sh, nil
+}
+
+// WriteTargetsForPK selects the primary owner for a write and any
+// split-child mirrors that must receive the same mutation while a
+// parent shard is in the splitting state.
+func (m *Manager) WriteTargetsForPK(pkBytes []byte, epoch uint64) (WriteTargets, error) {
+	m.splitMu.RLock()
+	targets, err := m.writeTargetsForPKLocked(pkBytes, epoch)
+	if err != nil {
+		m.splitMu.RUnlock()
+		return WriteTargets{}, err
+	}
+	targets.release = m.splitMu.RUnlock
+	return targets, nil
+}
+
+func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTargets, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if err := checkRoutingEpoch(epoch, m.placement.Epoch); err != nil {
+		return WriteTargets{}, err
+	}
+	token := m.router.TokenForPK(pkBytes)
+	id := m.router.ShardForUint64(token)
+	if int(id) >= len(m.shards) {
+		return WriteTargets{}, fmt.Errorf("cluster: routed to missing shard %d", id)
+	}
+	primary := m.shards[id]
+	if primary == nil {
+		return WriteTargets{}, fmt.Errorf("cluster: routed to missing shard %d", id)
+	}
+	if !primary.State.routable() {
+		return WriteTargets{}, fmt.Errorf("cluster: routed to non-routable shard %d state=%s", id, primary.State)
+	}
+
+	out := WriteTargets{Primary: primary}
+	if primary.State != ShardStateSplitting || m.placement.Strategy != PlacementStrategyTokenRange {
+		return out, nil
+	}
+	seen := map[uint32]struct{}{primary.ID: {}}
+	for _, meta := range m.placement.Shards {
+		if meta.State != ShardStateCreating {
+			continue
+		}
+		for _, rng := range meta.Ranges {
+			if !rng.Contains(token) {
+				continue
+			}
+			if _, ok := seen[meta.ID]; ok {
+				break
+			}
+			if int(meta.ID) >= len(m.shards) || m.shards[meta.ID] == nil {
+				return WriteTargets{}, fmt.Errorf("cluster: split child shard %d is not open locally", meta.ID)
+			}
+			out.Mirrors = append(out.Mirrors, m.shards[meta.ID])
+			seen[meta.ID] = struct{}{}
+			break
+		}
+	}
+	return out, nil
 }
 
 func checkRoutingEpoch(clientEpoch, currentEpoch uint64) error {

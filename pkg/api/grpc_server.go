@@ -248,7 +248,12 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.storageFor(pkBytes).PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	targets, err := s.writeTargetsForPK(pkBytes)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	defer targets.Release()
+	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.PutItemResponse{}, nil
@@ -326,7 +331,12 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	db := s.storageFor(pkBytes)
+	targets, err := s.writeTargetsForPK(pkBytes)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	defer targets.Release()
+	db := targets.primary
 	plan, err := cefassql.PlanStmt(stmt, s.cat)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("plan: %v", err))
@@ -335,6 +345,15 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	res, err := ex.Execute(plan)
 	if err != nil {
 		return nil, mapStorageErr(err)
+	}
+	if len(targets.mirrors) > 0 {
+		finalItem, err := db.GetItem(req.GetTable(), td.KeySchema, key)
+		if err != nil {
+			return nil, mapStorageErr(err)
+		}
+		if err := targets.MirrorPutItem(td, finalItem); err != nil {
+			return nil, mapStorageErr(err)
+		}
 	}
 	resp := &cefaspb.UpdateItemResponse{}
 	if wantImage != "" && len(res.Rows) > 0 {
@@ -379,7 +398,12 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.storageFor(pkBytes).DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	targets, err := s.writeTargetsForPK(pkBytes)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	defer targets.Release()
+	if err := targets.DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.DeleteItemResponse{}, nil
@@ -424,7 +448,14 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 	if s.manager == nil {
 		return s.db.BatchWriteItem(td, ops)
 	}
-	buckets := make(map[*storage.DB][]storage.BatchOp)
+	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
+	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	var releases []func()
+	defer func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}()
 	for _, op := range ops {
 		probe := op.Item
 		if op.Op == storage.BatchOpDelete {
@@ -434,10 +465,22 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 		if err != nil {
 			return err
 		}
-		db := s.storageFor(pkBytes)
-		buckets[db] = append(buckets[db], op)
+		targets, err := s.writeTargetsForPK(pkBytes)
+		if err != nil {
+			return err
+		}
+		releases = append(releases, targets.Release)
+		primaryBuckets[targets.primary] = append(primaryBuckets[targets.primary], op)
+		for _, mirror := range targets.mirrors {
+			mirrorBuckets[mirror] = append(mirrorBuckets[mirror], op)
+		}
 	}
-	for db, group := range buckets {
+	for db, group := range primaryBuckets {
+		if err := db.BatchWriteItem(td, group); err != nil {
+			return err
+		}
+	}
+	for db, group := range mirrorBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
 		}
