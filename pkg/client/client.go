@@ -740,20 +740,54 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 	}
 }
 
+type RestoreTableFromBackupOptions struct {
+	DryRun bool
+}
+
+type RestoreTableFromBackupResult struct {
+	TargetTableName  string
+	RowsCopied       int
+	DryRun           bool
+	SourceTableStats BackupTableStats
+	ManifestVersion  int
+	ManifestStatus   string
+}
+
 // RestoreTableFromBackup reads `sourceTable`'s descriptor from
 // `backupName` and reproduces it under `targetTable` in the live
 // catalog, then copies every row from the checkpoint into the new
 // table. Returns the number of rows copied.
 func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceTable, targetTable string) (int, error) {
+	result, err := c.RestoreTableFromBackupWithOptions(ctx, backupName, sourceTable, targetTable, RestoreTableFromBackupOptions{})
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsCopied, nil
+}
+
+func (c *Client) RestoreTableFromBackupWithOptions(ctx context.Context, backupName, sourceTable, targetTable string, opts RestoreTableFromBackupOptions) (RestoreTableFromBackupResult, error) {
 	resp, err := c.stub.RestoreTableFromBackup(c.withAuth(ctx), &cefaspb.RestoreTableFromBackupRequest{
 		BackupName:      backupName,
 		SourceTableName: sourceTable,
 		TargetTableName: targetTable,
+		DryRun:          opts.DryRun,
 	})
 	if err != nil {
-		return 0, err
+		return RestoreTableFromBackupResult{}, err
 	}
-	return int(resp.GetRowsCopied()), nil
+	stat := resp.GetSourceTableStats()
+	return RestoreTableFromBackupResult{
+		TargetTableName: resp.GetTargetTableName(),
+		RowsCopied:      int(resp.GetRowsCopied()),
+		DryRun:          resp.GetDryRun(),
+		ManifestVersion: int(resp.GetManifestVersion()),
+		ManifestStatus:  resp.GetManifestStatus(),
+		SourceTableStats: BackupTableStats{
+			Table:    stat.GetTable(),
+			Rows:     stat.GetRows(),
+			Checksum: stat.GetChecksum(),
+		},
+	}, nil
 }
 
 type CompactionResult struct {

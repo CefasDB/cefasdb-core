@@ -224,6 +224,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/SpatialQuery", s.handleSpatialQuery)
 	register("/v1/Sql", s.handleSql)
 	register("/v1/PartiQL", s.handlePartiQL)
+	register("/v1/RestoreTableFromBackup", s.handleRestoreTableFromBackup)
 	register("/v1/Health", s.handleHealth)
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
@@ -300,6 +301,78 @@ type compactRequest struct {
 	LowerBase64 string `json:"lower,omitempty"`
 	UpperBase64 string `json:"upper,omitempty"`
 	Parallelize bool   `json:"parallelize,omitempty"`
+}
+
+type restoreTableFromBackupRequest struct {
+	BackupName      string `json:"backupName"`
+	SourceTableName string `json:"sourceTableName"`
+	TargetTableName string `json:"targetTableName"`
+	DryRun          bool   `json:"dryRun,omitempty"`
+}
+
+type restoreTableFromBackupResponse struct {
+	TargetTableName  string                   `json:"targetTableName"`
+	RowsCopied       int                      `json:"rowsCopied"`
+	DryRun           bool                     `json:"dryRun"`
+	SourceTableStats storage.BackupTableStats `json:"sourceTableStats"`
+	ManifestVersion  int                      `json:"manifestVersion"`
+	ManifestStatus   string                   `json:"manifestStatus"`
+	TableStatus      string                   `json:"tableStatus"`
+}
+
+func (s *Server) handleRestoreTableFromBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	var req restoreTableFromBackupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	register := func(td types.TableDescriptor) error {
+		if err := s.cat.Create(td); err != nil {
+			return err
+		}
+		if s.manager != nil {
+			for i, sh := range s.manager.Shards() {
+				if i == 0 {
+					continue
+				}
+				if cat, cerr := catalog.New(sh.Storage); cerr == nil {
+					_ = cat.Create(td)
+				}
+			}
+		}
+		return nil
+	}
+	res, err := s.db.RestoreTableFromBackupWithOptions(
+		req.BackupName,
+		req.SourceTableName,
+		req.TargetTableName,
+		storage.RestoreOptions{DryRun: req.DryRun},
+		register,
+	)
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	status := "ACTIVE"
+	if res.DryRun {
+		status = "DRY_RUN"
+	}
+	writeJSON(w, http.StatusOK, restoreTableFromBackupResponse{
+		TargetTableName:  res.TargetTable.Name,
+		RowsCopied:       res.RowsCopied,
+		DryRun:           res.DryRun,
+		SourceTableStats: res.SourceStats,
+		ManifestVersion:  res.ManifestVersion,
+		ManifestStatus:   res.ManifestStatus,
+		TableStatus:      status,
+	})
 }
 
 func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
@@ -1607,6 +1680,9 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 func mapWriteErr(err error) int {
 	if errors.Is(err, types.ErrMissingKey) || errors.Is(err, types.ErrInvalidKeyType) {
 		return http.StatusBadRequest
+	}
+	if errors.Is(err, types.ErrTableAlreadyExists) {
+		return http.StatusConflict
 	}
 	if errors.Is(err, cluster.ErrInvalidPlacementPlan) {
 		return http.StatusBadRequest

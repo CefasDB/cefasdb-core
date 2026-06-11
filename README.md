@@ -266,8 +266,17 @@ cefas create-backup --backup-name before-maintenance
 cefas list-backups
 cefas restore-table-from-backup \
   --backup-name before-maintenance \
-  --source-table Users \
-  --target-table Users_restored
+  --source-table-name Users \
+  --target-table-name Users_restored
+cefas restore-table-from-backup \
+  --backup-name before-maintenance \
+  --source-table-name Users \
+  --target-table-name Users_restored \
+  --dry-run
+curl -s -X POST "$CEFAS_HTTP/v1/RestoreTableFromBackup" \
+  -H "Authorization: Bearer $CEFAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"backupName":"before-maintenance","sourceTableName":"Users","targetTableName":"Users_restored","dryRun":true}'
 ```
 
 ## Project Layout
