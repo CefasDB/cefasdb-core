@@ -56,6 +56,8 @@ const (
 	Cefas_Compact_FullMethodName                = "/cefas.v1.Cefas/Compact"
 	Cefas_CreateBackup_FullMethodName           = "/cefas.v1.Cefas/CreateBackup"
 	Cefas_ListBackups_FullMethodName            = "/cefas.v1.Cefas/ListBackups"
+	Cefas_DeleteBackup_FullMethodName           = "/cefas.v1.Cefas/DeleteBackup"
+	Cefas_ApplyBackupRetention_FullMethodName   = "/cefas.v1.Cefas/ApplyBackupRetention"
 	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
 	Cefas_ListPlugins_FullMethodName            = "/cefas.v1.Cefas/ListPlugins"
 	Cefas_DescribePlugin_FullMethodName         = "/cefas.v1.Cefas/DescribePlugin"
@@ -127,6 +129,8 @@ type CefasClient interface {
 	// catalogued under cefas/admin/backups/<name>).
 	CreateBackup(ctx context.Context, in *CreateBackupRequest, opts ...grpc.CallOption) (*CreateBackupResponse, error)
 	ListBackups(ctx context.Context, in *ListBackupsRequest, opts ...grpc.CallOption) (*ListBackupsResponse, error)
+	DeleteBackup(ctx context.Context, in *DeleteBackupRequest, opts ...grpc.CallOption) (*DeleteBackupResponse, error)
+	ApplyBackupRetention(ctx context.Context, in *ApplyBackupRetentionRequest, opts ...grpc.CallOption) (*ApplyBackupRetentionResponse, error)
 	RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error)
 	// Plugin introspection.
 	ListPlugins(ctx context.Context, in *ListPluginsRequest, opts ...grpc.CallOption) (*ListPluginsResponse, error)
@@ -492,6 +496,26 @@ func (c *cefasClient) ListBackups(ctx context.Context, in *ListBackupsRequest, o
 	return out, nil
 }
 
+func (c *cefasClient) DeleteBackup(ctx context.Context, in *DeleteBackupRequest, opts ...grpc.CallOption) (*DeleteBackupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteBackupResponse)
+	err := c.cc.Invoke(ctx, Cefas_DeleteBackup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ApplyBackupRetention(ctx context.Context, in *ApplyBackupRetentionRequest, opts ...grpc.CallOption) (*ApplyBackupRetentionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyBackupRetentionResponse)
+	err := c.cc.Invoke(ctx, Cefas_ApplyBackupRetention_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) RestoreTableFromBackup(ctx context.Context, in *RestoreTableFromBackupRequest, opts ...grpc.CallOption) (*RestoreTableFromBackupResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RestoreTableFromBackupResponse)
@@ -696,6 +720,8 @@ type CefasServer interface {
 	// catalogued under cefas/admin/backups/<name>).
 	CreateBackup(context.Context, *CreateBackupRequest) (*CreateBackupResponse, error)
 	ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error)
+	DeleteBackup(context.Context, *DeleteBackupRequest) (*DeleteBackupResponse, error)
+	ApplyBackupRetention(context.Context, *ApplyBackupRetentionRequest) (*ApplyBackupRetentionResponse, error)
 	RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error)
 	// Plugin introspection.
 	ListPlugins(context.Context, *ListPluginsRequest) (*ListPluginsResponse, error)
@@ -814,6 +840,12 @@ func (UnimplementedCefasServer) CreateBackup(context.Context, *CreateBackupReque
 }
 func (UnimplementedCefasServer) ListBackups(context.Context, *ListBackupsRequest) (*ListBackupsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListBackups not implemented")
+}
+func (UnimplementedCefasServer) DeleteBackup(context.Context, *DeleteBackupRequest) (*DeleteBackupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteBackup not implemented")
+}
+func (UnimplementedCefasServer) ApplyBackupRetention(context.Context, *ApplyBackupRetentionRequest) (*ApplyBackupRetentionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyBackupRetention not implemented")
 }
 func (UnimplementedCefasServer) RestoreTableFromBackup(context.Context, *RestoreTableFromBackupRequest) (*RestoreTableFromBackupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreTableFromBackup not implemented")
@@ -1390,6 +1422,42 @@ func _Cefas_ListBackups_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_DeleteBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteBackupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DeleteBackup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DeleteBackup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DeleteBackup(ctx, req.(*DeleteBackupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ApplyBackupRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyBackupRetentionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ApplyBackupRetention(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ApplyBackupRetention_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ApplyBackupRetention(ctx, req.(*ApplyBackupRetentionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_RestoreTableFromBackup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RestoreTableFromBackupRequest)
 	if err := dec(in); err != nil {
@@ -1745,6 +1813,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListBackups",
 			Handler:    _Cefas_ListBackups_Handler,
+		},
+		{
+			MethodName: "DeleteBackup",
+			Handler:    _Cefas_DeleteBackup_Handler,
+		},
+		{
+			MethodName: "ApplyBackupRetention",
+			Handler:    _Cefas_ApplyBackupRetention_Handler,
 		},
 		{
 			MethodName: "RestoreTableFromBackup",

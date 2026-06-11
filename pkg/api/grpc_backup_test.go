@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestCreateAndListBackups(t *testing.T) {
@@ -71,5 +73,70 @@ func TestCreateBackupRejectsDuplicate(t *testing.T) {
 	}
 	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "x"}); err == nil {
 		t.Fatal("expected duplicate-name error")
+	}
+}
+
+func TestDeleteBackupRemovesBackup(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	createTable(t, stub, "Users")
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "snap"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	resp, err := stub.DeleteBackup(ctx, &cefaspb.DeleteBackupRequest{Name: "snap"})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !resp.GetResult().GetMetadataDeleted() || !resp.GetResult().GetCheckpointDeleted() {
+		t.Fatalf("delete result = %+v", resp.GetResult())
+	}
+	list, err := stub.ListBackups(ctx, &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list.GetBackups()) != 0 {
+		t.Fatalf("backups after delete = %+v", list.GetBackups())
+	}
+}
+
+func TestDeleteBackupMissingBackup(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	_, err := stub.DeleteBackup(context.Background(), &cefaspb.DeleteBackupRequest{Name: "ghost"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("missing backup code = %v, want NotFound: %v", status.Code(err), err)
+	}
+}
+
+func TestApplyBackupRetentionDryRun(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "a"}); err != nil {
+		t.Fatalf("create a: %v", err)
+	}
+	if _, err := stub.CreateBackup(ctx, &cefaspb.CreateBackupRequest{Name: "b"}); err != nil {
+		t.Fatalf("create b: %v", err)
+	}
+
+	resp, err := stub.ApplyBackupRetention(ctx, &cefaspb.ApplyBackupRetentionRequest{
+		KeepLatestSet: true,
+		KeepLatest:    0,
+		DryRun:        true,
+	})
+	if err != nil {
+		t.Fatalf("retention dry-run: %v", err)
+	}
+	if !resp.GetDryRun() || len(resp.GetWouldDelete()) != 2 || len(resp.GetDeleted()) != 0 {
+		t.Fatalf("retention response = %+v", resp)
+	}
+	list, err := stub.ListBackups(ctx, &cefaspb.ListBackupsRequest{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list.GetBackups()) != 2 {
+		t.Fatalf("dry-run deleted backups: %+v", list.GetBackups())
 	}
 }

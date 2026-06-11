@@ -225,6 +225,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/Sql", s.handleSql)
 	register("/v1/PartiQL", s.handlePartiQL)
 	register("/v1/RestoreTableFromBackup", s.handleRestoreTableFromBackup)
+	register("/v1/DeleteBackup", s.handleDeleteBackup)
+	register("/v1/ApplyBackupRetention", s.handleApplyBackupRetention)
 	register("/v1/Health", s.handleHealth)
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
@@ -318,6 +320,78 @@ type restoreTableFromBackupResponse struct {
 	ManifestVersion  int                      `json:"manifestVersion"`
 	ManifestStatus   string                   `json:"manifestStatus"`
 	TableStatus      string                   `json:"tableStatus"`
+}
+
+type deleteBackupRequest struct {
+	BackupName string `json:"backupName"`
+}
+
+type applyBackupRetentionRequest struct {
+	KeepLatest    int    `json:"keepLatest,omitempty"`
+	KeepLatestSet bool   `json:"keepLatestSet,omitempty"`
+	MaxAgeSeconds int64  `json:"maxAgeSeconds,omitempty"`
+	MaxAgeSet     bool   `json:"maxAgeSet,omitempty"`
+	MaxAge        string `json:"maxAge,omitempty"`
+	DryRun        bool   `json:"dryRun,omitempty"`
+}
+
+func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	var req deleteBackupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.db.DeleteBackup(req.BackupName)
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"BackupDeletion": result})
+}
+
+func (s *Server) handleApplyBackupRetention(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
+		return
+	}
+	var req applyBackupRetentionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	maxAge := time.Duration(req.MaxAgeSeconds) * time.Second
+	maxAgeSet := req.MaxAgeSet
+	if req.MaxAge != "" {
+		parsed, err := time.ParseDuration(req.MaxAge)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		maxAge = parsed
+		maxAgeSet = true
+	}
+	result, err := s.db.ApplyBackupRetention(storage.BackupRetentionOptions{
+		KeepLatest:    req.KeepLatest,
+		KeepLatestSet: req.KeepLatestSet,
+		MaxAge:        maxAge,
+		MaxAgeSet:     maxAgeSet,
+		DryRun:        req.DryRun,
+	})
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"BackupRetention": result})
 }
 
 func (s *Server) handleRestoreTableFromBackup(w http.ResponseWriter, r *http.Request) {
@@ -1683,6 +1757,15 @@ func mapWriteErr(err error) int {
 	}
 	if errors.Is(err, types.ErrTableAlreadyExists) {
 		return http.StatusConflict
+	}
+	if errors.Is(err, storage.ErrBackupNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, storage.ErrBackupInUse) {
+		return http.StatusConflict
+	}
+	if errors.Is(err, storage.ErrInvalidBackupRetention) {
+		return http.StatusBadRequest
 	}
 	if errors.Is(err, cluster.ErrInvalidPlacementPlan) {
 		return http.StatusBadRequest

@@ -56,6 +56,12 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 	opts RestoreOptions,
 	register func(types.TableDescriptor) error,
 ) (RestoreResult, error) {
+	if backupName == "" {
+		return RestoreResult{}, fmt.Errorf("backup name required")
+	}
+	releaseBackup := d.beginBackupRestore(backupName)
+	defer releaseBackup()
+
 	preflight, checkpoint, err := d.restoreTablePreflight(backupName, sourceTable, targetTable)
 	if err != nil {
 		return RestoreResult{}, err
@@ -111,6 +117,12 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 }
 
 func (d *DB) PreflightRestoreTableFromBackup(backupName, sourceTable, targetTable string) (RestorePreflightResult, error) {
+	if backupName == "" {
+		return RestorePreflightResult{}, fmt.Errorf("backup name required")
+	}
+	releaseBackup := d.beginBackupRestore(backupName)
+	defer releaseBackup()
+
 	preflight, checkpoint, err := d.restoreTablePreflight(backupName, sourceTable, targetTable)
 	if err != nil {
 		return RestorePreflightResult{}, err

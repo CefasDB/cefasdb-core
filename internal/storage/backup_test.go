@@ -2,10 +2,12 @@ package storage_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
@@ -237,6 +239,159 @@ func TestGetBackupAbsent(t *testing.T) {
 	}
 }
 
+func TestDeleteBackupRemovesMetadataAndCheckpoint(t *testing.T) {
+	db := openDB(t)
+	seedBackupTable(t, db, "Users", "u1")
+	meta, err := db.CreateBackup("snap", []string{"Users"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := os.Stat(meta.CheckpointAt); err != nil {
+		t.Fatalf("checkpoint before delete: %v", err)
+	}
+
+	result, err := db.DeleteBackup("snap")
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !result.MetadataDeleted || !result.CheckpointDeleted || result.PartialCleanup {
+		t.Fatalf("delete result = %+v", result)
+	}
+	got, err := db.GetBackup("snap")
+	if err != nil {
+		t.Fatalf("get after delete: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("metadata still exists: %+v", got)
+	}
+	if _, err := os.Stat(meta.CheckpointAt); !os.IsNotExist(err) {
+		t.Fatalf("checkpoint stat after delete = %v, want not exist", err)
+	}
+}
+
+func TestDeleteBackupMissingBackup(t *testing.T) {
+	db := openDB(t)
+	_, err := db.DeleteBackup("ghost")
+	if !errors.Is(err, storage.ErrBackupNotFound) {
+		t.Fatalf("delete missing err = %v, want ErrBackupNotFound", err)
+	}
+}
+
+func TestDeleteBackupRefusesActiveRestore(t *testing.T) {
+	db := openDB(t)
+	seedBackupTable(t, db, "Users", "u1")
+	if _, err := db.CreateBackup("snap", []string{"Users"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{}, func(types.TableDescriptor) error {
+			close(started)
+			<-release
+			return nil
+		})
+		done <- err
+	}()
+	<-started
+
+	_, err := db.DeleteBackup("snap")
+	if !errors.Is(err, storage.ErrBackupInUse) {
+		t.Fatalf("delete active restore err = %v, want ErrBackupInUse", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+}
+
+func TestApplyBackupRetentionDryRunOrdersOldestFirst(t *testing.T) {
+	db := openDB(t)
+	for _, name := range []string{"old", "middle", "new"} {
+		if _, err := db.CreateBackup(name, nil); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+	setBackupCreatedAt(t, db, "old", 100)
+	setBackupCreatedAt(t, db, "middle", 200)
+	setBackupCreatedAt(t, db, "new", 300)
+
+	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+		KeepLatestSet: true,
+		KeepLatest:    1,
+		DryRun:        true,
+	})
+	if err != nil {
+		t.Fatalf("retention dry-run: %v", err)
+	}
+	if !result.DryRun || len(result.WouldDelete) != 2 {
+		t.Fatalf("retention result = %+v", result)
+	}
+	if result.WouldDelete[0].Backup.Name != "old" || result.WouldDelete[1].Backup.Name != "middle" {
+		t.Fatalf("would delete order = %+v", result.WouldDelete)
+	}
+	if backups, err := db.ListBackups(); err != nil || len(backups) != 3 {
+		t.Fatalf("dry-run deleted backups: len=%d err=%v", len(backups), err)
+	}
+}
+
+func TestApplyBackupRetentionMaxAgeDeletesOldCheckpoints(t *testing.T) {
+	db := openDB(t)
+	for _, name := range []string{"old", "fresh"} {
+		if _, err := db.CreateBackup(name, nil); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+	oldMeta := setBackupCreatedAt(t, db, "old", 100)
+	freshMeta := setBackupCreatedAt(t, db, "fresh", 250)
+
+	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+		MaxAgeSet: true,
+		MaxAge:    100 * time.Second,
+		Now:       time.Unix(250, 0),
+	})
+	if err != nil {
+		t.Fatalf("retention: %v", err)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0].BackupName != "old" {
+		t.Fatalf("deleted = %+v", result.Deleted)
+	}
+	if _, err := os.Stat(oldMeta.CheckpointAt); !os.IsNotExist(err) {
+		t.Fatalf("old checkpoint stat = %v, want not exist", err)
+	}
+	if _, err := os.Stat(freshMeta.CheckpointAt); err != nil {
+		t.Fatalf("fresh checkpoint stat = %v", err)
+	}
+}
+
+func TestApplyBackupRetentionKeepsLatestEvenWhenOlderThanMaxAge(t *testing.T) {
+	db := openDB(t)
+	for _, name := range []string{"old", "latest"} {
+		if _, err := db.CreateBackup(name, nil); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+	setBackupCreatedAt(t, db, "old", 100)
+	setBackupCreatedAt(t, db, "latest", 200)
+
+	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+		KeepLatestSet: true,
+		KeepLatest:    1,
+		MaxAgeSet:     true,
+		MaxAge:        time.Second,
+		Now:           time.Unix(300, 0),
+		DryRun:        true,
+	})
+	if err != nil {
+		t.Fatalf("retention: %v", err)
+	}
+	if len(result.WouldDelete) != 1 || result.WouldDelete[0].Backup.Name != "old" {
+		t.Fatalf("would delete = %+v", result.WouldDelete)
+	}
+}
+
 func TestCreateBackupRefusesExistingCheckpointDir(t *testing.T) {
 	db := openDB(t)
 	// Force the checkpoint dir into existence before CreateBackup.
@@ -267,6 +422,26 @@ func TestCreateBackupRefusesExistingCheckpointDir(t *testing.T) {
 		t.Fatalf("expected collision error, got %v", err)
 	}
 	_ = db
+}
+
+func setBackupCreatedAt(t *testing.T, db *storage.DB, name string, createdAt int64) storage.BackupMetadata {
+	t.Helper()
+	meta, err := db.GetBackup(name)
+	if err != nil {
+		t.Fatalf("get backup %s: %v", name, err)
+	}
+	if meta == nil {
+		t.Fatalf("backup %s not found", name)
+	}
+	meta.CreatedAt = createdAt
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal backup %s: %v", name, err)
+	}
+	if err := db.Set([]byte("cefas/admin/backups/"+name), raw); err != nil {
+		t.Fatalf("set backup %s: %v", name, err)
+	}
+	return *meta
 }
 
 func seedBackupTable(t *testing.T, db *storage.DB, table string, ids ...string) {

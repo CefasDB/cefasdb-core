@@ -886,6 +886,34 @@ func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequ
 	return &cefaspb.ListBackupsResponse{Backups: out}, nil
 }
 
+func (s *GRPCServer) DeleteBackup(ctx context.Context, req *cefaspb.DeleteBackupRequest) (*cefaspb.DeleteBackupResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	result, err := s.db.DeleteBackup(req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.DeleteBackupResponse{Result: backupDeletionToPB(result)}, nil
+}
+
+func (s *GRPCServer) ApplyBackupRetention(ctx context.Context, req *cefaspb.ApplyBackupRetentionRequest) (*cefaspb.ApplyBackupRetentionResponse, error) {
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	result, err := s.db.ApplyBackupRetention(storage.BackupRetentionOptions{
+		KeepLatest:    int(req.GetKeepLatest()),
+		KeepLatestSet: req.GetKeepLatestSet(),
+		MaxAge:        time.Duration(req.GetMaxAgeSeconds()) * time.Second,
+		MaxAgeSet:     req.GetMaxAgeSet(),
+		DryRun:        req.GetDryRun(),
+	})
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return backupRetentionToPB(result), nil
+}
+
 func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.RestoreTableFromBackupRequest) (*cefaspb.RestoreTableFromBackupResponse, error) {
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
@@ -962,6 +990,46 @@ func backupTableStatsToPB(stat storage.BackupTableStats) *cefaspb.BackupTableSta
 		Table:    stat.Table,
 		Rows:     stat.Rows,
 		Checksum: stat.Checksum,
+	}
+}
+
+func backupDeletionToPB(result storage.BackupDeletionResult) *cefaspb.BackupDeletionResult {
+	return &cefaspb.BackupDeletionResult{
+		BackupName:        result.BackupName,
+		CheckpointPath:    result.CheckpointPath,
+		MetadataDeleted:   result.MetadataDeleted,
+		CheckpointDeleted: result.CheckpointDeleted,
+		CheckpointMissing: result.CheckpointMissing,
+		PartialCleanup:    result.PartialCleanup,
+		CleanupError:      result.CleanupError,
+	}
+}
+
+func backupRetentionToPB(result storage.BackupRetentionResult) *cefaspb.ApplyBackupRetentionResponse {
+	wouldDelete := make([]*cefaspb.BackupRetentionCandidate, 0, len(result.WouldDelete))
+	for _, candidate := range result.WouldDelete {
+		wouldDelete = append(wouldDelete, backupRetentionCandidateToPB(candidate))
+	}
+	deleted := make([]*cefaspb.BackupDeletionResult, 0, len(result.Deleted))
+	for _, item := range result.Deleted {
+		deleted = append(deleted, backupDeletionToPB(item))
+	}
+	return &cefaspb.ApplyBackupRetentionResponse{
+		DryRun:        result.DryRun,
+		KeepLatest:    int32(result.KeepLatest),
+		KeepLatestSet: result.KeepLatestSet,
+		MaxAgeSeconds: result.MaxAgeSeconds,
+		MaxAgeSet:     result.MaxAgeSet,
+		CutoffUnix:    result.CutoffUnix,
+		WouldDelete:   wouldDelete,
+		Deleted:       deleted,
+	}
+}
+
+func backupRetentionCandidateToPB(candidate storage.BackupRetentionCandidate) *cefaspb.BackupRetentionCandidate {
+	return &cefaspb.BackupRetentionCandidate{
+		Backup: backupMetaToPB(candidate.Backup),
+		Reason: candidate.Reason,
 	}
 }
 
@@ -1553,6 +1621,12 @@ func mapStorageErr(err error) error {
 	case errors.Is(err, types.ErrItemNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMissingKey), errors.Is(err, types.ErrInvalidKeyType):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, storage.ErrBackupNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, storage.ErrBackupInUse):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, storage.ErrInvalidBackupRetention):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, cluster.ErrInvalidPlacementPlan):
 		return status.Error(codes.InvalidArgument, err.Error())
