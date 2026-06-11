@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -16,6 +17,12 @@ import (
 )
 
 const BackupManifestVersion = 1
+
+var (
+	ErrBackupNotFound         = errors.New("cefas/storage: backup not found")
+	ErrBackupInUse            = errors.New("cefas/storage: backup in use")
+	ErrInvalidBackupRetention = errors.New("cefas/storage: invalid backup retention policy")
+)
 
 // BackupMetadata describes an admin-named backup of the live keyspace.
 // One metadata blob per backup, persisted under cefas/admin/backups/<name>
@@ -35,6 +42,41 @@ type BackupTableStats struct {
 	Table    string `json:"table"`
 	Rows     int64  `json:"rows"`
 	Checksum string `json:"checksum"`
+}
+
+type BackupDeletionResult struct {
+	BackupName        string `json:"backupName"`
+	CheckpointPath    string `json:"checkpointPath,omitempty"`
+	MetadataDeleted   bool   `json:"metadataDeleted"`
+	CheckpointDeleted bool   `json:"checkpointDeleted"`
+	CheckpointMissing bool   `json:"checkpointMissing"`
+	PartialCleanup    bool   `json:"partialCleanup"`
+	CleanupError      string `json:"cleanupError,omitempty"`
+}
+
+type BackupRetentionOptions struct {
+	KeepLatest    int
+	KeepLatestSet bool
+	MaxAge        time.Duration
+	MaxAgeSet     bool
+	DryRun        bool
+	Now           time.Time
+}
+
+type BackupRetentionCandidate struct {
+	Backup BackupMetadata `json:"backup"`
+	Reason string         `json:"reason"`
+}
+
+type BackupRetentionResult struct {
+	DryRun        bool                       `json:"dryRun"`
+	KeepLatest    int                        `json:"keepLatest,omitempty"`
+	KeepLatestSet bool                       `json:"keepLatestSet,omitempty"`
+	MaxAgeSeconds int64                      `json:"maxAgeSeconds,omitempty"`
+	MaxAgeSet     bool                       `json:"maxAgeSet,omitempty"`
+	CutoffUnix    int64                      `json:"cutoffUnix,omitempty"`
+	WouldDelete   []BackupRetentionCandidate `json:"wouldDelete,omitempty"`
+	Deleted       []BackupDeletionResult     `json:"deleted,omitempty"`
 }
 
 const backupKeyPrefix = "cefas/admin/backups/"
@@ -147,6 +189,201 @@ func (d *DB) GetBackup(name string) (*BackupMetadata, error) {
 	}
 	normalizeBackupMetadata(&meta)
 	return &meta, nil
+}
+
+func (d *DB) DeleteBackup(name string) (BackupDeletionResult, error) {
+	if err := validateBackupName(name); err != nil {
+		return BackupDeletionResult{}, err
+	}
+
+	d.backupMu.Lock()
+	defer d.backupMu.Unlock()
+
+	if d.activeBackupRestores[name] > 0 {
+		return BackupDeletionResult{}, fmt.Errorf("%w: %q", ErrBackupInUse, name)
+	}
+
+	meta, err := d.GetBackup(name)
+	if err != nil {
+		return BackupDeletionResult{}, err
+	}
+	if meta == nil {
+		return BackupDeletionResult{}, fmt.Errorf("%w: %q", ErrBackupNotFound, name)
+	}
+
+	result := BackupDeletionResult{
+		BackupName:     meta.Name,
+		CheckpointPath: meta.CheckpointAt,
+	}
+	if err := validateBackupCheckpointPath(d.path, meta.CheckpointAt); err != nil {
+		return result, err
+	}
+
+	if err := d.Delete(backupKey(name)); err != nil {
+		return result, fmt.Errorf("delete backup metadata: %w", err)
+	}
+	result.MetadataDeleted = true
+
+	if _, err := os.Stat(meta.CheckpointAt); err != nil {
+		if os.IsNotExist(err) {
+			result.CheckpointMissing = true
+			return result, nil
+		}
+		result.PartialCleanup = true
+		result.CleanupError = err.Error()
+		return result, nil
+	}
+	if err := os.RemoveAll(meta.CheckpointAt); err != nil {
+		result.PartialCleanup = true
+		result.CleanupError = err.Error()
+		return result, nil
+	}
+	result.CheckpointDeleted = true
+	return result, nil
+}
+
+func (d *DB) ApplyBackupRetention(opts BackupRetentionOptions) (BackupRetentionResult, error) {
+	if err := validateBackupRetentionOptions(opts); err != nil {
+		return BackupRetentionResult{}, err
+	}
+	backups, err := d.ListBackups()
+	if err != nil {
+		return BackupRetentionResult{}, err
+	}
+	candidates, cutoff := selectBackupRetentionCandidates(backups, opts)
+	result := BackupRetentionResult{
+		DryRun:        opts.DryRun,
+		KeepLatest:    opts.KeepLatest,
+		KeepLatestSet: opts.KeepLatestSet,
+		MaxAgeSeconds: int64(opts.MaxAge / time.Second),
+		MaxAgeSet:     opts.MaxAgeSet,
+		CutoffUnix:    cutoff,
+		WouldDelete:   candidates,
+	}
+	if opts.DryRun {
+		return result, nil
+	}
+	for _, candidate := range candidates {
+		deleted, err := d.DeleteBackup(candidate.Backup.Name)
+		if err != nil {
+			return result, err
+		}
+		result.Deleted = append(result.Deleted, deleted)
+	}
+	return result, nil
+}
+
+func (d *DB) beginBackupRestore(name string) func() {
+	d.backupMu.Lock()
+	if d.activeBackupRestores == nil {
+		d.activeBackupRestores = make(map[string]int)
+	}
+	d.activeBackupRestores[name]++
+	d.backupMu.Unlock()
+
+	return func() {
+		d.backupMu.Lock()
+		defer d.backupMu.Unlock()
+		if d.activeBackupRestores[name] <= 1 {
+			delete(d.activeBackupRestores, name)
+			return
+		}
+		d.activeBackupRestores[name]--
+	}
+}
+
+func validateBackupRetentionOptions(opts BackupRetentionOptions) error {
+	if !opts.KeepLatestSet && !opts.MaxAgeSet {
+		return fmt.Errorf("%w: requires keep-latest or max-age", ErrInvalidBackupRetention)
+	}
+	if opts.KeepLatestSet && opts.KeepLatest < 0 {
+		return fmt.Errorf("%w: keep-latest must be >= 0", ErrInvalidBackupRetention)
+	}
+	if opts.MaxAgeSet && opts.MaxAge < 0 {
+		return fmt.Errorf("%w: max-age must be >= 0", ErrInvalidBackupRetention)
+	}
+	return nil
+}
+
+func selectBackupRetentionCandidates(backups []BackupMetadata, opts BackupRetentionOptions) ([]BackupRetentionCandidate, int64) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	cutoff := int64(0)
+	if opts.MaxAgeSet {
+		cutoff = now.Add(-opts.MaxAge).Unix()
+	}
+
+	newest := append([]BackupMetadata(nil), backups...)
+	sort.Slice(newest, func(i, j int) bool {
+		if newest[i].CreatedAt == newest[j].CreatedAt {
+			return newest[i].Name < newest[j].Name
+		}
+		return newest[i].CreatedAt > newest[j].CreatedAt
+	})
+	retainedByLatest := make(map[string]bool)
+	if opts.KeepLatestSet {
+		limit := opts.KeepLatest
+		if limit > len(newest) {
+			limit = len(newest)
+		}
+		for _, meta := range newest[:limit] {
+			retainedByLatest[meta.Name] = true
+		}
+	}
+
+	var out []BackupRetentionCandidate
+	for _, meta := range backups {
+		outsideLatest := opts.KeepLatestSet && !retainedByLatest[meta.Name]
+		olderThanMaxAge := opts.MaxAgeSet && meta.CreatedAt < cutoff
+		deleteByPolicy := false
+		reason := ""
+		switch {
+		case opts.KeepLatestSet && opts.MaxAgeSet:
+			deleteByPolicy = outsideLatest && olderThanMaxAge
+			reason = "outside_latest_and_older_than_max_age"
+		case opts.KeepLatestSet:
+			deleteByPolicy = outsideLatest
+			reason = "outside_latest"
+		case opts.MaxAgeSet:
+			deleteByPolicy = olderThanMaxAge
+			reason = "older_than_max_age"
+		}
+		if deleteByPolicy {
+			out = append(out, BackupRetentionCandidate{Backup: meta, Reason: reason})
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Backup.CreatedAt == out[j].Backup.CreatedAt {
+			return out[i].Backup.Name < out[j].Backup.Name
+		}
+		return out[i].Backup.CreatedAt < out[j].Backup.CreatedAt
+	})
+	return out, cutoff
+}
+
+func validateBackupCheckpointPath(dbPath, checkpointPath string) error {
+	if checkpointPath == "" {
+		return fmt.Errorf("backup checkpoint path is empty")
+	}
+	root, err := filepath.Abs(filepath.Join(dbPath, "backups"))
+	if err != nil {
+		return err
+	}
+	checkpoint, err := filepath.Abs(checkpointPath)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, checkpoint)
+	if err != nil {
+		return err
+	}
+	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return fmt.Errorf("backup checkpoint path %q is outside %q", checkpointPath, root)
+	}
+	return nil
 }
 
 func buildBackupManifest(checkpointDir string, requested []string) ([]string, []BackupTableStats, error) {

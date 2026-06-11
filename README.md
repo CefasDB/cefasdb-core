@@ -259,7 +259,9 @@ requested table set, the captured table set, and a deterministic row
 count/checksum for each table in the checkpoint. Restore validates the source
 table against that manifest before creating the target catalog entry or copying
 rows. Backups created before manifests remain listable with
-`manifest_status=legacy`.
+`manifest_status=legacy`. Retention can run as a dry-run first; when deletion
+cannot remove a checkpoint directory it reports `partialCleanup` and
+`cleanupError` explicitly.
 
 ```sh
 cefas create-backup --backup-name before-maintenance
@@ -273,10 +275,16 @@ cefas restore-table-from-backup \
   --source-table-name Users \
   --target-table-name Users_restored \
   --dry-run
+cefas apply-backup-retention --keep-latest 7 --max-age 720h --dry-run
+cefas delete-backup --backup-name before-maintenance
 curl -s -X POST "$CEFAS_HTTP/v1/RestoreTableFromBackup" \
   -H "Authorization: Bearer $CEFAS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"backupName":"before-maintenance","sourceTableName":"Users","targetTableName":"Users_restored","dryRun":true}'
+curl -s -X POST "$CEFAS_HTTP/v1/ApplyBackupRetention" \
+  -H "Authorization: Bearer $CEFAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"keepLatest":7,"keepLatestSet":true,"maxAge":"720h","dryRun":true}'
 ```
 
 ## Project Layout

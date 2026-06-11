@@ -692,6 +692,40 @@ type BackupTableStats struct {
 	Checksum string
 }
 
+type BackupDeletionResult struct {
+	BackupName        string
+	CheckpointPath    string
+	MetadataDeleted   bool
+	CheckpointDeleted bool
+	CheckpointMissing bool
+	PartialCleanup    bool
+	CleanupError      string
+}
+
+type BackupRetentionOptions struct {
+	KeepLatest    int
+	KeepLatestSet bool
+	MaxAge        time.Duration
+	MaxAgeSet     bool
+	DryRun        bool
+}
+
+type BackupRetentionCandidate struct {
+	Backup BackupDescriptor
+	Reason string
+}
+
+type BackupRetentionResult struct {
+	DryRun        bool
+	KeepLatest    int
+	KeepLatestSet bool
+	MaxAgeSeconds int64
+	MaxAgeSet     bool
+	CutoffUnix    int64
+	WouldDelete   []BackupRetentionCandidate
+	Deleted       []BackupDeletionResult
+}
+
 // CreateBackup snapshots the live keyspace into a pebble checkpoint
 // and records metadata under cefas/admin/backups/<name>. Pass nil for
 // tables to back up every table the catalog currently knows.
@@ -716,6 +750,28 @@ func (c *Client) ListBackups(ctx context.Context) ([]BackupDescriptor, error) {
 	return out, nil
 }
 
+func (c *Client) DeleteBackup(ctx context.Context, name string) (BackupDeletionResult, error) {
+	resp, err := c.stub.DeleteBackup(c.withAuth(ctx), &cefaspb.DeleteBackupRequest{Name: name})
+	if err != nil {
+		return BackupDeletionResult{}, err
+	}
+	return backupDeletionFromPB(resp.GetResult()), nil
+}
+
+func (c *Client) ApplyBackupRetention(ctx context.Context, opts BackupRetentionOptions) (BackupRetentionResult, error) {
+	resp, err := c.stub.ApplyBackupRetention(c.withAuth(ctx), &cefaspb.ApplyBackupRetentionRequest{
+		KeepLatest:    int32(opts.KeepLatest),
+		KeepLatestSet: opts.KeepLatestSet,
+		MaxAgeSeconds: int64(opts.MaxAge / time.Second),
+		MaxAgeSet:     opts.MaxAgeSet,
+		DryRun:        opts.DryRun,
+	})
+	if err != nil {
+		return BackupRetentionResult{}, err
+	}
+	return backupRetentionFromPB(resp), nil
+}
+
 func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 	if b == nil {
 		return BackupDescriptor{}
@@ -737,6 +793,48 @@ func backupFromPB(b *cefaspb.BackupDescriptor) BackupDescriptor {
 		ManifestStatus:  b.GetManifestStatus(),
 		RequestedTables: b.GetRequestedTables(),
 		TableStats:      stats,
+	}
+}
+
+func backupDeletionFromPB(r *cefaspb.BackupDeletionResult) BackupDeletionResult {
+	if r == nil {
+		return BackupDeletionResult{}
+	}
+	return BackupDeletionResult{
+		BackupName:        r.GetBackupName(),
+		CheckpointPath:    r.GetCheckpointPath(),
+		MetadataDeleted:   r.GetMetadataDeleted(),
+		CheckpointDeleted: r.GetCheckpointDeleted(),
+		CheckpointMissing: r.GetCheckpointMissing(),
+		PartialCleanup:    r.GetPartialCleanup(),
+		CleanupError:      r.GetCleanupError(),
+	}
+}
+
+func backupRetentionFromPB(resp *cefaspb.ApplyBackupRetentionResponse) BackupRetentionResult {
+	if resp == nil {
+		return BackupRetentionResult{}
+	}
+	wouldDelete := make([]BackupRetentionCandidate, 0, len(resp.GetWouldDelete()))
+	for _, candidate := range resp.GetWouldDelete() {
+		wouldDelete = append(wouldDelete, BackupRetentionCandidate{
+			Backup: backupFromPB(candidate.GetBackup()),
+			Reason: candidate.GetReason(),
+		})
+	}
+	deleted := make([]BackupDeletionResult, 0, len(resp.GetDeleted()))
+	for _, item := range resp.GetDeleted() {
+		deleted = append(deleted, backupDeletionFromPB(item))
+	}
+	return BackupRetentionResult{
+		DryRun:        resp.GetDryRun(),
+		KeepLatest:    int(resp.GetKeepLatest()),
+		KeepLatestSet: resp.GetKeepLatestSet(),
+		MaxAgeSeconds: resp.GetMaxAgeSeconds(),
+		MaxAgeSet:     resp.GetMaxAgeSet(),
+		CutoffUnix:    resp.GetCutoffUnix(),
+		WouldDelete:   wouldDelete,
+		Deleted:       deleted,
 	}
 }
 

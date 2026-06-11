@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	pebbledb "github.com/cockroachdb/pebble"
 )
@@ -74,6 +75,9 @@ type DB struct {
 	syncOpt *pebbledb.WriteOptions
 	repl    Replicator
 	bp      backpressureController
+
+	backupMu             sync.Mutex
+	activeBackupRestores map[string]int
 }
 
 type commitReq struct {
@@ -101,13 +105,14 @@ func Open(opts Options) (*DB, error) {
 	}
 
 	wrapper := &DB{
-		db:       d,
-		path:     opts.Path,
-		commitCh: make(chan *commitReq, commitChanBuf),
-		stopCh:   make(chan struct{}),
-		stopped:  make(chan struct{}),
-		syncOpt:  syncOpt,
-		bp:       newBackpressureController(opts.Backpressure),
+		db:                   d,
+		path:                 opts.Path,
+		commitCh:             make(chan *commitReq, commitChanBuf),
+		stopCh:               make(chan struct{}),
+		stopped:              make(chan struct{}),
+		syncOpt:              syncOpt,
+		bp:                   newBackpressureController(opts.Backpressure),
+		activeBackupRestores: make(map[string]int),
 	}
 	go wrapper.commitLoop()
 	return wrapper, nil
