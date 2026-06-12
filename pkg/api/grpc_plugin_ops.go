@@ -85,7 +85,11 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	if err := ip.Build(buildDesc, s.itemSourceFor(buildDesc.Table)); err != nil {
+	source, _, err := s.indexItemSourceFor(buildDesc.Table)
+	if err != nil {
+		return nil, err
+	}
+	if err := ip.Build(buildDesc, source); err != nil {
 		return nil, status.Errorf(codes.Internal, "plugin build: %v", err)
 	}
 	if err := s.db.PutPluginIndexDescriptor(storedDesc); err != nil {
@@ -136,13 +140,11 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	count := 0
-	if err := ip.Build(buildDesc, func(yield func(model.Item) bool) {
-		s.itemSourceFor(buildDesc.Table)(func(it model.Item) bool {
-			count++
-			return yield(it)
-		})
-	}); err != nil {
+	source, count, err := s.indexItemSourceFor(buildDesc.Table)
+	if err != nil {
+		return nil, err
+	}
+	if err := ip.Build(buildDesc, source); err != nil {
 		return nil, status.Errorf(codes.Internal, "rebuild: %v", err)
 	}
 	return &cefaspb.RebuildIndexResponse{ItemsIndexed: int64(count)}, nil
@@ -226,17 +228,48 @@ func tableVectorDim(td model.TableDescriptor, field string) (int, bool) {
 
 // itemSourceFor produces a plugin.ItemSource over the live table.
 func (s *GRPCServer) itemSourceFor(table string) func(yield func(model.Item) bool) {
-	return func(yield func(model.Item) bool) {
-		items, err := s.db.ScanTable(table, 0)
+	source, _, err := s.indexItemSourceFor(table)
+	if err != nil {
+		return func(yield func(model.Item) bool) {}
+	}
+	return source
+}
+
+func (s *GRPCServer) indexItemSourceFor(table string) (func(yield func(model.Item) bool), int, error) {
+	td, err := s.cat.Describe(table)
+	if err != nil {
+		return nil, 0, mapStorageErr(err)
+	}
+	stores := s.scatterReadStores()
+	if len(stores) == 0 {
+		return nil, 0, status.Error(codes.Unavailable, "no readable shards available")
+	}
+	seen := make(map[string]struct{})
+	items := make([]model.Item, 0)
+	for _, db := range stores {
+		scanned, err := db.ScanTable(table, 0)
 		if err != nil {
-			return
+			return nil, 0, mapStorageErr(err)
 		}
+		for _, it := range scanned {
+			id, err := primaryIdentity(it, td.KeySchema)
+			if err != nil {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			items = append(items, it)
+		}
+	}
+	return func(yield func(model.Item) bool) {
 		for _, it := range items {
 			if !yield(it) {
 				return
 			}
 		}
-	}
+	}, len(items), nil
 }
 
 // ---------- Explain ----------
