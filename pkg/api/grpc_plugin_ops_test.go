@@ -155,6 +155,33 @@ func TestTopKRanksByDistance(t *testing.T) {
 	}
 }
 
+func TestTopKRequiresANNIndexWhenDistanceOmitted(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	table := "TopKNeedsANN"
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      table,
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+			AttributeDefinitions: []*cefaspb.AttributeDefinition{{
+				Name: "emb", Type: "V", VectorDimensions: 3,
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	_, err := stub.TopK(ctx, &cefaspb.TopKRequest{
+		Table:  table,
+		Field:  "emb",
+		Target: pbVec(1, 0, 0),
+		K:      1,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("want FailedPrecondition, got %v", err)
+	}
+}
+
 func TestANNIndexInfersTopKMetricAndSQL(t *testing.T) {
 	stub, cleanup := startUnsecuredFixture(t)
 	defer cleanup()

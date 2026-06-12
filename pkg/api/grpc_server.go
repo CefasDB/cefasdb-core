@@ -794,9 +794,17 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat, DistanceResolver: s.sqlDistanceResolver}
+	ex := &cefassql.Executor{
+		Storage:              s.db,
+		Catalog:              s.cat,
+		DistanceResolver:     s.sqlDistanceResolver,
+		ANNCandidateResolver: s.sqlANNCandidateResolver,
+	}
 	res, err := ex.Execute(plan)
 	if err != nil {
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
 		return nil, mapStorageErr(err)
 	}
 	out := &cefaspb.SqlResponse{AffectedRows: int64(res.AffectedRows)}
@@ -808,6 +816,11 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 
 func (s *GRPCServer) sqlDistanceResolver(table, field string, target types.AttributeValue) (cquery.DistanceOp, error) {
 	return s.resolveTopKDistance(table, field, "", target)
+}
+
+func (s *GRPCServer) sqlANNCandidateResolver(table, field string, target types.AttributeValue, limit int) ([]cquery.TopKResult, bool, error) {
+	ann, ok, err := s.indexedANNTopK(table, field, target, limit, "")
+	return ann.rows, ok, err
 }
 
 func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {

@@ -16,6 +16,7 @@ package vectorlsh
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
 	"sync"
@@ -35,13 +36,13 @@ type Config struct {
 }
 
 type State struct {
-	mu        sync.RWMutex
-	cfg       Config
-	ks        model.KeySchema
-	planes    [][][]float64 // sketches × bits × dim
-	items     map[string]model.Item
-	vectors   map[string][]float64 // id → vector (for diagnostics)
-	buckets   []map[uint64][]string // per sketch: bucket → ids
+	mu      sync.RWMutex
+	cfg     Config
+	ks      model.KeySchema
+	planes  [][][]float64 // sketches × bits × dim
+	items   map[string]model.Item
+	vectors map[string][]float64  // id → vector (for diagnostics)
+	buckets []map[uint64][]string // per sketch: bucket → ids
 }
 
 func newState(cfg Config, ks model.KeySchema) *State {
@@ -278,10 +279,13 @@ func (p *Plugin) Query(d index.Descriptor, req plugin.IndexQuery) (plugin.Candid
 	}
 	out := make([]plugin.Candidate, 0, len(seen))
 	for id := range seen {
-		out = append(out, plugin.Candidate{Key: cloneItem(s.items[id])})
+		out = append(out, plugin.Candidate{Key: cloneItem(s.items[id]), Score: cosineScore(vec, s.vectors[id])})
 	}
 	s.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
 		ai, _ := pkid.Of(out[i].Key, s.ks)
 		aj, _ := pkid.Of(out[j].Key, s.ks)
 		return ai < aj
@@ -290,6 +294,29 @@ func (p *Plugin) Query(d index.Descriptor, req plugin.IndexQuery) (plugin.Candid
 		out = out[:req.Limit]
 	}
 	return &sliceSet{rows: out}, nil
+}
+
+func cosineScore(a, b []float64) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, na, nb float64
+	for i := range a {
+		dot += a[i] * b[i]
+		na += a[i] * a[i]
+		nb += b[i] * b[i]
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	score := dot / (math.Sqrt(na) * math.Sqrt(nb))
+	if score > 1 {
+		return 1
+	}
+	if score < -1 {
+		return -1
+	}
+	return score
 }
 
 func (p *Plugin) Estimate(d index.Descriptor, req plugin.IndexQuery) (int, error) {

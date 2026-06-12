@@ -42,9 +42,10 @@ type CatalogMutator interface {
 
 // Executor runs a compiled Plan against the storage + catalog.
 type Executor struct {
-	Storage          Storage
-	Catalog          CatalogMutator
-	DistanceResolver func(table, field string, target types.AttributeValue) (cquery.DistanceOp, error)
+	Storage              Storage
+	Catalog              CatalogMutator
+	DistanceResolver     func(table, field string, target types.AttributeValue) (cquery.DistanceOp, error)
+	ANNCandidateResolver func(table, field string, target types.AttributeValue, limit int) ([]cquery.TopKResult, bool, error)
 }
 
 // Execute dispatches to the plan-specific path.
@@ -464,6 +465,36 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if e.ANNCandidateResolver != nil {
+		fanout := p.Limit
+		if p.Predicate != nil && p.Filter.Strategy == cquery.StrategyANNFirstOverscan {
+			overscan := p.Filter.OverscanFactor
+			if overscan < 1 {
+				overscan = 1
+			}
+			fanout = p.Limit * overscan
+		}
+		rows, ok, err := e.ANNCandidateResolver(p.Table, p.Field, p.Target, fanout)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			if p.Predicate != nil {
+				var sel cquery.Selectivity
+				rows, sel, err = filterANNRows(p, rows)
+				if err != nil {
+					return nil, err
+				}
+				p.Filter.Selectivity.Actual = sel.Actual
+				p.Filter.Selectivity.CandidateRows = sel.CandidateRows
+				p.Filter.Selectivity.KeptRows = sel.KeptRows
+				if len(rows) < p.Limit {
+					p.Filter.Warning = cquery.FewerThanKWarning
+				}
+			}
+			return e.finishANN(p, rows, op)
+		}
+	}
 	eng, err := cquery.NewTopK(op, p.Field, p.Target, p.Limit)
 	if err != nil {
 		return nil, err
@@ -527,6 +558,32 @@ func (e *Executor) execANN(p *PlanANN) (*Result, error) {
 		p.Filter.Warning = cquery.FewerThanKWarning
 	}
 	return e.finishANN(p, rows, op)
+}
+
+func filterANNRows(p *PlanANN, rows []cquery.TopKResult) ([]cquery.TopKResult, cquery.Selectivity, error) {
+	sel := cquery.Selectivity{CandidateRows: len(rows)}
+	capHint := len(rows)
+	if capHint > p.Limit {
+		capHint = p.Limit
+	}
+	out := make([]cquery.TopKResult, 0, capHint)
+	for _, row := range rows {
+		ok, err := EvalBool(p.Predicate, row.Item, nil)
+		if err != nil {
+			return nil, sel, err
+		}
+		if !ok {
+			continue
+		}
+		sel.KeptRows++
+		if len(out) < p.Limit {
+			out = append(out, row)
+		}
+	}
+	if sel.CandidateRows > 0 {
+		sel.Actual = float64(sel.KeptRows) / float64(sel.CandidateRows)
+	}
+	return out, sel, nil
 }
 
 func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult, op cquery.DistanceOp) (*Result, error) {

@@ -45,9 +45,20 @@ func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {
 			t.Fatalf("put %s: %v", row.id, err)
 		}
 	}
+	if _, err := stub.CreateIndex(ctx, &cefaspb.CreateIndexRequest{
+		Descriptor_: &cefaspb.PluginIndexDescriptor{
+			Table:        table,
+			Name:         "emb_ann",
+			PluginName:   "ann",
+			PluginConfig: []byte(`{"field":"emb","dim":3,"metric":"cosine","algorithm":"lsh"}`),
+			KeySchema:    &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create ann: %v", err)
+	}
 
 	topk, err := stub.TopK(ctx, &cefaspb.TopKRequest{
-		Table: table, Field: "emb", DistanceOperator: "cosine",
+		Table: table, Field: "emb",
 		Target: pbVec(1, 0, 0), K: 3,
 	})
 	if err != nil {
@@ -65,7 +76,7 @@ func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {
 		t.Fatalf("rerank: %v", err)
 	}
 	rec, err := stub.Recommend(ctx, &cefaspb.RecommendRequest{
-		Table: table, Field: "emb", DistanceOperator: "cosine",
+		Table: table, Field: "emb",
 		Target: pbVec(1, 0, 0), CandidateLimit: 3, Limit: 2,
 		FilterExpression: "region = 'us'", MmrLambda: 0.1,
 	})
@@ -80,7 +91,7 @@ func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {
 	}
 
 	plain, err := stub.Recommend(ctx, &cefaspb.RecommendRequest{
-		Table: table, Field: "emb", DistanceOperator: "cosine",
+		Table: table, Field: "emb",
 		Target: pbVec(1, 0, 0), CandidateLimit: 3, Limit: 2,
 		DisableDiversify: true,
 	})
