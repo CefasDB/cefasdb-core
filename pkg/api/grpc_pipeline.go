@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -78,25 +79,15 @@ func (s *GRPCServer) Recommend(ctx context.Context, req *cefaspb.RecommendReques
 	reasons := reasonSet{}
 
 	start := time.Now()
-	items, err := s.db.ScanTable(req.GetTable(), 0)
+	topk, scanned, err := s.recommendCandidates(req.GetTable(), req.GetField(), req.GetDistanceOperator(), target, candidateLimit, dist)
 	if err != nil {
-		return nil, mapStorageErr(err)
+		return nil, err
 	}
-	eng, err := cquery.NewTopK(dist, req.GetField(), target, candidateLimit)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	for _, item := range items {
-		if err := eng.Observe(item); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "observe: %v", err)
-		}
-	}
-	topk := eng.Result()
 	rows := make([]recommendationRow, 0, len(topk))
 	for _, r := range topk {
 		rows = append(rows, recommendationRow{item: r.Item, distance: r.Distance})
 	}
-	resp.Stages = append(resp.Stages, pipelineStage("retrieve", len(items), len(rows), start))
+	resp.Stages = append(resp.Stages, pipelineStage("retrieve", scanned, len(rows), start))
 
 	if req.GetFilterExpression() != "" {
 		start = time.Now()
@@ -160,6 +151,22 @@ func (s *GRPCServer) Recommend(ctx context.Context, req *cefaspb.RecommendReques
 	}
 	resp.ReasonCodes = reasons.slice()
 	return resp, nil
+}
+
+func (s *GRPCServer) recommendCandidates(table, field, explicit string, target types.AttributeValue, candidateLimit int, dist cquery.DistanceOp) ([]cquery.TopKResult, int, error) {
+	if ann, ok, err := s.indexedANNTopK(table, field, target, candidateLimit, explicit); err != nil {
+		return nil, 0, err
+	} else if ok {
+		return ann.rows, ann.candidateCount, nil
+	}
+	if strings.TrimSpace(explicit) == "" {
+		return nil, 0, status.Errorf(codes.FailedPrecondition, "no ann index for %s.%s", table, field)
+	}
+	rows, scanned, err := s.exactScanTopK(table, field, target, candidateLimit, dist, explicit)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, scanned, nil
 }
 
 func parsePipelineFilter(table, expr string) (cefassql.Expr, error) {

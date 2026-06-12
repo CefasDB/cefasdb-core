@@ -284,28 +284,19 @@ func (s *GRPCServer) TopK(ctx context.Context, req *cefaspb.TopKRequest) (*cefas
 	if err != nil {
 		return nil, err
 	}
-	eng, err := cquery.NewTopK(dist, req.GetField(), target, int(req.GetK()))
+	if ann, ok, err := s.indexedANNTopK(req.GetTable(), req.GetField(), target, int(req.GetK()), req.GetDistanceOperator()); err != nil {
+		return nil, err
+	} else if ok {
+		return &cefaspb.TopKResponse{Rows: topKRowsToPB(ann.rows)}, nil
+	}
+	if strings.TrimSpace(req.GetDistanceOperator()) == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "no ann index for %s.%s", req.GetTable(), req.GetField())
+	}
+	rows, _, err := s.exactScanTopK(req.GetTable(), req.GetField(), target, int(req.GetK()), dist, req.GetDistanceOperator())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, err
 	}
-	items, err := s.db.ScanTable(req.GetTable(), 0)
-	if err != nil {
-		return nil, mapStorageErr(err)
-	}
-	for _, it := range items {
-		if err := eng.Observe(it); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "observe: %v", err)
-		}
-	}
-	rows := eng.Result()
-	pbRows := make([]*cefaspb.TopKRow, 0, len(rows))
-	for _, r := range rows {
-		pbRows = append(pbRows, &cefaspb.TopKRow{
-			Item:     &cefaspb.Item{Attributes: itemToPB(r.Item)},
-			Distance: r.Distance,
-		})
-	}
-	return &cefaspb.TopKResponse{Rows: pbRows}, nil
+	return &cefaspb.TopKResponse{Rows: topKRowsToPB(rows)}, nil
 }
 
 func (s *GRPCServer) resolveTopKDistance(table, field, explicit string, target model.AttributeValue) (cquery.DistanceOp, error) {
@@ -332,30 +323,8 @@ func (s *GRPCServer) resolveTopKDistance(table, field, explicit string, target m
 }
 
 func findANNConfig(table, field string, target model.AttributeValue) (annConfig, bool, error) {
-	pluginIndexBook.mu.RLock()
-	defer pluginIndexBook.mu.RUnlock()
-	for _, desc := range pluginIndexBook.entries {
-		if desc.Table != table || !strings.EqualFold(desc.PluginName, "ann") {
-			continue
-		}
-		cfg, err := parseANNConfig(desc.PluginConfig)
-		if err != nil {
-			return annConfig{}, false, err
-		}
-		if cfg.Field != field {
-			continue
-		}
-		if cfg.Metric == "" {
-			cfg.Metric = "cosine"
-		}
-		if cfg.Dim > 0 {
-			if got := attrVectorDim(target); got > 0 && got != cfg.Dim {
-				return annConfig{}, false, fmt.Errorf("ann: target dim %d != index dim %d", got, cfg.Dim)
-			}
-		}
-		return cfg, true, nil
-	}
-	return annConfig{}, false, nil
+	_, cfg, ok, err := findANNDescriptor(table, field, target)
+	return cfg, ok, err
 }
 
 func attrVectorDim(av model.AttributeValue) int {
