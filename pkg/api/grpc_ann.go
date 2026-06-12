@@ -8,6 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -148,11 +150,52 @@ func (s *GRPCServer) exactScanTopK(table, field string, target model.AttributeVa
 	if exactTopKScanFallbackHook != nil {
 		exactTopKScanFallbackHook(table, field, explicit)
 	}
+	if s.manager == nil {
+		return localExactScanTopK(s.db, table, field, target, limit, dist)
+	}
+	td, err := s.cat.Describe(table)
+	if err != nil {
+		return nil, 0, mapStorageErr(err)
+	}
 	eng, err := cquery.NewTopK(dist, field, target, limit)
 	if err != nil {
 		return nil, 0, status.Error(codes.InvalidArgument, err.Error())
 	}
-	items, err := s.db.ScanTable(table, 0)
+	seen := make(map[string]struct{})
+	scanned := 0
+	stores := s.scatterReadStores()
+	if len(stores) == 0 {
+		return nil, 0, status.Error(codes.Unavailable, "no readable shards available")
+	}
+	for _, db := range stores {
+		rows, localScanned, err := localExactScanTopK(db, table, field, target, limit, dist)
+		if err != nil {
+			return nil, 0, err
+		}
+		scanned += localScanned
+		for _, row := range rows {
+			id, err := primaryIdentity(row.Item, td.KeySchema)
+			if err != nil {
+				return nil, 0, status.Errorf(codes.Internal, "topk identity: %v", err)
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			if err := eng.Observe(row.Item); err != nil {
+				return nil, 0, status.Errorf(codes.InvalidArgument, "observe: %v", err)
+			}
+		}
+	}
+	return eng.Result(), scanned, nil
+}
+
+func localExactScanTopK(db *storage.DB, table, field string, target model.AttributeValue, limit int, dist cquery.DistanceOp) ([]cquery.TopKResult, int, error) {
+	eng, err := cquery.NewTopK(dist, field, target, limit)
+	if err != nil {
+		return nil, 0, status.Error(codes.InvalidArgument, err.Error())
+	}
+	items, err := db.ScanTable(table, 0)
 	if err != nil {
 		return nil, 0, mapStorageErr(err)
 	}
@@ -162,6 +205,37 @@ func (s *GRPCServer) exactScanTopK(table, field string, target model.AttributeVa
 		}
 	}
 	return eng.Result(), len(items), nil
+}
+
+func (s *GRPCServer) scatterReadStores() []*storage.DB {
+	if s.manager == nil {
+		return []*storage.DB{s.db}
+	}
+	out := make([]*storage.DB, 0)
+	seen := map[*storage.DB]struct{}{}
+	for _, sh := range s.manager.Shards() {
+		if !scatterReadableShard(sh) || sh.Storage == nil {
+			continue
+		}
+		if _, ok := seen[sh.Storage]; ok {
+			continue
+		}
+		out = append(out, sh.Storage)
+		seen[sh.Storage] = struct{}{}
+	}
+	return out
+}
+
+func scatterReadableShard(sh *cluster.Shard) bool {
+	if sh == nil {
+		return false
+	}
+	switch sh.State {
+	case "", cluster.ShardStateActive, cluster.ShardStateSplitting, cluster.ShardStateMoving, cluster.ShardStateReadOnly:
+		return true
+	default:
+		return false
+	}
 }
 
 func topKRowsToPB(rows []cquery.TopKResult) []*cefaspb.TopKRow {
