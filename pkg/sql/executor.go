@@ -44,6 +44,7 @@ type CatalogMutator interface {
 type Executor struct {
 	Storage              Storage
 	Catalog              CatalogMutator
+	TableDropHook        func(table string) error
 	DistanceResolver     func(table, field string, target types.AttributeValue) (cquery.DistanceOp, error)
 	ANNCandidateResolver func(table, field string, target types.AttributeValue, limit int) ([]cquery.TopKResult, bool, error)
 }
@@ -83,6 +84,11 @@ func (e *Executor) execCreate(p *PlanCreateTable) (*Result, error) {
 func (e *Executor) execDrop(p *PlanDropTable) (*Result, error) {
 	if err := e.Catalog.Drop(p.Name); err != nil {
 		return nil, err
+	}
+	if e.TableDropHook != nil {
+		if err := e.TableDropHook(p.Name); err != nil {
+			return nil, err
+		}
 	}
 	return &Result{AffectedRows: 1}, nil
 }

@@ -27,12 +27,13 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/plugin/roaring"
 )
 
-// pluginIndexBook is the in-memory descriptor catalog Epic 7 uses
-// while persistent storage of plugin-backed index descriptors lives
-// in a follow-up. Surviving a restart means re-running CreateIndex.
+// pluginIndexBook is the in-memory descriptor cache for plugin-backed
+// indexes. Durable descriptor records live in storage under the
+// cefas/internal/plugin-index/ keyspace; reads hydrate this cache.
 var pluginIndexBook = struct {
-	mu      sync.RWMutex
-	entries map[string]index.Descriptor // "table/name" → descriptor
+	createMu sync.Mutex
+	mu       sync.RWMutex
+	entries  map[string]index.Descriptor // "table/name" → descriptor
 }{entries: map[string]index.Descriptor{}}
 
 func indexKey(table, name string) string { return table + "/" + name }
@@ -68,6 +69,13 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	pluginIndexBook.createMu.Lock()
+	defer pluginIndexBook.createMu.Unlock()
+	if _, ok, err := s.lookupPluginIndexDescriptor(storedDesc.Table, storedDesc.Name); err != nil {
+		return nil, mapStorageErr(err)
+	} else if ok {
+		return nil, status.Errorf(codes.AlreadyExists, "index %s/%s already exists", storedDesc.Table, storedDesc.Name)
+	}
 
 	plug, ok := s.pluginRegistry().Lookup(buildDesc.PluginName)
 	if !ok {
@@ -80,9 +88,10 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if err := ip.Build(buildDesc, s.itemSourceFor(buildDesc.Table)); err != nil {
 		return nil, status.Errorf(codes.Internal, "plugin build: %v", err)
 	}
-	pluginIndexBook.mu.Lock()
-	pluginIndexBook.entries[indexKey(storedDesc.Table, storedDesc.Name)] = storedDesc
-	pluginIndexBook.mu.Unlock()
+	if err := s.db.PutPluginIndexDescriptor(storedDesc); err != nil {
+		return nil, mapStorageErr(err)
+	}
+	cachePluginIndexDescriptor(storedDesc)
 	return &cefaspb.CreateIndexResponse{Descriptor_: pluginIndexToPB(storedDesc)}, nil
 }
 
@@ -90,9 +99,10 @@ func (s *GRPCServer) DescribeIndex(ctx context.Context, req *cefaspb.DescribeInd
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
-	pluginIndexBook.mu.RLock()
-	d, ok := pluginIndexBook.entries[indexKey(req.GetTable(), req.GetName())]
-	pluginIndexBook.mu.RUnlock()
+	d, ok, err := s.lookupPluginIndexDescriptor(req.GetTable(), req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "index %s/%s not found", req.GetTable(), req.GetName())
 	}
@@ -103,9 +113,10 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
-	pluginIndexBook.mu.RLock()
-	d, ok := pluginIndexBook.entries[indexKey(req.GetTable(), req.GetName())]
-	pluginIndexBook.mu.RUnlock()
+	d, ok, err := s.lookupPluginIndexDescriptor(req.GetTable(), req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "index %s/%s not found", req.GetTable(), req.GetName())
 	}
@@ -302,7 +313,7 @@ func (s *GRPCServer) TopK(ctx context.Context, req *cefaspb.TopKRequest) (*cefas
 func (s *GRPCServer) resolveTopKDistance(table, field, explicit string, target model.AttributeValue) (cquery.DistanceOp, error) {
 	name := strings.TrimSpace(explicit)
 	if name == "" {
-		cfg, ok, err := findANNConfig(table, field, target)
+		cfg, ok, err := s.findANNConfig(table, field, target)
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
@@ -322,8 +333,8 @@ func (s *GRPCServer) resolveTopKDistance(table, field, explicit string, target m
 	return dist, nil
 }
 
-func findANNConfig(table, field string, target model.AttributeValue) (annConfig, bool, error) {
-	_, cfg, ok, err := findANNDescriptor(table, field, target)
+func (s *GRPCServer) findANNConfig(table, field string, target model.AttributeValue) (annConfig, bool, error) {
+	_, cfg, ok, err := s.findANNDescriptor(table, field, target)
 	return cfg, ok, err
 }
 
@@ -432,9 +443,10 @@ func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb
 	if idxName == "" {
 		idxName = "loc_geo"
 	}
-	pluginIndexBook.mu.RLock()
-	d, ok := pluginIndexBook.entries[indexKey(req.GetTable(), idxName)]
-	pluginIndexBook.mu.RUnlock()
+	d, ok, err := s.lookupPluginIndexDescriptor(req.GetTable(), idxName)
+	if err != nil {
+		return status.Errorf(codes.Internal, "index lookup: %v", err)
+	}
 	if !ok {
 		return status.Errorf(codes.FailedPrecondition,
 			"geohash index %s/%s not registered; create with cefas create-index --type geohash", req.GetTable(), idxName)

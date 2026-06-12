@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"net/url"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -31,6 +32,9 @@ const (
 	pCatalog  = Namespace + "catalog/"
 	pTables   = Namespace + "t/"
 	pAdmin    = Namespace + "admin/"
+	pInternal = Namespace + "internal/"
+
+	pPluginIndex = pInternal + "plugin-index/"
 
 	segPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -65,6 +69,23 @@ func KeyCatalog(table string) []byte {
 // PrefixCatalog covers every table descriptor for catalog scans.
 func PrefixCatalog() (lower, upper []byte) {
 	p := []byte(pCatalog)
+	return p, prefixUpper(p)
+}
+
+// KeyPluginIndexDescriptor stores a plugin-backed index descriptor.
+func KeyPluginIndexDescriptor(table, name string) []byte {
+	return []byte(pPluginIndex + escapeKeySegment(table) + "/" + escapeKeySegment(name))
+}
+
+// PrefixPluginIndexDescriptors covers every plugin index descriptor.
+func PrefixPluginIndexDescriptors() (lower, upper []byte) {
+	p := []byte(pPluginIndex)
+	return p, prefixUpper(p)
+}
+
+// PrefixPluginIndexTableDescriptors covers plugin index descriptors for one table.
+func PrefixPluginIndexTableDescriptors(table string) (lower, upper []byte) {
+	p := []byte(pPluginIndex + escapeKeySegment(table) + "/")
 	return p, prefixUpper(p)
 }
 
@@ -164,6 +185,8 @@ func RangePrimaryBySK(table string, pkSerialized, skLow, skHigh []byte) (lower, 
 }
 
 func tableBase(table string) string { return pTables + table }
+
+func escapeKeySegment(s string) string { return url.PathEscape(s) }
 
 func pkHash8(serialized []byte) []byte {
 	h := xxhash.Sum64(serialized)

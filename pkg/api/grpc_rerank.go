@@ -90,7 +90,7 @@ func (s *GRPCServer) resolveRerankDistance(table, field, explicit string, cands 
 		if len(cands) > 0 {
 			probe = cands[0].Vector
 		}
-		cfg, ok, err := findANNConfig(table, field, probe)
+		cfg, ok, err := s.findANNConfig(table, field, probe)
 		if err != nil {
 			return nil, "", status.Error(codes.InvalidArgument, err.Error())
 		}

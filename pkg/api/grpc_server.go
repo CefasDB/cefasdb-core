@@ -44,7 +44,11 @@ type GRPCServer struct {
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
 // instances the HTTP server uses. Cluster may be nil.
 func NewGRPCServer(db *storage.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
-	return &GRPCServer{db: db, cat: cat, cluster: cluster}
+	s := &GRPCServer{db: db, cat: cat, cluster: cluster}
+	if db != nil {
+		_ = s.hydratePluginIndexCatalog()
+	}
+	return s
 }
 
 // AttachManager wires the multi-shard manager onto the gRPC handler.
@@ -187,6 +191,9 @@ func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableReques
 		return nil, err
 	}
 	if err := s.cat.Drop(req.GetName()); err != nil {
+		return nil, mapStorageErr(err)
+	}
+	if err := s.deletePluginIndexDescriptorsForTable(req.GetName()); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.DropTableResponse{}, nil
@@ -797,6 +804,7 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 	ex := &cefassql.Executor{
 		Storage:              s.db,
 		Catalog:              s.cat,
+		TableDropHook:        s.deletePluginIndexDescriptorsForTable,
 		DistanceResolver:     s.sqlDistanceResolver,
 		ANNCandidateResolver: s.sqlANNCandidateResolver,
 	}

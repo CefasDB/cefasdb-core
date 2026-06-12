@@ -29,15 +29,17 @@ type annTopKResult struct {
 
 var exactTopKScanFallbackHook func(table, field, explicit string)
 
-func findANNDescriptor(table, field string, target model.AttributeValue) (index.Descriptor, annConfig, bool, error) {
-	pluginIndexBook.mu.RLock()
-	matches := make([]index.Descriptor, 0, len(pluginIndexBook.entries))
-	for _, desc := range pluginIndexBook.entries {
+func (s *GRPCServer) findANNDescriptor(table, field string, target model.AttributeValue) (index.Descriptor, annConfig, bool, error) {
+	descs, err := s.pluginIndexDescriptorsForTable(table)
+	if err != nil {
+		return index.Descriptor{}, annConfig{}, false, err
+	}
+	matches := make([]index.Descriptor, 0, len(descs))
+	for _, desc := range descs {
 		if desc.Table == table && strings.EqualFold(desc.PluginName, "ann") {
 			matches = append(matches, desc)
 		}
 	}
-	pluginIndexBook.mu.RUnlock()
 	sort.Slice(matches, func(i, j int) bool { return matches[i].Name < matches[j].Name })
 
 	for _, desc := range matches {
@@ -62,7 +64,7 @@ func findANNDescriptor(table, field string, target model.AttributeValue) (index.
 }
 
 func (s *GRPCServer) findANNIndex(table, field string, target model.AttributeValue) (annIndexRef, bool, error) {
-	stored, cfg, ok, err := findANNDescriptor(table, field, target)
+	stored, cfg, ok, err := s.findANNDescriptor(table, field, target)
 	if err != nil || !ok {
 		return annIndexRef{}, ok, err
 	}
