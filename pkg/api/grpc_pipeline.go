@@ -20,8 +20,8 @@ import (
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/core/query/mmr"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
+	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -289,27 +289,41 @@ func (s *GRPCServer) NextBestAction(ctx context.Context, req *cefaspb.NextBestAc
 			return nil, err
 		}
 		start = time.Now()
-		pick, err := chooseEligibleBanditArm(bp, req.GetBanditId(), eligible)
-		if err != nil {
-			return nil, mapBanditErr(err)
+		pick, unknown, err := bp.SampleEligible(req.GetBanditId(), req.GetContext(), eligibleBanditArmIDs(eligible))
+		for _, armID := range unknown {
+			reasons.add("bandit:unknown_arm:" + armID)
 		}
-		actionID = pick
-		resp.Stages = append(resp.Stages, pipelineStage("bandit", len(eligible), 1, start, "bandit:posterior_mean"))
-
-		start = time.Now()
-		capAllowed, capReason, err := s.checkNBACap(req, actionID)
-		if err != nil {
-			return nil, err
-		}
-		if !capAllowed {
-			reasons.add(capReason)
-			if req.GetFallbackActionId() == "" {
-				return nil, status.Error(codes.FailedPrecondition, "selected action blocked by cap and no fallback_action_id")
-			}
+		if errors.Is(err, bandit.ErrNoEligibleArms) {
+			reasons.add("fallback:no_registered_eligible_actions")
 			actionID = req.GetFallbackActionId()
 			fallback = true
+			resp.Stages = append(resp.Stages, pipelineStage("bandit", len(eligible), 0, start, reasons.slice()...))
+			if actionID == "" {
+				return nil, status.Error(codes.FailedPrecondition, "no eligible registered bandit arms and no fallback_action_id")
+			}
+		} else if err != nil {
+			return nil, mapBanditErr(err)
+		} else {
+			actionID = pick
+			resp.Stages = append(resp.Stages, pipelineStage("bandit", len(eligible), 1, start, "bandit:strategy"))
 		}
-		resp.Stages = append(resp.Stages, pipelineStage("cap", 1, boolCount(capAllowed), start, capReason))
+
+		if !fallback {
+			start = time.Now()
+			capAllowed, capReason, err := s.checkNBACap(req, actionID)
+			if err != nil {
+				return nil, err
+			}
+			if !capAllowed {
+				reasons.add(capReason)
+				if req.GetFallbackActionId() == "" {
+					return nil, status.Error(codes.FailedPrecondition, "selected action blocked by cap and no fallback_action_id")
+				}
+				actionID = req.GetFallbackActionId()
+				fallback = true
+			}
+			resp.Stages = append(resp.Stages, pipelineStage("cap", 1, boolCount(capAllowed), start, capReason))
+		}
 	}
 
 	decisionID, err := newDecisionID()
@@ -343,31 +357,12 @@ func (s *GRPCServer) NextBestAction(ctx context.Context, req *cefaspb.NextBestAc
 	return resp, nil
 }
 
-func chooseEligibleBanditArm(bp plugin.BanditPlugin, banditID string, eligible []*cefaspb.NBAAction) (string, error) {
-	snap, err := bp.Snapshot(banditID)
-	if err != nil {
-		return "", err
-	}
-	means := make(map[string]float64, len(snap.Arms))
-	for _, arm := range snap.Arms {
-		means[arm.ArmID] = arm.Mean
-	}
-	best := ""
-	bestMean := 0.0
+func eligibleBanditArmIDs(eligible []*cefaspb.NBAAction) []string {
+	out := make([]string, 0, len(eligible))
 	for _, action := range eligible {
-		mean, ok := means[action.GetActionId()]
-		if !ok {
-			continue
-		}
-		if best == "" || mean > bestMean {
-			best = action.GetActionId()
-			bestMean = mean
-		}
+		out = append(out, action.GetActionId())
 	}
-	if best == "" {
-		return "", fmt.Errorf("bandit: no eligible actions are registered arms")
-	}
-	return best, nil
+	return out
 }
 
 func (s *GRPCServer) checkNBACap(req *cefaspb.NextBestActionRequest, actionID string) (bool, string, error) {

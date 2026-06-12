@@ -154,6 +154,147 @@ func TestEpsilonExploresAndExploits(t *testing.T) {
 	}
 }
 
+func TestSampleEligibleThompsonCanPickNonMeanBestArm(t *testing.T) {
+	for seed := int64(1); seed < 500; seed++ {
+		p := NewPluginWith(NewMemoryStore(), seed)
+		if err := p.Init(plugin.BanditSpec{
+			BanditID: "restricted",
+			Strategy: StrategyThompson,
+			Arms: []plugin.BanditArmSpec{
+				{ArmID: "A", Family: FamilyBetaBernoulli, Alpha: 6, Beta: 4},
+				{ArmID: "B", Family: FamilyBetaBernoulli, Alpha: 5, Beta: 5},
+			},
+		}); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		arm, unknown, err := p.SampleEligible("restricted", nil, []string{"A", "B"})
+		if err != nil {
+			t.Fatalf("SampleEligible: %v", err)
+		}
+		if len(unknown) != 0 {
+			t.Fatalf("unknown = %v, want none", unknown)
+		}
+		if arm == "B" {
+			return
+		}
+	}
+	t.Fatal("no deterministic Thompson seed selected the lower-mean eligible arm")
+}
+
+func TestSampleEligibleUCB1ExploresWithinEligibleSet(t *testing.T) {
+	p := NewPluginWith(NewMemoryStore(), 7)
+	if err := p.Init(plugin.BanditSpec{
+		BanditID: "restricted",
+		Strategy: StrategyUCB1,
+		Arms: []plugin.BanditArmSpec{
+			{ArmID: "A", Family: FamilyBetaBernoulli},
+			{ArmID: "B", Family: FamilyBetaBernoulli},
+			{ArmID: "C", Family: FamilyBetaBernoulli},
+		},
+	}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := p.Reward("restricted", "A", 1, nil); err != nil {
+			t.Fatalf("Reward A: %v", err)
+		}
+	}
+	arm, unknown, err := p.SampleEligible("restricted", nil, []string{"A", "B"})
+	if err != nil {
+		t.Fatalf("SampleEligible: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Fatalf("unknown = %v, want none", unknown)
+	}
+	if arm != "B" {
+		t.Fatalf("SampleEligible UCB1 = %q, want unexplored eligible arm B", arm)
+	}
+}
+
+func TestSampleEligibleEpsilonRestrictsAndReportsUnknown(t *testing.T) {
+	p := NewPluginWith(NewMemoryStore(), 99)
+	if err := p.Init(plugin.BanditSpec{
+		BanditID: "restricted",
+		Strategy: StrategyEpsilon,
+		Epsilon:  0.1,
+		Arms: []plugin.BanditArmSpec{
+			{ArmID: "A", Family: FamilyBetaBernoulli},
+			{ArmID: "B", Family: FamilyBetaBernoulli},
+			{ArmID: "C", Family: FamilyBetaBernoulli},
+		},
+	}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := p.Reward("restricted", "C", 1, nil); err != nil {
+			t.Fatalf("Reward C: %v", err)
+		}
+	}
+	arm, unknown, err := p.SampleEligible("restricted", nil, []string{"B", "Z"})
+	if err != nil {
+		t.Fatalf("SampleEligible: %v", err)
+	}
+	if arm != "B" {
+		t.Fatalf("SampleEligible epsilon = %q, want only registered eligible arm B", arm)
+	}
+	if len(unknown) != 1 || unknown[0] != "Z" {
+		t.Fatalf("unknown = %v, want [Z]", unknown)
+	}
+}
+
+func TestSampleEligibleEpsilonCanExploreWithinEligibleSet(t *testing.T) {
+	for seed := int64(1); seed < 500; seed++ {
+		p := NewPluginWith(NewMemoryStore(), seed)
+		if err := p.Init(plugin.BanditSpec{
+			BanditID: "restricted",
+			Strategy: StrategyEpsilon,
+			Epsilon:  0.9,
+			Arms: []plugin.BanditArmSpec{
+				{ArmID: "A", Family: FamilyBetaBernoulli},
+				{ArmID: "B", Family: FamilyBetaBernoulli},
+			},
+		}); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		for i := 0; i < 5; i++ {
+			if err := p.Reward("restricted", "A", 1, nil); err != nil {
+				t.Fatalf("Reward A: %v", err)
+			}
+		}
+		arm, unknown, err := p.SampleEligible("restricted", nil, []string{"A", "B"})
+		if err != nil {
+			t.Fatalf("SampleEligible: %v", err)
+		}
+		if len(unknown) != 0 {
+			t.Fatalf("unknown = %v, want none", unknown)
+		}
+		if arm == "B" {
+			return
+		}
+	}
+	t.Fatal("no deterministic epsilon seed explored the lower-mean eligible arm")
+}
+
+func TestSampleEligibleNoRegisteredEligibleArms(t *testing.T) {
+	p := NewPluginWith(NewMemoryStore(), 1)
+	if err := p.Init(plugin.BanditSpec{
+		BanditID: "restricted",
+		Strategy: StrategyThompson,
+		Arms: []plugin.BanditArmSpec{
+			{ArmID: "A", Family: FamilyBetaBernoulli},
+		},
+	}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	_, unknown, err := p.SampleEligible("restricted", nil, []string{"Z"})
+	if !errors.Is(err, ErrNoEligibleArms) {
+		t.Fatalf("SampleEligible err = %v, want ErrNoEligibleArms", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "Z" {
+		t.Fatalf("unknown = %v, want [Z]", unknown)
+	}
+}
+
 // TestPosteriorPersistsAcrossPluginInstances simulates a node restart
 // by handing the same in-memory store to two plugin instances. The
 // second instance must observe the posterior the first one built.
