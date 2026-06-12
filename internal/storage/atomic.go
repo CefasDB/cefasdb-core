@@ -79,6 +79,7 @@ type AtomicOptions struct {
 // APPLY — the new value of the affected attribute).
 type AtomicResult struct {
 	Item     types.Item
+	OldItem  types.Item
 	Returned []types.AttributeValue
 	Created  bool // true when the item did not exist prior
 }
@@ -275,7 +276,7 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	return AtomicResult{Item: newItem, Returned: returned, Created: created}, nil
+	return AtomicResult{Item: newItem, OldItem: priorItem, Returned: returned, Created: created}, nil
 }
 
 func cloneItem(in types.Item) types.Item {

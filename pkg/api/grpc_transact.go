@@ -130,6 +130,10 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 		}
 	}
 	if len(batchOps) > 0 {
+		pluginPlan, err := s.planPluginIndexBatch(primary, td, batchOps)
+		if err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
 		if err := primary.BatchWriteItem(td, batchOps); err != nil {
 			return nil, mapStorageErr(err)
 		}
@@ -137,6 +141,9 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 			if err := mirror.BatchWriteItem(td, mirrorOps); err != nil {
 				return nil, mapStorageErr(err)
 			}
+		}
+		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
+			return nil, mapWriteMutationErr(err)
 		}
 	}
 	return &cefaspb.TransactWriteItemsResponse{}, nil

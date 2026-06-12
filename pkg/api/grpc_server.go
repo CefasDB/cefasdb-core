@@ -286,8 +286,15 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 		return nil, mapStorageErr(err)
 	}
 	defer targets.Release()
+	pluginPlan, err := s.planPluginIndexPut(targets.primary, td, item)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
+	}
+	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
+		return nil, mapWriteMutationErr(err)
 	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
 	return &cefaspb.PutItemResponse{}, nil
@@ -380,9 +387,10 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("plan: %v", err))
 	}
 	ex := &cefassql.Executor{Storage: db, Catalog: s.cat}
+	ex.MutationHook = s.pluginIndexMutationHookForPlan(plan)
 	res, err := ex.Execute(plan)
 	if err != nil {
-		return nil, mapStorageErr(err)
+		return nil, mapWriteMutationErr(err)
 	}
 	if len(targets.mirrors) > 0 {
 		finalItem, err := db.GetItem(req.GetTable(), td.KeySchema, key)
@@ -447,8 +455,15 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 		return nil, mapStorageErr(err)
 	}
 	defer targets.Release()
+	pluginPlan, err := s.planPluginIndexDelete(targets.primary, td, key)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 	if err := targets.DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
+	}
+	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
+		return nil, mapWriteMutationErr(err)
 	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
 	return &cefaspb.DeleteItemResponse{}, nil
@@ -484,7 +499,7 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 		}
 	}
 	if err := s.batchWriteFanOut(td, ops); err != nil {
-		return nil, mapStorageErr(err)
+		return nil, mapWriteMutationErr(err)
 	}
 	return &cefaspb.BatchWriteItemResponse{}, nil
 }
@@ -492,7 +507,14 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.BatchOp) error {
 	if s.manager == nil {
 		started := time.Now()
+		pluginPlan, err := s.planPluginIndexBatch(s.db, td, ops)
+		if err != nil {
+			return err
+		}
 		if err := s.db.BatchWriteItem(td, ops); err != nil {
+			return err
+		}
+		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 			return err
 		}
 		for _, op := range ops {
@@ -546,6 +568,14 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 		}
 	}
 	started := time.Now()
+	pluginPlans := make([]pluginIndexWritePlan, 0, len(primaryBuckets))
+	for db, group := range primaryBuckets {
+		pluginPlan, err := s.planPluginIndexBatch(db, td, group)
+		if err != nil {
+			return err
+		}
+		pluginPlans = append(pluginPlans, pluginPlan)
+	}
 	for db, group := range primaryBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
 			return err
@@ -553,6 +583,11 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 	}
 	for db, group := range mirrorBuckets {
 		if err := db.BatchWriteItem(td, group); err != nil {
+			return err
+		}
+	}
+	for _, pluginPlan := range pluginPlans {
+		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 			return err
 		}
 	}
@@ -808,6 +843,7 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 		DistanceResolver:     s.sqlDistanceResolver,
 		ANNCandidateResolver: s.sqlANNCandidateResolver,
 	}
+	ex.MutationHook = s.pluginIndexMutationHookForPlan(plan)
 	res, err := ex.Execute(plan)
 	if err != nil {
 		if _, ok := status.FromError(err); ok {
