@@ -19,6 +19,20 @@ type Result struct {
 	AffectedRows int
 }
 
+// ItemMutation describes one row-level DML change after the storage
+// mutation has succeeded. NewItem is nil for deletes; DeleteKey carries
+// the caller-supplied key even when the row did not previously exist.
+type ItemMutation struct {
+	Table     string
+	OldItem   types.Item
+	NewItem   types.Item
+	DeleteKey types.Item
+}
+
+// MutationHook lets API layers attach secondary maintenance to SQL DML
+// without teaching the SQL package about plugin registries.
+type MutationHook func(ItemMutation) error
+
 // Storage is the executor's view of the storage engine. The real
 // *storage.DB satisfies it; tests can fake parts.
 type Storage interface {
@@ -47,6 +61,7 @@ type Executor struct {
 	TableDropHook        func(table string) error
 	DistanceResolver     func(table, field string, target types.AttributeValue) (cquery.DistanceOp, error)
 	ANNCandidateResolver func(table, field string, target types.AttributeValue, limit int) ([]cquery.TopKResult, bool, error)
+	MutationHook         MutationHook
 }
 
 // Execute dispatches to the plan-specific path.
@@ -94,21 +109,30 @@ func (e *Executor) execDrop(p *PlanDropTable) (*Result, error) {
 }
 
 func (e *Executor) execInsert(p *PlanPutItem) (*Result, error) {
-	if p.If != nil {
-		prior, err := e.Storage.GetItem(p.Table, p.Descriptor.KeySchema, keyOnly(p.Item, p.Descriptor.KeySchema))
+	var prior types.Item
+	if p.If != nil || e.MutationHook != nil {
+		var err error
+		prior, err = e.Storage.GetItem(p.Table, p.Descriptor.KeySchema, keyOnly(p.Item, p.Descriptor.KeySchema))
 		if err != nil && !errors.Is(err, types.ErrItemNotFound) {
 			return nil, err
 		}
-		ok, evalErr := EvalBool(p.If, prior, nil)
-		if evalErr != nil {
-			return nil, evalErr
-		}
-		if !ok {
-			return nil, storage.ErrConditionFailed
+		if p.If != nil {
+			ok, evalErr := EvalBool(p.If, prior, nil)
+			if evalErr != nil {
+				return nil, evalErr
+			}
+			if !ok {
+				return nil, storage.ErrConditionFailed
+			}
 		}
 	}
 	if err := e.Storage.PutItemWith(p.Descriptor, p.Item, storage.PutOptions{}); err != nil {
 		return nil, err
+	}
+	if e.MutationHook != nil {
+		if err := e.MutationHook(ItemMutation{Table: p.Table, OldItem: cloneItem(prior), NewItem: cloneItem(p.Item)}); err != nil {
+			return nil, err
+		}
 	}
 	res := &Result{AffectedRows: 1}
 	switch p.Returning {
@@ -144,6 +168,11 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 	if err := e.Storage.PutItemWith(p.Descriptor, prior, storage.PutOptions{}); err != nil {
 		return nil, err
 	}
+	if e.MutationHook != nil {
+		if err := e.MutationHook(ItemMutation{Table: p.Table, OldItem: cloneItem(oldImage), NewItem: cloneItem(prior)}); err != nil {
+			return nil, err
+		}
+	}
 	res := &Result{AffectedRows: 1}
 	switch p.Returning {
 	case ReturningNew, ReturningAll:
@@ -156,7 +185,7 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 
 func (e *Executor) execDelete(p *PlanDelete) (*Result, error) {
 	var oldImage types.Item
-	if p.If != nil || p.Returning != ReturningNone {
+	if p.If != nil || p.Returning != ReturningNone || e.MutationHook != nil {
 		prior, err := e.Storage.GetItem(p.Table, p.Descriptor.KeySchema, p.Key)
 		if err != nil && !errors.Is(err, types.ErrItemNotFound) {
 			return nil, err
@@ -174,6 +203,11 @@ func (e *Executor) execDelete(p *PlanDelete) (*Result, error) {
 	}
 	if err := e.Storage.DeleteItemWith(p.Descriptor, p.Key, storage.DeleteOptions{}); err != nil {
 		return nil, err
+	}
+	if e.MutationHook != nil {
+		if err := e.MutationHook(ItemMutation{Table: p.Table, OldItem: cloneItem(oldImage), DeleteKey: cloneItem(p.Key)}); err != nil {
+			return nil, err
+		}
 	}
 	res := &Result{AffectedRows: 1}
 	if (p.Returning == ReturningOld || p.Returning == ReturningAll) && oldImage != nil {
@@ -251,6 +285,8 @@ func evalAssignExpr(e Expr, item types.Item) (types.AttributeValue, error) {
 	switch n := e.(type) {
 	case *Literal:
 		return evalLiteral(n)
+	case *VectorLiteral:
+		return types.AttributeValue{T: types.AttrVec, Vec: append([]float64(nil), n.Values...)}, nil
 	case *ColumnRef:
 		return item[n.Name], nil
 	case *ArithExpr:

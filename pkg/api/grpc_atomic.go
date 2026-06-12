@@ -103,6 +103,19 @@ func (s *AtomicServer) AtomicUpdate(ctx context.Context, req *cefaspb.AtomicUpda
 	if err := targets.MirrorPutItem(td, res.Item); err != nil {
 		return nil, mapStorageErr(err)
 	}
+	pluginPlan := pluginIndexWritePlan{
+		deltas: []pluginIndexDelta{{
+			oldItem: clonePluginIndexItem(res.OldItem),
+			newItem: clonePluginIndexItem(res.Item),
+		}},
+	}
+	pluginPlan.descriptors, err = s.core.pluginIndexBuildDescriptors(td)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
+	if err := s.core.applyPluginIndexPlan(pluginPlan); err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 
 	returned := make([]*cefaspb.AttributeValue, len(res.Returned))
 	for i := range res.Returned {
