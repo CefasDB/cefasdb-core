@@ -190,6 +190,8 @@ func mapBanditErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, bandit.ErrNoArms), errors.Is(err, bandit.ErrBadStrategy):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, bandit.ErrNoEligibleArms):
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, bandit.ErrTooManyRetries):
 		return status.Error(codes.Aborted, err.Error())
 	}

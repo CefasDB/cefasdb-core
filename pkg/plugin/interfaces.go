@@ -84,10 +84,10 @@ type EstimatorPlugin interface {
 // AudienceRequest packs the geo + targeting inputs for an audience
 // query. Plugins ignore fields they don't need.
 type AudienceRequest struct {
-	Lat, Lon      float64
-	Radius        float64 // meters
-	ActiveWithin  time.Duration
-	Extra         map[string]model.AttributeValue
+	Lat, Lon     float64
+	Radius       float64 // meters
+	ActiveWithin time.Duration
+	Extra        map[string]model.AttributeValue
 }
 
 // AudiencePlugin backs the ads workloads (Epic 6 / #102).
@@ -163,6 +163,11 @@ type BanditPlugin interface {
 	Init(spec BanditSpec) error
 	Sample(banditID string, context map[string]string) (armID string, err error)
 	BatchSample(banditID string, context map[string]string, n int) ([]string, error)
+	// SampleEligible applies the configured bandit strategy to a
+	// caller-supplied eligible arm subset. Unknown arm IDs are returned
+	// separately so orchestration layers can emit reason codes while
+	// still sampling known eligible arms.
+	SampleEligible(banditID string, context map[string]string, eligibleArmIDs []string) (armID string, unknownArmIDs []string, err error)
 	Reward(banditID, armID string, reward float64, context map[string]string) error
 	Snapshot(banditID string) (BanditSnapshot, error)
 }

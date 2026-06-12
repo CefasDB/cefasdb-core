@@ -55,6 +55,7 @@ var (
 	ErrUnknownArm      = errors.New("bandit: unknown armID")
 	ErrNoArms          = errors.New("bandit: arm spec required")
 	ErrBadStrategy     = errors.New("bandit: unsupported strategy")
+	ErrNoEligibleArms  = errors.New("bandit: no eligible registered arms")
 	ErrConditionFailed = errors.New("bandit: posterior version mismatch")
 	ErrTooManyRetries  = errors.New("bandit: gave up after retry budget")
 )
@@ -283,18 +284,7 @@ func (p *Plugin) Sample(banditID string, _ map[string]string) (string, error) {
 	if len(arms) == 0 {
 		return "", ErrNoArms
 	}
-	p.mu.Lock()
-	rng := p.rng
-	p.mu.Unlock()
-	switch meta.Strategy {
-	case StrategyThompson:
-		return sampleThompson(rng, arms), nil
-	case StrategyUCB1:
-		return sampleUCB1(arms, meta.C), nil
-	case StrategyEpsilon:
-		return sampleEpsilon(rng, arms, meta.Epsilon), nil
-	}
-	return "", ErrBadStrategy
+	return p.sampleArm(meta, arms)
 }
 
 // BatchSample returns n independent samples — each call to Sample
@@ -312,25 +302,33 @@ func (p *Plugin) BatchSample(banditID string, ctx map[string]string, n int) ([]s
 		return nil, ErrNoArms
 	}
 	out := make([]string, 0, n)
-	p.mu.Lock()
-	rng := p.rng
-	p.mu.Unlock()
 	for i := 0; i < n; i++ {
-		var pick string
-		switch meta.Strategy {
-		case StrategyThompson:
-			pick = sampleThompson(rng, arms)
-		case StrategyUCB1:
-			pick = sampleUCB1(arms, meta.C)
-		case StrategyEpsilon:
-			pick = sampleEpsilon(rng, arms, meta.Epsilon)
-		default:
-			return nil, ErrBadStrategy
+		pick, err := p.sampleArm(meta, arms)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, pick)
 	}
 	_ = ctx
 	return out, nil
+}
+
+// SampleEligible applies the configured strategy to the intersection
+// of registered arms and the caller-provided eligible set.
+func (p *Plugin) SampleEligible(banditID string, _ map[string]string, eligibleArmIDs []string) (string, []string, error) {
+	meta, arms, err := p.snapshotInternal(banditID)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(arms) == 0 {
+		return "", nil, ErrNoArms
+	}
+	filtered, unknown := restrictArms(arms, eligibleArmIDs)
+	if len(filtered) == 0 {
+		return "", unknown, ErrNoEligibleArms
+	}
+	pick, err := p.sampleArm(meta, filtered)
+	return pick, unknown, err
 }
 
 // Reward updates the posterior for (banditID, armID) by `reward`.
@@ -451,6 +449,51 @@ func (p *Plugin) snapshotInternal(banditID string) (MetaRecord, []ArmRecord, err
 	return *meta, arms, nil
 }
 
+func (p *Plugin) sampleArm(meta MetaRecord, arms []ArmRecord) (string, error) {
+	if len(arms) == 0 {
+		return "", ErrNoArms
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch meta.Strategy {
+	case StrategyThompson:
+		return sampleThompson(p.rng, arms), nil
+	case StrategyUCB1:
+		return sampleUCB1(arms, meta.C), nil
+	case StrategyEpsilon:
+		return sampleEpsilon(p.rng, arms, meta.Epsilon), nil
+	}
+	return "", ErrBadStrategy
+}
+
+func restrictArms(arms []ArmRecord, eligibleArmIDs []string) ([]ArmRecord, []string) {
+	byID := make(map[string]ArmRecord, len(arms))
+	for _, arm := range arms {
+		byID[arm.ArmID] = arm
+	}
+	seen := make(map[string]struct{}, len(eligibleArmIDs))
+	filtered := make([]ArmRecord, 0, len(eligibleArmIDs))
+	unknown := make([]string, 0)
+	for _, id := range eligibleArmIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		arm, ok := byID[id]
+		if !ok {
+			unknown = append(unknown, id)
+			continue
+		}
+		filtered = append(filtered, arm)
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].ArmID < filtered[j].ArmID })
+	sort.Strings(unknown)
+	return filtered, unknown
+}
+
 func normalizeFamily(f string) string {
 	switch f {
 	case "", FamilyBetaBernoulli:
@@ -490,8 +533,12 @@ func posteriorMean(a ArmRecord) float64 {
 // EncodeArm / DecodeArm + EncodeMeta / DecodeMeta give external Store
 // implementations (the storage-backed one in pkg/api) a stable wire
 // format without re-spelling field tags.
-func EncodeArm(a ArmRecord) ([]byte, error)  { return json.Marshal(a) }
-func DecodeArm(b []byte) (ArmRecord, error)  { var a ArmRecord; err := json.Unmarshal(b, &a); return a, err }
+func EncodeArm(a ArmRecord) ([]byte, error) { return json.Marshal(a) }
+func DecodeArm(b []byte) (ArmRecord, error) {
+	var a ArmRecord
+	err := json.Unmarshal(b, &a)
+	return a, err
+}
 func EncodeMeta(m MetaRecord) ([]byte, error) { return json.Marshal(m) }
 func DecodeMeta(b []byte) (MetaRecord, error) {
 	var m MetaRecord

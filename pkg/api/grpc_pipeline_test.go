@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
 )
 
@@ -104,7 +106,7 @@ func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {
 }
 
 func TestNextBestActionDecisionLogAndReward(t *testing.T) {
-	stub, cleanup := startUnsecuredFixture(t)
+	stub, cleanup := startPipelineFixtureWithBandit(t, 42)
 	defer cleanup()
 	ctx := context.Background()
 	if _, err := stub.BanditCreate(ctx, &cefaspb.BanditCreateRequest{
@@ -138,20 +140,24 @@ func TestNextBestActionDecisionLogAndReward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nba decide: %v", err)
 	}
-	if decide.GetActionId() != "B" || decide.GetDecisionId() == "" {
+	if decide.GetActionId() == "C" || decide.GetActionId() == "" || decide.GetDecisionId() == "" {
 		t.Fatalf("unexpected decision: %+v", decide)
 	}
 	gotDecision, err := stub.GetDecision(ctx, &cefaspb.GetDecisionRequest{DecisionId: decide.GetDecisionId()})
 	if err != nil {
 		t.Fatalf("get decision: %v", err)
 	}
-	if !gotDecision.GetFound() || gotDecision.GetDecision().GetActionId() != "B" {
+	if !gotDecision.GetFound() || gotDecision.GetDecision().GetActionId() != decide.GetActionId() {
 		t.Fatalf("decision log not queryable: %+v", gotDecision)
 	}
 
+	before, err := stub.BanditDescribe(ctx, &cefaspb.BanditDescribeRequest{BanditId: "offers"})
+	if err != nil {
+		t.Fatalf("describe before reward: %v", err)
+	}
 	if _, err := stub.RecordReward(ctx, &cefaspb.RecordRewardRequest{
 		DecisionId: decide.GetDecisionId(),
-		ActionId:   "A",
+		ActionId:   otherAction(decide.GetActionId()),
 		Reward:     1,
 	}); err != nil {
 		t.Fatalf("record reward: %v", err)
@@ -160,7 +166,9 @@ func TestNextBestActionDecisionLogAndReward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if pullsByArm(snap)["B"] != 4 || pullsByArm(snap)["A"] != 1 {
+	beforePulls := pullsByArm(before)
+	afterPulls := pullsByArm(snap)
+	if afterPulls[decide.GetActionId()] != beforePulls[decide.GetActionId()]+1 {
 		t.Fatalf("reward did not update original arm: %+v", snap.GetArms())
 	}
 
@@ -179,6 +187,90 @@ func TestNextBestActionDecisionLogAndReward(t *testing.T) {
 	if !fallback.GetFallback() || fallback.GetActionId() != "fallback" {
 		t.Fatalf("unexpected fallback decision: %+v", fallback)
 	}
+}
+
+func TestNextBestActionUsesUCBStrategyOverEligibleActions(t *testing.T) {
+	stub, cleanup := startPipelineFixtureWithBandit(t, 7)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := stub.BanditCreate(ctx, &cefaspb.BanditCreateRequest{
+		BanditId: "offers",
+		Strategy: "ucb1",
+		Arms: []*cefaspb.BanditArmSpec{
+			{ArmId: "A"}, {ArmId: "B"},
+		},
+	}); err != nil {
+		t.Fatalf("bandit create: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := stub.BanditReward(ctx, &cefaspb.BanditRewardRequest{BanditId: "offers", ArmId: "A", Reward: 1}); err != nil {
+			t.Fatalf("reward A: %v", err)
+		}
+	}
+
+	decide, err := stub.NextBestAction(ctx, &cefaspb.NextBestActionRequest{
+		BanditId: "offers",
+		UserId:   "u-ucb",
+		Actions: []*cefaspb.NBAAction{
+			{ActionId: "A"},
+			{ActionId: "B"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("nba decide: %v", err)
+	}
+	if decide.GetActionId() != "B" {
+		t.Fatalf("UCB NBA action = %q, want unexplored eligible arm B", decide.GetActionId())
+	}
+	if !hasReason(stageReasons(decide.GetStages(), "bandit"), "bandit:strategy") {
+		t.Fatalf("bandit stage missing strategy reason: %+v", decide.GetStages())
+	}
+}
+
+func TestNextBestActionUnknownEligibleArmFallsBackWithReason(t *testing.T) {
+	stub, cleanup := startPipelineFixtureWithBandit(t, 1)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := stub.BanditCreate(ctx, &cefaspb.BanditCreateRequest{
+		BanditId: "offers",
+		Strategy: "thompson",
+		Arms: []*cefaspb.BanditArmSpec{
+			{ArmId: "A"},
+		},
+	}); err != nil {
+		t.Fatalf("bandit create: %v", err)
+	}
+
+	decide, err := stub.NextBestAction(ctx, &cefaspb.NextBestActionRequest{
+		BanditId: "offers",
+		UserId:   "u-unknown",
+		Actions: []*cefaspb.NBAAction{
+			{ActionId: "Z"},
+		},
+		FallbackActionId: "fallback",
+	})
+	if err != nil {
+		t.Fatalf("nba decide: %v", err)
+	}
+	if !decide.GetFallback() || decide.GetActionId() != "fallback" {
+		t.Fatalf("fallback decision = %+v, want fallback action", decide)
+	}
+	if !hasReason(decide.GetReasonCodes(), "bandit:unknown_arm:Z") ||
+		!hasReason(decide.GetReasonCodes(), "fallback:no_registered_eligible_actions") {
+		t.Fatalf("reason codes = %v, want unknown-arm and fallback reasons", decide.GetReasonCodes())
+	}
+	if got := stageOutput(decide.GetStages(), "bandit"); got != 0 {
+		t.Fatalf("bandit stage output = %d, want 0", got)
+	}
+}
+
+func startPipelineFixtureWithBandit(t *testing.T, seed int64) (cefaspb.CefasClient, func()) {
+	t.Helper()
+	reg := plugin.NewRegistry()
+	if err := reg.Register(bandit.NewPluginWith(bandit.NewMemoryStore(), seed)); err != nil {
+		t.Fatalf("register bandit: %v", err)
+	}
+	return fixtureWithRegistry(t, reg)
 }
 
 func recommendIDs(rows []*cefaspb.RecommendRow) []string {
@@ -207,6 +299,40 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func otherAction(actionID string) string {
+	if actionID == "A" {
+		return "B"
+	}
+	return "A"
+}
+
+func hasReason(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
+}
+
+func stageReasons(stages []*cefaspb.PipelineStageTiming, name string) []string {
+	for _, stage := range stages {
+		if stage.GetStage() == name {
+			return stage.GetReasonCodes()
+		}
+	}
+	return nil
+}
+
+func stageOutput(stages []*cefaspb.PipelineStageTiming, name string) int32 {
+	for _, stage := range stages {
+		if stage.GetStage() == name {
+			return stage.GetOutputCount()
+		}
+	}
+	return -1
 }
 
 func pullsByArm(resp *cefaspb.BanditDescribeResponse) map[string]int64 {
