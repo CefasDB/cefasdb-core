@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 // parseKV parses a comma-separated `Key=Value,Key=Value` shorthand
@@ -107,4 +109,39 @@ func PartitionAndSort(ks []KeySchemaEntry) (pk, sk string, err error) {
 		return "", "", fmt.Errorf("key-schema missing HASH key")
 	}
 	return pk, sk, nil
+}
+
+func parseStreamSpecification(raw string) (*types.StreamSpecification, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	kv, err := parseKV(raw)
+	if err != nil {
+		return nil, fmt.Errorf("stream-specification: %w", err)
+	}
+	enabledRaw, ok := kv["StreamEnabled"]
+	if !ok {
+		return nil, fmt.Errorf("stream-specification: StreamEnabled is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(enabledRaw)) {
+	case "false":
+		return nil, nil
+	case "true":
+	default:
+		return nil, fmt.Errorf("stream-specification: StreamEnabled must be true or false")
+	}
+	view := types.NormalizeStreamViewType(kv["StreamViewType"])
+	if view != "" && !types.IsValidStreamViewType(view) {
+		return nil, fmt.Errorf("stream-specification: StreamViewType %q must be one of %s, %s, %s, %s",
+			kv["StreamViewType"],
+			types.StreamViewTypeKeysOnly,
+			types.StreamViewTypeNewImage,
+			types.StreamViewTypeOldImage,
+			types.StreamViewTypeNewAndOldImages)
+	}
+	return &types.StreamSpecification{
+		StreamEnabled:  true,
+		StreamViewType: view,
+	}, nil
 }

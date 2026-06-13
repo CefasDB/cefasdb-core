@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
@@ -88,5 +89,74 @@ func TestUpdateTablePersistsAcrossReload(t *testing.T) {
 	got, _ := c.Describe("T")
 	if got.TTLAttribute != "exp" {
 		t.Fatalf("TTLAttribute after reload = %q", got.TTLAttribute)
+	}
+}
+
+func TestCreateTableNormalizesStreamSpecification(t *testing.T) {
+	c := openCat(t)
+	td := types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled: true,
+		},
+	}
+	if err := c.Create(td); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if got.StreamSpecification == nil || !got.StreamSpecification.StreamEnabled {
+		t.Fatalf("stream specification not enabled: %+v", got.StreamSpecification)
+	}
+	if got.StreamSpecification.StreamViewType != types.StreamViewTypeNewAndOldImages {
+		t.Fatalf("stream view = %q, want %q", got.StreamSpecification.StreamViewType, types.StreamViewTypeNewAndOldImages)
+	}
+	if got.StreamStatus != types.StreamStatusEnabled {
+		t.Fatalf("stream status = %q, want %q", got.StreamStatus, types.StreamStatusEnabled)
+	}
+	if got.LatestStreamLabel == "" {
+		t.Fatal("LatestStreamLabel is empty")
+	}
+	if !strings.Contains(got.LatestStreamArn, "table/Events/stream/"+got.LatestStreamLabel) {
+		t.Fatalf("LatestStreamArn = %q, label = %q", got.LatestStreamArn, got.LatestStreamLabel)
+	}
+}
+
+func TestCreateTableRejectsInvalidStreamViewType(t *testing.T) {
+	c := openCat(t)
+	err := c.Create(types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: "FULL_IMAGE",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "streamViewType") {
+		t.Fatalf("want streamViewType error, got %v", err)
+	}
+}
+
+func TestCreateTableClearsDisabledStreamSpecification(t *testing.T) {
+	c := openCat(t)
+	if err := c.Create(types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  false,
+			StreamViewType: types.StreamViewTypeNewImage,
+		},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if got.StreamSpecification != nil || got.LatestStreamArn != "" || got.LatestStreamLabel != "" || got.StreamStatus != "" {
+		t.Fatalf("disabled stream metadata not cleared: %+v", got)
 	}
 }

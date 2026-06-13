@@ -137,8 +137,18 @@ func (c *Client) withAuth(ctx context.Context) context.Context {
 
 // CreateTable persists a new table descriptor on the leader.
 func (c *Client) CreateTable(ctx context.Context, td types.TableDescriptor) error {
-	_, err := c.stub.CreateTable(c.withAuth(ctx), &cefaspb.CreateTableRequest{Descriptor_: tdToPB(td)})
+	_, err := c.CreateTableWithDescriptor(ctx, td)
 	return err
+}
+
+// CreateTableWithDescriptor persists a table and returns the normalized
+// descriptor the server stored.
+func (c *Client) CreateTableWithDescriptor(ctx context.Context, td types.TableDescriptor) (types.TableDescriptor, error) {
+	resp, err := c.stub.CreateTable(c.withAuth(ctx), &cefaspb.CreateTableRequest{Descriptor_: tdToPB(td)})
+	if err != nil {
+		return types.TableDescriptor{}, err
+	}
+	return tdFromPB(resp.GetDescriptor_()), nil
 }
 
 // DescribeTable returns the descriptor for `name`.

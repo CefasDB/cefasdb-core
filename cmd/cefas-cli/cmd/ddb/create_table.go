@@ -17,6 +17,7 @@ func registerCreateTable(root *cobra.Command) {
 		keySchema    []string
 		billingMode  string
 		storageClass string
+		streamSpec   string
 	)
 	c := &cobra.Command{
 		Use:   "create-table",
@@ -55,12 +56,17 @@ ignored.`,
 			if err != nil {
 				return err
 			}
+			streamSpecification, err := parseStreamSpecification(streamSpec)
+			if err != nil {
+				return err
+			}
 			_ = billingMode // aws-cli compat; cefas has no billing tier
 
 			td := types.TableDescriptor{
-				Name:         table,
-				KeySchema:    types.KeySchema{PK: pk, SK: sk},
-				StorageClass: storageClass,
+				Name:                table,
+				KeySchema:           types.KeySchema{PK: pk, SK: sk},
+				StorageClass:        storageClass,
+				StreamSpecification: streamSpecification,
 			}
 			for _, def := range defs {
 				td.AttributeDefinitions = append(td.AttributeDefinitions, types.AttributeDefinition{
@@ -75,20 +81,23 @@ ignored.`,
 				return err
 			}
 			defer cli.Close()
-			if err := cli.CreateTable(ctx, td); err != nil {
+			created, err := cli.CreateTableWithDescriptor(ctx, td)
+			if err != nil {
 				return fmt.Errorf("create table: %w", err)
 			}
 			fm, err := output.Validate(profile.Output)
 			if err != nil {
 				return err
 			}
+			desc := map[string]any{
+				"TableName":    created.Name,
+				"TableStatus":  "ACTIVE",
+				"KeySchema":    keySchemaWire(created.KeySchema.PK, created.KeySchema.SK),
+				"StorageClass": created.StorageClass,
+			}
+			addTableStreamFields(desc, created)
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
-				"TableDescription": map[string]any{
-					"TableName":    td.Name,
-					"TableStatus":  "ACTIVE",
-					"KeySchema":    keySchemaWire(pk, sk),
-					"StorageClass": td.StorageClass,
-				},
+				"TableDescription": desc,
 			})
 		},
 	}
@@ -98,6 +107,7 @@ ignored.`,
 	f.StringArrayVar(&keySchema, "key-schema", nil, "AttributeName=<n>,KeyType=<HASH|RANGE> (repeatable)")
 	f.StringVar(&billingMode, "billing-mode", "", "Accepted for aws-cli compat; cefas ignores it")
 	f.StringVar(&storageClass, "storage-class", "", "Storage class: disk or memory")
+	f.StringVar(&streamSpec, "stream-specification", "", "StreamEnabled=<true|false>,StreamViewType=<KEYS_ONLY|NEW_IMAGE|OLD_IMAGE|NEW_AND_OLD_IMAGES>")
 	_ = c.MarkFlagRequired("table-name")
 	root.AddCommand(c)
 }

@@ -125,6 +125,43 @@ func TestSDKCreateTableAndPutGet(t *testing.T) {
 	}
 }
 
+func TestSDKCreateTableWithStreamSpecification(t *testing.T) {
+	c, _ := newFixture(t)
+	ctx := context.Background()
+
+	created, err := c.CreateTableWithDescriptor(ctx, types.TableDescriptor{
+		Name:      "streamed_events",
+		KeySchema: types.KeySchema{PK: "id"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeKeysOnly,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.StreamSpecification == nil || !created.StreamSpecification.StreamEnabled {
+		t.Fatalf("created stream spec = %+v", created.StreamSpecification)
+	}
+	if created.StreamSpecification.StreamViewType != types.StreamViewTypeKeysOnly {
+		t.Fatalf("created stream view = %q", created.StreamSpecification.StreamViewType)
+	}
+	if created.LatestStreamArn == "" || created.LatestStreamLabel == "" || created.StreamStatus != types.StreamStatusEnabled {
+		t.Fatalf("created stream metadata incomplete: %+v", created)
+	}
+
+	described, err := c.DescribeTable(ctx, "streamed_events")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if described.LatestStreamArn != created.LatestStreamArn {
+		t.Fatalf("LatestStreamArn = %q, want %q", described.LatestStreamArn, created.LatestStreamArn)
+	}
+	if described.StreamSpecification == nil || described.StreamSpecification.StreamViewType != types.StreamViewTypeKeysOnly {
+		t.Fatalf("described stream spec = %+v", described.StreamSpecification)
+	}
+}
+
 func TestSDKQueryStreaming(t *testing.T) {
 	c, _ := newFixture(t)
 	ctx := context.Background()

@@ -120,6 +120,15 @@ func tdToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 		KeySchema:            &cefaspb.KeySchema{Pk: td.KeySchema.PK, Sk: td.KeySchema.SK},
 		StorageClass:         td.StorageClass,
 		MemoryFootprintBytes: td.MemoryFootprintBytes,
+		LatestStreamArn:      td.LatestStreamArn,
+		LatestStreamLabel:    td.LatestStreamLabel,
+		StreamStatus:         td.StreamStatus,
+	}
+	if td.StreamSpecification != nil {
+		out.StreamSpecification = &cefaspb.StreamSpecification{
+			StreamEnabled:  td.StreamSpecification.StreamEnabled,
+			StreamViewType: td.StreamSpecification.StreamViewType,
+		}
 	}
 	for _, g := range td.GSIs {
 		out.Gsis = append(out.Gsis, &cefaspb.GSIDescriptor{
@@ -158,6 +167,15 @@ func tdFromPB(pb *cefaspb.TableDescriptor) types.TableDescriptor {
 		Name:                 pb.GetName(),
 		StorageClass:         pb.GetStorageClass(),
 		MemoryFootprintBytes: pb.GetMemoryFootprintBytes(),
+		LatestStreamArn:      pb.GetLatestStreamArn(),
+		LatestStreamLabel:    pb.GetLatestStreamLabel(),
+		StreamStatus:         pb.GetStreamStatus(),
+	}
+	if ss := pb.GetStreamSpecification(); ss != nil {
+		out.StreamSpecification = &types.StreamSpecification{
+			StreamEnabled:  ss.GetStreamEnabled(),
+			StreamViewType: ss.GetStreamViewType(),
+		}
 	}
 	if ks := pb.GetKeySchema(); ks != nil {
 		out.KeySchema = types.KeySchema{PK: ks.GetPk(), SK: ks.GetSk()}
