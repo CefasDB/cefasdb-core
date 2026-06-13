@@ -133,6 +133,10 @@ func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRe
 	if err := s.cat.Create(td); err != nil {
 		return nil, mapStorageErr(err)
 	}
+	created, err := s.cat.Describe(td.Name)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
 	// Fan out to every other shard so each can resolve the schema
 	// locally when a write lands on it.
 	if s.manager != nil {
@@ -141,11 +145,11 @@ func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRe
 				continue
 			}
 			if cat, err := catalog.New(sh.Storage); err == nil {
-				_ = cat.Create(td)
+				_ = cat.Create(created)
 			}
 		}
 	}
-	return &cefaspb.CreateTableResponse{Descriptor_: tableDescriptorToPB(td)}, nil
+	return &cefaspb.CreateTableResponse{Descriptor_: tableDescriptorToPB(created)}, nil
 }
 
 func (s *GRPCServer) DescribeTable(ctx context.Context, req *cefaspb.DescribeTableRequest) (*cefaspb.DescribeTableResponse, error) {

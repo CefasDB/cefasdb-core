@@ -7,6 +7,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func registerDescribeTable(root *cobra.Command) {
@@ -38,19 +39,21 @@ Example:
 				return err
 			}
 			// AWS-style envelope around the cefas TableDescriptor.
+			tableDesc := map[string]any{
+				"TableName":            td.Name,
+				"TableStatus":          "ACTIVE",
+				"KeySchema":            keySchemaWire(td.KeySchema.PK, td.KeySchema.SK),
+				"GSIs":                 td.GSIs,
+				"LSIs":                 td.LSIs,
+				"SpatialIndexes":       td.SpatialIndexes,
+				"TTLAttribute":         td.TTLAttribute,
+				"AttributeDefinitions": td.AttributeDefinitions,
+				"StorageClass":         td.StorageClass,
+				"MemoryFootprintBytes": td.MemoryFootprintBytes,
+			}
+			addTableStreamFields(tableDesc, td)
 			resp := map[string]any{
-				"Table": map[string]any{
-					"TableName":            td.Name,
-					"TableStatus":          "ACTIVE",
-					"KeySchema":            keySchemaWire(td.KeySchema.PK, td.KeySchema.SK),
-					"GSIs":                 td.GSIs,
-					"LSIs":                 td.LSIs,
-					"SpatialIndexes":       td.SpatialIndexes,
-					"TTLAttribute":         td.TTLAttribute,
-					"AttributeDefinitions": td.AttributeDefinitions,
-					"StorageClass":         td.StorageClass,
-					"MemoryFootprintBytes": td.MemoryFootprintBytes,
-				},
+				"Table": tableDesc,
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(resp)
 		},
@@ -66,4 +69,23 @@ func keySchemaWire(pk, sk string) []map[string]string {
 		out = append(out, map[string]string{"AttributeName": sk, "KeyType": "RANGE"})
 	}
 	return out
+}
+
+func addTableStreamFields(out map[string]any, td types.TableDescriptor) {
+	if td.StreamSpecification != nil {
+		out["StreamSpecification"] = map[string]any{
+			"StreamEnabled":  td.StreamSpecification.StreamEnabled,
+			"StreamViewType": td.StreamSpecification.StreamViewType,
+		}
+		out["StreamViewType"] = td.StreamSpecification.StreamViewType
+	}
+	if td.LatestStreamArn != "" {
+		out["LatestStreamArn"] = td.LatestStreamArn
+	}
+	if td.LatestStreamLabel != "" {
+		out["LatestStreamLabel"] = td.LatestStreamLabel
+	}
+	if td.StreamStatus != "" {
+		out["StreamStatus"] = td.StreamStatus
+	}
 }

@@ -479,6 +479,11 @@ message AttributeDefinition {
   int32  vector_dimensions = 3;
 }
 
+message StreamSpecification {
+  bool   stream_enabled   = 1;
+  string stream_view_type = 2; // KEYS_ONLY | NEW_IMAGE | OLD_IMAGE | NEW_AND_OLD_IMAGES
+}
+
 message TableDescriptor {
   string                          name                   = 1;
   KeySchema                       key_schema             = 2;
@@ -487,6 +492,10 @@ message TableDescriptor {
   repeated AttributeDefinition    attribute_definitions  = 5;
   string                          storage_class          = 6;
   int64                           memory_footprint_bytes = 7;
+  StreamSpecification             stream_specification   = 8;
+  string                          latest_stream_arn      = 9;
+  string                          latest_stream_label    = 10;
+  string                          stream_status          = 11;
 }
 
 // ---------- schema rpcs ----------

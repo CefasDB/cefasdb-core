@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -171,6 +172,45 @@ func normalizeDescriptor(td *types.TableDescriptor) error {
 		if td.AttributeDefinitions[i].Type == "V" && td.AttributeDefinitions[i].VectorDimensions <= 0 {
 			return fmt.Errorf("attributeDefinitions[%d]: V requires vectorDimensions > 0", i)
 		}
+	}
+	if err := normalizeStreamDescriptor(td); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeStreamDescriptor(td *types.TableDescriptor) error {
+	if td.StreamSpecification == nil || !td.StreamSpecification.StreamEnabled {
+		td.StreamSpecification = nil
+		td.LatestStreamArn = ""
+		td.LatestStreamLabel = ""
+		td.StreamStatus = ""
+		return nil
+	}
+	view := types.NormalizeStreamViewType(td.StreamSpecification.StreamViewType)
+	if view == "" {
+		view = types.StreamViewTypeNewAndOldImages
+	}
+	if !types.IsValidStreamViewType(view) {
+		return fmt.Errorf("streamViewType %q must be one of %q, %q, %q, %q",
+			td.StreamSpecification.StreamViewType,
+			types.StreamViewTypeKeysOnly,
+			types.StreamViewTypeNewImage,
+			types.StreamViewTypeOldImage,
+			types.StreamViewTypeNewAndOldImages)
+	}
+	td.StreamSpecification = &types.StreamSpecification{
+		StreamEnabled:  true,
+		StreamViewType: view,
+	}
+	if td.LatestStreamLabel == "" {
+		td.LatestStreamLabel = time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
+	}
+	if td.LatestStreamArn == "" {
+		td.LatestStreamArn = fmt.Sprintf("arn:cefas:dynamodb:local:000000000000:table/%s/stream/%s", td.Name, td.LatestStreamLabel)
+	}
+	if td.StreamStatus == "" {
+		td.StreamStatus = types.StreamStatusEnabled
 	}
 	return nil
 }

@@ -4,7 +4,10 @@
 // wire format and SDK are independent.
 package types
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // AttrType is the kind tag on an AttributeValue. Same letter codes as
 // DynamoDB so requests are diff-readable side-by-side.
@@ -135,6 +138,34 @@ const (
 	StorageClassMemory = "memory"
 )
 
+const (
+	StreamViewTypeKeysOnly        = "KEYS_ONLY"
+	StreamViewTypeNewImage        = "NEW_IMAGE"
+	StreamViewTypeOldImage        = "OLD_IMAGE"
+	StreamViewTypeNewAndOldImages = "NEW_AND_OLD_IMAGES"
+
+	StreamStatusEnabled = "ENABLED"
+)
+
+// StreamSpecification mirrors DynamoDB's table-level stream settings.
+type StreamSpecification struct {
+	StreamEnabled  bool   `json:"streamEnabled"`
+	StreamViewType string `json:"streamViewType,omitempty"`
+}
+
+func NormalizeStreamViewType(view string) string {
+	return strings.ToUpper(strings.TrimSpace(view))
+}
+
+func IsValidStreamViewType(view string) bool {
+	switch NormalizeStreamViewType(view) {
+	case StreamViewTypeKeysOnly, StreamViewTypeNewImage, StreamViewTypeOldImage, StreamViewTypeNewAndOldImages:
+		return true
+	default:
+		return false
+	}
+}
+
 // NumRange bounds a single numeric dimension for Z-order encoding.
 type NumRange struct {
 	Lo float64 `json:"lo"`
@@ -155,7 +186,11 @@ type TableDescriptor struct {
 	// value (Unix epoch seconds) marks the row's expiration. The
 	// background reaper sweeps expired rows lazily; reads of an
 	// expired row are still served until the reaper passes.
-	TTLAttribute string `json:"ttlAttribute,omitempty"`
+	TTLAttribute        string               `json:"ttlAttribute,omitempty"`
+	StreamSpecification *StreamSpecification `json:"streamSpecification,omitempty"`
+	LatestStreamArn     string               `json:"latestStreamArn,omitempty"`
+	LatestStreamLabel   string               `json:"latestStreamLabel,omitempty"`
+	StreamStatus        string               `json:"streamStatus,omitempty"`
 }
 
 // Errors surfaced by the public API. Server code maps these to HTTP /

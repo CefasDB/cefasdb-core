@@ -488,10 +488,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // ---------- table management ----------
 
 type createTableRequest struct {
-	Name           string                         `json:"name"`
-	KeySchema      jsonKeySchema                  `json:"keySchema"`
-	GSIs           []types.GSIDescriptor          `json:"gsis,omitempty"`
-	SpatialIndexes []types.SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	Name                string                         `json:"name"`
+	KeySchema           jsonKeySchema                  `json:"keySchema"`
+	GSIs                []types.GSIDescriptor          `json:"gsis,omitempty"`
+	SpatialIndexes      []types.SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	StreamSpecification *types.StreamSpecification     `json:"streamSpecification,omitempty"`
 }
 
 type jsonKeySchema struct {
@@ -511,10 +512,11 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		td := types.TableDescriptor{
-			Name:           req.Name,
-			KeySchema:      types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
-			GSIs:           req.GSIs,
-			SpatialIndexes: req.SpatialIndexes,
+			Name:                req.Name,
+			KeySchema:           types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
+			GSIs:                req.GSIs,
+			SpatialIndexes:      req.SpatialIndexes,
+			StreamSpecification: req.StreamSpecification,
 		}
 		if err := s.cat.Create(td); err != nil {
 			status := http.StatusBadRequest
@@ -524,11 +526,16 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, status, err)
 			return
 		}
+		created, err := s.cat.Describe(td.Name)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 		// Fan the descriptor out to every shard so writes routed to
 		// any of them can resolve the schema locally. Shard 0 already
 		// has it via s.cat.Create above.
-		s.fanOutCatalog(td)
-		writeJSON(w, http.StatusCreated, td)
+		s.fanOutCatalog(created)
+		writeJSON(w, http.StatusCreated, created)
 	case http.MethodGet:
 		if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
 			return
