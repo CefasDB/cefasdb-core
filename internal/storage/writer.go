@@ -172,12 +172,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if _, err := d.appendChangeRecord(b, ChangeRecord{
-		Op:    ChangePut,
-		Table: td.Name,
-		Key:   keyItemFromItem(item, td.KeySchema),
-		Item:  item,
-	}); err != nil {
+	if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
 		return fmt.Errorf("change log: %w", err)
 	}
 	if err := d.CommitBatch(b); err != nil {
@@ -268,11 +263,7 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if _, err := d.appendChangeRecord(b, ChangeRecord{
-		Op:    ChangeDelete,
-		Table: td.Name,
-		Key:   keyItemFromItem(keyAttrs, td.KeySchema),
-	}); err != nil {
+	if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)); err != nil {
 		return fmt.Errorf("change log: %w", err)
 	}
 	if err := d.CommitBatch(b); err != nil {
@@ -629,12 +620,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if isMemoryTable(td) {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
 			}
-			if _, err := d.appendChangeRecord(b, ChangeRecord{
-				Op:    ChangePut,
-				Table: td.Name,
-				Key:   keyItemFromItem(op.Item, td.KeySchema),
-				Item:  op.Item,
-			}); err != nil {
+			if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)); err != nil {
 				return fmt.Errorf("op %d change log: %w", i, err)
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
@@ -681,11 +667,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if isMemoryTable(td) {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), delete: true})
 			}
-			if _, err := d.appendChangeRecord(b, ChangeRecord{
-				Op:    ChangeDelete,
-				Table: td.Name,
-				Key:   keyItemFromItem(op.Key, td.KeySchema),
-			}); err != nil {
+			if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)); err != nil {
 				return fmt.Errorf("op %d change log: %w", i, err)
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
