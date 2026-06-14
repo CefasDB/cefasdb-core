@@ -21,6 +21,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
 // Metrics groups every cefas metric instance so the storage / API
@@ -70,6 +72,17 @@ type Metrics struct {
 	RangeCompactionDebt  *prometheus.GaugeVec     // shard, bucket
 	RangeThrottleState   *prometheus.GaugeVec     // shard, bucket
 	RangeHotspotRegistry *RangeHotspotTracker
+
+	StreamRecordsAppended         *prometheus.GaugeVec   // shard, table
+	StreamRecordsTrimmed          *prometheus.GaugeVec   // shard, table
+	StreamRetainedBytes           *prometheus.GaugeVec   // shard, table
+	StreamOldestSequence          *prometheus.GaugeVec   // shard, table
+	StreamNewestSequence          *prometheus.GaugeVec   // shard, table
+	StreamGetRecordsCalls         *prometheus.CounterVec // table, outcome
+	StreamGetRecordsEmptyPolls    *prometheus.CounterVec // table
+	StreamIteratorCreationFailure *prometheus.CounterVec // table, reason
+	StreamTrimmedErrors           *prometheus.CounterVec // table, op
+	StreamExpiredIteratorErrors   *prometheus.CounterVec // table, op
 }
 
 // New builds a Metrics with every collector pre-registered against a
@@ -230,6 +243,46 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 			Help: "Shard write throttle state projected onto bounded token buckets: 0 normal, 1 warning, 2 critical.",
 		}, []string{"shard", "bucket"}),
 		RangeHotspotRegistry: NewRangeHotspotTracker(hotspots),
+		StreamRecordsAppended: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_records_appended",
+			Help: "Cumulative DynamoDB Streams records appended, reconstructed from persisted stream retention state.",
+		}, []string{"shard", "table"}),
+		StreamRecordsTrimmed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_records_trimmed",
+			Help: "Cumulative DynamoDB Streams records logically trimmed by retention.",
+		}, []string{"shard", "table"}),
+		StreamRetainedBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_retained_bytes",
+			Help: "Approximate bytes retained for DynamoDB Streams after logical trimming.",
+		}, []string{"shard", "table"}),
+		StreamOldestSequence: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_oldest_sequence",
+			Help: "Oldest readable DynamoDB Streams sequence number for the table stream.",
+		}, []string{"shard", "table"}),
+		StreamNewestSequence: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_newest_sequence",
+			Help: "Newest appended DynamoDB Streams sequence number for the table stream.",
+		}, []string{"shard", "table"}),
+		StreamGetRecordsCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_stream_get_records_total",
+			Help: "DynamoDB Streams GetRecords calls by outcome.",
+		}, []string{"table", "outcome"}),
+		StreamGetRecordsEmptyPolls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_stream_get_records_empty_polls_total",
+			Help: "DynamoDB Streams GetRecords calls that returned no records while the shard stayed readable.",
+		}, []string{"table"}),
+		StreamIteratorCreationFailure: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_stream_iterator_creation_failures_total",
+			Help: "DynamoDB Streams GetShardIterator failures by reason.",
+		}, []string{"table", "reason"}),
+		StreamTrimmedErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_stream_trimmed_errors_total",
+			Help: "DynamoDB Streams trimmed-data errors by operation.",
+		}, []string{"table", "op"}),
+		StreamExpiredIteratorErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_stream_expired_iterator_errors_total",
+			Help: "DynamoDB Streams expired iterator errors by operation.",
+		}, []string{"table", "op"}),
 	}
 	reg.MustRegister(
 		m.OpDuration,
@@ -265,6 +318,16 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.RangeLatencySeconds,
 		m.RangeCompactionDebt,
 		m.RangeThrottleState,
+		m.StreamRecordsAppended,
+		m.StreamRecordsTrimmed,
+		m.StreamRetainedBytes,
+		m.StreamOldestSequence,
+		m.StreamNewestSequence,
+		m.StreamGetRecordsCalls,
+		m.StreamGetRecordsEmptyPolls,
+		m.StreamIteratorCreationFailure,
+		m.StreamTrimmedErrors,
+		m.StreamExpiredIteratorErrors,
 	)
 	return m
 }
@@ -294,6 +357,73 @@ func (m *Metrics) AuthRejected(reason string) {
 		return
 	}
 	m.AuthRejectedTotal.WithLabelValues(reason).Inc()
+}
+
+func (m *Metrics) ObserveStreamRetention(shard string, stats storage.StreamRetentionStats) {
+	if m == nil {
+		return
+	}
+	if shard == "" {
+		shard = "0"
+	}
+	table := stats.Table
+	if table == "" {
+		table = "unknown"
+	}
+	m.StreamRecordsAppended.WithLabelValues(shard, table).Set(float64(stats.RecordsAppended))
+	m.StreamRecordsTrimmed.WithLabelValues(shard, table).Set(float64(stats.RecordsTrimmed))
+	m.StreamRetainedBytes.WithLabelValues(shard, table).Set(float64(stats.RetainedBytes))
+	m.StreamOldestSequence.WithLabelValues(shard, table).Set(float64(stats.OldestSequence))
+	m.StreamNewestSequence.WithLabelValues(shard, table).Set(float64(stats.NewestSequence))
+}
+
+func (m *Metrics) ObserveStreamGetRecords(table, outcome string, empty bool) {
+	if m == nil {
+		return
+	}
+	if table == "" {
+		table = "unknown"
+	}
+	if outcome == "" {
+		outcome = "ok"
+	}
+	m.StreamGetRecordsCalls.WithLabelValues(table, outcome).Inc()
+	if empty {
+		m.StreamGetRecordsEmptyPolls.WithLabelValues(table).Inc()
+	}
+}
+
+func (m *Metrics) ObserveStreamIteratorFailure(table, reason string) {
+	if m == nil {
+		return
+	}
+	if table == "" {
+		table = "unknown"
+	}
+	if reason == "" {
+		reason = "err"
+	}
+	m.StreamIteratorCreationFailure.WithLabelValues(table, reason).Inc()
+}
+
+func (m *Metrics) ObserveStreamTrimmedError(table, op string) {
+	if m == nil {
+		return
+	}
+	if table == "" {
+		table = "unknown"
+	}
+	m.StreamTrimmedErrors.WithLabelValues(table, op).Inc()
+}
+
+func (m *Metrics) ObserveStreamExpiredIterator(table, op string) {
+	if m == nil {
+		return
+	}
+	if table == "" {
+		table = "unknown"
+	}
+	m.StreamExpiredIteratorErrors.WithLabelValues(table, op).Inc()
 }
 
 func (m *Metrics) ObserveScheduledBackup(backupName, outcome, reason string, duration time.Duration, rows, bytes int64) {

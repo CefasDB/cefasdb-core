@@ -437,6 +437,7 @@ func (s *Server) handleGetShardIterator(w http.ResponseWriter, r *http.Request) 
 		time.Now(),
 	)
 	if err != nil {
+		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.StreamArn), err)
 		writeErr(w, mapWriteErr(err), err)
 		return
 	}
@@ -456,13 +457,15 @@ func (s *Server) handleGetRecords(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	records, nextIterator, err := getStreamRecords(s.cat, s.db, req.ShardIterator, req.Limit, time.Now())
+	result, err := getStreamRecords(s.cat, s.db, req.ShardIterator, req.Limit, time.Now())
 	if err != nil {
+		s.observeStreamGetRecords(result, err)
 		writeErr(w, mapWriteErr(err), err)
 		return
 	}
-	resp := getRecordsResponse{NextShardIterator: nextIterator}
-	for _, record := range records {
+	s.observeStreamGetRecords(result, nil)
+	resp := getRecordsResponse{NextShardIterator: result.NextShardIterator}
+	for _, record := range result.Records {
 		resp.Records = append(resp.Records, streamRecordToHTTP(record))
 	}
 	writeJSON(w, http.StatusOK, resp)

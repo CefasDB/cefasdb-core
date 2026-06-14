@@ -36,6 +36,7 @@ const (
 
 	pPluginIndex = pInternal + "plugin-index/"
 	pStreams     = pAdmin + "streams/by-arn/"
+	pStreamTrim  = pAdmin + "streams/retention/"
 
 	segPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -70,6 +71,17 @@ func KeyStreamDescriptor(streamArn string) []byte {
 // PrefixStreamDescriptors covers every persisted stream descriptor.
 func PrefixStreamDescriptors() (lower, upper []byte) {
 	p := []byte(pStreams)
+	return p, prefixUpper(p)
+}
+
+// KeyStreamRetention stores logical retention state for one table's stream.
+func KeyStreamRetention(table string) []byte {
+	return []byte(pStreamTrim + escapeKeySegment(table))
+}
+
+// PrefixStreamRetention covers every persisted stream retention state.
+func PrefixStreamRetention() (lower, upper []byte) {
+	p := []byte(pStreamTrim)
 	return p, prefixUpper(p)
 }
 

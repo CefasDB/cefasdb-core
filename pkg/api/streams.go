@@ -64,6 +64,12 @@ type streamRecordData struct {
 	StreamViewType              string
 }
 
+type streamRecordsResult struct {
+	TableName         string
+	Records           []streamRecordEntry
+	NextShardIterator string
+}
+
 func normalizeStreamAPILimit(limit int32) int {
 	if limit <= 0 || limit > maxStreamAPILimit {
 		return maxStreamAPILimit
@@ -156,7 +162,11 @@ func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, 
 	if !ok {
 		return "", types.ErrStreamShardNotFound
 	}
-	nextSequence, err := resolveShardIteratorNextSequence(db, shard, iteratorType, sequenceNumber)
+	retention, err := db.PreviewStreamRetention(desc.TableName, now)
+	if err != nil {
+		return "", err
+	}
+	nextSequence, err := resolveShardIteratorNextSequence(db, shard, iteratorType, sequenceNumber, retention)
 	if err != nil {
 		return "", err
 	}
@@ -170,61 +180,69 @@ func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, 
 	})
 }
 
-func getStreamRecords(cat *catalog.Catalog, db *storage.DB, shardIterator string, limit int32, now time.Time) ([]streamRecordEntry, string, error) {
+func getStreamRecords(cat *catalog.Catalog, db *storage.DB, shardIterator string, limit int32, now time.Time) (streamRecordsResult, error) {
 	if shardIterator == "" {
-		return nil, "", fmt.Errorf("%w: shard_iterator required", types.ErrStreamIteratorInvalid)
+		return streamRecordsResult{}, fmt.Errorf("%w: shard_iterator required", types.ErrStreamIteratorInvalid)
 	}
 	payload, err := decodeStreamShardIterator(shardIterator, now)
 	if err != nil {
-		return nil, "", err
+		return streamRecordsResult{}, err
 	}
 	desc, err := cat.DescribeStream(payload.StreamArn)
 	if err != nil {
-		return nil, "", err
+		return streamRecordsResult{}, err
 	}
+	result := streamRecordsResult{TableName: desc.TableName}
 	shard, ok := findStreamShard(desc, payload.ShardID)
 	if !ok {
-		return nil, "", types.ErrStreamShardNotFound
+		return result, types.ErrStreamShardNotFound
+	}
+	retention, err := db.PreviewStreamRetention(desc.TableName, now)
+	if err != nil {
+		return result, err
 	}
 	nextSequence, err := parseStreamSequenceNumber(payload.NextSequenceNumber)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+		return result, fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
 	}
 	startSequence, err := parseStreamSequenceNumber(shard.SequenceNumberRange.StartingSequenceNumber)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: shard starting sequence: %v", types.ErrStreamIteratorInvalid, err)
+		return result, fmt.Errorf("%w: shard starting sequence: %v", types.ErrStreamIteratorInvalid, err)
 	}
-	if nextSequence < startSequence {
-		return nil, "", types.ErrStreamTrimmed
+	trimFloor := streamTrimFloor(startSequence, retention)
+	if nextSequence < trimFloor {
+		return result, types.ErrStreamTrimmed
 	}
 	var endingSequence uint64
 	if shard.SequenceNumberRange.EndingSequenceNumber != "" {
 		endingSequence, err = parseStreamSequenceNumber(shard.SequenceNumberRange.EndingSequenceNumber)
 		if err != nil {
-			return nil, "", fmt.Errorf("%w: shard ending sequence: %v", types.ErrStreamIteratorInvalid, err)
+			return result, fmt.Errorf("%w: shard ending sequence: %v", types.ErrStreamIteratorInvalid, err)
 		}
 		if nextSequence > endingSequence {
-			return nil, "", nil
+			return result, nil
 		}
 	}
 	records, nextSequence, err := db.StreamRecords(desc.TableName, nextSequence, endingSequence, normalizeGetRecordsLimit(limit), maxGetRecordsResponseBytes)
 	if err != nil {
-		return nil, "", err
+		return result, err
 	}
 	out := make([]streamRecordEntry, 0, len(records))
 	for _, rec := range records {
 		out = append(out, streamRecordFromChange(payload.StreamArn, rec))
 	}
+	result.Records = out
 	if endingSequence > 0 && nextSequence > endingSequence {
-		return out, "", nil
+		return result, nil
 	}
 	payload.NextSequenceNumber = strconv.FormatUint(nextSequence, 10)
 	payload.ExpiresUnixNano = now.Add(streamShardIteratorTTL).UnixNano()
 	nextIterator, err := encodeStreamShardIterator(payload)
 	if err != nil {
-		return nil, "", err
+		return result, err
 	}
-	return out, nextIterator, nil
+	result.NextShardIterator = nextIterator
+	return result, nil
 }
 
 func streamRecordFromChange(streamArn string, rec storage.ChangeRecord) streamRecordEntry {
@@ -273,14 +291,15 @@ func findStreamShard(desc types.StreamDescriptor, shardID string) (types.StreamS
 	return types.StreamShardDescriptor{}, false
 }
 
-func resolveShardIteratorNextSequence(db *storage.DB, shard types.StreamShardDescriptor, iteratorType, sequenceNumber string) (uint64, error) {
+func resolveShardIteratorNextSequence(db *storage.DB, shard types.StreamShardDescriptor, iteratorType, sequenceNumber string, retention storage.StreamRetentionStats) (uint64, error) {
 	start, err := parseStreamSequenceNumber(shard.SequenceNumberRange.StartingSequenceNumber)
 	if err != nil {
 		return 0, fmt.Errorf("stream shard starting sequence: %w", err)
 	}
+	trimFloor := streamTrimFloor(start, retention)
 	switch iteratorType {
 	case streamIteratorTypeTrimHorizon:
-		return start, nil
+		return trimFloor, nil
 	case streamIteratorTypeLatest:
 		return latestStreamSequence(db, shard)
 	case streamIteratorTypeAtSequenceNumber, streamIteratorTypeAfterSequenceNumber:
@@ -291,7 +310,7 @@ func resolveShardIteratorNextSequence(db *storage.DB, shard types.StreamShardDes
 		if err != nil {
 			return 0, fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
 		}
-		if seq < start {
+		if seq < trimFloor {
 			return 0, types.ErrStreamTrimmed
 		}
 		if iteratorType == streamIteratorTypeAfterSequenceNumber {
@@ -301,6 +320,13 @@ func resolveShardIteratorNextSequence(db *storage.DB, shard types.StreamShardDes
 	default:
 		return 0, fmt.Errorf("unsupported iterator type %q", iteratorType)
 	}
+}
+
+func streamTrimFloor(shardStart uint64, retention storage.StreamRetentionStats) uint64 {
+	if retention.OldestSequence > shardStart {
+		return retention.OldestSequence
+	}
+	return shardStart
 }
 
 func latestStreamSequence(db *storage.DB, shard types.StreamShardDescriptor) (uint64, error) {

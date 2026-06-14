@@ -80,6 +80,8 @@ func main() {
 		backpressureCritReadAmp  = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
 		backpressureWarnDelay    = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
 		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
+		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
+		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -149,6 +151,7 @@ func main() {
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
+		*streamRetention, *streamRetentionMaxBytes,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
@@ -191,18 +194,19 @@ func main() {
 
 	if cfg.Cluster.Shards > 0 {
 		mgr, err = cluster.Open(context.Background(), cluster.Config{
-			Root:           cfg.Data,
-			Shards:         cfg.Cluster.Shards,
-			SelfID:         cfg.Cluster.SelfID,
-			MuxAddr:        cfg.Cluster.MuxAddr,
-			Peers:          cfg.Cluster.Peers,
-			PeerHTTPAddrs:  cfg.Cluster.HTTPPeers,
-			Bootstrap:      cfg.Cluster.Bootstrap,
-			FsyncOnCommit:  cfg.Storage.FsyncOnCommit,
-			StorageProfile: cfg.Storage.Profile,
-			StorageTuning:  storageTuningFromConfig(cfg),
-			Backpressure:   backpressureFromConfig(cfg),
-			RaftProfile:    cfg.Storage.RaftProfile,
+			Root:            cfg.Data,
+			Shards:          cfg.Cluster.Shards,
+			SelfID:          cfg.Cluster.SelfID,
+			MuxAddr:         cfg.Cluster.MuxAddr,
+			Peers:           cfg.Cluster.Peers,
+			PeerHTTPAddrs:   cfg.Cluster.HTTPPeers,
+			Bootstrap:       cfg.Cluster.Bootstrap,
+			FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
+			StorageProfile:  cfg.Storage.Profile,
+			StorageTuning:   storageTuningFromConfig(cfg),
+			Backpressure:    backpressureFromConfig(cfg),
+			StreamRetention: streamRetentionFromConfig(cfg),
+			RaftProfile:     cfg.Storage.RaftProfile,
 		})
 		if err != nil {
 			log.Fatalf("open cluster manager: %v", err)
@@ -474,11 +478,12 @@ func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(
 
 func storageOptionsFromConfig(cfg config.Config, path string) storage.Options {
 	return storage.Options{
-		Path:          path,
-		FsyncOnCommit: cfg.Storage.FsyncOnCommit,
-		Profile:       cfg.Storage.Profile,
-		Tuning:        storageTuningFromConfig(cfg),
-		Backpressure:  backpressureFromConfig(cfg),
+		Path:            path,
+		FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
+		Profile:         cfg.Storage.Profile,
+		Tuning:          storageTuningFromConfig(cfg),
+		Backpressure:    backpressureFromConfig(cfg),
+		StreamRetention: streamRetentionFromConfig(cfg),
 	}
 }
 
@@ -559,6 +564,13 @@ func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
 	}
 }
 
+func streamRetentionFromConfig(cfg config.Config) storage.StreamRetentionOptions {
+	return storage.StreamRetentionOptions{
+		Retention: cfg.Storage.StreamRetention,
+		MaxBytes:  cfg.Storage.StreamRetentionMaxBytes,
+	}
+}
+
 // streamAdapter bridges the raft package's CDC types to the api
 // package's wire-agnostic shape. Lives here so neither package needs
 // to import the other.
@@ -627,6 +639,7 @@ func overlayFlags(
 	backpressureWarnDebt, backpressureCriticalDebt uint64,
 	backpressureWarnReadAmp, backpressureCriticalReadAmp int,
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
+	streamRetention time.Duration, streamRetentionMaxBytes int64,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
 	shardsN int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
@@ -739,6 +752,12 @@ func overlayFlags(
 	}
 	if backpressureCriticalDelay > 0 {
 		cfg.Storage.BackpressureCriticalDelay = backpressureCriticalDelay
+	}
+	if streamRetention > 0 {
+		cfg.Storage.StreamRetention = streamRetention
+	}
+	if streamRetentionMaxBytes > 0 {
+		cfg.Storage.StreamRetentionMaxBytes = streamRetentionMaxBytes
 	}
 	if identityJwks != "" {
 		cfg.Identity.JwksURL = identityJwks

@@ -48,6 +48,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 				}
 				collectPebble(m, label, sh.Storage)
 				collectBackpressure(m, label, sh.Storage)
+				collectStreamRetention(m, label, sh.Storage)
 				if sh.RaftStorage != nil {
 					collectPebble(m, label+":raft", sh.RaftStorage)
 					collectBackpressure(m, label+":raft", sh.RaftStorage)
@@ -85,6 +86,7 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *stor
 			}
 			collectPebble(m, label, st)
 			collectBackpressure(m, label, st)
+			collectStreamRetention(m, label, st)
 		}
 	}
 }
@@ -131,5 +133,18 @@ func collectBackpressure(m *Metrics, label string, st *storage.DB) {
 			active = 1.0
 		}
 		m.BackpressureReason.WithLabelValues(label, reason).Set(active)
+	}
+}
+
+func collectStreamRetention(m *Metrics, label string, st *storage.DB) {
+	if m == nil || st == nil {
+		return
+	}
+	stats, err := st.ListStreamRetentionStats()
+	if err != nil {
+		return
+	}
+	for _, stat := range stats {
+		m.ObserveStreamRetention(label, stat)
 	}
 }

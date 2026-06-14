@@ -59,6 +59,9 @@ type Options struct {
 	// Backpressure slows or rejects caller-facing writes when Pebble
 	// LSM pressure crosses configured thresholds.
 	Backpressure BackpressureOptions
+	// StreamRetention bounds the logical DynamoDB Streams retention
+	// window. The physical changelog is preserved for PITR/backup.
+	StreamRetention StreamRetentionOptions
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -85,6 +88,8 @@ type DB struct {
 
 	changeMu    sync.Mutex
 	changeIndex uint64
+
+	streamRetention StreamRetentionOptions
 }
 
 type commitReq struct {
@@ -119,6 +124,7 @@ func Open(opts Options) (*DB, error) {
 		stopped:              make(chan struct{}),
 		syncOpt:              syncOpt,
 		bp:                   newBackpressureController(opts.Backpressure),
+		streamRetention:      normalizeStreamRetentionOptions(opts.StreamRetention),
 		activeBackupRestores: make(map[string]int),
 		memTables:            make(map[string]map[string][]byte),
 		memLoaded:            make(map[string]bool),

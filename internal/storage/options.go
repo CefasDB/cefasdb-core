@@ -45,6 +45,27 @@ type BackpressureOptions struct {
 	RejectOnCritical            bool
 }
 
+const DefaultStreamRetention = 24 * time.Hour
+
+// StreamRetentionOptions controls logical DynamoDB Streams retention.
+// Retention defaults to 24h for DynamoDB parity. MaxBytes <= 0 means
+// only the time window is enforced. Trimming advances per-table stream
+// high-water marks but keeps the physical changelog for PITR.
+type StreamRetentionOptions struct {
+	Retention time.Duration
+	MaxBytes  int64
+}
+
+func normalizeStreamRetentionOptions(o StreamRetentionOptions) StreamRetentionOptions {
+	if o.Retention <= 0 {
+		o.Retention = DefaultStreamRetention
+	}
+	if o.MaxBytes < 0 {
+		o.MaxBytes = 0
+	}
+	return o
+}
+
 func normalizeProfile(profile string) string {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
 	case "", ProfileDefault:

@@ -56,6 +56,8 @@ type Config struct {
 		BackpressureCriticalReadAmp int           `yaml:"backpressureCriticalReadAmp"`
 		BackpressureWarningDelay    time.Duration `yaml:"backpressureWarningDelay"`
 		BackpressureCriticalDelay   time.Duration `yaml:"backpressureCriticalDelay"`
+		StreamRetention             time.Duration `yaml:"streamRetention"`
+		StreamRetentionMaxBytes     int64         `yaml:"streamRetentionMaxBytes"`
 	} `yaml:"storage"`
 	Cluster struct {
 		Shards    int               `yaml:"shards"`
@@ -147,6 +149,7 @@ func Defaults() Config {
 	c.Rebalancer.ApplyTimeout = 5 * time.Second
 	c.BackupScheduler.Interval = time.Hour
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
+	c.Storage.StreamRetention = 24 * time.Hour
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -268,6 +271,8 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.BackpressureCriticalReadAmp = integer("STORAGE_BACKPRESSURE_CRITICAL_READ_AMP", cfg.Storage.BackpressureCriticalReadAmp)
 	cfg.Storage.BackpressureWarningDelay = dur("STORAGE_BACKPRESSURE_WARNING_DELAY", cfg.Storage.BackpressureWarningDelay)
 	cfg.Storage.BackpressureCriticalDelay = dur("STORAGE_BACKPRESSURE_CRITICAL_DELAY", cfg.Storage.BackpressureCriticalDelay)
+	cfg.Storage.StreamRetention = dur("STORAGE_STREAM_RETENTION", cfg.Storage.StreamRetention)
+	cfg.Storage.StreamRetentionMaxBytes = integer64("STORAGE_STREAM_RETENTION_MAX_BYTES", cfg.Storage.StreamRetentionMaxBytes)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
 	cfg.Cluster.MuxAddr = str("CLUSTER_MUX_ADDR", cfg.Cluster.MuxAddr)

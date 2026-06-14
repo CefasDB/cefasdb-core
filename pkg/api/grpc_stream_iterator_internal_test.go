@@ -17,8 +17,15 @@ import (
 )
 
 func newStreamIteratorTestServer(t *testing.T) (*GRPCServer, *storage.DB, *catalog.Catalog, func()) {
+	return newStreamIteratorTestServerWithStorageOptions(t, storage.Options{Path: t.TempDir()})
+}
+
+func newStreamIteratorTestServerWithStorageOptions(t *testing.T, opts storage.Options) (*GRPCServer, *storage.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	if opts.Path == "" {
+		opts.Path = t.TempDir()
+	}
+	db, err := storage.Open(opts)
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -480,5 +487,50 @@ func TestGetRecordsRejectsExpiredMalformedAndTrimmedIterators(t *testing.T) {
 	_, err = srv.GetRecords(context.Background(), &cefaspb.GetRecordsRequest{ShardIterator: trimmed})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("trimmed code = %v, want FailedPrecondition: %v", status.Code(err), err)
+	}
+}
+
+func TestStreamRetentionTrimPointRejectsOldIterators(t *testing.T) {
+	srv, db, catStore, cleanup := newStreamIteratorTestServerWithStorageOptions(t, storage.Options{
+		Path:            t.TempDir(),
+		StreamRetention: storage.StreamRetentionOptions{Retention: 100 * time.Millisecond},
+	})
+	defer cleanup()
+	arn := createIteratorStream(t, srv)
+	appendIteratorStreamRecords(t, db, catStore, 1)
+	time.Sleep(120 * time.Millisecond)
+	if _, err := db.ApplyStreamRetention("Events", time.Now()); err != nil {
+		t.Fatalf("apply retention: %v", err)
+	}
+	appendIteratorStreamRecords(t, db, catStore, 1)
+
+	_, err := srv.GetShardIterator(context.Background(), &cefaspb.GetShardIteratorRequest{
+		StreamArn:         arn,
+		ShardId:           types.StreamShardIDSingle,
+		ShardIteratorType: streamIteratorTypeAtSequenceNumber,
+		SequenceNumber:    "1",
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("trimmed sequence code = %v, want FailedPrecondition: %v", status.Code(err), err)
+	}
+
+	iter, err := srv.GetShardIterator(context.Background(), &cefaspb.GetShardIteratorRequest{
+		StreamArn:         arn,
+		ShardId:           types.StreamShardIDSingle,
+		ShardIteratorType: streamIteratorTypeTrimHorizon,
+	})
+	if err != nil {
+		t.Fatalf("trim horizon iterator: %v", err)
+	}
+	payload := iteratorPayloadFromResponse(t, iter)
+	if payload.NextSequenceNumber != "2" {
+		t.Fatalf("trim horizon next sequence = %q, want 2", payload.NextSequenceNumber)
+	}
+	resp, err := srv.GetRecords(context.Background(), &cefaspb.GetRecordsRequest{ShardIterator: iter.GetShardIterator()})
+	if err != nil {
+		t.Fatalf("get retained records: %v", err)
+	}
+	if len(resp.GetRecords()) != 1 || resp.GetRecords()[0].GetDynamodb().GetSequenceNumber() != "2" {
+		t.Fatalf("retained records = %+v", resp.GetRecords())
 	}
 }
