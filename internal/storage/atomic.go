@@ -262,12 +262,7 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return AtomicResult{}, err
 	}
-	if _, err := d.appendChangeRecord(b, ChangeRecord{
-		Op:    ChangePut,
-		Table: td.Name,
-		Key:   keyItemFromItem(newItem, td.KeySchema),
-		Item:  newItem,
-	}); err != nil {
+	if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(newItem, td.KeySchema), priorItem, newItem)); err != nil {
 		return AtomicResult{}, fmt.Errorf("change log: %w", err)
 	}
 	if err := d.CommitBatch(b); err != nil {

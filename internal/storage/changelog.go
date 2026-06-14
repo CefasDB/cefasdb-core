@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
@@ -19,13 +20,28 @@ const (
 	ChangeDelete ChangeOp = "delete"
 )
 
+type ChangeEventName string
+
+const (
+	ChangeEventInsert ChangeEventName = "INSERT"
+	ChangeEventModify ChangeEventName = "MODIFY"
+	ChangeEventRemove ChangeEventName = "REMOVE"
+)
+
 type ChangeRecord struct {
-	Index    uint64     `json:"index"`
-	UnixNano int64      `json:"unixNano"`
-	Op       ChangeOp   `json:"op"`
-	Table    string     `json:"table"`
-	Key      types.Item `json:"key,omitempty"`
-	Item     types.Item `json:"item,omitempty"`
+	Index          uint64          `json:"index"`
+	SequenceNumber string          `json:"sequenceNumber,omitempty"`
+	UnixNano       int64           `json:"unixNano"`
+	Op             ChangeOp        `json:"op"`
+	Table          string          `json:"table"`
+	Key            types.Item      `json:"key,omitempty"`
+	Item           types.Item      `json:"item,omitempty"`
+	StreamRecord   bool            `json:"streamRecord,omitempty"`
+	EventName      ChangeEventName `json:"eventName,omitempty"`
+	OldItem        types.Item      `json:"oldItem,omitempty"`
+	NewItem        types.Item      `json:"newItem,omitempty"`
+	StreamViewType string          `json:"streamViewType,omitempty"`
+	SizeBytes      int64           `json:"sizeBytes,omitempty"`
 }
 
 func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeRecord, error) {
@@ -43,8 +59,14 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	}
 	d.changeIndex++
 	rec.Index = d.changeIndex
+	if rec.StreamRecord {
+		rec.SequenceNumber = strconv.FormatUint(rec.Index, 10)
+	}
 	if rec.UnixNano == 0 {
 		rec.UnixNano = time.Now().UnixNano()
+	}
+	if rec.StreamRecord && rec.SizeBytes == 0 {
+		rec.SizeBytes = approximateChangeRecordSize(rec)
 	}
 	raw, err := json.Marshal(rec)
 	if err != nil {
@@ -59,6 +81,141 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 		return rec, err
 	}
 	return rec, nil
+}
+
+func newChangeRecord(td types.TableDescriptor, op ChangeOp, key, oldItem, newItem types.Item) ChangeRecord {
+	rec := ChangeRecord{
+		Op:    op,
+		Table: td.Name,
+		Key:   cloneChangeItem(key),
+	}
+	if op == ChangePut {
+		rec.Item = cloneChangeItem(newItem)
+	}
+	applyStreamRecordFields(td, &rec, oldItem, newItem)
+	return rec
+}
+
+func applyStreamRecordFields(td types.TableDescriptor, rec *ChangeRecord, oldItem, newItem types.Item) {
+	if td.StreamSpecification == nil || !td.StreamSpecification.StreamEnabled {
+		return
+	}
+	view := types.NormalizeStreamViewType(td.StreamSpecification.StreamViewType)
+	if view == "" {
+		view = types.StreamViewTypeNewAndOldImages
+	}
+	if !types.IsValidStreamViewType(view) {
+		return
+	}
+
+	switch rec.Op {
+	case ChangePut:
+		if oldItem == nil {
+			rec.EventName = ChangeEventInsert
+		} else {
+			rec.EventName = ChangeEventModify
+		}
+	case ChangeDelete:
+		if oldItem == nil {
+			return
+		}
+		rec.EventName = ChangeEventRemove
+	default:
+		return
+	}
+	if streamRecordIncludesOldImage(view, rec.EventName) {
+		rec.OldItem = cloneChangeItem(oldItem)
+	}
+	if streamRecordIncludesNewImage(view, rec.EventName) {
+		rec.NewItem = cloneChangeItem(newItem)
+	}
+	rec.StreamRecord = true
+	rec.StreamViewType = view
+}
+
+func streamRecordIncludesOldImage(view string, event ChangeEventName) bool {
+	if event == ChangeEventInsert {
+		return false
+	}
+	return view == types.StreamViewTypeOldImage || view == types.StreamViewTypeNewAndOldImages
+}
+
+func streamRecordIncludesNewImage(view string, event ChangeEventName) bool {
+	if event == ChangeEventRemove {
+		return false
+	}
+	return view == types.StreamViewTypeNewImage || view == types.StreamViewTypeNewAndOldImages
+}
+
+func approximateChangeRecordSize(rec ChangeRecord) int64 {
+	payload := struct {
+		SequenceNumber string          `json:"sequenceNumber,omitempty"`
+		EventName      ChangeEventName `json:"eventName,omitempty"`
+		Table          string          `json:"table,omitempty"`
+		Key            types.Item      `json:"key,omitempty"`
+		OldItem        types.Item      `json:"oldItem,omitempty"`
+		NewItem        types.Item      `json:"newItem,omitempty"`
+		StreamViewType string          `json:"streamViewType,omitempty"`
+	}{
+		SequenceNumber: rec.SequenceNumber,
+		EventName:      rec.EventName,
+		Table:          rec.Table,
+		Key:            rec.Key,
+		OldItem:        rec.OldItem,
+		NewItem:        rec.NewItem,
+		StreamViewType: rec.StreamViewType,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return 0
+	}
+	return int64(len(raw))
+}
+
+func cloneChangeItem(in types.Item) types.Item {
+	if in == nil {
+		return nil
+	}
+	out := make(types.Item, len(in))
+	for k, v := range in {
+		out[k] = cloneChangeAttr(v)
+	}
+	return out
+}
+
+func cloneChangeAttr(in types.AttributeValue) types.AttributeValue {
+	out := in
+	if in.B != nil {
+		out.B = append([]byte(nil), in.B...)
+	}
+	if in.SS != nil {
+		out.SS = append([]string(nil), in.SS...)
+	}
+	if in.NS != nil {
+		out.NS = append([]string(nil), in.NS...)
+	}
+	if in.BS != nil {
+		out.BS = make([][]byte, len(in.BS))
+		for i := range in.BS {
+			out.BS[i] = append([]byte(nil), in.BS[i]...)
+		}
+	}
+	if in.L != nil {
+		out.L = make([]types.AttributeValue, len(in.L))
+		for i := range in.L {
+			out.L[i] = cloneChangeAttr(in.L[i])
+		}
+	}
+	if in.M != nil {
+		out.M = make(map[string]types.AttributeValue, len(in.M))
+		for k, v := range in.M {
+			out.M[k] = cloneChangeAttr(v)
+		}
+	}
+	if in.Vec != nil {
+		out.Vec = append([]float64(nil), in.Vec...)
+	}
+	return out
 }
 
 func (d *DB) loadChangeIndexLocked() (uint64, error) {
