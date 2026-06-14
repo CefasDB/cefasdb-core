@@ -48,8 +48,14 @@ jobs:
           mkdir -p dist
 
           VERSION="${RELEASE_TAG#v}"
+          # 386 only makes sense for linux today — it's used by the
+          # cefas-sandbox V86 image (V86 is a 32-bit x86 emulator).
+          # darwin and windows dropped 386 long ago.
           for GOOS in linux darwin windows; do
-            for GOARCH in amd64 arm64; do
+            for GOARCH in amd64 arm64 386; do
+              if [ "$GOARCH" = "386" ] && [ "$GOOS" != "linux" ]; then
+                continue
+              fi
               ext=""
               if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
               echo "Building $GOOS/$GOARCH"
