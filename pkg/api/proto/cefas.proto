@@ -22,6 +22,7 @@ service Cefas {
   rpc ListStreams(ListStreamsRequest) returns (ListStreamsResponse);
   rpc DescribeStream(DescribeStreamRequest) returns (DescribeStreamResponse);
   rpc GetShardIterator(GetShardIteratorRequest) returns (GetShardIteratorResponse);
+  rpc GetRecords(GetRecordsRequest) returns (GetRecordsResponse);
 
   // TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
   // these RPCs only mutate the catalog entry.
@@ -575,6 +576,36 @@ message GetShardIteratorRequest {
 
 message GetShardIteratorResponse {
   string shard_iterator = 1;
+}
+
+message GetRecordsRequest {
+  string shard_iterator = 1;
+  int32  limit          = 2;
+}
+
+message StreamRecordData {
+  int64                       approximate_creation_date_time = 1;
+  map<string, AttributeValue> keys                           = 2;
+  map<string, AttributeValue> new_image                      = 3;
+  map<string, AttributeValue> old_image                      = 4;
+  string                      sequence_number                = 5;
+  int64                       size_bytes                     = 6;
+  string                      stream_view_type               = 7;
+}
+
+message StreamRecordEntry {
+  string           event_id          = 1;
+  string           event_name        = 2;
+  string           event_version     = 3;
+  string           event_source      = 4;
+  string           event_source_arn  = 5;
+  string           aws_region        = 6;
+  StreamRecordData dynamodb          = 7;
+}
+
+message GetRecordsResponse {
+  repeated StreamRecordEntry records             = 1;
+  string                     next_shard_iterator = 2;
 }
 
 // TTL specification mirrors aws dynamodb update-time-to-live.

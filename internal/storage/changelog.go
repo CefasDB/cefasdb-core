@@ -279,3 +279,59 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 	}
 	return out, nil
 }
+
+// StreamRecords returns stream-enabled change records for table starting at
+// fromSequence. nextSequence is the next changelog sequence a caller should use
+// even when records from other tables or non-stream writes are skipped.
+func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit int, maxBytes int64) ([]ChangeRecord, uint64, error) {
+	if fromSequence == 0 {
+		fromSequence = 1
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	lower := KeyChangeLog(fromSequence)
+	_, upperAll := PrefixChangeLog()
+	upper := upperAll
+	if toSequence > 0 {
+		upper = KeyChangeLog(toSequence + 1)
+	}
+	it, err := d.Iter(lower, upper)
+	if err != nil {
+		return nil, fromSequence, err
+	}
+	defer it.Close()
+
+	nextSequence := fromSequence
+	var out []ChangeRecord
+	var bytes int64
+	for valid := it.First(); valid; valid = it.Next() {
+		var rec ChangeRecord
+		raw := append([]byte(nil), it.Value()...)
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, nextSequence, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
+		}
+		if rec.Table != table || !rec.StreamRecord {
+			if rec.Index >= nextSequence {
+				nextSequence = rec.Index + 1
+			}
+			continue
+		}
+		recBytes := int64(len(raw))
+		if maxBytes > 0 && len(out) > 0 && bytes+recBytes > maxBytes {
+			break
+		}
+		out = append(out, rec)
+		bytes += recBytes
+		if rec.Index >= nextSequence {
+			nextSequence = rec.Index + 1
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	if err := it.Error(); err != nil {
+		return nil, nextSequence, err
+	}
+	return out, nextSequence, nil
+}
