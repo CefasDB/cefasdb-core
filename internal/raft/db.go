@@ -327,8 +327,11 @@ func (d *DB) LocalAddr() net.Addr {
 }
 
 // IsLeader reports whether this node is the current raft leader.
+// Safe on a nil receiver — the single-node server path wraps a
+// (*DB)(nil) in a LeaderGate interface, so without this guard the
+// metrics collector segfaults seconds after the server binds.
 func (d *DB) IsLeader() bool {
-	if d.raft == nil {
+	if d == nil || d.raft == nil {
 		return false
 	}
 	return d.raft.State() == hraft.Leader
