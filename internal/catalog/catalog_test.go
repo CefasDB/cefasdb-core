@@ -12,6 +12,12 @@ import (
 
 func openCat(t *testing.T) *catalog.Catalog {
 	t.Helper()
+	c, _ := openCatWithDB(t)
+	return c
+}
+
+func openCatWithDB(t *testing.T) (*catalog.Catalog, *storage.DB) {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := storage.Open(storage.Options{Path: dir})
 	if err != nil {
@@ -22,7 +28,7 @@ func openCat(t *testing.T) *catalog.Catalog {
 	if err != nil {
 		t.Fatalf("new catalog: %v", err)
 	}
-	return c
+	return c, db
 }
 
 func TestUpdateTableSetsTTL(t *testing.T) {
@@ -122,6 +128,221 @@ func TestCreateTableNormalizesStreamSpecification(t *testing.T) {
 	}
 	if !strings.Contains(got.LatestStreamArn, "table/Events/stream/"+got.LatestStreamLabel) {
 		t.Fatalf("LatestStreamArn = %q, label = %q", got.LatestStreamArn, got.LatestStreamLabel)
+	}
+}
+
+func TestCreateTablePersistsStreamDescriptor(t *testing.T) {
+	c := openCat(t)
+	td := types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk", SK: "sk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeNewImage,
+		},
+	}
+	if err := c.Create(td); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	table, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe table: %v", err)
+	}
+	if table.LatestStreamArn == "" {
+		t.Fatal("LatestStreamArn is empty")
+	}
+	desc, err := c.DescribeStream(table.LatestStreamArn)
+	if err != nil {
+		t.Fatalf("describe stream: %v", err)
+	}
+	if desc.StreamArn != table.LatestStreamArn || desc.StreamLabel != table.LatestStreamLabel {
+		t.Fatalf("stream identity = (%q, %q), want (%q, %q)", desc.StreamArn, desc.StreamLabel, table.LatestStreamArn, table.LatestStreamLabel)
+	}
+	if desc.TableName != "Events" {
+		t.Fatalf("TableName = %q, want Events", desc.TableName)
+	}
+	if desc.StreamStatus != types.StreamStatusEnabled {
+		t.Fatalf("StreamStatus = %q, want %q", desc.StreamStatus, types.StreamStatusEnabled)
+	}
+	if desc.StreamViewType != types.StreamViewTypeNewImage {
+		t.Fatalf("StreamViewType = %q, want %q", desc.StreamViewType, types.StreamViewTypeNewImage)
+	}
+	if desc.CreationRequestDateTime == 0 {
+		t.Fatal("CreationRequestDateTime is zero")
+	}
+	if desc.KeySchema != td.KeySchema {
+		t.Fatalf("KeySchema = %+v, want %+v", desc.KeySchema, td.KeySchema)
+	}
+	if len(desc.Shards) != 1 {
+		t.Fatalf("shards = %d, want 1", len(desc.Shards))
+	}
+	shard := desc.Shards[0]
+	if shard.ShardID != types.StreamShardIDSingle {
+		t.Fatalf("ShardID = %q, want %q", shard.ShardID, types.StreamShardIDSingle)
+	}
+	if shard.SequenceNumberRange.StartingSequenceNumber != "1" {
+		t.Fatalf("StartingSequenceNumber = %q, want 1", shard.SequenceNumberRange.StartingSequenceNumber)
+	}
+	if shard.SequenceNumberRange.EndingSequenceNumber != "" {
+		t.Fatalf("EndingSequenceNumber = %q, want empty", shard.SequenceNumberRange.EndingSequenceNumber)
+	}
+	streams, err := c.ListStreams("Events")
+	if err != nil {
+		t.Fatalf("list streams: %v", err)
+	}
+	if len(streams) != 1 || streams[0].StreamArn != desc.StreamArn {
+		t.Fatalf("streams = %+v, want one descriptor for %q", streams, desc.StreamArn)
+	}
+}
+
+func TestStreamDescriptorStartingSequenceUsesNextChangeIndex(t *testing.T) {
+	c, db := openCatWithDB(t)
+	if err := db.PutItem("Audit", types.KeySchema{PK: "pk"}, types.Item{
+		"pk": {T: types.AttrS, S: "existing"},
+	}); err != nil {
+		t.Fatalf("put existing change: %v", err)
+	}
+	if err := c.Create(types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled: true,
+		},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	table, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe table: %v", err)
+	}
+	desc, err := c.DescribeStream(table.LatestStreamArn)
+	if err != nil {
+		t.Fatalf("describe stream: %v", err)
+	}
+	if got := desc.Shards[0].SequenceNumberRange.StartingSequenceNumber; got != "2" {
+		t.Fatalf("StartingSequenceNumber = %q, want next change index 2", got)
+	}
+}
+
+func TestUpdateTableDisableAndReenableStreamsCreatesNewDescriptor(t *testing.T) {
+	c := openCat(t)
+	if err := c.Create(types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeKeysOnly,
+		},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	enabled, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe enabled: %v", err)
+	}
+	firstARN := enabled.LatestStreamArn
+	firstLabel := enabled.LatestStreamLabel
+	enabled.StreamSpecification = nil
+	if err := c.UpdateTable(enabled); err != nil {
+		t.Fatalf("disable stream: %v", err)
+	}
+	disabledTable, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe disabled table: %v", err)
+	}
+	if disabledTable.StreamSpecification != nil || disabledTable.LatestStreamArn != "" || disabledTable.StreamStatus != "" {
+		t.Fatalf("disabled table kept active stream metadata: %+v", disabledTable)
+	}
+	firstDesc, err := c.DescribeStream(firstARN)
+	if err != nil {
+		t.Fatalf("describe disabled stream: %v", err)
+	}
+	if firstDesc.StreamStatus != types.StreamStatusDisabled {
+		t.Fatalf("disabled stream status = %q, want %q", firstDesc.StreamStatus, types.StreamStatusDisabled)
+	}
+	if firstDesc.Shards[0].SequenceNumberRange.EndingSequenceNumber == "" {
+		t.Fatal("disabled stream missing EndingSequenceNumber")
+	}
+
+	disabledTable.StreamSpecification = &types.StreamSpecification{
+		StreamEnabled:  true,
+		StreamViewType: types.StreamViewTypeOldImage,
+	}
+	if err := c.UpdateTable(disabledTable); err != nil {
+		t.Fatalf("re-enable stream: %v", err)
+	}
+	reenabled, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe reenabled: %v", err)
+	}
+	if reenabled.LatestStreamArn == "" || reenabled.LatestStreamLabel == "" {
+		t.Fatalf("reenabled stream missing latest metadata: %+v", reenabled)
+	}
+	if reenabled.LatestStreamArn == firstARN {
+		t.Fatalf("re-enabled stream ARN reused %q", firstARN)
+	}
+	if reenabled.LatestStreamLabel == firstLabel {
+		t.Fatalf("re-enabled stream label reused %q", firstLabel)
+	}
+	secondDesc, err := c.DescribeStream(reenabled.LatestStreamArn)
+	if err != nil {
+		t.Fatalf("describe reenabled stream: %v", err)
+	}
+	if secondDesc.StreamStatus != types.StreamStatusEnabled {
+		t.Fatalf("second stream status = %q, want %q", secondDesc.StreamStatus, types.StreamStatusEnabled)
+	}
+	if secondDesc.StreamViewType != types.StreamViewTypeOldImage {
+		t.Fatalf("second stream view = %q, want %q", secondDesc.StreamViewType, types.StreamViewTypeOldImage)
+	}
+	if secondDesc.Shards[0].SequenceNumberRange.EndingSequenceNumber != "" {
+		t.Fatalf("active second stream EndingSequenceNumber = %q, want empty", secondDesc.Shards[0].SequenceNumberRange.EndingSequenceNumber)
+	}
+	streams, err := c.ListStreams("Events")
+	if err != nil {
+		t.Fatalf("list streams: %v", err)
+	}
+	if len(streams) != 2 {
+		t.Fatalf("stream count = %d, want 2: %+v", len(streams), streams)
+	}
+	if streams[0].StreamArn != firstARN || streams[0].StreamStatus != types.StreamStatusDisabled {
+		t.Fatalf("first listed stream = %+v, want disabled %q", streams[0], firstARN)
+	}
+	if streams[1].StreamArn != reenabled.LatestStreamArn || streams[1].StreamStatus != types.StreamStatusEnabled {
+		t.Fatalf("second listed stream = %+v, want enabled %q", streams[1], reenabled.LatestStreamArn)
+	}
+}
+
+func TestUpdateTableRejectsStreamViewTypeChangeWhileEnabled(t *testing.T) {
+	c := openCat(t)
+	if err := c.Create(types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "pk"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeKeysOnly,
+		},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	td, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	firstARN := td.LatestStreamArn
+	td.StreamSpecification.StreamViewType = types.StreamViewTypeNewImage
+	err = c.UpdateTable(td)
+	if err == nil || !strings.Contains(err.Error(), "cannot be changed while stream is enabled") {
+		t.Fatalf("want streamViewType validation error, got %v", err)
+	}
+	got, err := c.Describe("Events")
+	if err != nil {
+		t.Fatalf("describe after failed update: %v", err)
+	}
+	if got.StreamSpecification.StreamViewType != types.StreamViewTypeKeysOnly {
+		t.Fatalf("stream view changed to %q", got.StreamSpecification.StreamViewType)
+	}
+	if got.LatestStreamArn != firstARN {
+		t.Fatalf("LatestStreamArn changed to %q, want %q", got.LatestStreamArn, firstARN)
 	}
 }
 

@@ -35,6 +35,7 @@ const (
 	pInternal = Namespace + "internal/"
 
 	pPluginIndex = pInternal + "plugin-index/"
+	pStreams     = pAdmin + "streams/by-arn/"
 
 	segPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -58,6 +59,17 @@ func KeyChangeLog(index uint64) []byte {
 
 func PrefixChangeLog() (lower, upper []byte) {
 	p := []byte(pAdmin + "change/log/")
+	return p, prefixUpper(p)
+}
+
+// KeyStreamDescriptor stores persisted DynamoDB Streams metadata by ARN.
+func KeyStreamDescriptor(streamArn string) []byte {
+	return []byte(pStreams + escapeKeySegment(streamArn))
+}
+
+// PrefixStreamDescriptors covers every persisted stream descriptor.
+func PrefixStreamDescriptors() (lower, upper []byte) {
+	p := []byte(pStreams)
 	return p, prefixUpper(p)
 }
 
