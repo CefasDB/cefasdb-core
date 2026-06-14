@@ -32,6 +32,7 @@ const (
 	Cefas_DropTable_FullMethodName              = "/cefas.v1.Cefas/DropTable"
 	Cefas_ListStreams_FullMethodName            = "/cefas.v1.Cefas/ListStreams"
 	Cefas_DescribeStream_FullMethodName         = "/cefas.v1.Cefas/DescribeStream"
+	Cefas_GetShardIterator_FullMethodName       = "/cefas.v1.Cefas/GetShardIterator"
 	Cefas_UpdateTimeToLive_FullMethodName       = "/cefas.v1.Cefas/UpdateTimeToLive"
 	Cefas_DescribeTimeToLive_FullMethodName     = "/cefas.v1.Cefas/DescribeTimeToLive"
 	Cefas_PutItem_FullMethodName                = "/cefas.v1.Cefas/PutItem"
@@ -97,6 +98,7 @@ type CefasClient interface {
 	// DynamoDB Streams discovery surface.
 	ListStreams(ctx context.Context, in *ListStreamsRequest, opts ...grpc.CallOption) (*ListStreamsResponse, error)
 	DescribeStream(ctx context.Context, in *DescribeStreamRequest, opts ...grpc.CallOption) (*DescribeStreamResponse, error)
+	GetShardIterator(ctx context.Context, in *GetShardIteratorRequest, opts ...grpc.CallOption) (*GetShardIteratorResponse, error)
 	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
 	// these RPCs only mutate the catalog entry.
 	UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error)
@@ -241,6 +243,16 @@ func (c *cefasClient) DescribeStream(ctx context.Context, in *DescribeStreamRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DescribeStreamResponse)
 	err := c.cc.Invoke(ctx, Cefas_DescribeStream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) GetShardIterator(ctx context.Context, in *GetShardIteratorRequest, opts ...grpc.CallOption) (*GetShardIteratorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetShardIteratorResponse)
+	err := c.cc.Invoke(ctx, Cefas_GetShardIterator_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -814,6 +826,7 @@ type CefasServer interface {
 	// DynamoDB Streams discovery surface.
 	ListStreams(context.Context, *ListStreamsRequest) (*ListStreamsResponse, error)
 	DescribeStream(context.Context, *DescribeStreamRequest) (*DescribeStreamResponse, error)
+	GetShardIterator(context.Context, *GetShardIteratorRequest) (*GetShardIteratorResponse, error)
 	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
 	// these RPCs only mutate the catalog entry.
 	UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error)
@@ -921,6 +934,9 @@ func (UnimplementedCefasServer) ListStreams(context.Context, *ListStreamsRequest
 }
 func (UnimplementedCefasServer) DescribeStream(context.Context, *DescribeStreamRequest) (*DescribeStreamResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeStream not implemented")
+}
+func (UnimplementedCefasServer) GetShardIterator(context.Context, *GetShardIteratorRequest) (*GetShardIteratorResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetShardIterator not implemented")
 }
 func (UnimplementedCefasServer) UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTimeToLive not implemented")
@@ -1200,6 +1216,24 @@ func _Cefas_DescribeStream_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).DescribeStream(ctx, req.(*DescribeStreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_GetShardIterator_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetShardIteratorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).GetShardIterator(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_GetShardIterator_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).GetShardIterator(ctx, req.(*GetShardIteratorRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2117,6 +2151,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DescribeStream",
 			Handler:    _Cefas_DescribeStream_Handler,
+		},
+		{
+			MethodName: "GetShardIterator",
+			Handler:    _Cefas_GetShardIterator_Handler,
 		},
 		{
 			MethodName: "UpdateTimeToLive",

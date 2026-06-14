@@ -21,6 +21,7 @@ service Cefas {
   // DynamoDB Streams discovery surface.
   rpc ListStreams(ListStreamsRequest) returns (ListStreamsResponse);
   rpc DescribeStream(DescribeStreamRequest) returns (DescribeStreamResponse);
+  rpc GetShardIterator(GetShardIteratorRequest) returns (GetShardIteratorResponse);
 
   // TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
   // these RPCs only mutate the catalog entry.
@@ -563,6 +564,17 @@ message StreamDescription {
 
 message DescribeStreamResponse {
   StreamDescription stream_description = 1;
+}
+
+message GetShardIteratorRequest {
+  string stream_arn          = 1;
+  string shard_id            = 2;
+  string shard_iterator_type = 3; // TRIM_HORIZON | LATEST | AT_SEQUENCE_NUMBER | AFTER_SEQUENCE_NUMBER
+  string sequence_number     = 4;
+}
+
+message GetShardIteratorResponse {
+  string shard_iterator = 1;
 }
 
 // TTL specification mirrors aws dynamodb update-time-to-live.

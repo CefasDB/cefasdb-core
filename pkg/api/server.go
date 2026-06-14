@@ -224,6 +224,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/tables/", s.handleTable) // GET=describe
 	register("/v1/ListStreams", s.handleListStreams)
 	register("/v1/DescribeStream", s.handleDescribeStream)
+	register("/v1/GetShardIterator", s.handleGetShardIterator)
 	register("/v1/PutItem", s.handlePutItem)
 	register("/v1/GetItem", s.handleGetItem)
 	register("/v1/DeleteItem", s.handleDeleteItem)
@@ -293,6 +294,17 @@ type streamDescriptionResponse struct {
 
 type describeStreamResponse struct {
 	StreamDescription streamDescriptionResponse `json:"streamDescription"`
+}
+
+type getShardIteratorRequest struct {
+	StreamArn         string `json:"streamArn"`
+	ShardID           string `json:"shardId"`
+	ShardIteratorType string `json:"shardIteratorType"`
+	SequenceNumber    string `json:"sequenceNumber,omitempty"`
+}
+
+type getShardIteratorResponse struct {
+	ShardIterator string `json:"shardIterator"`
 }
 
 func (s *Server) handleListStreams(w http.ResponseWriter, r *http.Request) {
@@ -369,6 +381,35 @@ func (s *Server) handleDescribeStream(w http.ResponseWriter, r *http.Request) {
 			LastEvaluatedShardID:    lastEvaluated,
 		},
 	})
+}
+
+func (s *Server) handleGetShardIterator(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
+		return
+	}
+	var req getShardIteratorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	token, err := createStreamShardIterator(
+		s.cat,
+		s.db,
+		req.StreamArn,
+		req.ShardID,
+		req.ShardIteratorType,
+		req.SequenceNumber,
+		time.Now(),
+	)
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, getShardIteratorResponse{ShardIterator: token})
 }
 
 // handleStream is the HTTP/SSE variant of the CDC stream. Clients
@@ -1896,8 +1937,14 @@ func mapWriteErr(err error) int {
 	if errors.Is(err, types.ErrTableAlreadyExists) {
 		return http.StatusConflict
 	}
-	if errors.Is(err, types.ErrStreamNotFound) {
+	if errors.Is(err, types.ErrStreamNotFound) || errors.Is(err, types.ErrStreamShardNotFound) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, types.ErrStreamIteratorInvalid) || errors.Is(err, types.ErrStreamTrimmed) {
+		return http.StatusBadRequest
+	}
+	if errors.Is(err, types.ErrStreamIteratorExpired) {
+		return http.StatusPreconditionFailed
 	}
 	if errors.Is(err, storage.ErrBackupNotFound) {
 		return http.StatusNotFound

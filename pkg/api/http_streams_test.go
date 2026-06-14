@@ -85,6 +85,22 @@ func TestHTTPStreamsDiscovery(t *testing.T) {
 		len(describeResp.StreamDescription.Shards) != 1 {
 		t.Fatalf("describe response = %+v", describeResp)
 	}
+
+	iteratorReq := httptest.NewRequest(http.MethodPost, "/v1/GetShardIterator", bytes.NewBufferString(`{"streamArn":"`+td.LatestStreamArn+`","shardId":"`+types.StreamShardIDSingle+`","shardIteratorType":"TRIM_HORIZON"}`))
+	iteratorRec := httptest.NewRecorder()
+	mux.ServeHTTP(iteratorRec, iteratorReq)
+	if iteratorRec.Code != http.StatusOK {
+		t.Fatalf("iterator status = %d body=%s", iteratorRec.Code, iteratorRec.Body.String())
+	}
+	var iteratorResp struct {
+		ShardIterator string `json:"shardIterator"`
+	}
+	if err := json.NewDecoder(iteratorRec.Body).Decode(&iteratorResp); err != nil {
+		t.Fatalf("decode iterator: %v", err)
+	}
+	if iteratorResp.ShardIterator == "" {
+		t.Fatal("empty shard iterator")
+	}
 }
 
 func TestHTTPDescribeStreamMissingReturnsNotFound(t *testing.T) {
