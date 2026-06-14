@@ -144,13 +144,45 @@ const (
 	StreamViewTypeOldImage        = "OLD_IMAGE"
 	StreamViewTypeNewAndOldImages = "NEW_AND_OLD_IMAGES"
 
-	StreamStatusEnabled = "ENABLED"
+	StreamStatusEnabling  = "ENABLING"
+	StreamStatusEnabled   = "ENABLED"
+	StreamStatusDisabling = "DISABLING"
+	StreamStatusDisabled  = "DISABLED"
+
+	StreamShardIDSingle = "shardId-000000000000"
 )
 
 // StreamSpecification mirrors DynamoDB's table-level stream settings.
 type StreamSpecification struct {
 	StreamEnabled  bool   `json:"streamEnabled"`
 	StreamViewType string `json:"streamViewType,omitempty"`
+}
+
+// StreamSequenceNumberRange mirrors DynamoDB's per-shard sequence range.
+// Active shards omit EndingSequenceNumber; closed shards retain it.
+type StreamSequenceNumberRange struct {
+	StartingSequenceNumber string `json:"startingSequenceNumber,omitempty"`
+	EndingSequenceNumber   string `json:"endingSequenceNumber,omitempty"`
+}
+
+// StreamShardDescriptor is the public shard model for table streams.
+// CefasDB V1 uses one open shard per active table stream.
+type StreamShardDescriptor struct {
+	ShardID             string                    `json:"shardId"`
+	SequenceNumberRange StreamSequenceNumberRange `json:"sequenceNumberRange"`
+}
+
+// StreamDescriptor is the persisted metadata returned by future
+// ListStreams and DescribeStream APIs.
+type StreamDescriptor struct {
+	StreamArn               string                  `json:"streamArn"`
+	StreamLabel             string                  `json:"streamLabel"`
+	TableName               string                  `json:"tableName"`
+	StreamStatus            string                  `json:"streamStatus"`
+	StreamViewType          string                  `json:"streamViewType"`
+	CreationRequestDateTime int64                   `json:"creationRequestDateTime"`
+	KeySchema               KeySchema               `json:"keySchema"`
+	Shards                  []StreamShardDescriptor `json:"shards,omitempty"`
 }
 
 func NormalizeStreamViewType(view string) string {
@@ -203,4 +235,5 @@ var (
 	ErrInvalidKeyType     = errors.New("cefas: key attribute must be S, N, or B")
 	ErrSpatialNotFound    = errors.New("cefas: spatial index not found")
 	ErrInvalidSpatial     = errors.New("cefas: invalid spatial index descriptor")
+	ErrStreamNotFound     = errors.New("cefas: stream not found")
 )
