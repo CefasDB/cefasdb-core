@@ -120,7 +120,7 @@ func (c *Cohort) Serialize() ([]byte, error) {
 		return nil, err
 	}
 	out := make([]byte, 4+len(cfg)+len(bm))
-	if len(cfg) > 0xffff_ffff {
+	if uint64(len(cfg)) > 0xffff_ffff {
 		return nil, errors.New("roaring: config too large")
 	}
 	// little-endian length so it matches the Roaring serialization's
