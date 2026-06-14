@@ -225,3 +225,37 @@ func tableDescriptorToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 	}
 	return out
 }
+
+func streamSummaryToPB(desc types.StreamDescriptor) *cefaspb.StreamSummary {
+	return &cefaspb.StreamSummary{
+		StreamArn:   desc.StreamArn,
+		StreamLabel: desc.StreamLabel,
+		TableName:   desc.TableName,
+	}
+}
+
+func streamDescriptionToPB(desc types.StreamDescriptor) *cefaspb.StreamDescription {
+	out := &cefaspb.StreamDescription{
+		StreamArn:               desc.StreamArn,
+		StreamLabel:             desc.StreamLabel,
+		StreamStatus:            desc.StreamStatus,
+		StreamViewType:          desc.StreamViewType,
+		TableName:               desc.TableName,
+		CreationRequestDateTime: desc.CreationRequestDateTime,
+		KeySchema:               &cefaspb.KeySchema{Pk: desc.KeySchema.PK, Sk: desc.KeySchema.SK},
+	}
+	for _, shard := range desc.Shards {
+		out.Shards = append(out.Shards, streamShardToPB(shard))
+	}
+	return out
+}
+
+func streamShardToPB(shard types.StreamShardDescriptor) *cefaspb.StreamShard {
+	return &cefaspb.StreamShard{
+		ShardId: shard.ShardID,
+		SequenceNumberRange: &cefaspb.SequenceNumberRange{
+			StartingSequenceNumber: shard.SequenceNumberRange.StartingSequenceNumber,
+			EndingSequenceNumber:   shard.SequenceNumberRange.EndingSequenceNumber,
+		},
+	}
+}

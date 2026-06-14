@@ -30,6 +30,8 @@ const (
 	Cefas_DescribeTable_FullMethodName          = "/cefas.v1.Cefas/DescribeTable"
 	Cefas_ListTables_FullMethodName             = "/cefas.v1.Cefas/ListTables"
 	Cefas_DropTable_FullMethodName              = "/cefas.v1.Cefas/DropTable"
+	Cefas_ListStreams_FullMethodName            = "/cefas.v1.Cefas/ListStreams"
+	Cefas_DescribeStream_FullMethodName         = "/cefas.v1.Cefas/DescribeStream"
 	Cefas_UpdateTimeToLive_FullMethodName       = "/cefas.v1.Cefas/UpdateTimeToLive"
 	Cefas_DescribeTimeToLive_FullMethodName     = "/cefas.v1.Cefas/DescribeTimeToLive"
 	Cefas_PutItem_FullMethodName                = "/cefas.v1.Cefas/PutItem"
@@ -92,6 +94,9 @@ type CefasClient interface {
 	DescribeTable(ctx context.Context, in *DescribeTableRequest, opts ...grpc.CallOption) (*DescribeTableResponse, error)
 	ListTables(ctx context.Context, in *ListTablesRequest, opts ...grpc.CallOption) (*ListTablesResponse, error)
 	DropTable(ctx context.Context, in *DropTableRequest, opts ...grpc.CallOption) (*DropTableResponse, error)
+	// DynamoDB Streams discovery surface.
+	ListStreams(ctx context.Context, in *ListStreamsRequest, opts ...grpc.CallOption) (*ListStreamsResponse, error)
+	DescribeStream(ctx context.Context, in *DescribeStreamRequest, opts ...grpc.CallOption) (*DescribeStreamResponse, error)
 	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
 	// these RPCs only mutate the catalog entry.
 	UpdateTimeToLive(ctx context.Context, in *UpdateTimeToLiveRequest, opts ...grpc.CallOption) (*UpdateTimeToLiveResponse, error)
@@ -216,6 +221,26 @@ func (c *cefasClient) DropTable(ctx context.Context, in *DropTableRequest, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DropTableResponse)
 	err := c.cc.Invoke(ctx, Cefas_DropTable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ListStreams(ctx context.Context, in *ListStreamsRequest, opts ...grpc.CallOption) (*ListStreamsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListStreamsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListStreams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribeStream(ctx context.Context, in *DescribeStreamRequest, opts ...grpc.CallOption) (*DescribeStreamResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeStreamResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribeStream_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -786,6 +811,9 @@ type CefasServer interface {
 	DescribeTable(context.Context, *DescribeTableRequest) (*DescribeTableResponse, error)
 	ListTables(context.Context, *ListTablesRequest) (*ListTablesResponse, error)
 	DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error)
+	// DynamoDB Streams discovery surface.
+	ListStreams(context.Context, *ListStreamsRequest) (*ListStreamsResponse, error)
+	DescribeStream(context.Context, *DescribeStreamRequest) (*DescribeStreamResponse, error)
 	// TTL configuration. The reaper already honours TableDescriptor.TTLAttribute;
 	// these RPCs only mutate the catalog entry.
 	UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error)
@@ -887,6 +915,12 @@ func (UnimplementedCefasServer) ListTables(context.Context, *ListTablesRequest) 
 }
 func (UnimplementedCefasServer) DropTable(context.Context, *DropTableRequest) (*DropTableResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropTable not implemented")
+}
+func (UnimplementedCefasServer) ListStreams(context.Context, *ListStreamsRequest) (*ListStreamsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListStreams not implemented")
+}
+func (UnimplementedCefasServer) DescribeStream(context.Context, *DescribeStreamRequest) (*DescribeStreamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeStream not implemented")
 }
 func (UnimplementedCefasServer) UpdateTimeToLive(context.Context, *UpdateTimeToLiveRequest) (*UpdateTimeToLiveResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTimeToLive not implemented")
@@ -1130,6 +1164,42 @@ func _Cefas_DropTable_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).DropTable(ctx, req.(*DropTableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ListStreams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListStreamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListStreams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListStreams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListStreams(ctx, req.(*ListStreamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribeStream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeStreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribeStream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribeStream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribeStream(ctx, req.(*DescribeStreamRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2039,6 +2109,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropTable",
 			Handler:    _Cefas_DropTable_Handler,
+		},
+		{
+			MethodName: "ListStreams",
+			Handler:    _Cefas_ListStreams_Handler,
+		},
+		{
+			MethodName: "DescribeStream",
+			Handler:    _Cefas_DescribeStream_Handler,
 		},
 		{
 			MethodName: "UpdateTimeToLive",
