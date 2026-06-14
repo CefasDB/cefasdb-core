@@ -162,6 +162,100 @@ func TestSDKCreateTableWithStreamSpecification(t *testing.T) {
 	}
 }
 
+func TestSDKDynamoDBStreamsAPIs(t *testing.T) {
+	c, _ := newFixture(t)
+	ctx := context.Background()
+
+	created, err := c.CreateTableWithDescriptor(ctx, types.TableDescriptor{
+		Name:      "streamed_events",
+		KeySchema: types.KeySchema{PK: "id"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeNewAndOldImages,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.LatestStreamArn == "" {
+		t.Fatal("created table returned empty stream arn")
+	}
+	if err := c.PutItem(ctx, "streamed_events", types.Item{
+		"id":     sAttr("event-1"),
+		"status": sAttr("new"),
+	}); err != nil {
+		t.Fatalf("put first: %v", err)
+	}
+	if err := c.PutItem(ctx, "streamed_events", types.Item{
+		"id":     sAttr("event-1"),
+		"status": sAttr("updated"),
+	}); err != nil {
+		t.Fatalf("put update: %v", err)
+	}
+	if err := c.DeleteItem(ctx, "streamed_events", types.Item{"id": sAttr("event-1")}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	listed, err := c.ListStreams(ctx, client.ListStreamsOptions{
+		TableName: "streamed_events",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("list streams: %v", err)
+	}
+	if len(listed.Streams) != 1 || listed.Streams[0].StreamArn != created.LatestStreamArn {
+		t.Fatalf("listed streams = %+v, want arn %q", listed, created.LatestStreamArn)
+	}
+
+	desc, err := c.DescribeStream(ctx, created.LatestStreamArn, client.DescribeStreamOptions{Limit: 1})
+	if err != nil {
+		t.Fatalf("describe stream: %v", err)
+	}
+	if desc.StreamArn != created.LatestStreamArn ||
+		desc.TableName != "streamed_events" ||
+		desc.StreamViewType != types.StreamViewTypeNewAndOldImages ||
+		len(desc.Shards) != 1 {
+		t.Fatalf("stream description = %+v", desc)
+	}
+
+	iterator, err := c.GetShardIterator(ctx, client.GetShardIteratorOptions{
+		StreamArn:         desc.StreamArn,
+		ShardID:           desc.Shards[0].ShardID,
+		ShardIteratorType: "TRIM_HORIZON",
+	})
+	if err != nil {
+		t.Fatalf("get shard iterator: %v", err)
+	}
+	if iterator == "" {
+		t.Fatal("empty shard iterator")
+	}
+
+	page1, err := c.GetRecords(ctx, iterator, client.GetRecordsOptions{Limit: 2})
+	if err != nil {
+		t.Fatalf("get records page1: %v", err)
+	}
+	if len(page1.Records) != 2 || page1.NextShardIterator == "" {
+		t.Fatalf("page1 = %+v", page1)
+	}
+	if page1.Records[0].EventName != "INSERT" ||
+		page1.Records[0].DynamoDB.Keys["id"].S != "event-1" ||
+		page1.Records[1].EventName != "MODIFY" ||
+		page1.Records[1].DynamoDB.OldImage["status"].S != "new" ||
+		page1.Records[1].DynamoDB.NewImage["status"].S != "updated" {
+		t.Fatalf("unexpected page1 records = %+v", page1.Records)
+	}
+
+	page2, err := c.GetRecords(ctx, page1.NextShardIterator, client.GetRecordsOptions{Limit: 2})
+	if err != nil {
+		t.Fatalf("get records page2: %v", err)
+	}
+	if len(page2.Records) != 1 ||
+		page2.Records[0].EventName != "REMOVE" ||
+		page2.Records[0].DynamoDB.OldImage["status"].S != "updated" {
+		t.Fatalf("page2 = %+v", page2)
+	}
+}
+
 func TestSDKQueryStreaming(t *testing.T) {
 	c, _ := newFixture(t)
 	ctx := context.Background()
