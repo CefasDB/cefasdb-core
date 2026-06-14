@@ -60,6 +60,15 @@ The same surface is available through gRPC and HTTP JSON endpoints:
 `/v1/ListStreams`, `/v1/DescribeStream`, `/v1/GetShardIterator`, and
 `/v1/GetRecords`.
 
+Legacy CDC remains available separately through gRPC `StreamChanges` and HTTP
+SSE `/v1/Stream`. Those endpoints are raft-log change feeds that emit
+`ChangeEvent` records with `RaftIndex`, `Op`, raw storage key bytes, and raw
+value bytes. They are intentionally not DynamoDB Streams compatible: they do
+not use table stream ARNs, shard iterators, `StreamViewType` projection,
+DynamoDB event names, or Streams retention. New AWS-style consumers should use
+the APIs in this guide. Existing internal CDC consumers can keep using
+`StreamChanges` or `/v1/Stream` as the legacy CDC surface.
+
 Supported iterator types:
 
 - `TRIM_HORIZON`: first readable sequence in the stream after retention.
