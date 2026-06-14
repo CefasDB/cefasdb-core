@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 type staticLeader bool
@@ -43,6 +44,44 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("metrics body missing expected storage collector series\n--- got ---\n%s", body)
+}
+
+func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
+	m := New()
+	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	td := types.TableDescriptor{
+		Name:      "Events",
+		KeySchema: types.KeySchema{PK: "id"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeKeysOnly,
+		},
+	}
+	if err := db.PutItemWith(td, types.Item{
+		"id": {T: types.AttrS, S: "event-1"},
+	}, storage.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go RunStorageCollector(ctx, m, "solo", db, nil, time.Millisecond)
+
+	var body string
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		body = scrapeMetrics(t, m)
+		if strings.Contains(body, `cefas_stream_records_appended{shard="solo",table="Events"} 1`) &&
+			strings.Contains(body, `cefas_stream_newest_sequence{shard="solo",table="Events"} 1`) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("metrics body missing expected stream retention series\n--- got ---\n%s", body)
 }
 
 func scrapeMetrics(t *testing.T, m *Metrics) string {

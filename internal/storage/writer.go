@@ -181,7 +181,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	return nil
+	return d.refreshStreamRetentionAfterWrite(td)
 }
 
 // DeleteItem removes an item identified by its key attributes (no GSI
@@ -272,7 +272,7 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if isMemoryTable(td) {
 		d.memoryDelete(td.Name, primaryKey)
 	}
-	return nil
+	return d.refreshStreamRetentionAfterWrite(td)
 }
 
 // snapshotGet performs a single-key read under a Pebble snapshot. The
@@ -698,7 +698,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			}
 		}
 	}
-	return nil
+	return d.refreshStreamRetentionAfterWrite(td)
 }
 
 // BatchGetItem fetches multiple items by primary key in one pass. The

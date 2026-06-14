@@ -20,11 +20,12 @@ import (
 type ShardConfig struct {
 	ShardID uint32
 
-	StoragePath    string
-	FsyncOnCommit  bool
-	StorageProfile string
-	StorageTuning  storage.PebbleTuning
-	Backpressure   storage.BackpressureOptions
+	StoragePath     string
+	FsyncOnCommit   bool
+	StorageProfile  string
+	StorageTuning   storage.PebbleTuning
+	Backpressure    storage.BackpressureOptions
+	StreamRetention storage.StreamRetentionOptions
 
 	RaftPath      string
 	RaftStorePath string
@@ -96,12 +97,13 @@ type Config struct {
 	// HasExistingState contract).
 	Bootstrap bool
 
-	FsyncOnCommit  bool
-	StorageProfile string
-	StorageTuning  storage.PebbleTuning
-	Backpressure   storage.BackpressureOptions
-	RaftProfile    string
-	RaftTuning     storage.PebbleTuning
+	FsyncOnCommit   bool
+	StorageProfile  string
+	StorageTuning   storage.PebbleTuning
+	Backpressure    storage.BackpressureOptions
+	StreamRetention storage.StreamRetentionOptions
+	RaftProfile     string
+	RaftTuning      storage.PebbleTuning
 
 	HeartbeatMS   int
 	ElectionMS    int
@@ -258,11 +260,12 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	}
 
 	st, err := storage.Open(storage.Options{
-		Path:          stateDir,
-		FsyncOnCommit: m.cfg.FsyncOnCommit,
-		Profile:       m.cfg.StorageProfile,
-		Tuning:        m.cfg.StorageTuning,
-		Backpressure:  m.cfg.Backpressure,
+		Path:            stateDir,
+		FsyncOnCommit:   m.cfg.FsyncOnCommit,
+		Profile:         m.cfg.StorageProfile,
+		Tuning:          m.cfg.StorageTuning,
+		Backpressure:    m.cfg.Backpressure,
+		StreamRetention: m.cfg.StreamRetention,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
