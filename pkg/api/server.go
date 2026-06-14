@@ -222,6 +222,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	}
 	register("/v1/tables", s.handleTables) // POST=create, GET=list
 	register("/v1/tables/", s.handleTable) // GET=describe
+	register("/v1/ListStreams", s.handleListStreams)
+	register("/v1/DescribeStream", s.handleDescribeStream)
 	register("/v1/PutItem", s.handlePutItem)
 	register("/v1/GetItem", s.handleGetItem)
 	register("/v1/DeleteItem", s.handleDeleteItem)
@@ -250,6 +252,123 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/Stream", s.handleStream)
 	mux.HandleFunc("/v1/admin/snapshots", s.handleListSnapshots)
 	mux.HandleFunc("/v1/admin/compact", s.handleCompact)
+}
+
+// ---------- streams ----------
+
+type listStreamsRequest struct {
+	TableName               string `json:"tableName,omitempty"`
+	Limit                   int32  `json:"limit,omitempty"`
+	ExclusiveStartStreamArn string `json:"exclusiveStartStreamArn,omitempty"`
+}
+
+type streamSummaryResponse struct {
+	StreamArn   string `json:"streamArn"`
+	StreamLabel string `json:"streamLabel"`
+	TableName   string `json:"tableName"`
+}
+
+type listStreamsResponse struct {
+	Streams                []streamSummaryResponse `json:"streams"`
+	LastEvaluatedStreamArn string                  `json:"lastEvaluatedStreamArn,omitempty"`
+}
+
+type describeStreamRequest struct {
+	StreamArn             string `json:"streamArn"`
+	Limit                 int32  `json:"limit,omitempty"`
+	ExclusiveStartShardID string `json:"exclusiveStartShardId,omitempty"`
+}
+
+type streamDescriptionResponse struct {
+	StreamArn               string                        `json:"streamArn"`
+	StreamLabel             string                        `json:"streamLabel"`
+	StreamStatus            string                        `json:"streamStatus"`
+	StreamViewType          string                        `json:"streamViewType"`
+	TableName               string                        `json:"tableName"`
+	CreationRequestDateTime int64                         `json:"creationRequestDateTime"`
+	KeySchema               types.KeySchema               `json:"keySchema"`
+	Shards                  []types.StreamShardDescriptor `json:"shards"`
+	LastEvaluatedShardID    string                        `json:"lastEvaluatedShardId,omitempty"`
+}
+
+type describeStreamResponse struct {
+	StreamDescription streamDescriptionResponse `json:"streamDescription"`
+}
+
+func (s *Server) handleListStreams(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
+		return
+	}
+	var req listStreamsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	streams, err := s.cat.ListStreams(req.TableName)
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	page, lastEvaluated, err := paginateStreamDescriptors(streams, normalizeStreamAPILimit(req.Limit), req.ExclusiveStartStreamArn)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	resp := listStreamsResponse{LastEvaluatedStreamArn: lastEvaluated}
+	for _, stream := range page {
+		resp.Streams = append(resp.Streams, streamSummaryResponse{
+			StreamArn:   stream.StreamArn,
+			StreamLabel: stream.StreamLabel,
+			TableName:   stream.TableName,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleDescribeStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
+		return
+	}
+	var req describeStreamRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.StreamArn == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("streamArn required"))
+		return
+	}
+	desc, err := s.cat.DescribeStream(req.StreamArn)
+	if err != nil {
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	shards, lastEvaluated, err := paginateStreamShards(desc.Shards, normalizeStreamAPILimit(req.Limit), req.ExclusiveStartShardID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, describeStreamResponse{
+		StreamDescription: streamDescriptionResponse{
+			StreamArn:               desc.StreamArn,
+			StreamLabel:             desc.StreamLabel,
+			StreamStatus:            desc.StreamStatus,
+			StreamViewType:          desc.StreamViewType,
+			TableName:               desc.TableName,
+			CreationRequestDateTime: desc.CreationRequestDateTime,
+			KeySchema:               desc.KeySchema,
+			Shards:                  shards,
+			LastEvaluatedShardID:    lastEvaluated,
+		},
+	})
 }
 
 // handleStream is the HTTP/SSE variant of the CDC stream. Clients
@@ -1776,6 +1895,9 @@ func mapWriteErr(err error) int {
 	}
 	if errors.Is(err, types.ErrTableAlreadyExists) {
 		return http.StatusConflict
+	}
+	if errors.Is(err, types.ErrStreamNotFound) {
+		return http.StatusNotFound
 	}
 	if errors.Is(err, storage.ErrBackupNotFound) {
 		return http.StatusNotFound
