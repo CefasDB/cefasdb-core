@@ -1790,7 +1790,7 @@ func mapStorageErr(err error) error {
 	switch {
 	case errors.Is(err, types.ErrTableNotFound):
 		return status.Error(codes.NotFound, err.Error())
-	case errors.Is(err, types.ErrStreamNotFound):
+	case errors.Is(err, types.ErrStreamNotFound), errors.Is(err, types.ErrStreamShardNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrTableAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
@@ -1812,6 +1812,10 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrInvalidSpatial):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, types.ErrStreamIteratorInvalid):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, types.ErrStreamIteratorExpired), errors.Is(err, types.ErrStreamTrimmed):
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrConditionFailed):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrNotLeader):

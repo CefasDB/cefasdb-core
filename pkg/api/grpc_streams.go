@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -58,4 +59,23 @@ func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeSt
 	out := streamDescriptionToPB(desc)
 	out.LastEvaluatedShardId = lastEvaluated
 	return &cefaspb.DescribeStreamResponse{StreamDescription: out}, nil
+}
+
+func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShardIteratorRequest) (*cefaspb.GetShardIteratorResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	token, err := createStreamShardIterator(
+		s.cat,
+		s.db,
+		req.GetStreamArn(),
+		req.GetShardId(),
+		req.GetShardIteratorType(),
+		req.GetSequenceNumber(),
+		time.Now(),
+	)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.GetShardIteratorResponse{ShardIterator: token}, nil
 }
