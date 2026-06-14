@@ -259,3 +259,23 @@ func streamShardToPB(shard types.StreamShardDescriptor) *cefaspb.StreamShard {
 		},
 	}
 }
+
+func streamRecordToPB(rec streamRecordEntry) *cefaspb.StreamRecordEntry {
+	return &cefaspb.StreamRecordEntry{
+		EventId:        rec.EventID,
+		EventName:      rec.EventName,
+		EventVersion:   rec.EventVersion,
+		EventSource:    rec.EventSource,
+		EventSourceArn: rec.EventSourceARN,
+		AwsRegion:      rec.AWSRegion,
+		Dynamodb: &cefaspb.StreamRecordData{
+			ApproximateCreationDateTime: rec.DynamoDB.ApproximateCreationDateTime,
+			Keys:                        itemToPB(rec.DynamoDB.Keys),
+			NewImage:                    itemToPB(rec.DynamoDB.NewImage),
+			OldImage:                    itemToPB(rec.DynamoDB.OldImage),
+			SequenceNumber:              rec.DynamoDB.SequenceNumber,
+			SizeBytes:                   rec.DynamoDB.SizeBytes,
+			StreamViewType:              rec.DynamoDB.StreamViewType,
+		},
+	}
+}

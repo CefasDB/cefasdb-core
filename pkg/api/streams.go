@@ -16,7 +16,9 @@ import (
 )
 
 const (
-	maxStreamAPILimit = 100
+	maxStreamAPILimit          = 100
+	maxGetRecordsLimit         = 1000
+	maxGetRecordsResponseBytes = 1 << 20
 
 	streamIteratorTypeTrimHorizon         = "TRIM_HORIZON"
 	streamIteratorTypeLatest              = "LATEST"
@@ -25,6 +27,10 @@ const (
 
 	streamShardIteratorTokenPrefix = "cefas-stream-iterator-v1"
 	streamShardIteratorTTL         = 15 * time.Minute
+
+	streamEventVersion = "1.1"
+	streamEventSource  = "cefas:dynamodb-compatible"
+	streamAWSRegion    = "local"
 )
 
 var streamShardIteratorKey = []byte("cefas-stream-iterator-signing-key-v1")
@@ -38,9 +44,36 @@ type streamShardIteratorPayload struct {
 	ExpiresUnixNano    int64  `json:"expiresUnixNano"`
 }
 
+type streamRecordEntry struct {
+	EventID        string
+	EventName      string
+	EventVersion   string
+	EventSource    string
+	EventSourceARN string
+	AWSRegion      string
+	DynamoDB       streamRecordData
+}
+
+type streamRecordData struct {
+	ApproximateCreationDateTime int64
+	Keys                        types.Item
+	NewImage                    types.Item
+	OldImage                    types.Item
+	SequenceNumber              string
+	SizeBytes                   int64
+	StreamViewType              string
+}
+
 func normalizeStreamAPILimit(limit int32) int {
 	if limit <= 0 || limit > maxStreamAPILimit {
 		return maxStreamAPILimit
+	}
+	return int(limit)
+}
+
+func normalizeGetRecordsLimit(limit int32) int {
+	if limit <= 0 || limit > maxGetRecordsLimit {
+		return maxGetRecordsLimit
 	}
 	return int(limit)
 }
@@ -135,6 +168,87 @@ func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, 
 		IteratorType:       iteratorType,
 		ExpiresUnixNano:    now.Add(streamShardIteratorTTL).UnixNano(),
 	})
+}
+
+func getStreamRecords(cat *catalog.Catalog, db *storage.DB, shardIterator string, limit int32, now time.Time) ([]streamRecordEntry, string, error) {
+	if shardIterator == "" {
+		return nil, "", fmt.Errorf("%w: shard_iterator required", types.ErrStreamIteratorInvalid)
+	}
+	payload, err := decodeStreamShardIterator(shardIterator, now)
+	if err != nil {
+		return nil, "", err
+	}
+	desc, err := cat.DescribeStream(payload.StreamArn)
+	if err != nil {
+		return nil, "", err
+	}
+	shard, ok := findStreamShard(desc, payload.ShardID)
+	if !ok {
+		return nil, "", types.ErrStreamShardNotFound
+	}
+	nextSequence, err := parseStreamSequenceNumber(payload.NextSequenceNumber)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+	}
+	startSequence, err := parseStreamSequenceNumber(shard.SequenceNumberRange.StartingSequenceNumber)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: shard starting sequence: %v", types.ErrStreamIteratorInvalid, err)
+	}
+	if nextSequence < startSequence {
+		return nil, "", types.ErrStreamTrimmed
+	}
+	var endingSequence uint64
+	if shard.SequenceNumberRange.EndingSequenceNumber != "" {
+		endingSequence, err = parseStreamSequenceNumber(shard.SequenceNumberRange.EndingSequenceNumber)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: shard ending sequence: %v", types.ErrStreamIteratorInvalid, err)
+		}
+		if nextSequence > endingSequence {
+			return nil, "", nil
+		}
+	}
+	records, nextSequence, err := db.StreamRecords(desc.TableName, nextSequence, endingSequence, normalizeGetRecordsLimit(limit), maxGetRecordsResponseBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]streamRecordEntry, 0, len(records))
+	for _, rec := range records {
+		out = append(out, streamRecordFromChange(payload.StreamArn, rec))
+	}
+	if endingSequence > 0 && nextSequence > endingSequence {
+		return out, "", nil
+	}
+	payload.NextSequenceNumber = strconv.FormatUint(nextSequence, 10)
+	payload.ExpiresUnixNano = now.Add(streamShardIteratorTTL).UnixNano()
+	nextIterator, err := encodeStreamShardIterator(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return out, nextIterator, nil
+}
+
+func streamRecordFromChange(streamArn string, rec storage.ChangeRecord) streamRecordEntry {
+	sequence := rec.SequenceNumber
+	if sequence == "" {
+		sequence = strconv.FormatUint(rec.Index, 10)
+	}
+	return streamRecordEntry{
+		EventID:        streamArn + ":" + sequence,
+		EventName:      string(rec.EventName),
+		EventVersion:   streamEventVersion,
+		EventSource:    streamEventSource,
+		EventSourceARN: streamArn,
+		AWSRegion:      streamAWSRegion,
+		DynamoDB: streamRecordData{
+			ApproximateCreationDateTime: rec.UnixNano,
+			Keys:                        rec.Key,
+			NewImage:                    rec.NewItem,
+			OldImage:                    rec.OldItem,
+			SequenceNumber:              sequence,
+			SizeBytes:                   rec.SizeBytes,
+			StreamViewType:              rec.StreamViewType,
+		},
+	}
 }
 
 func normalizeStreamIteratorType(iteratorType string) string {

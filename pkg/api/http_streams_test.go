@@ -37,6 +37,12 @@ func TestHTTPStreamsDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("describe events: %v", err)
 	}
+	if err := db.PutItemWith(td, types.Item{
+		"pk": {T: types.AttrS, S: "event-1"},
+		"v":  {T: types.AttrS, S: "payload"},
+	}, storage.PutOptions{}); err != nil {
+		t.Fatalf("put stream row: %v", err)
+	}
 
 	srv := api.New(db, catStore)
 	mux := http.NewServeMux()
@@ -100,6 +106,39 @@ func TestHTTPStreamsDiscovery(t *testing.T) {
 	}
 	if iteratorResp.ShardIterator == "" {
 		t.Fatal("empty shard iterator")
+	}
+
+	recordsReq := httptest.NewRequest(http.MethodPost, "/v1/GetRecords", bytes.NewBufferString(`{"shardIterator":"`+iteratorResp.ShardIterator+`","limit":1}`))
+	recordsRec := httptest.NewRecorder()
+	mux.ServeHTTP(recordsRec, recordsReq)
+	if recordsRec.Code != http.StatusOK {
+		t.Fatalf("records status = %d body=%s", recordsRec.Code, recordsRec.Body.String())
+	}
+	var recordsResp struct {
+		Records []struct {
+			EventName      string `json:"eventName"`
+			EventSourceARN string `json:"eventSourceARN"`
+			DynamoDB       struct {
+				Keys map[string]struct {
+					S string `json:"S,omitempty"`
+				} `json:"keys"`
+				SequenceNumber string `json:"sequenceNumber"`
+				StreamViewType string `json:"streamViewType"`
+			} `json:"dynamodb"`
+		} `json:"records"`
+		NextShardIterator string `json:"nextShardIterator,omitempty"`
+	}
+	if err := json.NewDecoder(recordsRec.Body).Decode(&recordsResp); err != nil {
+		t.Fatalf("decode records: %v", err)
+	}
+	if len(recordsResp.Records) != 1 ||
+		recordsResp.Records[0].EventName != "INSERT" ||
+		recordsResp.Records[0].EventSourceARN != td.LatestStreamArn ||
+		recordsResp.Records[0].DynamoDB.Keys["pk"].S != "event-1" ||
+		recordsResp.Records[0].DynamoDB.SequenceNumber != "1" ||
+		recordsResp.Records[0].DynamoDB.StreamViewType != types.StreamViewTypeKeysOnly ||
+		recordsResp.NextShardIterator == "" {
+		t.Fatalf("records response = %+v", recordsResp)
 	}
 }
 

@@ -79,3 +79,24 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 	}
 	return &cefaspb.GetShardIteratorResponse{ShardIterator: token}, nil
 }
+
+func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequest) (*cefaspb.GetRecordsResponse, error) {
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	records, nextIterator, err := getStreamRecords(
+		s.cat,
+		s.db,
+		req.GetShardIterator(),
+		req.GetLimit(),
+		time.Now(),
+	)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	resp := &cefaspb.GetRecordsResponse{NextShardIterator: nextIterator}
+	for _, record := range records {
+		resp.Records = append(resp.Records, streamRecordToPB(record))
+	}
+	return resp, nil
+}
