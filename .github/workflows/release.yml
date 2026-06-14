@@ -58,12 +58,18 @@ jobs:
               fi
               ext=""
               if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-              echo "Building $GOOS/$GOARCH"
+              echo "Building cefas-cli $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
                 -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd.Version=${VERSION}" \
                 -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
                 ./cmd/cefas-cli
+              echo "Building cefas-server $GOOS/$GOARCH"
+              CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+                go build -trimpath \
+                -ldflags "-s -w" \
+                -o "dist/${BIN_NAME}-server-${GOOS}-${GOARCH}${ext}" \
+                ./cmd/cefas-server
             done
           done
 
