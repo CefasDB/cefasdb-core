@@ -18,6 +18,7 @@ Long-form documentation lives in the GitHub Wiki.
 - [Plugins and Extensions](https://github.com/osvaldoandrade/cefas/wiki/Plugins-Overview)
 - [Interfaces](https://github.com/osvaldoandrade/cefas/wiki/Interfaces-Overview)
 - [Operations](https://github.com/osvaldoandrade/cefas/wiki/Operations-Overview)
+- [DynamoDB Streams Compatibility](docs/dynamodb-streams.md)
 
 ## What It Does
 

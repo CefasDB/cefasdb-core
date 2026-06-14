@@ -209,6 +209,40 @@ func TestFailedConditionalWriteDoesNotAppendStreamRecord(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingItemDoesNotEmitStreamRecord(t *testing.T) {
+	db := openChangeLogTestDB(t)
+	td := streamTestTable()
+	if err := db.DeleteItemWith(td, types.Item{"id": streamS("missing")}, DeleteOptions{}); err != nil {
+		t.Fatalf("delete missing: %v", err)
+	}
+
+	all, err := db.changeRecordsAfter(td.Name, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("pitr records: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("physical changelog records = %d, want 1", len(all))
+	}
+	rec := all[0]
+	if rec.StreamRecord || rec.EventName != "" || rec.OldItem != nil || rec.NewItem != nil {
+		t.Fatalf("missing delete should not expose DynamoDB Streams fields: %+v", rec)
+	}
+	if rec.Op != ChangeDelete || rec.Key["id"].S != "missing" {
+		t.Fatalf("PITR delete record not preserved: %+v", rec)
+	}
+
+	streamRecords, next, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("stream records: %v", err)
+	}
+	if len(streamRecords) != 0 {
+		t.Fatalf("stream record count = %d, want 0: %+v", len(streamRecords), streamRecords)
+	}
+	if next != 2 {
+		t.Fatalf("next sequence = %d, want 2 after skipped physical record", next)
+	}
+}
+
 func TestBatchWriteItemEmitsOrderedStreamRecords(t *testing.T) {
 	db := openChangeLogTestDB(t)
 	td := streamTestTable()
