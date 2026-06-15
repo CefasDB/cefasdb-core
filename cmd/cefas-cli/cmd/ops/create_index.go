@@ -104,7 +104,7 @@ Example:
 	f.StringVar(&metric, "metric", "", "ANN distance metric, for example cosine or euclidean")
 	f.StringVar(&algorithm, "algorithm", "", "ANN algorithm, defaults to lsh")
 	f.IntVar(&dim, "dim", 0, "ANN vector dimension")
-	f.StringVar(&pkAttr, "pk", "pk", "Table partition key attribute")
-	f.StringVar(&skAttr, "sk", "", "Table sort key attribute (optional)")
+	f.StringVar(&pkAttr, "pk", "", "Table partition key attribute (defaults to the table partition key)")
+	f.StringVar(&skAttr, "sk", "", "Table sort key attribute (defaults to the table sort key)")
 	root.AddCommand(c)
 }

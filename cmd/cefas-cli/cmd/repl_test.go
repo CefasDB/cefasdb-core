@@ -217,6 +217,28 @@ func TestSimpleCreateExpansion(t *testing.T) {
 	}
 }
 
+func TestSimpleScanWithConsistentExpansion(t *testing.T) {
+	tokens, err := parseREPLTokenDetails("scan picpay_match_keys where source=picpay limit 10 consistent")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got, err := expandREPLCommand(context.Background(), runtime.NewSession(runtime.Options{}), tokens)
+	if err != nil {
+		t.Fatalf("expandREPLCommand: %v", err)
+	}
+	want := []string{
+		"scan",
+		"--table-name", "picpay_match_keys",
+		"--filter-expression", "source = :v0",
+		"--expression-attribute-values", `{":v0":{"S":"picpay"}}`,
+		"--limit", "10",
+		"--consistent-read",
+	}
+	if !reflect.DeepEqual(got.Args, want) {
+		t.Fatalf("args = %#v, want %#v", got.Args, want)
+	}
+}
+
 func TestInteractiveDefaultsPreferTableOutput(t *testing.T) {
 	session := runtime.NewSession(runtime.Options{})
 	applyInteractiveDefaults(session)
