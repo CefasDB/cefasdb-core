@@ -1,7 +1,7 @@
 // Package cmd implements the cefas-cli root command surface. Each
 // subcommand lives in the cmd/ddb or cmd/cluster sub-package; this
-// file just registers the global flag surface every command
-// inherits and dispatches Execute.
+// file registers the global flag surface, dispatches Execute, and
+// starts the interactive shell when no subcommand is provided.
 package cmd
 
 import (
@@ -22,30 +22,56 @@ import (
 // time; falls back to "dev".
 var Version = "dev"
 
+type rootMode int
+
+const (
+	rootModeCLI rootMode = iota
+	rootModeCommand
+)
+
 // Root returns the root Cobra command with every subcommand
 // registered.
 func Root() *cobra.Command {
+	session := runtime.NewSession(runtime.Flags)
+	root := rootWithSession(session, rootModeCLI)
+	root.SetContext(runtime.WithSession(context.Background(), session))
+	return root
+}
+
+func rootWithSession(session *runtime.Session, mode rootMode) *cobra.Command {
+	if session == nil {
+		session = runtime.NewSession(runtime.Options{})
+	}
 	root := &cobra.Command{
 		Use:   "cefas",
 		Short: "cefas — distributed multi-model database CLI",
 		Long: `cefas is the command-line interface for the cefas database.
 The surface mirrors AWS DynamoDB CLI so scripts written against
-'aws dynamodb' can be ported by replacing the command name.`,
+'aws dynamodb' can be ported by replacing the command name.
+
+Run cefas without a command to start the interactive shell.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	if mode == rootModeCLI {
+		root.Args = cobra.NoArgs
+		root.RunE = func(cmd *cobra.Command, _ []string) error {
+			return runREPL(cmd.Context(), session, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+		}
+	}
 
+	flags := session.BindTarget()
 	pf := root.PersistentFlags()
-	pf.StringVar(&runtime.Flags.ConfigPath, "config", "", "Config file path (defaults to ~/.cefas/config.yaml)")
-	pf.StringVar(&runtime.Flags.ProfileName, "profile", "", "Named profile from the config file (default: 'default')")
-	pf.StringVar(&runtime.Flags.Endpoint, "endpoint", "", "gRPC endpoint host:port (overrides config + env)")
-	pf.StringVar(&runtime.Flags.Token, "token", "", "Bearer token (overrides --token-file and env)")
-	pf.StringVar(&runtime.Flags.TokenFile, "token-file", "", "Path to a file containing the bearer token")
-	pf.StringVar(&runtime.Flags.TLSCAPath, "ca", "", "Path to a TLS CA bundle for server verification")
-	pf.BoolVar(&runtime.Flags.Insecure, "insecure", false, "Disable TLS (plaintext)")
-	pf.StringVar(&runtime.Flags.Output, "output", "", "Output format: json (default) | table | text")
-	pf.DurationVar(&runtime.Flags.Timeout, "timeout", 0, "Per-call timeout (e.g. 30s)")
-	pf.BoolVar(&runtime.Flags.NoStream, "no-stream", false, "Buffer streaming results into a single response")
+	pf.StringVar(&flags.ConfigPath, "config", "", "Config file path (defaults to ~/.cefas/config.yaml)")
+	pf.StringVar(&flags.ProfileName, "profile", "", "Named profile from the config file (default: 'default')")
+	pf.StringVar(&flags.Endpoint, "endpoint", "", "gRPC endpoint host:port (overrides config + env)")
+	pf.StringVar(&flags.Token, "token", "", "Bearer token (overrides --token-file and env)")
+	pf.StringVar(&flags.TokenFile, "token-file", "", "Path to a file containing the bearer token")
+	pf.StringVar(&flags.TLSCAPath, "ca", "", "Path to a TLS CA bundle for server verification")
+	pf.BoolVar(&flags.Insecure, "insecure", false, "Disable TLS (plaintext)")
+	pf.StringVar(&flags.Output, "output", "", "Output format: json (default) | table | text")
+	pf.DurationVar(&flags.Timeout, "timeout", 0, "Per-call timeout (e.g. 30s)")
+	pf.BoolVar(&flags.NoStream, "no-stream", false, "Buffer streaming results into a single response")
 
 	root.AddCommand(versionCmd())
 
@@ -74,8 +100,9 @@ func Execute() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	root := Root()
-	root.SetContext(ctx)
+	session := runtime.NewSession(runtime.Options{})
+	root := rootWithSession(session, rootModeCLI)
+	root.SetContext(runtime.WithSession(ctx, session))
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "cefas:", err)
