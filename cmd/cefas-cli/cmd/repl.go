@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-isatty"
@@ -25,18 +27,21 @@ func runREPL(ctx context.Context, session *runtime.Session, in io.Reader, out, e
 	}
 	ctx = runtime.WithSession(ctx, session)
 	if isTerminal(in, out) {
+		applyInteractiveDefaults(session)
 		return runInteractiveREPL(ctx, session, out, errOut)
 	}
 	return runScriptedREPL(ctx, session, in, out, errOut)
 }
 
 func runInteractiveREPL(ctx context.Context, session *runtime.Session, out, errOut io.Writer) error {
+	printREPLBanner(ctx, session, out)
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:                 replPrompt(ctx, session),
 		HistoryFile:            replHistoryPath(),
 		HistoryLimit:           1000,
 		DisableAutoSaveHistory: true,
 		HistorySearchFold:      true,
+		AutoComplete:           replCompleter(),
 		InterruptPrompt:        "^C",
 		EOFPrompt:              "exit",
 		Stdout:                 out,
@@ -62,13 +67,17 @@ func runInteractiveREPL(ctx context.Context, session *runtime.Session, out, errO
 		if shouldSaveHistory(line) {
 			_ = rl.SaveHistory(line)
 		}
-		exit, err := executeREPLLine(ctx, session, line, out, errOut)
+		start := time.Now()
+		result, err := executeREPLLine(ctx, session, line, out, errOut)
 		if err != nil {
-			fmt.Fprintln(errOut, "cefas:", err)
+			printREPLError(errOut, err, time.Since(start))
 			continue
 		}
-		if exit {
+		if result.Exit {
 			return nil
+		}
+		if !result.Empty && !result.Builtin {
+			printREPLStatus(errOut, time.Since(start))
 		}
 	}
 }
@@ -79,12 +88,12 @@ func runScriptedREPL(ctx context.Context, session *runtime.Session, in io.Reader
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
-			exit, execErr := executeREPLLine(ctx, session, line, out, errOut)
+			result, execErr := executeREPLLine(ctx, session, line, out, errOut)
 			if execErr != nil {
 				fmt.Fprintln(errOut, "cefas:", execErr)
 				return execErr
 			}
-			if exit {
+			if result.Exit {
 				return nil
 			}
 		}
@@ -97,26 +106,45 @@ func runScriptedREPL(ctx context.Context, session *runtime.Session, in io.Reader
 	}
 }
 
-func executeREPLLine(ctx context.Context, session *runtime.Session, line string, out, errOut io.Writer) (bool, error) {
+type replLineResult struct {
+	Exit    bool
+	Empty   bool
+	Builtin bool
+}
+
+func executeREPLLine(ctx context.Context, session *runtime.Session, line string, out, errOut io.Writer) (replLineResult, error) {
 	args, err := parseREPLArgs(line)
 	if err != nil {
-		return false, err
+		return replLineResult{}, err
 	}
 	if len(args) == 0 {
-		return false, nil
+		return replLineResult{Empty: true}, nil
 	}
 	if args[0] == "?" {
 		args[0] = "help"
 	}
 	handled, exit, err := handleREPLBuiltin(ctx, session, args, out)
 	if handled {
-		return exit, err
+		return replLineResult{Exit: exit, Builtin: true}, err
 	}
-	return false, runCommand(ctx, session, args, strings.NewReader(""), out, errOut)
+	return replLineResult{}, runCommand(ctx, session, args, strings.NewReader(""), out, errOut)
 }
 
 func handleREPLBuiltin(ctx context.Context, session *runtime.Session, args []string, out io.Writer) (bool, bool, error) {
 	switch strings.ToLower(args[0]) {
+	case "help":
+		if len(args) == 1 || strings.EqualFold(args[1], "repl") {
+			return true, false, showREPLHelp(out)
+		}
+		if len(args) == 2 && (strings.EqualFold(args[1], "shortcuts") || strings.EqualFold(args[1], "settings")) {
+			return true, false, showREPLHelp(out)
+		}
+		return false, false, nil
+	case "shortcuts":
+		if len(args) != 1 {
+			return true, false, fmt.Errorf("usage: shortcuts")
+		}
+		return true, false, showREPLHelp(out)
 	case "exit", "quit":
 		if len(args) != 1 {
 			return true, false, fmt.Errorf("usage: %s", args[0])
@@ -145,6 +173,38 @@ func handleREPLBuiltin(ctx context.Context, session *runtime.Session, args []str
 	}
 }
 
+func showREPLHelp(out io.Writer) error {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "Cefas interactive shell")
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Shortcuts\t")
+	fmt.Fprintln(tw, "  TABLES\tList tables")
+	fmt.Fprintln(tw, "  DESC <table>\tDescribe a table")
+	fmt.Fprintln(tw, "  GET <table> <key-json> [CONSISTENT]\tFetch one item")
+	fmt.Fprintln(tw, "  PUT <table> <item-json>\tInsert or replace one item")
+	fmt.Fprintln(tw, "  DELETE <table> <key-json>\tDelete one item")
+	fmt.Fprintln(tw, "  QUERY <table> <pk-json> [SK <low> <high>] [LIMIT n] [INDEX name] [CONSISTENT]\tRun a key query")
+	fmt.Fprintln(tw, "  SCAN <table> [FILTER expr] [VALUES ddb-json] [LIMIT n] [CONSISTENT]\tScan a table")
+	fmt.Fprintln(tw, "  SQL <statement> [PARAMS ddb-json-array]\tRun PartiQL")
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Session\t")
+	fmt.Fprintln(tw, "  show\tShow active profile, endpoint, output, and transport")
+	fmt.Fprintln(tw, "  use <profile>\tSwitch profile for this REPL session")
+	fmt.Fprintln(tw, "  set endpoint <host:port>\tChange target endpoint")
+	fmt.Fprintln(tw, "  set output table|json|text\tChange output format")
+	fmt.Fprintln(tw, "  set insecure [true|false]\tToggle plaintext transport")
+	fmt.Fprintln(tw, "  set token-file <path>\tUse a token file")
+	fmt.Fprintln(tw, "  set ca <path>\tUse a TLS CA bundle")
+	fmt.Fprintln(tw, "  clear\tClear the screen")
+	fmt.Fprintln(tw, "  exit\tLeave the shell")
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Tips\t")
+	fmt.Fprintln(tw, "  Existing CLI commands still work unchanged.\tExample: list-tables --output json")
+	fmt.Fprintln(tw, "  Use file://path for large JSON payloads.\tExample: PUT Users file://item.json")
+	fmt.Fprintln(tw, "  Help for a CLI command still works.\tExample: help create-table")
+	return tw.Flush()
+}
+
 func showREPLSession(ctx context.Context, session *runtime.Session, out io.Writer) error {
 	profile, err := runtime.ResolveProfile(runtime.WithSession(ctx, session))
 	if err != nil {
@@ -155,25 +215,27 @@ func showREPLSession(ctx context.Context, session *runtime.Session, out io.Write
 	if profileName == "" {
 		profileName = "default"
 	}
-	fmt.Fprintf(out, "profile: %s\n", profileName)
-	fmt.Fprintf(out, "endpoint: %s\n", profile.Endpoint)
-	fmt.Fprintf(out, "output: %s\n", profile.Output)
-	fmt.Fprintf(out, "insecure: %t\n", profile.Insecure)
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "Setting\tValue")
+	fmt.Fprintf(tw, "profile\t%s\n", profileName)
+	fmt.Fprintf(tw, "endpoint\t%s\n", profile.Endpoint)
+	fmt.Fprintf(tw, "output\t%s\n", profile.Output)
+	fmt.Fprintf(tw, "transport\t%s\n", transportLabel(profile.Insecure))
 	if opts.ConfigPath != "" {
-		fmt.Fprintf(out, "config: %s\n", opts.ConfigPath)
+		fmt.Fprintf(tw, "config\t%s\n", opts.ConfigPath)
 	}
 	if profile.TLSCAPath != "" {
-		fmt.Fprintf(out, "ca: %s\n", profile.TLSCAPath)
+		fmt.Fprintf(tw, "ca\t%s\n", profile.TLSCAPath)
 	}
 	if profile.TokenFile != "" {
-		fmt.Fprintf(out, "tokenFile: %s\n", profile.TokenFile)
+		fmt.Fprintf(tw, "tokenFile\t%s\n", profile.TokenFile)
 	} else if profile.Token != "" {
-		fmt.Fprintln(out, "token: <configured>")
+		fmt.Fprintln(tw, "token\t<configured>")
 	}
 	if opts.NoStream {
-		fmt.Fprintln(out, "noStream: true")
+		fmt.Fprintln(tw, "noStream\ttrue")
 	}
-	return nil
+	return tw.Flush()
 }
 
 func useREPLProfile(ctx context.Context, session *runtime.Session, name string, out io.Writer) error {
@@ -185,7 +247,7 @@ func useREPLProfile(ctx context.Context, session *runtime.Session, name string, 
 		session.Update(old)
 		return err
 	}
-	fmt.Fprintln(out, "OK")
+	fmt.Fprintf(out, "profile = %s\n", name)
 	return nil
 }
 
@@ -239,7 +301,7 @@ func setREPLSessionOption(session *runtime.Session, args []string, out io.Writer
 		return fmt.Errorf("unknown setting %q", args[1])
 	}
 	session.Update(opts)
-	fmt.Fprintln(out, "OK")
+	fmt.Fprintf(out, "%s = %s\n", key, replSettingValue(opts, key))
 	return nil
 }
 
@@ -286,7 +348,12 @@ func replPrompt(ctx context.Context, session *runtime.Session) string {
 	if err != nil || endpoint == "" {
 		endpoint = "unknown"
 	}
-	return fmt.Sprintf("cefas[%s@%s]> ", name, endpoint)
+	return fmt.Sprintf("\033[36mcefas\033[0m \033[2m%s@%s %s %s\033[0m\n> ",
+		name,
+		endpoint,
+		profile.Output,
+		transportLabel(profile.Insecure),
+	)
 }
 
 func replHistoryPath() string {
@@ -327,6 +394,124 @@ func shellwordsParser() *shellwords.Parser {
 	parser.ParseEnv = false
 	parser.ParseBacktick = false
 	return parser
+}
+
+func applyInteractiveDefaults(session *runtime.Session) {
+	opts := session.Options()
+	if opts.Output == "" {
+		opts.Output = "table"
+		session.Update(opts)
+	}
+}
+
+func printREPLBanner(ctx context.Context, session *runtime.Session, out io.Writer) {
+	profile, err := runtime.ResolveProfile(runtime.WithSession(ctx, session))
+	opts := session.Options()
+	name := opts.ProfileName
+	if name == "" {
+		name = "default"
+	}
+	endpoint := profile.Endpoint
+	if err != nil || endpoint == "" {
+		endpoint = "unknown"
+	}
+	fmt.Fprintf(out, "\033[36mCefas interactive shell\033[0m\n")
+	fmt.Fprintf(out, "session: %s@%s  output=%s  transport=%s\n",
+		name,
+		endpoint,
+		profile.Output,
+		transportLabel(profile.Insecure),
+	)
+	fmt.Fprintln(out, "type help for shortcuts, show for session, exit to quit")
+	fmt.Fprintln(out)
+}
+
+func printREPLStatus(out io.Writer, elapsed time.Duration) {
+	fmt.Fprintf(out, "\033[32mok\033[0m %s\n", formatElapsed(elapsed))
+}
+
+func printREPLError(out io.Writer, err error, elapsed time.Duration) {
+	fmt.Fprintf(out, "\033[31merror\033[0m %s: %v\n", formatElapsed(elapsed), err)
+}
+
+func formatElapsed(d time.Duration) string {
+	if d < time.Millisecond {
+		us := d.Microseconds()
+		if us < 1 {
+			us = 1
+		}
+		return fmt.Sprintf("%dus", us)
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return d.Round(10 * time.Millisecond).String()
+}
+
+func replSettingValue(opts runtime.Options, key string) string {
+	switch key {
+	case "endpoint":
+		return opts.Endpoint
+	case "output":
+		return opts.Output
+	case "insecure":
+		return strconv.FormatBool(opts.Insecure)
+	case "token-file":
+		return opts.TokenFile
+	case "ca":
+		return opts.TLSCAPath
+	case "no-stream":
+		return strconv.FormatBool(opts.NoStream)
+	default:
+		return ""
+	}
+}
+
+func transportLabel(insecure bool) string {
+	if insecure {
+		return "plain"
+	}
+	return "tls"
+}
+
+func replCompleter() readline.AutoCompleter {
+	return readline.NewPrefixCompleter(
+		readline.PcItem("help"),
+		readline.PcItem("shortcuts"),
+		readline.PcItem("show"),
+		readline.PcItem("use"),
+		readline.PcItem("set",
+			readline.PcItem("endpoint"),
+			readline.PcItem("output",
+				readline.PcItem("table"),
+				readline.PcItem("json"),
+				readline.PcItem("text"),
+			),
+			readline.PcItem("insecure"),
+			readline.PcItem("token-file"),
+			readline.PcItem("ca"),
+			readline.PcItem("no-stream"),
+		),
+		readline.PcItem("clear"),
+		readline.PcItem("exit"),
+		readline.PcItem("quit"),
+		readline.PcItem("TABLES"),
+		readline.PcItem("DESC"),
+		readline.PcItem("GET"),
+		readline.PcItem("PUT"),
+		readline.PcItem("DELETE"),
+		readline.PcItem("QUERY"),
+		readline.PcItem("SCAN"),
+		readline.PcItem("SQL"),
+		readline.PcItem("list-tables"),
+		readline.PcItem("describe-table"),
+		readline.PcItem("get-item"),
+		readline.PcItem("put-item"),
+		readline.PcItem("delete-item"),
+		readline.PcItem("query"),
+		readline.PcItem("scan"),
+		readline.PcItem("execute-statement"),
+	)
 }
 
 func isTerminal(in io.Reader, out io.Writer) bool {
