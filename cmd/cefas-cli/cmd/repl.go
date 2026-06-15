@@ -366,12 +366,17 @@ func replPrompt(ctx context.Context, session *runtime.Session) string {
 	if err != nil || endpoint == "" {
 		endpoint = "unknown"
 	}
-	return fmt.Sprintf("\033[36mcefas\033[0m \033[2m%s@%s %s %s\033[0m\n> ",
-		name,
-		endpoint,
-		profile.Output,
-		transportLabel(profile.Insecure),
-	)
+	// Single-line prompt with ANSI codes wrapped in chzyer/readline's
+	// zero-width markers (\001..\002) so the library doesn't count the
+	// escape bytes when computing cursor position. The previous
+	// multi-line prompt broke the per-keystroke redraw: \r only
+	// resets to the start of the current line, so typing one
+	// character re-emitted the entire session header. Session info
+	// lives in the startup banner and the `show` command instead.
+	_ = name
+	_ = endpoint
+	_ = profile
+	return "\001\033[36m\002cefas\001\033[0m\002> "
 }
 
 func replHistoryPath() string {
