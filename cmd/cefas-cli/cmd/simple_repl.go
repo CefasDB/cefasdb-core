@@ -508,7 +508,7 @@ func isLegacyQuery(args []string) bool {
 func isLegacyScan(args []string) bool {
 	for _, arg := range args[2:] {
 		switch strings.ToUpper(arg) {
-		case "FILTER", "VALUES", "CONSISTENT":
+		case "FILTER", "VALUES":
 			return true
 		}
 	}
