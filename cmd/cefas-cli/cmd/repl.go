@@ -15,7 +15,6 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-isatty"
-	"github.com/mattn/go-shellwords"
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
@@ -113,10 +112,11 @@ type replLineResult struct {
 }
 
 func executeREPLLine(ctx context.Context, session *runtime.Session, line string, out, errOut io.Writer) (replLineResult, error) {
-	args, err := parseREPLArgs(line)
+	tokens, err := parseREPLTokenDetails(line)
 	if err != nil {
 		return replLineResult{}, err
 	}
+	args := replTokenTexts(tokens)
 	if len(args) == 0 {
 		return replLineResult{Empty: true}, nil
 	}
@@ -127,7 +127,21 @@ func executeREPLLine(ctx context.Context, session *runtime.Session, line string,
 	if handled {
 		return replLineResult{Exit: exit, Builtin: true}, err
 	}
-	return replLineResult{}, runCommand(ctx, session, args, strings.NewReader(""), out, errOut)
+	expanded, err := expandREPLCommand(ctx, session, tokens)
+	if err != nil {
+		return replLineResult{}, err
+	}
+	cmdOut := out
+	if expanded.Quiet {
+		cmdOut = io.Discard
+	}
+	if err := runCommand(ctx, session, expanded.Args, strings.NewReader(""), cmdOut, errOut); err != nil {
+		return replLineResult{}, err
+	}
+	if expanded.InvalidateTable != "" {
+		session.ClearCachedTable(expanded.InvalidateTable)
+	}
+	return replLineResult{}, nil
 }
 
 func handleREPLBuiltin(ctx context.Context, session *runtime.Session, args []string, out io.Writer) (bool, bool, error) {
@@ -177,15 +191,18 @@ func showREPLHelp(out io.Writer) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "Cefas interactive shell")
 	fmt.Fprintln(tw)
-	fmt.Fprintln(tw, "Shortcuts\t")
-	fmt.Fprintln(tw, "  TABLES\tList tables")
-	fmt.Fprintln(tw, "  DESC <table>\tDescribe a table")
-	fmt.Fprintln(tw, "  GET <table> <key-json> [CONSISTENT]\tFetch one item")
-	fmt.Fprintln(tw, "  PUT <table> <item-json>\tInsert or replace one item")
-	fmt.Fprintln(tw, "  DELETE <table> <key-json>\tDelete one item")
-	fmt.Fprintln(tw, "  QUERY <table> <pk-json> [SK <low> <high>] [LIMIT n] [INDEX name] [CONSISTENT]\tRun a key query")
-	fmt.Fprintln(tw, "  SCAN <table> [FILTER expr] [VALUES ddb-json] [LIMIT n] [CONSISTENT]\tScan a table")
-	fmt.Fprintln(tw, "  SQL <statement> [PARAMS ddb-json-array]\tRun PartiQL")
+	fmt.Fprintln(tw, "Simple commands\t")
+	fmt.Fprintln(tw, "  tables\tList tables")
+	fmt.Fprintln(tw, "  create <table> [pk] [sk]\tCreate a table; defaults to pk=id")
+	fmt.Fprintln(tw, "  create-table <table> [pk] [sk]\tCreate a table with simple syntax")
+	fmt.Fprintln(tw, "  desc <table>\tDescribe a table")
+	fmt.Fprintln(tw, "  put <table> <pk> [sk] field=value...\tInsert or replace one item")
+	fmt.Fprintln(tw, "  get <table> <pk> [sk] [consistent]\tFetch one item")
+	fmt.Fprintln(tw, "  delete <table> <pk> [sk]\tDelete one item")
+	fmt.Fprintln(tw, "  query <table> <pk> [between <low> <high>] [limit n] [consistent]\tRun a key query")
+	fmt.Fprintln(tw, "  scan <table> [where field=value] [limit n] [consistent]\tScan a table")
+	fmt.Fprintln(tw, "  drop <table>\tDelete a table")
+	fmt.Fprintln(tw, "  sql <statement> [PARAMS ddb-json-array]\tRun PartiQL")
 	fmt.Fprintln(tw)
 	fmt.Fprintln(tw, "Session\t")
 	fmt.Fprintln(tw, "  show\tShow active profile, endpoint, output, and transport")
@@ -199,8 +216,9 @@ func showREPLHelp(out io.Writer) error {
 	fmt.Fprintln(tw, "  exit\tLeave the shell")
 	fmt.Fprintln(tw)
 	fmt.Fprintln(tw, "Tips\t")
-	fmt.Fprintln(tw, "  Existing CLI commands still work unchanged.\tExample: list-tables --output json")
-	fmt.Fprintln(tw, "  Use file://path for large JSON payloads.\tExample: PUT Users file://item.json")
+	fmt.Fprintln(tw, "  Values infer type unless quoted.\tage=42 active=true code=\"42\"")
+	fmt.Fprintln(tw, "  Existing CLI commands still work unchanged.\tExample: create-table --table-name Users ...")
+	fmt.Fprintln(tw, "  Use DDB-JSON for advanced types.\tExample: PUT Users '{\"id\":{\"S\":\"1\"}}'")
 	fmt.Fprintln(tw, "  Help for a CLI command still works.\tExample: help create-table")
 	return tw.Flush()
 }
@@ -372,11 +390,11 @@ func shouldSaveHistory(line string) bool {
 	if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 		return false
 	}
-	parser := shellwordsParser()
-	args, err := parser.Parse(line)
+	tokens, err := parseREPLTokenDetails(line)
 	if err != nil {
 		return !strings.Contains(strings.ToLower(line), "--token")
 	}
+	args := replTokenTexts(tokens)
 	for i, arg := range args {
 		lower := strings.ToLower(arg)
 		if lower == "--token" || strings.HasPrefix(lower, "--token=") {
@@ -387,13 +405,6 @@ func shouldSaveHistory(line string) bool {
 		}
 	}
 	return true
-}
-
-func shellwordsParser() *shellwords.Parser {
-	parser := shellwords.NewParser()
-	parser.ParseEnv = false
-	parser.ParseBacktick = false
-	return parser
 }
 
 func applyInteractiveDefaults(session *runtime.Session) {
@@ -495,6 +506,23 @@ func replCompleter() readline.AutoCompleter {
 		readline.PcItem("clear"),
 		readline.PcItem("exit"),
 		readline.PcItem("quit"),
+		readline.PcItem("tables"),
+		readline.PcItem("create"),
+		readline.PcItem("create-table"),
+		readline.PcItem("desc"),
+		readline.PcItem("put"),
+		readline.PcItem("get"),
+		readline.PcItem("delete"),
+		readline.PcItem("query",
+			readline.PcItem("between"),
+			readline.PcItem("limit"),
+		),
+		readline.PcItem("scan",
+			readline.PcItem("where"),
+			readline.PcItem("limit"),
+		),
+		readline.PcItem("drop"),
+		readline.PcItem("sql"),
 		readline.PcItem("TABLES"),
 		readline.PcItem("DESC"),
 		readline.PcItem("GET"),

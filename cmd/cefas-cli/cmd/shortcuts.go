@@ -3,26 +3,113 @@ package cmd
 import (
 	"fmt"
 	"strings"
-
-	"github.com/mattn/go-shellwords"
 )
 
+type replToken struct {
+	Text   string
+	Quoted bool
+}
+
 func parseREPLArgs(line string) ([]string, error) {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, "#") {
-		return nil, nil
-	}
-	parser := shellwords.NewParser()
-	parser.ParseEnv = false
-	parser.ParseBacktick = false
-	args, err := parser.Parse(line)
+	tokens, err := parseREPLTokenDetails(line)
 	if err != nil {
 		return nil, err
 	}
+	args := replTokenTexts(tokens)
 	if len(args) == 0 {
 		return nil, nil
 	}
 	return expandShortcut(args)
+}
+
+func parseREPLTokens(line string) ([]string, error) {
+	tokens, err := parseREPLTokenDetails(line)
+	if err != nil {
+		return nil, err
+	}
+	return replTokenTexts(tokens), nil
+}
+
+func parseREPLTokenDetails(line string) ([]replToken, error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return nil, nil
+	}
+	var tokens []replToken
+	var b strings.Builder
+	var quote rune
+	quoted := false
+	escaped := false
+	inToken := false
+
+	flush := func() {
+		if !inToken {
+			return
+		}
+		tokens = append(tokens, replToken{Text: b.String(), Quoted: quoted})
+		b.Reset()
+		quoted = false
+		inToken = false
+	}
+
+	for _, r := range line {
+		if escaped {
+			switch r {
+			case 'n':
+				b.WriteRune('\n')
+			case 't':
+				b.WriteRune('\t')
+			default:
+				b.WriteRune(r)
+			}
+			inToken = true
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			escaped = true
+			inToken = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				quoted = true
+				inToken = true
+				continue
+			}
+			b.WriteRune(r)
+			inToken = true
+			continue
+		}
+		switch r {
+		case '\t', '\n', '\r', ' ':
+			flush()
+		case '\'', '"':
+			quote = r
+			quoted = true
+			inToken = true
+		default:
+			b.WriteRune(r)
+			inToken = true
+		}
+	}
+	if escaped {
+		b.WriteRune('\\')
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	flush()
+	return tokens, nil
+}
+
+func replTokenTexts(tokens []replToken) []string {
+	args := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		args = append(args, token.Text)
+	}
+	return args
 }
 
 func expandShortcut(args []string) ([]string, error) {
