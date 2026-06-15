@@ -87,11 +87,11 @@ func TestREPLBuiltinsMutateSession(t *testing.T) {
 	})
 	var out bytes.Buffer
 
-	exit, err := executeREPLLine(context.Background(), session, "set output table", &out, &bytes.Buffer{})
+	result, err := executeREPLLine(context.Background(), session, "set output table", &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("set output: %v", err)
 	}
-	if exit {
+	if result.Exit {
 		t.Fatal("set output requested exit")
 	}
 	if got := session.Options().Output; got != "table" {
@@ -99,11 +99,11 @@ func TestREPLBuiltinsMutateSession(t *testing.T) {
 	}
 
 	out.Reset()
-	exit, err = executeREPLLine(context.Background(), session, "set insecure false", &out, &bytes.Buffer{})
+	result, err = executeREPLLine(context.Background(), session, "set insecure false", &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("set insecure: %v", err)
 	}
-	if exit {
+	if result.Exit {
 		t.Fatal("set insecure requested exit")
 	}
 	if got := session.Options().Insecure; got {
@@ -111,15 +111,49 @@ func TestREPLBuiltinsMutateSession(t *testing.T) {
 	}
 
 	out.Reset()
-	exit, err = executeREPLLine(context.Background(), session, "show", &out, &bytes.Buffer{})
+	result, err = executeREPLLine(context.Background(), session, "show", &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("show: %v", err)
 	}
-	if exit {
+	if result.Exit {
 		t.Fatal("show requested exit")
 	}
-	if !strings.Contains(out.String(), "output: table") {
+	if !strings.Contains(out.String(), "output") || !strings.Contains(out.String(), "table") {
 		t.Fatalf("show output = %q, want output table", out.String())
+	}
+}
+
+func TestREPLHelpIsShellSpecific(t *testing.T) {
+	session := runtime.NewSession(runtime.Options{
+		ConfigPath: "/path/that/does/not/exist.yaml",
+	})
+	var out bytes.Buffer
+	result, err := executeREPLLine(context.Background(), session, "help", &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !result.Builtin {
+		t.Fatal("help should be handled by REPL")
+	}
+	got := out.String()
+	for _, want := range []string{"Cefas interactive shell", "TABLES", "set output table|json|text", "Existing CLI commands"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help output = %q, missing %q", got, want)
+		}
+	}
+}
+
+func TestInteractiveDefaultsPreferTableOutput(t *testing.T) {
+	session := runtime.NewSession(runtime.Options{})
+	applyInteractiveDefaults(session)
+	if got := session.Options().Output; got != "table" {
+		t.Fatalf("interactive output default = %q, want table", got)
+	}
+
+	session = runtime.NewSession(runtime.Options{Output: "json"})
+	applyInteractiveDefaults(session)
+	if got := session.Options().Output; got != "json" {
+		t.Fatalf("explicit output = %q, want json", got)
 	}
 }
 
@@ -153,7 +187,7 @@ func TestRootWithoutArgsRunsScriptedREPL(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("root Execute: %v\nstderr: %s", err, errOut.String())
 	}
-	if got := out.String(); !strings.Contains(got, "endpoint: localhost:19090") {
+	if got := out.String(); !strings.Contains(got, "endpoint") || !strings.Contains(got, "localhost:19090") {
 		t.Fatalf("repl output = %q, want endpoint from root flag", got)
 	}
 }
