@@ -5,11 +5,14 @@ go 1.25.0
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.18.2
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/chzyer/readline v1.5.1
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/codecompany/identity-middleware v0.0.0-20260129011223-c06aafa60c82
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.7.3
+	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-shellwords v1.0.13
 	github.com/prometheus/client_golang v1.15.0
 	github.com/spf13/cobra v1.8.1
 	go.opentelemetry.io/otel v1.44.0
@@ -67,7 +70,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

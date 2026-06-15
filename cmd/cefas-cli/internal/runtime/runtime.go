@@ -1,6 +1,6 @@
-// Package runtime owns the cefas-cli global flag values + Dial
-// helper. Both the root cmd package (which binds the flags) and the
-// subcommand packages (which read them) import this — keeps the
+// Package runtime owns cefas-cli connection/session options plus the
+// Dial helper. The root command binds flags into a Session and
+// subcommands resolve the active session through context, keeping the
 // import graph cycle-free.
 package runtime
 
@@ -17,31 +17,97 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/client"
 )
 
-// Flags is the live binding target for cobra persistent flags.
-// root.go binds every PersistentFlag onto fields of this exported
-// struct so subcommands can read them.
-var Flags struct {
-	ConfigPath    string
-	ProfileName   string
-	Endpoint      string
-	Token         string
-	TokenFile     string
-	TLSCAPath     string
-	Insecure      bool
-	Output        string
-	Timeout       time.Duration
-	NoStream      bool
+// Options is the complete CLI connection/runtime option set.
+type Options struct {
+	ConfigPath  string
+	ProfileName string
+	Endpoint    string
+	Token       string
+	TokenFile   string
+	TLSCAPath   string
+	Insecure    bool
+	Output      string
+	Timeout     time.Duration
+	NoStream    bool
+}
+
+// Flags is the legacy binding target for callers that build only a
+// subcommand tree in tests. New code should pass a Session in context.
+var Flags Options
+
+// Session is the mutable state for one CLI or REPL session.
+type Session struct {
+	options Options
+}
+
+type sessionContextKey struct{}
+
+// NewSession returns a session initialized with opts.
+func NewSession(opts Options) *Session {
+	return &Session{options: opts}
+}
+
+// Options returns a copy of the current session options.
+func (s *Session) Options() Options {
+	if s == nil {
+		return Options{}
+	}
+	return s.options
+}
+
+// BindTarget returns the live options object for flag binding.
+func (s *Session) BindTarget() *Options {
+	if s == nil {
+		return &Flags
+	}
+	return &s.options
+}
+
+// Update replaces the session options atomically for single-threaded
+// CLI usage.
+func (s *Session) Update(opts Options) {
+	if s != nil {
+		s.options = opts
+	}
+}
+
+// WithSession attaches a CLI session to ctx.
+func WithSession(ctx context.Context, s *Session) context.Context {
+	if s == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionContextKey{}, s)
+}
+
+// FromContext returns the active CLI session, if any.
+func FromContext(ctx context.Context) *Session {
+	if ctx == nil {
+		return nil
+	}
+	s, _ := ctx.Value(sessionContextKey{}).(*Session)
+	return s
+}
+
+// ResolveProfile resolves the active profile (flag > env > yaml >
+// defaults) without opening a network connection.
+func ResolveProfile(ctx context.Context) (clicfg.Profile, error) {
+	opts := optionsFromContext(ctx)
+	p, err := clicfg.LoadProfile(opts.ConfigPath, opts.ProfileName)
+	if err != nil {
+		return p, err
+	}
+	clicfg.ApplyEnv(&p)
+	overlay(&p, opts)
+	return p, nil
 }
 
 // Dial resolves the active profile (flag > env > yaml > defaults)
 // and returns a connected client.Client. Caller owns Close.
 func Dial(ctx context.Context) (*client.Client, clicfg.Profile, error) {
-	p, err := clicfg.LoadProfile(Flags.ConfigPath, Flags.ProfileName)
+	p, err := ResolveProfile(ctx)
 	if err != nil {
 		return nil, p, err
 	}
-	clicfg.ApplyEnv(&p)
-	overlay(&p)
 
 	token, err := clicfg.ResolveToken(p)
 	if err != nil {
@@ -76,27 +142,34 @@ func Format(p clicfg.Profile) (output.Format, error) {
 	return output.Validate(p.Output)
 }
 
-func overlay(p *clicfg.Profile) {
-	if Flags.Endpoint != "" {
-		p.Endpoint = Flags.Endpoint
+func optionsFromContext(ctx context.Context) Options {
+	if s := FromContext(ctx); s != nil {
+		return s.Options()
 	}
-	if Flags.Token != "" {
-		p.Token = Flags.Token
+	return Flags
+}
+
+func overlay(p *clicfg.Profile, opts Options) {
+	if opts.Endpoint != "" {
+		p.Endpoint = opts.Endpoint
 	}
-	if Flags.TokenFile != "" {
-		p.TokenFile = Flags.TokenFile
+	if opts.Token != "" {
+		p.Token = opts.Token
 	}
-	if Flags.TLSCAPath != "" {
-		p.TLSCAPath = Flags.TLSCAPath
+	if opts.TokenFile != "" {
+		p.TokenFile = opts.TokenFile
 	}
-	if Flags.Insecure {
+	if opts.TLSCAPath != "" {
+		p.TLSCAPath = opts.TLSCAPath
+	}
+	if opts.Insecure {
 		p.Insecure = true
 	}
-	if Flags.Output != "" {
-		p.Output = Flags.Output
+	if opts.Output != "" {
+		p.Output = opts.Output
 	}
-	if Flags.Timeout > 0 {
-		p.Timeout = Flags.Timeout
+	if opts.Timeout > 0 {
+		p.Timeout = opts.Timeout
 	}
 }
 
