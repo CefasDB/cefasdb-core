@@ -15,6 +15,7 @@ import (
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/clicfg"
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/output"
 	"github.com/osvaldoandrade/cefas/pkg/client"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 // Options is the complete CLI connection/runtime option set.
@@ -37,14 +38,15 @@ var Flags Options
 
 // Session is the mutable state for one CLI or REPL session.
 type Session struct {
-	options Options
+	options    Options
+	tableCache map[string]types.TableDescriptor
 }
 
 type sessionContextKey struct{}
 
 // NewSession returns a session initialized with opts.
 func NewSession(opts Options) *Session {
-	return &Session{options: opts}
+	return &Session{options: opts, tableCache: map[string]types.TableDescriptor{}}
 }
 
 // Options returns a copy of the current session options.
@@ -67,8 +69,39 @@ func (s *Session) BindTarget() *Options {
 // CLI usage.
 func (s *Session) Update(opts Options) {
 	if s != nil {
+		if connectionOptionsChanged(s.options, opts) {
+			s.tableCache = map[string]types.TableDescriptor{}
+		}
 		s.options = opts
 	}
+}
+
+// CachedTable returns a table descriptor cached for this REPL session.
+func (s *Session) CachedTable(name string) (types.TableDescriptor, bool) {
+	if s == nil || s.tableCache == nil {
+		return types.TableDescriptor{}, false
+	}
+	td, ok := s.tableCache[name]
+	return td, ok
+}
+
+// CacheTable stores a table descriptor for later simple REPL commands.
+func (s *Session) CacheTable(td types.TableDescriptor) {
+	if s == nil || td.Name == "" {
+		return
+	}
+	if s.tableCache == nil {
+		s.tableCache = map[string]types.TableDescriptor{}
+	}
+	s.tableCache[td.Name] = td
+}
+
+// ClearCachedTable removes one descriptor from the session cache.
+func (s *Session) ClearCachedTable(name string) {
+	if s == nil || s.tableCache == nil {
+		return
+	}
+	delete(s.tableCache, name)
 }
 
 // WithSession attaches a CLI session to ctx.
@@ -171,6 +204,16 @@ func overlay(p *clicfg.Profile, opts Options) {
 	if opts.Timeout > 0 {
 		p.Timeout = opts.Timeout
 	}
+}
+
+func connectionOptionsChanged(a, b Options) bool {
+	return a.ConfigPath != b.ConfigPath ||
+		a.ProfileName != b.ProfileName ||
+		a.Endpoint != b.Endpoint ||
+		a.Token != b.Token ||
+		a.TokenFile != b.TokenFile ||
+		a.TLSCAPath != b.TLSCAPath ||
+		a.Insecure != b.Insecure
 }
 
 func buildTLSConfig(caPath string) (*tls.Config, error) {

@@ -12,7 +12,6 @@ require (
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.7.3
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattn/go-shellwords v1.0.13
 	github.com/prometheus/client_golang v1.15.0
 	github.com/spf13/cobra v1.8.1
 	go.opentelemetry.io/otel v1.44.0
