@@ -7,7 +7,8 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -129,12 +130,19 @@ func main() {
 	)
 	flag.Parse()
 
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	logf := func(format string, args ...any) {
+		logger.Info(fmt.Sprintf(format, args...))
+	}
+
 	cfg, err := config.LoadFile(*configPath)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Error("config", "err", err)
+		os.Exit(1)
 	}
 	if err := config.ApplyEnv(&cfg); err != nil {
-		log.Fatalf("config env: %v", err)
+		logger.Error("config env", "err", err)
+		os.Exit(1)
 	}
 	// Promote any flag value the user actually set onto cfg so the
 	// downstream code paths can read a single source of truth.
@@ -167,7 +175,8 @@ func main() {
 		SampleRate: cfg.Tracing.SampleRate,
 	})
 	if err != nil {
-		log.Fatalf("tracing: %v", err)
+		logger.Error("tracing", "err", err)
+		os.Exit(1)
 	}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -205,7 +214,8 @@ func main() {
 			RaftProfile:     cfg.Storage.RaftProfile,
 		})
 		if err != nil {
-			log.Fatalf("open cluster manager: %v", err)
+			logger.Error("open cluster manager", "err", err)
+			os.Exit(1)
 		}
 		defer mgr.Close()
 		// Shard 0 is the metadata shard; the catalog lives there
@@ -214,26 +224,30 @@ func main() {
 		db = shard0.Storage
 		cat, err = catalog.New(db)
 		if err != nil {
-			log.Fatalf("load catalog (shard 0): %v", err)
+			logger.Error("load catalog (shard 0)", "err", err)
+			os.Exit(1)
 		}
-		log.Printf("multi-Raft enabled: shards=%d mux=%s peers=%v", cfg.Cluster.Shards, cfg.Cluster.MuxAddr, cfg.Cluster.Peers)
+		logger.Info("multi-Raft enabled", "shards", cfg.Cluster.Shards, "mux", cfg.Cluster.MuxAddr, "peers", cfg.Cluster.Peers)
 	} else {
 		var err error
 		db, err = storage.Open(bootstrapserver.StorageOptions(cfg, cfg.Data))
 		if err != nil {
-			log.Fatalf("open pebble: %v", err)
+			logger.Error("open pebble", "err", err)
+			os.Exit(1)
 		}
 		defer db.Close()
 		cat, err = catalog.New(db)
 		if err != nil {
-			log.Fatalf("load catalog: %v", err)
+			logger.Error("load catalog", "err", err)
+			os.Exit(1)
 		}
 	}
 
 	var raftStore *storage.DB
 	if mgr == nil && cfg.Raft.Bind != "" {
 		if cfg.Cluster.SelfID == "" {
-			log.Fatal("-raft-id is required when -raft-bind is set")
+			logger.Error("invalid flags", "reason", "-raft-id is required when -raft-bind is set")
+			os.Exit(1)
 		}
 		path := cfg.Raft.Path
 		if path == "" {
@@ -253,7 +267,8 @@ func main() {
 			Profile:       raftProfile,
 		})
 		if err != nil {
-			log.Fatalf("open raft store: %v", err)
+			logger.Error("open raft store", "err", err)
+			os.Exit(1)
 		}
 		defer raftStore.Close()
 		raftDB, err = craft.Open(context.Background(), craft.Config{
@@ -265,11 +280,12 @@ func main() {
 			PeerHTTPAddrs: cfg.Cluster.HTTPPeers,
 		}, db.Raw(), raftStore.Raw())
 		if err != nil {
-			log.Fatalf("open raft: %v", err)
+			logger.Error("open raft", "err", err)
+			os.Exit(1)
 		}
 		defer raftDB.Close()
 		db.AttachReplicator(raftDB)
-		log.Printf("raft attached: id=%s bind=%s bootstrap=%v peers=%v raftStore=%s", cfg.Cluster.SelfID, cfg.Raft.Bind, cfg.Cluster.Bootstrap, cfg.Cluster.Peers, storePath)
+		logger.Info("raft attached", "id", cfg.Cluster.SelfID, "bind", cfg.Raft.Bind, "bootstrap", cfg.Cluster.Bootstrap, "peers", cfg.Cluster.Peers, "raftStore", storePath)
 	}
 
 	var validator *auth.Validator
@@ -282,14 +298,15 @@ func main() {
 			ClockSkew: cfg.Identity.ClockSkew,
 		})
 		if err != nil {
-			log.Fatalf("auth validator: %v", err)
+			logger.Error("auth validator", "err", err)
+			os.Exit(1)
 		}
-		log.Printf("identity auth enabled: jwks=%s issuer=%q audience=%q", cfg.Identity.JwksURL, cfg.Identity.Issuer, cfg.Identity.Audience)
+		logger.Info("identity auth enabled", "jwks", cfg.Identity.JwksURL, "issuer", cfg.Identity.Issuer, "audience", cfg.Identity.Audience)
 	}
 
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
-	backupScheduler := storage.NewScheduledBackupRunner(db, bootstrapserver.ScheduledBackupConfig(cfg, prom, log.Printf))
+	backupScheduler := storage.NewScheduledBackupRunner(db, bootstrapserver.ScheduledBackupConfig(cfg, prom, logf))
 
 	mux := http.NewServeMux()
 	apiSrv := api.New(db, cat)
@@ -328,18 +345,18 @@ func main() {
 	}
 	if cfg.BackupScheduler.Enabled {
 		go backupScheduler.Run(runtimeCtx)
-		log.Printf("scheduled backups enabled: interval=%s dryRun=%v template=%q tables=%v", cfg.BackupScheduler.Interval, cfg.BackupScheduler.DryRun, cfg.BackupScheduler.NameTemplate, cfg.BackupScheduler.Tables)
+		logger.Info("scheduled backups enabled", "interval", cfg.BackupScheduler.Interval, "dryRun", cfg.BackupScheduler.DryRun, "template", cfg.BackupScheduler.NameTemplate, "tables", cfg.BackupScheduler.Tables)
 	}
 	if cfg.Rebalancer.Enabled {
 		if mgr == nil {
-			log.Printf("rebalancer disabled: multi-Raft cluster manager is not configured")
+			logger.Info("rebalancer disabled", "reason", "multi-Raft cluster manager is not configured")
 		} else if prom == nil {
-			log.Printf("rebalancer disabled: metrics must be enabled for hotspot input")
+			logger.Info("rebalancer disabled", "reason", "metrics must be enabled for hotspot input")
 		} else {
 			ctrl := rebalancer.NewController(bootstrapserver.RebalancerConfig(cfg), mgr, prom, nil)
-			ctrl.SetLogger(log.Printf)
+			ctrl.SetLogger(logf)
 			go ctrl.Run(runtimeCtx)
-			log.Printf("rebalancer enabled: mode=%s interval=%s maxConcurrent=%d", cfg.Rebalancer.Mode, cfg.Rebalancer.Interval, cfg.Rebalancer.MaxConcurrentOperations)
+			logger.Info("rebalancer enabled", "mode", cfg.Rebalancer.Mode, "interval", cfg.Rebalancer.Interval, "maxConcurrent", cfg.Rebalancer.MaxConcurrentOperations)
 		}
 	}
 	apiSrv.Routes(mux)
@@ -355,9 +372,10 @@ func main() {
 		if raftDB != nil {
 			mode = "raft"
 		}
-		log.Printf("cefas-server listening on %s (data=%s, mode=%s)", cfg.HTTP.Addr, cfg.Data, mode)
+		logger.Info("cefas-server listening", "addr", cfg.HTTP.Addr, "data", cfg.Data, "mode", mode)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http serve: %v", err)
+			logger.Error("http serve", "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -366,7 +384,8 @@ func main() {
 	if cfg.GRPC.Addr != "" {
 		opts, err := bootstrapserver.BuildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath)
 		if err != nil {
-			log.Fatalf("grpc opts: %v", err)
+			logger.Error("grpc opts", "err", err)
+			os.Exit(1)
 		}
 		gsrv = grpc.NewServer(opts...)
 		var clu api.Cluster
@@ -395,12 +414,13 @@ func main() {
 		}
 		ln, err := net.Listen("tcp", cfg.GRPC.Addr)
 		if err != nil {
-			log.Fatalf("grpc listen: %v", err)
+			logger.Error("grpc listen", "err", err)
+			os.Exit(1)
 		}
 		go func() {
-			log.Printf("gRPC listening on %s (tls=%v mtls=%v reflection=%v)", cfg.GRPC.Addr, cfg.GRPC.TLSCertPath != "", cfg.GRPC.MTLSCAPath != "", cfg.GRPC.Reflection)
+			logger.Info("gRPC listening", "addr", cfg.GRPC.Addr, "tls", cfg.GRPC.TLSCertPath != "", "mtls", cfg.GRPC.MTLSCAPath != "", "reflection", cfg.GRPC.Reflection)
 			if err := gsrv.Serve(ln); err != nil {
-				log.Printf("grpc serve: %v", err)
+				logger.Error("grpc serve", "err", err)
 			}
 		}()
 	}
@@ -408,7 +428,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	log.Println("shutting down")
+	logger.Info("shutting down")
 	runtimeCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

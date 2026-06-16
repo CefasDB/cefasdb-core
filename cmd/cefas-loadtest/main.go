@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +16,13 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/client"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
+
+var logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+func fatal(msg string, args ...any) {
+	logger.Error(msg, args...)
+	os.Exit(1)
+}
 
 type config struct {
 	addr        string
@@ -52,20 +59,20 @@ func main() {
 		var err error
 		addr, err = selectLeader(ctx, cfg.addrs, opts)
 		if err != nil {
-			log.Fatalf("select leader: %v", err)
+			fatal("select leader", "err", err)
 		}
 	}
 	fmt.Printf("target: %s\n", addr)
 
 	cli, err := client.Dial(ctx, addr, opts...)
 	if err != nil {
-		log.Fatalf("dial: %v", err)
+		fatal("dial", "err", err)
 	}
 	defer cli.Close()
 
 	if cfg.createTable {
 		if err := ensureTable(ctx, cli, cfg.Table); err != nil {
-			log.Fatalf("create table: %v", err)
+			fatal("create table", "err", err)
 		}
 	}
 
@@ -75,7 +82,7 @@ func main() {
 		runner.PrintStats(stats)
 		phases = append(phases, runner.SummarizeStats(stats))
 		if err != nil {
-			log.Fatalf("write load failed: %v", err)
+			fatal("write load failed", "err", err)
 		}
 		wrote = stats.Units
 	}
@@ -86,7 +93,7 @@ func main() {
 			keyspace = wrote
 		}
 		if keyspace == 0 {
-			log.Fatal("--reads requires --keyspace when --items is 0")
+			fatal("invalid flags", "reason", "--reads requires --keyspace when --items is 0")
 		}
 		stats, found, err := runner.RunReadPhase(ctx, cfg.Config, cli, keyspace)
 		stats.Found = found
@@ -94,7 +101,7 @@ func main() {
 		fmt.Printf("read found: %d/%d\n", found, stats.Units)
 		phases = append(phases, runner.SummarizeStats(stats))
 		if err != nil {
-			log.Fatalf("read load failed: %v", err)
+			fatal("read load failed", "err", err)
 		}
 	}
 
@@ -104,7 +111,7 @@ func main() {
 			keyspace = wrote
 		}
 		if keyspace == 0 {
-			log.Fatal("--mixed-duration requires --keyspace or a preceding write phase")
+			fatal("invalid flags", "reason", "--mixed-duration requires --keyspace or a preceding write phase")
 		}
 		writeStartID := cfg.StartID + keyspace
 		writeStats, readStats, found, err := runner.RunMixedPhase(ctx, cfg.Config, cli, keyspace, writeStartID)
@@ -114,13 +121,13 @@ func main() {
 		fmt.Printf("mixed read found: %d/%d\n", found, readStats.Units)
 		phases = append(phases, runner.SummarizeStats(writeStats), runner.SummarizeStats(readStats))
 		if err != nil {
-			log.Fatalf("mixed load failed: %v", err)
+			fatal("mixed load failed", "err", err)
 		}
 	}
 
 	if cfg.JSONOutput != "" {
 		if err := runner.WriteReport(cfg.Config, addr, startedAt, time.Now(), phases); err != nil {
-			log.Fatalf("write json report: %v", err)
+			fatal("write json report", "err", err)
 		}
 		fmt.Printf("json report: %s\n", cfg.JSONOutput)
 	}
@@ -157,34 +164,34 @@ func parseFlags() config {
 	flag.Parse()
 
 	if cfg.Items < 0 || cfg.Reads < 0 {
-		log.Fatal("--items and --reads must be >= 0")
+		fatal("invalid flags", "reason", "--items and --reads must be >= 0")
 	}
 	if cfg.WriteDuration < 0 || cfg.ReadDuration < 0 {
-		log.Fatal("--write-duration and --read-duration must be >= 0")
+		fatal("invalid flags", "reason", "--write-duration and --read-duration must be >= 0")
 	}
 	if cfg.MixedDuration < 0 {
-		log.Fatal("--mixed-duration must be >= 0")
+		fatal("invalid flags", "reason", "--mixed-duration must be >= 0")
 	}
 	if cfg.StartID < 0 {
-		log.Fatal("--start-id must be >= 0")
+		fatal("invalid flags", "reason", "--start-id must be >= 0")
 	}
 	if cfg.BatchSize <= 0 {
-		log.Fatal("--batch-size must be > 0")
+		fatal("invalid flags", "reason", "--batch-size must be > 0")
 	}
 	if cfg.Workers <= 0 || cfg.ReadWorkers <= 0 {
-		log.Fatal("--workers and --read-workers must be > 0")
+		fatal("invalid flags", "reason", "--workers and --read-workers must be > 0")
 	}
 	if cfg.WriteRate < 0 || cfg.ReadRate < 0 {
-		log.Fatal("--write-rate and --read-rate must be >= 0")
+		fatal("invalid flags", "reason", "--write-rate and --read-rate must be >= 0")
 	}
 	if cfg.Users <= 0 {
-		log.Fatal("--users must be > 0")
+		fatal("invalid flags", "reason", "--users must be > 0")
 	}
 	if cfg.PayloadBytes < 0 {
-		log.Fatal("--payload-bytes must be >= 0")
+		fatal("invalid flags", "reason", "--payload-bytes must be >= 0")
 	}
 	if cfg.LatencySampleRate <= 0 {
-		log.Fatal("--latency-sample-rate must be > 0")
+		fatal("invalid flags", "reason", "--latency-sample-rate must be > 0")
 	}
 	return cfg
 }
