@@ -3,6 +3,8 @@ package cluster
 import (
 	"fmt"
 	"sort"
+
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 // planDrain derives the placement-plan that removes a node from
@@ -10,15 +12,16 @@ import (
 // callers must apply the resulting Raft membership steps shard by
 // shard before stopping the node.
 func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
-	if err := validateDrainInputs(cat, req); err != nil {
+	nodeID, err := validateDrainInputs(cat, req)
+	if err != nil {
 		return PlacementPlan{}, err
 	}
 	targets, err := drainTargets(cat, req)
 	if err != nil {
 		return PlacementPlan{}, err
 	}
-	after := markNodeDraining(cat, req.NodeID)
-	steps, policyWarnings, err := executeDrainShards(after, req, targets)
+	after := markNodeDraining(cat, nodeID)
+	steps, policyWarnings, err := executeDrainShards(after, req, nodeID, targets)
 	if err != nil {
 		return PlacementPlan{}, err
 	}
@@ -30,37 +33,41 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 }
 
 // validateDrainInputs enforces the two preconditions every drain
-// request must satisfy before any catalog mutation happens.
-func validateDrainInputs(cat PlacementCatalog, req PlacementPlanRequest) error {
-	if req.NodeID == "" {
-		return invalidPlan("drain requires nodeId")
+// request must satisfy before any catalog mutation happens, and
+// returns the validated NodeID value object so downstream helpers
+// cannot accidentally consume the raw request string.
+func validateDrainInputs(cat PlacementCatalog, req PlacementPlanRequest) (model.NodeID, error) {
+	nodeID, err := model.NewNodeID(req.NodeID)
+	if err != nil {
+		return model.NodeID{}, invalidPlan("drain requires nodeId")
 	}
-	if _, ok := cat.Nodes[req.NodeID]; !ok {
-		return invalidPlan("node %q does not exist in placement", req.NodeID)
+	if _, ok := cat.Nodes[nodeID.String()]; !ok {
+		return model.NodeID{}, invalidPlan("node %q does not exist in placement", nodeID.String())
 	}
-	return nil
+	return nodeID, nil
 }
 
 // markNodeDraining produces the next-epoch catalog with the node's
 // state flipped to NodeStateDraining. Subsequent helpers mutate the
 // returned catalog's shard membership in place.
-func markNodeDraining(cat PlacementCatalog, nodeID string) PlacementCatalog {
+func markNodeDraining(cat PlacementCatalog, nodeID model.NodeID) PlacementCatalog {
 	after := nextCatalog(cat)
-	node := after.Nodes[nodeID]
+	key := nodeID.String()
+	node := after.Nodes[key]
 	node.State = NodeStateDraining
-	after.Nodes[nodeID] = node
+	after.Nodes[key] = node
 	return after
 }
 
 // executeDrainShards walks the affected shards on `after` and
 // rejects the drain if the node is unreferenced by every shard.
-func executeDrainShards(after PlacementCatalog, req PlacementPlanRequest, targets []string) ([]PlacementPlanStep, []string, error) {
+func executeDrainShards(after PlacementCatalog, req PlacementPlanRequest, nodeID model.NodeID, targets []string) ([]PlacementPlanStep, []string, error) {
 	steps, policyWarnings, affected, err := drainShards(after, req, targets)
 	if err != nil {
 		return nil, nil, err
 	}
 	if affected == 0 {
-		return nil, nil, invalidPlan("node %q is not present in any shard membership", req.NodeID)
+		return nil, nil, invalidPlan("node %q is not present in any shard membership", nodeID.String())
 	}
 	return steps, policyWarnings, nil
 }
