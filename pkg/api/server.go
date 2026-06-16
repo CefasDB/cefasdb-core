@@ -29,6 +29,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	tablehttp "github.com/osvaldoandrade/cefas/pkg/api/http/table"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -429,15 +430,19 @@ func (s *Server) handleGetShardIterator(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	token, err := createStreamShardIterator(
-		s.cat,
-		s.db,
-		req.StreamArn,
-		req.ShardID,
-		req.ShardIteratorType,
-		req.SequenceNumber,
-		time.Now(),
-	)
+	shardID, err := model.NewStreamShardID(req.ShardID)
+	if err != nil {
+		err = fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.StreamArn), err)
+		writeErr(w, mapWriteErr(err), err)
+		return
+	}
+	token, err := createStreamShardIterator(s.cat, s.db, createIteratorRequest{
+		StreamArn:      req.StreamArn,
+		ShardID:        shardID,
+		IteratorType:   req.ShardIteratorType,
+		SequenceNumber: req.SequenceNumber,
+	}, time.Now())
 	if err != nil {
 		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.StreamArn), err)
 		writeErr(w, mapWriteErr(err), err)

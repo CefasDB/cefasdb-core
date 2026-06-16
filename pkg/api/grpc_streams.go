@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRequest) (*cefaspb.ListStreamsResponse, error) {
@@ -65,15 +68,18 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
-	token, err := createStreamShardIterator(
-		s.cat,
-		s.db,
-		req.GetStreamArn(),
-		req.GetShardId(),
-		req.GetShardIteratorType(),
-		req.GetSequenceNumber(),
-		time.Now(),
-	)
+	shardID, err := model.NewStreamShardID(req.GetShardId())
+	if err != nil {
+		err = fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.GetStreamArn()), err)
+		return nil, mapStorageErr(err)
+	}
+	token, err := createStreamShardIterator(s.cat, s.db, createIteratorRequest{
+		StreamArn:      req.GetStreamArn(),
+		ShardID:        shardID,
+		IteratorType:   req.GetShardIteratorType(),
+		SequenceNumber: req.GetSequenceNumber(),
+	}, time.Now())
 	if err != nil {
 		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.GetStreamArn()), err)
 		return nil, mapStorageErr(err)

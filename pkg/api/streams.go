@@ -12,8 +12,21 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
+
+// createIteratorRequest packs every input createStreamShardIterator
+// needs. Replaces the seven-parameter call that violated the §9
+// argument-limit cap; also gives StreamShardID a single validation
+// site at the boundary instead of repeating "if shardID == ''" in
+// every caller.
+type createIteratorRequest struct {
+	StreamArn      string
+	ShardID        model.StreamShardID
+	IteratorType   string
+	SequenceNumber string
+}
 
 const (
 	maxStreamAPILimit          = 100
@@ -36,12 +49,12 @@ const (
 var streamShardIteratorKey = []byte("cefas-stream-iterator-signing-key-v1")
 
 type streamShardIteratorPayload struct {
-	Version            int    `json:"version"`
-	StreamArn          string `json:"streamArn"`
-	ShardID            string `json:"shardId"`
-	NextSequenceNumber string `json:"nextSequenceNumber"`
-	IteratorType       string `json:"iteratorType"`
-	ExpiresUnixNano    int64  `json:"expiresUnixNano"`
+	Version            int                 `json:"version"`
+	StreamArn          string              `json:"streamArn"`
+	ShardID            model.StreamShardID `json:"shardId"`
+	NextSequenceNumber string              `json:"nextSequenceNumber"`
+	IteratorType       string              `json:"iteratorType"`
+	ExpiresUnixNano    int64               `json:"expiresUnixNano"`
 }
 
 type streamRecordEntry struct {
@@ -134,14 +147,11 @@ func paginateStreamShards(shards []types.StreamShardDescriptor, limit int, exclu
 	return shards[start:end], shards[end-1].ShardID, nil
 }
 
-func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, shardID, iteratorType, sequenceNumber string, now time.Time) (string, error) {
-	if streamArn == "" {
+func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, req createIteratorRequest, now time.Time) (string, error) {
+	if req.StreamArn == "" {
 		return "", fmt.Errorf("%w: stream_arn required", types.ErrStreamIteratorInvalid)
 	}
-	if shardID == "" {
-		return "", fmt.Errorf("%w: shard_id required", types.ErrStreamIteratorInvalid)
-	}
-	iteratorType = normalizeStreamIteratorType(iteratorType)
+	iteratorType := normalizeStreamIteratorType(req.IteratorType)
 	if iteratorType == "" {
 		return "", fmt.Errorf("%w: shard_iterator_type required", types.ErrStreamIteratorInvalid)
 	}
@@ -154,11 +164,11 @@ func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, 
 			streamIteratorTypeAtSequenceNumber,
 			streamIteratorTypeAfterSequenceNumber)
 	}
-	desc, err := cat.DescribeStream(streamArn)
+	desc, err := cat.DescribeStream(req.StreamArn)
 	if err != nil {
 		return "", err
 	}
-	shard, ok := findStreamShard(desc, shardID)
+	shard, ok := findStreamShard(desc, req.ShardID)
 	if !ok {
 		return "", types.ErrStreamShardNotFound
 	}
@@ -166,14 +176,14 @@ func createStreamShardIterator(cat *catalog.Catalog, db *storage.DB, streamArn, 
 	if err != nil {
 		return "", err
 	}
-	nextSequence, err := resolveShardIteratorNextSequence(db, shard, iteratorType, sequenceNumber, retention)
+	nextSequence, err := resolveShardIteratorNextSequence(db, shard, iteratorType, req.SequenceNumber, retention)
 	if err != nil {
 		return "", err
 	}
 	return encodeStreamShardIterator(streamShardIteratorPayload{
 		Version:            1,
-		StreamArn:          streamArn,
-		ShardID:            shardID,
+		StreamArn:          req.StreamArn,
+		ShardID:            req.ShardID,
 		NextSequenceNumber: strconv.FormatUint(nextSequence, 10),
 		IteratorType:       iteratorType,
 		ExpiresUnixNano:    now.Add(streamShardIteratorTTL).UnixNano(),
@@ -282,9 +292,10 @@ func validStreamIteratorType(iteratorType string) bool {
 	}
 }
 
-func findStreamShard(desc types.StreamDescriptor, shardID string) (types.StreamShardDescriptor, bool) {
+func findStreamShard(desc types.StreamDescriptor, shardID model.StreamShardID) (types.StreamShardDescriptor, bool) {
+	wanted := shardID.String()
 	for _, shard := range desc.Shards {
-		if shard.ShardID == shardID {
+		if shard.ShardID == wanted {
 			return shard, true
 		}
 	}
@@ -392,7 +403,7 @@ func decodeStreamShardIterator(token string, now time.Time) (streamShardIterator
 	}
 	if payload.Version != 1 ||
 		payload.StreamArn == "" ||
-		payload.ShardID == "" ||
+		payload.ShardID.String() == "" ||
 		payload.NextSequenceNumber == "" ||
 		!validStreamIteratorType(payload.IteratorType) ||
 		payload.ExpiresUnixNano == 0 {
