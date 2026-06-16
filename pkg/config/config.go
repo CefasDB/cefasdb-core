@@ -1,4 +1,4 @@
-// Package config is the cefas-server configuration loader. Precedence:
+// Package config is the cefasdb configuration loader. Precedence:
 // flag > env > yaml file > default. The pattern mirrors codeq's
 // loader so operators carry intuition between the two.
 //
@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the deserialised cefas-server configuration. Every field
+// Config is the deserialised cefasdb configuration. Every field
 // has a sensible zero-value default so callers can construct an empty
 // Config and still get a working single-node server.
 type Config struct {
@@ -342,7 +342,7 @@ func ApplyEnv(cfg *Config) error {
 }
 
 // ParsePeers turns a "id1=addr1,id2=addr2" string into the
-// canonical map. Exposed so cefas-server can reuse it for the
+// canonical map. Exposed so cefasdb can reuse it for the
 // -raft-peers / -raft-http-peers flag conversions.
 func ParsePeers(s string) (map[string]string, error) {
 	out := make(map[string]string)

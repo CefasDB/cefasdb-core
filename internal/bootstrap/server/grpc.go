@@ -1,5 +1,5 @@
-// Package server hosts bootstrap helpers shared by the cefas-server
-// binary. Its purpose is to keep cmd/cefas-server/main.go small by
+// Package server hosts bootstrap helpers shared by the cefasdb
+// binary. Its purpose is to keep cmd/cefasdb/main.go small by
 // holding pure, testable builders for server-side wiring (gRPC, TLS,
 // interceptors).
 package server

@@ -1,6 +1,6 @@
 // Package ddbjson is the canonical encoder/decoder for the
 // DynamoDB-flavoured AttributeValue JSON shape used by both the
-// cefas HTTP API and the cefas-cli surface.
+// cefas HTTP API and the cefasctl surface.
 //
 // On the wire each attribute is a single-letter-tagged union:
 //

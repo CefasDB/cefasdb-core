@@ -1,4 +1,4 @@
-# Single-node demo stack: one cefas-server + Prometheus + Grafana.
+# Single-node demo stack: one cefasdb + Prometheus + Grafana.
 # `docker compose -f deploy/docker-compose.yml up --build` brings the
 # whole thing up. cefas exposes:
 #   - HTTP / SQL on :8080
@@ -26,7 +26,7 @@ services:
       - ":9090"
       - "-grpc-reflection"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/cefas-server", "-help"]
+      test: ["CMD", "/usr/local/bin/cefasdb", "-help"]
       interval: 30s
       timeout: 5s
       retries: 3

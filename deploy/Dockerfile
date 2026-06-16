@@ -26,7 +26,7 @@ ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/cefas-server ./cmd/cefas-server
+    go build -trimpath -ldflags="-s -w" -o /out/cefasdb ./cmd/cefasdb
 
 RUN mkdir -p /out/var/lib/cefas && touch /out/var/lib/cefas/.keep
 
@@ -43,7 +43,7 @@ LABEL org.opencontainers.image.source="https://github.com/osvaldoandrade/cefas" 
       org.opencontainers.image.revision="${COMMIT}" \
       org.opencontainers.image.version="${VERSION}"
 
-COPY --from=build /out/cefas-server /usr/local/bin/cefas-server
+COPY --from=build /out/cefasdb /usr/local/bin/cefasdb
 COPY --from=build --chown=65532:65532 /out/var/lib/cefas /var/lib/cefas
 
 # Default data directory is bind-mounted by docker-compose / k8s; we
@@ -55,5 +55,5 @@ VOLUME ["/var/lib/cefas"]
 EXPOSE 8080 9090
 
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/cefas-server"]
+ENTRYPOINT ["/usr/local/bin/cefasdb"]
 CMD ["-data", "/var/lib/cefas", "-http", ":8080", "-grpc", ":9090"]

@@ -1,4 +1,4 @@
-// Package server holds bootstrap helpers shared by cmd/cefas-server.
+// Package server holds bootstrap helpers shared by cmd/cefasdb.
 // It carries no runtime state — every export is a pure function over
 // the parsed flag values and the loaded *config.Config.
 package server
