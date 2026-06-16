@@ -150,7 +150,11 @@ func auditKeyForShard(t *testing.T, mgr *Manager, shardID uint32) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if router.ShardForPK(pk) == shardID {
+		id, err := router.ShardForPK(pk)
+		if err != nil {
+			t.Fatalf("ShardForPK returned error: %v", err)
+		}
+		if id == shardID {
 			return key
 		}
 	}

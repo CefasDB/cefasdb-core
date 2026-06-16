@@ -135,7 +135,11 @@ func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
-	if got := router.ShardForPK([]byte(key)); got != 0 {
+	got, err := router.ShardForPK([]byte(key))
+	if err != nil {
+		t.Fatalf("ShardForPK returned error: %v", err)
+	}
+	if got != 0 {
 		t.Fatalf("transition route = %d, want source shard 0", got)
 	}
 }
@@ -556,7 +560,11 @@ func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
 		t.Fatalf("child state dir not created: %v", err)
 	}
 	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
-	if got := mgr.Router().ShardForPK([]byte(key)); got != 0 {
+	got, err := mgr.Router().ShardForPK([]byte(key))
+	if err != nil {
+		t.Fatalf("ShardForPK returned error: %v", err)
+	}
+	if got != 0 {
 		t.Fatalf("transition route = %d, want parent shard 0", got)
 	}
 
@@ -620,7 +628,11 @@ func TestApplyPlacementPreparesRangeMoveOnline(t *testing.T) {
 		t.Fatalf("target state dir not created: %v", err)
 	}
 	key := keyInRange(t, plan.After.Shards[1].Ranges[0])
-	if got := mgr.Router().ShardForPK([]byte(key)); got != 0 {
+	got, err := mgr.Router().ShardForPK([]byte(key))
+	if err != nil {
+		t.Fatalf("ShardForPK returned error: %v", err)
+	}
+	if got != 0 {
 		t.Fatalf("transition route = %d, want source shard 0", got)
 	}
 }
@@ -749,8 +761,12 @@ func TestFinalizeSplitCopiesRangeAndActivatesChild(t *testing.T) {
 	if result.Placement.Shards[0].State != cluster.ShardStateActive || result.Placement.Shards[1].State != cluster.ShardStateActive {
 		t.Fatalf("unexpected shard states: %+v", result.Placement.Shards)
 	}
-	if got := mgr.Router().ShardForPK([]byte(key)); got != 1 {
-		t.Fatalf("key routes to shard %d, want child shard 1", got)
+	routed, err := mgr.Router().ShardForPK([]byte(key))
+	if err != nil {
+		t.Fatalf("ShardForPK returned error: %v", err)
+	}
+	if routed != 1 {
+		t.Fatalf("key routes to shard %d, want child shard 1", routed)
 	}
 	got, err := child.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: key}})
 	if err != nil {
@@ -962,11 +978,19 @@ func TestFinalizeRangeMoveCopiesRangeAndActivatesTarget(t *testing.T) {
 	if len(result.SourceRangesAfter) != 1 || result.SourceRangesAfter[0] != stayRange {
 		t.Fatalf("source ranges after = %+v, want %+v", result.SourceRangesAfter, stayRange)
 	}
-	if got := mgr.Router().ShardForPK([]byte(movedKey)); got != 1 {
-		t.Fatalf("moved key routes to shard %d, want target shard 1", got)
+	movedRouted, err := mgr.Router().ShardForPK([]byte(movedKey))
+	if err != nil {
+		t.Fatalf("ShardForPK(moved) returned error: %v", err)
 	}
-	if got := mgr.Router().ShardForPK([]byte(stayKey)); got != 0 {
-		t.Fatalf("stay key routes to shard %d, want source shard 0", got)
+	if movedRouted != 1 {
+		t.Fatalf("moved key routes to shard %d, want target shard 1", movedRouted)
+	}
+	stayRouted, err := mgr.Router().ShardForPK([]byte(stayKey))
+	if err != nil {
+		t.Fatalf("ShardForPK(stay) returned error: %v", err)
+	}
+	if stayRouted != 0 {
+		t.Fatalf("stay key routes to shard %d, want source shard 0", stayRouted)
 	}
 	got, err := target.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: movedKey}})
 	if err != nil {

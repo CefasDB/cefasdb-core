@@ -462,7 +462,10 @@ func (m *Manager) RouteForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
 	if err := checkRoutingEpoch(epoch, m.placement.Epoch); err != nil {
 		return nil, err
 	}
-	id := m.router.ShardForPK(pkBytes)
+	id, err := m.router.ShardForPK(pkBytes)
+	if err != nil {
+		return nil, err
+	}
 	if int(id) >= len(m.shards) {
 		return nil, fmt.Errorf("cluster: routed to missing shard %d", id)
 	}
@@ -497,7 +500,10 @@ func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTa
 		return WriteTargets{}, err
 	}
 	token := m.router.TokenForPK(pkBytes)
-	id := m.router.ShardForUint64(token)
+	id, err := m.router.ShardForUint64(token)
+	if err != nil {
+		return WriteTargets{}, err
+	}
 	if int(id) >= len(m.shards) {
 		return WriteTargets{}, fmt.Errorf("cluster: routed to missing shard %d", id)
 	}

@@ -9,10 +9,18 @@
 package cluster
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/cespare/xxhash/v2"
 )
+
+// ErrNoShardForToken is returned by Router.ShardForPK / ShardForUint64
+// when the active placement catalog leaves a token uncovered by every
+// shard's range. This indicates the catalog is corrupted or out of
+// sync with the caller — ValidatePlacement is supposed to guarantee
+// full coverage at construction time.
+var ErrNoShardForToken = errors.New("cluster: no shard owns token under active placement")
 
 // Router maps a partition key (canonical byte form, same input the
 // storage layer's pkHash8 consumes) onto a shard ID using the active
@@ -29,10 +37,15 @@ type routeRange struct {
 
 // NewRouter returns a router that distributes keys over `n` shards.
 // n == 0 is treated as 1 (single-shard / dev mode).
+//
+// Invariant guard: DefaultPlacement is internally constructed from
+// well-formed inputs and must always pass ValidatePlacement. A panic
+// here means DefaultPlacement itself is broken — a programmer error
+// that should fail fast at boot, not be returned as a runtime error.
 func NewRouter(n int) *Router {
 	r, err := NewRouterFromCatalog(DefaultPlacement(n, "", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange))
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("cluster: DefaultPlacement produced an invalid catalog: %w", err))
 	}
 	return r
 }
@@ -106,7 +119,10 @@ func (r *Router) ShardIDs() []uint32 {
 // ShardForPK returns the shard ID owning the supplied partition key
 // bytes. The mapping uses xxhash64 tokens, the same hash family the
 // storage key encoder already uses for pk_hash8.
-func (r *Router) ShardForPK(pkBytes []byte) uint32 {
+//
+// Returns ErrNoShardForToken (wrapped with the epoch / token for
+// diagnosis) when the active catalog leaves the token uncovered.
+func (r *Router) ShardForPK(pkBytes []byte) (uint32, error) {
 	return r.ShardForUint64(r.TokenForPK(pkBytes))
 }
 
@@ -116,22 +132,25 @@ func (r *Router) TokenForPK(pkBytes []byte) uint64 {
 
 // ShardForUint64 routes a precomputed hash directly. Useful when the
 // caller already has the pkHash8 in hand.
-func (r *Router) ShardForUint64(h uint64) uint32 {
+//
+// Returns ErrNoShardForToken (wrapped with the epoch / token for
+// diagnosis) when the active catalog leaves the token uncovered.
+func (r *Router) ShardForUint64(h uint64) (uint32, error) {
 	if r == nil || len(r.catalog.Shards) == 0 {
-		return 0
+		return 0, nil
 	}
 	if r.catalog.Strategy == PlacementStrategyLegacyModulo {
 		if len(r.catalog.Shards) == 1 {
-			return 0
+			return 0, nil
 		}
-		return uint32(h % uint64(len(r.catalog.Shards)))
+		return uint32(h % uint64(len(r.catalog.Shards))), nil
 	}
 	for _, rr := range r.ranges {
 		if rr.rng.Contains(h) {
-			return rr.shardID
+			return rr.shardID, nil
 		}
 	}
-	panic(fmt.Sprintf("cluster: placement epoch %d has no shard for token %d", r.catalog.Epoch, h))
+	return 0, fmt.Errorf("%w: epoch=%d token=%d", ErrNoShardForToken, r.catalog.Epoch, h)
 }
 
 // GroupID returns the mux groupID for a shard. Reserved IDs:

@@ -32,7 +32,11 @@ func TestRouterDistributesKeys(t *testing.T) {
 	hits := make(map[uint32]int)
 	for i := 0; i < 10_000; i++ {
 		pk := []byte(fmt.Sprintf("user-%d", i))
-		hits[r.ShardForPK(pk)]++
+		id, err := r.ShardForPK(pk)
+		if err != nil {
+			t.Fatalf("ShardForPK(%q) returned error: %v", pk, err)
+		}
+		hits[id]++
 	}
 	if len(hits) != 4 {
 		t.Fatalf("expected hits on every shard, got %v", hits)
@@ -50,7 +54,11 @@ func TestRouterDistributesKeys(t *testing.T) {
 func TestRouterSingleShard(t *testing.T) {
 	r := cluster.NewRouter(1)
 	for i := 0; i < 100; i++ {
-		if r.ShardForPK([]byte(fmt.Sprintf("k%d", i))) != 0 {
+		id, err := r.ShardForPK([]byte(fmt.Sprintf("k%d", i)))
+		if err != nil {
+			t.Fatalf("single-shard router returned error: %v", err)
+		}
+		if id != 0 {
 			t.Fatalf("single-shard router routed away from 0")
 		}
 	}
@@ -70,13 +78,21 @@ func TestRouterUsesTokenRangePlacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.ShardForUint64(99); got != 0 {
+	mustShard := func(h uint64) uint32 {
+		t.Helper()
+		id, err := r.ShardForUint64(h)
+		if err != nil {
+			t.Fatalf("ShardForUint64(%d) returned error: %v", h, err)
+		}
+		return id
+	}
+	if got := mustShard(99); got != 0 {
 		t.Fatalf("token 99 routed to shard %d, want 0", got)
 	}
-	if got := r.ShardForUint64(100); got != 1 {
+	if got := mustShard(100); got != 1 {
 		t.Fatalf("token 100 routed to shard %d, want 1", got)
 	}
-	if got := r.ShardForUint64(^uint64(0)); got != 1 {
+	if got := mustShard(^uint64(0)); got != 1 {
 		t.Fatalf("max token routed to shard %d, want 1", got)
 	}
 	if r.Epoch() != 7 {
@@ -301,7 +317,10 @@ func TestMultiShardCluster(t *testing.T) {
 	keys := map[uint32]string{}
 	for i := 0; len(keys) < shards && i < 10_000; i++ {
 		k := fmt.Sprintf("k-%d", i)
-		s := router.ShardForPK([]byte(k))
+		s, err := router.ShardForPK([]byte(k))
+		if err != nil {
+			t.Fatalf("ShardForPK(%q) returned error: %v", k, err)
+		}
 		if _, ok := keys[s]; !ok {
 			keys[s] = k
 		}

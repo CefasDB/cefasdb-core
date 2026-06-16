@@ -165,7 +165,11 @@ func TestRollbackSplitBeforePublishRestoresRoutingAndData(t *testing.T) {
 	if placement.Shards[0].State != ShardStateActive || placement.Shards[1].State != ShardStateDecommissioned {
 		t.Fatalf("unexpected placement after rollback: %+v", placement.Shards)
 	}
-	if got := mgr.Router().ShardForPK([]byte(key)); got != 0 {
+	got, err := mgr.Router().ShardForPK([]byte(key))
+	if err != nil {
+		t.Fatalf("ShardForPK returned error: %v", err)
+	}
+	if got != 0 {
 		t.Fatalf("key routes to shard %d after rollback, want parent 0", got)
 	}
 	if got, err := parent.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": sAttrResume(key)}); err != nil || got["v"].S != "rollback" {
