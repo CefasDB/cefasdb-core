@@ -179,9 +179,6 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		if s.IndexName != "" {
 			return nil, fmt.Errorf("ALLOW SCAN cannot be combined with USE INDEX")
 		}
-		if s.OrderBy != "" {
-			return nil, fmt.Errorf("scalar ORDER BY with ALLOW SCAN is not supported yet")
-		}
 		if !s.Count && s.Limit <= 0 {
 			return nil, fmt.Errorf("ALLOW SCAN requires LIMIT for row-returning SELECT")
 		}
@@ -190,6 +187,8 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 			Limit:      s.Limit,
 			Project:    s.Columns,
 			Predicate:  s.Where,
+			OrderBy:    s.OrderBy,
+			OrderDesc:  s.OrderDesc,
 			Descriptor: td,
 			Count:      s.Count,
 		}, nil
@@ -246,6 +245,7 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		SKHigh:     skHigh,
 		Limit:      limit,
 		Project:    s.Columns,
+		OrderBy:    s.OrderBy,
 		OrderDesc:  s.OrderDesc,
 		Descriptor: td,
 		PostFilter: postFilter,

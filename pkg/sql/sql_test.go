@@ -258,6 +258,81 @@ func TestAllowScanCountDoesNotRequireLimit(t *testing.T) {
 	}
 }
 
+func TestAllowScanScalarOrderBy(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('a', 'bravo', 10)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('b', 'alpha', 30)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('c', 'charlie', 20)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name) VALUES ('d', 'delta')")
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY score DESC LIMIT 2")
+	assertColumnOrder(t, res.Rows, "id", []string{"b", "c"})
+	for _, row := range res.Rows {
+		if _, ok := row["score"]; ok {
+			t.Fatalf("projection leaked order column: %+v", row)
+		}
+	}
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY name ASC LIMIT 4")
+	assertColumnOrder(t, res.Rows, "id", []string{"b", "a", "c", "d"})
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY score ASC LIMIT 4")
+	assertColumnOrder(t, res.Rows, "id", []string{"a", "c", "b", "d"})
+}
+
+func TestScalarOrderByKeyQuerySortsBeforeLimit(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE events (PRIMARY KEY (user_id, ts))")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '001', 10)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '002', 30)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '003', 20)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '004', 40)")
+
+	res := mustExec(t, ex, cat, "SELECT ts FROM events WHERE user_id = 'alice' ORDER BY score DESC LIMIT 2")
+	assertColumnOrder(t, res.Rows, "ts", []string{"004", "002"})
+}
+
+func TestScalarOrderByMixedTypesIsDeterministic(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, rank) VALUES ('string', '5')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, rank) VALUES ('number', 5)")
+	mustExec(t, ex, cat, "INSERT INTO t (id) VALUES ('missing')")
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY rank ASC LIMIT 3")
+	assertColumnOrder(t, res.Rows, "id", []string{"string", "number", "missing"})
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY rank DESC LIMIT 3")
+	assertColumnOrder(t, res.Rows, "id", []string{"number", "string", "missing"})
+}
+
+func assertColumnOrder(t *testing.T, rows []types.Item, col string, want []string) {
+	t.Helper()
+	if len(rows) != len(want) {
+		t.Fatalf("len(%s) = %d, want %d: %+v", col, len(rows), len(want), rows)
+	}
+	for i, row := range rows {
+		av, ok := row[col]
+		if !ok || av.T != types.AttrS {
+			t.Fatalf("row %d missing string %q: %+v", i, col, row)
+		}
+		if av.S != want[i] {
+			t.Fatalf("%s order = %v, want %v", col, columnStrings(rows, col), want)
+		}
+	}
+}
+
+func columnStrings(rows []types.Item, col string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if av, ok := row[col]; ok && av.T == types.AttrS {
+			out = append(out, av.S)
+		}
+	}
+	return out
+}
+
 func TestUpdateRejectsKeyColumn(t *testing.T) {
 	_, cat := newStorage(t)
 	if err := cat.Create(types.TableDescriptor{Name: "t", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
