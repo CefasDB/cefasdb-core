@@ -29,6 +29,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
@@ -73,6 +74,8 @@ func (s *GRPCServer) ensureBanditStore() (*bandit.Plugin, error) {
 
 // BanditCreate registers a bandit + its arms with the plugin.
 func (s *GRPCServer) BanditCreate(ctx context.Context, req *cefaspb.BanditCreateRequest) (*cefaspb.BanditCreateResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BanditCreate")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
@@ -110,6 +113,8 @@ func (s *GRPCServer) BanditCreate(ctx context.Context, req *cefaspb.BanditCreate
 
 // BanditSample returns one or more arm IDs from the named bandit.
 func (s *GRPCServer) BanditSample(ctx context.Context, req *cefaspb.BanditSampleRequest) (*cefaspb.BanditSampleResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BanditSample")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemRead); err != nil {
 		return nil, err
 	}
@@ -135,6 +140,8 @@ func (s *GRPCServer) BanditSample(ctx context.Context, req *cefaspb.BanditSample
 // BanditReward records one reward observation. The plugin handles the
 // optimistic-lock retry loop internally.
 func (s *GRPCServer) BanditReward(ctx context.Context, req *cefaspb.BanditRewardRequest) (*cefaspb.BanditRewardResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BanditReward")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemWrite); err != nil {
 		return nil, err
 	}
@@ -151,6 +158,8 @@ func (s *GRPCServer) BanditReward(ctx context.Context, req *cefaspb.BanditReward
 // BanditDescribe returns the live posterior for every arm under
 // bandit_id. Read-only.
 func (s *GRPCServer) BanditDescribe(ctx context.Context, req *cefaspb.BanditDescribeRequest) (*cefaspb.BanditDescribeResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BanditDescribe")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}

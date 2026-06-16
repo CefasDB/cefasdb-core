@@ -13,6 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -151,6 +152,8 @@ type streamRecordDataHTTP struct {
 
 // HandleListStreams serves POST /v1/ListStreams.
 func (h *Handlers) HandleListStreams(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "ListStreams")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -190,6 +193,8 @@ func (h *Handlers) HandleListStreams(w http.ResponseWriter, r *http.Request) {
 
 // HandleDescribeStream serves POST /v1/DescribeStream.
 func (h *Handlers) HandleDescribeStream(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "DescribeStream")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -237,6 +242,8 @@ func (h *Handlers) HandleDescribeStream(w http.ResponseWriter, r *http.Request) 
 
 // HandleGetShardIterator serves POST /v1/GetShardIterator.
 func (h *Handlers) HandleGetShardIterator(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "GetShardIterator")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -272,6 +279,8 @@ func (h *Handlers) HandleGetShardIterator(w http.ResponseWriter, r *http.Request
 
 // HandleGetRecords serves POST /v1/GetRecords.
 func (h *Handlers) HandleGetRecords(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "GetRecords")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -305,6 +314,8 @@ func (h *Handlers) HandleGetRecords(w http.ResponseWriter, r *http.Request) {
 // helper) so the long-lived connection bypasses per-request
 // instrumentation.
 func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Stream")
+	defer span.End()
 	if h.stream == nil {
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("change stream not configured"))
 		return

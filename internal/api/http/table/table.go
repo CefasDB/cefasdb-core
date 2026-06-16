@@ -9,6 +9,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -49,6 +50,8 @@ type jsonKeySchema struct {
 // HandleTables serves /v1/tables: POST creates a table, GET lists
 // every table descriptor.
 func (h *Handlers) HandleTables(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Tables")
+	defer span.End()
 	switch r.Method {
 	case http.MethodPost:
 		h.create(w, r)
@@ -61,6 +64,8 @@ func (h *Handlers) HandleTables(w http.ResponseWriter, r *http.Request) {
 
 // HandleTable serves /v1/tables/<name>: GET describes a single table.
 func (h *Handlers) HandleTable(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Table")
+	defer span.End()
 	name := r.URL.Path[len("/v1/tables/"):]
 	if name == "" {
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("table name required"))

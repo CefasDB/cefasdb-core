@@ -17,6 +17,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/core/query/mmr"
@@ -43,6 +44,8 @@ type recommendationRow struct {
 // set; cap optionally applies dedup/frequency gates before the final
 // limit.
 func (s *GRPCServer) Recommend(ctx context.Context, req *cefaspb.RecommendRequest) (*cefaspb.RecommendResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Recommend")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -246,6 +249,8 @@ func (s *GRPCServer) applyRecommendationCaps(req *cefaspb.RecommendRequest, rows
 // NextBestAction composes eligibility -> bandit -> cap -> action and
 // writes every decision to the internal __decisions__ namespace.
 func (s *GRPCServer) NextBestAction(ctx context.Context, req *cefaspb.NextBestActionRequest) (*cefaspb.NextBestActionResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "NextBestAction")
+	defer span.End()
 	if err := requireAnyScope(ctx, auth.ScopeItemRead, auth.ScopeItemWrite); err != nil {
 		return nil, err
 	}
@@ -388,6 +393,8 @@ func (s *GRPCServer) checkNBACap(req *cefaspb.NextBestActionRequest, actionID st
 }
 
 func (s *GRPCServer) RecordReward(ctx context.Context, req *cefaspb.RecordRewardRequest) (*cefaspb.RecordRewardResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "RecordReward")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemWrite); err != nil {
 		return nil, err
 	}
@@ -420,6 +427,8 @@ func (s *GRPCServer) RecordReward(ctx context.Context, req *cefaspb.RecordReward
 }
 
 func (s *GRPCServer) GetDecision(ctx context.Context, req *cefaspb.GetDecisionRequest) (*cefaspb.GetDecisionResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetDecision")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemRead); err != nil {
 		return nil, err
 	}

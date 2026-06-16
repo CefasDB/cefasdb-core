@@ -10,6 +10,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -23,6 +24,8 @@ const awsTransactLimit = 100
 // or cross-shard transactions are explicitly rejected; the issue
 // (#80) tracks the multi-shard 2PC design as follow-up work.
 func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.TransactWriteItemsRequest) (*cefaspb.TransactWriteItemsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "TransactWriteItems")
+	defer span.End()
 	ops := req.GetOps()
 	if len(ops) == 0 {
 		return &cefaspb.TransactWriteItemsResponse{}, nil
@@ -153,6 +156,8 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 // single-shard — uses BatchGetItem so the response shape matches the
 // existing batch path.
 func (s *GRPCServer) TransactGetItems(ctx context.Context, req *cefaspb.TransactGetItemsRequest) (*cefaspb.TransactGetItemsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "TransactGetItems")
+	defer span.End()
 	items := req.GetItems()
 	if len(items) == 0 {
 		return &cefaspb.TransactGetItemsResponse{}, nil
