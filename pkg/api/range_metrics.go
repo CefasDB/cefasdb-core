@@ -37,7 +37,11 @@ func rangeMetricRoute(mgr *cluster.Manager, pkBytes []byte) (string, uint64) {
 	}
 	router := mgr.Router()
 	token := router.TokenForPK(pkBytes)
-	return strconv.FormatUint(uint64(router.ShardForUint64(token)), 10), token
+	id, err := router.ShardForUint64(token)
+	if err != nil {
+		return "unrouted", token
+	}
+	return strconv.FormatUint(uint64(id), 10), token
 }
 
 func estimatedItemBytes(item types.Item) uint64 {
