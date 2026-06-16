@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
+func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	if hasGSI(td, indexName) {
 		return queryGSIAcrossShards(s.allShards(), td, indexName, pkVal, opts)
 	}
@@ -21,7 +22,7 @@ func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pk
 	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
 }
 
-func queryGSIAcrossShards(dbs []*storage.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
+func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	var out []types.Item
 	seen := make(map[string]struct{})
 	shardOpts := opts

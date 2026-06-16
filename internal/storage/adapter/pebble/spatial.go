@@ -1,8 +1,10 @@
-package storage
+package pebble
 
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -22,11 +24,11 @@ func planSpatial(
 	ks types.KeySchema,
 	indexes []types.SpatialIndexDescriptor,
 	prior, next types.Item,
-) ([]indexOp, error) {
+) ([]storage.IndexOp, error) {
 	if len(indexes) == 0 {
 		return nil, nil
 	}
-	ops := make([]indexOp, 0, len(indexes)*2)
+	ops := make([]storage.IndexOp, 0, len(indexes)*2)
 	for _, idx := range indexes {
 		if err := validateSpatial(idx); err != nil {
 			return nil, fmt.Errorf("spatial %q: %w", idx.Name, err)
@@ -39,14 +41,14 @@ func planSpatial(
 		if err != nil {
 			return nil, fmt.Errorf("spatial %q (next): %w", idx.Name, err)
 		}
-		if priorKey != nil && nextKey != nil && bytesEqual(priorKey, nextKey) {
+		if priorKey != nil && nextKey != nil && storage.BytesEqual(priorKey, nextKey) {
 			continue
 		}
 		if priorKey != nil {
-			ops = append(ops, indexOp{op: indexOpDelete, key: priorKey})
+			ops = append(ops, storage.IndexOp{Op: storage.IndexOpDelete, Key: priorKey})
 		}
 		if nextKey != nil {
-			ops = append(ops, indexOp{op: indexOpSet, key: nextKey, value: nextVal})
+			ops = append(ops, storage.IndexOp{Op: storage.IndexOpSet, Key: nextKey, Value: nextVal})
 		}
 	}
 	return ops, nil
@@ -88,7 +90,7 @@ func spatialEntry(
 	if err != nil {
 		return nil, nil, err
 	}
-	val := EncodeGSIPointer(primaryPK, primarySK)
+	val := storage.EncodeGSIPointer(primaryPK, primarySK)
 
 	switch idx.Kind {
 	case SpatialKindGeohash:
@@ -107,7 +109,7 @@ func spatialEntry(
 		if err != nil {
 			return nil, nil, err
 		}
-		return KeyGeo(table, idx.Name, string(h), primaryPK, primarySK), val, nil
+		return storage.KeyGeo(table, idx.Name, string(h), primaryPK, primarySK), val, nil
 	case SpatialKindZorder:
 		dims := make([]uint32, len(idx.Attributes))
 		for i, attr := range idx.Attributes {
@@ -125,7 +127,7 @@ func spatialEntry(
 		if err != nil {
 			return nil, nil, err
 		}
-		return KeyZorder(table, idx.Name, mortonBytes, primaryPK, primarySK), val, nil
+		return storage.KeyZorder(table, idx.Name, mortonBytes, primaryPK, primarySK), val, nil
 	}
 	return nil, nil, fmt.Errorf("unknown spatial kind %q", idx.Kind)
 }
@@ -135,7 +137,7 @@ func primaryKeyBytes(item types.Item, ks types.KeySchema) (pk, sk []byte, err er
 	if !ok {
 		return nil, nil, fmt.Errorf("primary PK %q missing on item", ks.PK)
 	}
-	pk, err = AttrCanonicalBytes(pkAttr)
+	pk, err = storage.AttrCanonicalBytes(pkAttr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("primary PK %q: %w", ks.PK, err)
 	}
@@ -146,7 +148,7 @@ func primaryKeyBytes(item types.Item, ks types.KeySchema) (pk, sk []byte, err er
 	if !ok {
 		return nil, nil, fmt.Errorf("primary SK %q missing on item", ks.SK)
 	}
-	sk, err = AttrCanonicalBytes(skAttr)
+	sk, err = storage.AttrCanonicalBytes(skAttr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("primary SK %q: %w", ks.SK, err)
 	}
@@ -241,7 +243,7 @@ func (d *DB) spatialQueryGeohash(td types.TableDescriptor, idx types.SpatialInde
 	var out []types.Item
 
 	for _, p := range prefixes {
-		lower, upper := PrefixGeoCell(td.Name, idx.Name, string(p))
+		lower, upper := storage.PrefixGeoCell(td.Name, idx.Name, string(p))
 		it, err := d.Iter(lower, upper)
 		if err != nil {
 			return nil, err
@@ -282,7 +284,7 @@ func (d *DB) spatialQueryZorder(td types.TableDescriptor, idx types.SpatialIndex
 	if err != nil {
 		return nil, err
 	}
-	lower, upper := RangeZorder(td.Name, idx.Name, low, high)
+	lower, upper := storage.RangeZorder(td.Name, idx.Name, low, high)
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return nil, err
@@ -331,7 +333,7 @@ func iterateAndResolve(
 		v := it.Value()
 		ptrCopy := make([]byte, len(v))
 		copy(ptrCopy, v)
-		primaryPK, primarySK, err := DecodeGSIPointer(ptrCopy)
+		primaryPK, primarySK, err := storage.DecodeGSIPointer(ptrCopy)
 		if err != nil {
 			return fmt.Errorf("decode pointer: %w", err)
 		}
@@ -339,14 +341,14 @@ func iterateAndResolve(
 		if _, ok := seen[dedupe]; ok {
 			continue
 		}
-		raw, err := d.Get(KeyPrimary(table, primaryPK, primarySK))
+		raw, err := d.Get(storage.KeyPrimary(table, primaryPK, primarySK))
 		if err == ErrNotFound {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		item, err := DecodeItem(raw)
+		item, err := storage.DecodeItem(raw)
 		if err != nil {
 			return fmt.Errorf("decode item: %w", err)
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 )
 
 const rangeMoveFinalizeStatePrefix = storage.Namespace + "cluster/range-move/finalize/"
@@ -382,7 +383,7 @@ func (m *Manager) loadRangeMoveFinalizeState(sourceShardID, targetShardID uint32
 		return RangeMoveFinalizeState{}, false, fmt.Errorf("cluster: shard 0 unavailable")
 	}
 	raw, err := shard0.Storage.Get(rangeMoveFinalizeStateKey(sourceShardID, targetShardID))
-	if err == storage.ErrNotFound {
+	if err == pebble.ErrNotFound {
 		return RangeMoveFinalizeState{}, false, nil
 	}
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -22,7 +23,7 @@ func TestFinalizeSplitVerificationFailsOnMismatch(t *testing.T) {
 	parent, child, td, key := seedSplitRow(t, mgr, plan, "mismatch")
 	setSplitFinalizeHook(t, func(phase SplitFinalizePhase, _ SplitFinalizeState) error {
 		if phase == SplitFinalizePhaseCopied {
-			if err := child.Storage.DeleteItemWith(td, types.Item{"id": sAttrResume(key)}, storage.DeleteOptions{}); err != nil {
+			if err := child.Storage.DeleteItemWith(td, types.Item{"id": sAttrResume(key)}, pebble.DeleteOptions{}); err != nil {
 				t.Fatalf("delete copied child row: %v", err)
 			}
 		}
@@ -148,7 +149,7 @@ func TestRollbackSplitBeforePublishRestoresRoutingAndData(t *testing.T) {
 	if _, err := copyCatalogKeys(context.Background(), parent.Storage, child.Storage); err != nil {
 		t.Fatalf("copy catalog: %v", err)
 	}
-	if err := child.Storage.PutItemWith(td, types.Item{"id": sAttrResume(key), "v": sAttrResume("rollback")}, storage.PutOptions{}); err != nil {
+	if err := child.Storage.PutItemWith(td, types.Item{"id": sAttrResume(key), "v": sAttrResume("rollback")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put child copy: %v", err)
 	}
 
@@ -230,7 +231,7 @@ func seedSplitRow(t *testing.T, mgr *Manager, plan placement.PlacementPlan, valu
 		t.Fatal(err)
 	}
 	key := keyInRangeForResume(t, plan.After.Shards[1].Ranges[0])
-	if err := parent.Storage.PutItemWith(td, types.Item{"id": sAttrResume(key), "v": sAttrResume(value)}, storage.PutOptions{}); err != nil {
+	if err := parent.Storage.PutItemWith(td, types.Item{"id": sAttrResume(key), "v": sAttrResume(value)}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put parent row: %v", err)
 	}
 	return parent, child, td, key
@@ -260,7 +261,7 @@ func setSplitFinalizeHook(t *testing.T, hook func(SplitFinalizePhase, SplitFinal
 	t.Cleanup(func() { splitFinalizeTestHook = prev })
 }
 
-func countKeysForResume(t *testing.T, db *storage.DB, bounds func() ([]byte, []byte)) int {
+func countKeysForResume(t *testing.T, db *pebble.DB, bounds func() ([]byte, []byte)) int {
 	t.Helper()
 	lower, upper := bounds()
 	iter, err := db.Iter(lower, upper)

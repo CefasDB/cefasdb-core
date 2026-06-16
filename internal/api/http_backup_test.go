@@ -7,14 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func TestHTTPRestoreTableFromBackupDryRun(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestHTTPRestoreTableFromBackupDryRun(t *testing.T) {
 			"id": types.AttributeValue{T: types.AttrS, S: id},
 			"v":  types.AttributeValue{T: types.AttrS, S: id + "-v"},
 		}
-		if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -77,7 +77,7 @@ func TestHTTPRestoreTableFromBackupDryRun(t *testing.T) {
 }
 
 func TestHTTPDeleteBackup(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestHTTPDeleteBackup(t *testing.T) {
 }
 
 func TestHTTPApplyBackupRetentionDryRun(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

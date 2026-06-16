@@ -1,10 +1,12 @@
-package storage
+package pebble
 
 import (
 	"bytes"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -117,7 +119,7 @@ func (d *DB) memoryScan(table string, lower, upper []byte, limit int) ([]types.I
 
 	out := make([]types.Item, 0, len(raw))
 	for i, v := range raw {
-		item, err := DecodeItem(v)
+		item, err := storage.DecodeItem(v)
 		if err != nil {
 			return nil, fmt.Errorf("decode memory item %d: %w", i, err)
 		}
@@ -130,7 +132,7 @@ func (d *DB) ensureMemoryTableLoaded(table string) error {
 	if d.memoryHasTable(table) {
 		return nil
 	}
-	lower, upper := PrefixPrimaryAll(table)
+	lower, upper := storage.PrefixPrimaryAll(table)
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return err

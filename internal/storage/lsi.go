@@ -9,16 +9,16 @@ import (
 // planLSI mirrors planGSI but routes through the primary partition's
 // key. Sparse semantics: items missing the LSI SK attribute are
 // simply not indexed.
-func planLSI(
+func PlanLSI(
 	table string,
 	ks types.KeySchema,
 	lsis []types.LSIDescriptor,
 	prior, next types.Item,
-) ([]indexOp, error) {
+) ([]IndexOp, error) {
 	if len(lsis) == 0 {
 		return nil, nil
 	}
-	ops := make([]indexOp, 0, len(lsis)*2)
+	ops := make([]IndexOp, 0, len(lsis)*2)
 	for _, l := range lsis {
 		if l.SK == "" {
 			return nil, fmt.Errorf("lsi %q: missing SK attribute name", l.Name)
@@ -31,14 +31,14 @@ func planLSI(
 		if err != nil {
 			return nil, fmt.Errorf("lsi %q (next): %w", l.Name, err)
 		}
-		if priorKey != nil && nextKey != nil && bytesEqual(priorKey, nextKey) {
+		if priorKey != nil && nextKey != nil && BytesEqual(priorKey, nextKey) {
 			continue
 		}
 		if priorKey != nil {
-			ops = append(ops, indexOp{op: indexOpDelete, key: priorKey})
+			ops = append(ops, IndexOp{Op: IndexOpDelete, Key: priorKey})
 		}
 		if nextKey != nil {
-			ops = append(ops, indexOp{op: indexOpSet, key: nextKey, value: nextVal})
+			ops = append(ops, IndexOp{Op: IndexOpSet, Key: nextKey, Value: nextVal})
 		}
 	}
 	return ops, nil

@@ -1,4 +1,4 @@
-package storage_test
+package pebble_test
 
 import (
 	"encoding/json"
@@ -11,13 +11,14 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func openDB(t *testing.T) *storage.DB {
+func openDB(t *testing.T) *pebble.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestCreateBackupWritesCheckpointAndMetadata(t *testing.T) {
 	if meta.Name != "first" || len(meta.Tables) != 2 {
 		t.Fatalf("meta = %+v", meta)
 	}
-	if meta.ManifestVersion != storage.BackupManifestVersion || meta.ManifestStatus != "ok" {
+	if meta.ManifestVersion != pebble.BackupManifestVersion || meta.ManifestStatus != "ok" {
 		t.Fatalf("manifest = version %d status %q", meta.ManifestVersion, meta.ManifestStatus)
 	}
 	if len(meta.RequestedTables) != 2 || meta.RequestedTables[0] != "T1" || meta.RequestedTables[1] != "T2" {
@@ -78,24 +79,24 @@ func TestRestoreTablePointInTimeReplaysChanges(t *testing.T) {
 	if err := cat.Create(td); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("old")}, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("old")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put old: %v", err)
 	}
 	_, err = db.CreateBackup("snap", []string{"Users"})
 	if err != nil {
 		t.Fatalf("backup: %v", err)
 	}
-	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("new")}, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u1"), "v": sAttr("new")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put new: %v", err)
 	}
-	if err := db.PutItemWith(td, types.Item{"id": sAttr("u2"), "v": sAttr("second")}, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("u2"), "v": sAttr("second")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put second: %v", err)
 	}
 	targetIndex, err := db.CurrentChangeIndex()
 	if err != nil {
 		t.Fatalf("change index: %v", err)
 	}
-	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_pitr", storage.RestoreOptions{
+	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_pitr", pebble.RestoreOptions{
 		TargetChangeIndex: targetIndex,
 	}, cat.Create)
 	if err != nil {
@@ -118,7 +119,7 @@ func TestRestoreTablePointInTimeReplaysChanges(t *testing.T) {
 	if got["v"].S != "second" {
 		t.Fatalf("restored u2 = %+v, want second", got)
 	}
-	_, err = db.RestoreTableFromBackupWithOptions("snap", "Users", "before_backup", storage.RestoreOptions{
+	_, err = db.RestoreTableFromBackupWithOptions("snap", "Users", "before_backup", pebble.RestoreOptions{
 		DryRun:            true,
 		TargetChangeIndex: ^uint64(0),
 	}, cat.Create)
@@ -194,7 +195,7 @@ func TestLegacyBackupMetadataReportsLegacyManifestStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	legacy := storage.BackupMetadata{
+	legacy := pebble.BackupMetadata{
 		Name:         meta.Name,
 		CreatedAt:    meta.CreatedAt,
 		Tables:       meta.Tables,
@@ -254,7 +255,7 @@ func TestRestoreDryRunValidatesWithoutWritingTarget(t *testing.T) {
 	}
 
 	called := false
-	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{DryRun: true}, func(types.TableDescriptor) error {
+	res, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", pebble.RestoreOptions{DryRun: true}, func(types.TableDescriptor) error {
 		called = true
 		return nil
 	})
@@ -281,7 +282,7 @@ func TestRestorePreflightRejectsExistingTargetBeforeRegister(t *testing.T) {
 	}
 
 	called := false
-	_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{}, func(types.TableDescriptor) error {
+	_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", pebble.RestoreOptions{}, func(types.TableDescriptor) error {
 		called = true
 		return nil
 	})
@@ -337,8 +338,8 @@ func TestDeleteBackupRemovesMetadataAndCheckpoint(t *testing.T) {
 func TestDeleteBackupMissingBackup(t *testing.T) {
 	db := openDB(t)
 	_, err := db.DeleteBackup("ghost")
-	if !errors.Is(err, storage.ErrBackupNotFound) {
-		t.Fatalf("delete missing err = %v, want ErrBackupNotFound", err)
+	if !errors.Is(err, pebble.ErrBackupNotFound) {
+		t.Fatalf("delete missing err = %v, want pebble.ErrBackupNotFound", err)
 	}
 }
 
@@ -353,7 +354,7 @@ func TestDeleteBackupRefusesActiveRestore(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", storage.RestoreOptions{}, func(types.TableDescriptor) error {
+		_, err := db.RestoreTableFromBackupWithOptions("snap", "Users", "Users_restored", pebble.RestoreOptions{}, func(types.TableDescriptor) error {
 			close(started)
 			<-release
 			return nil
@@ -363,8 +364,8 @@ func TestDeleteBackupRefusesActiveRestore(t *testing.T) {
 	<-started
 
 	_, err := db.DeleteBackup("snap")
-	if !errors.Is(err, storage.ErrBackupInUse) {
-		t.Fatalf("delete active restore err = %v, want ErrBackupInUse", err)
+	if !errors.Is(err, pebble.ErrBackupInUse) {
+		t.Fatalf("delete active restore err = %v, want pebble.ErrBackupInUse", err)
 	}
 	close(release)
 	if err := <-done; err != nil {
@@ -383,7 +384,7 @@ func TestApplyBackupRetentionDryRunOrdersOldestFirst(t *testing.T) {
 	setBackupCreatedAt(t, db, "middle", 200)
 	setBackupCreatedAt(t, db, "new", 300)
 
-	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+	result, err := db.ApplyBackupRetention(pebble.BackupRetentionOptions{
 		KeepLatestSet: true,
 		KeepLatest:    1,
 		DryRun:        true,
@@ -412,7 +413,7 @@ func TestApplyBackupRetentionMaxAgeDeletesOldCheckpoints(t *testing.T) {
 	oldMeta := setBackupCreatedAt(t, db, "old", 100)
 	freshMeta := setBackupCreatedAt(t, db, "fresh", 250)
 
-	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+	result, err := db.ApplyBackupRetention(pebble.BackupRetentionOptions{
 		MaxAgeSet: true,
 		MaxAge:    100 * time.Second,
 		Now:       time.Unix(250, 0),
@@ -441,7 +442,7 @@ func TestApplyBackupRetentionKeepsLatestEvenWhenOlderThanMaxAge(t *testing.T) {
 	setBackupCreatedAt(t, db, "old", 100)
 	setBackupCreatedAt(t, db, "latest", 200)
 
-	result, err := db.ApplyBackupRetention(storage.BackupRetentionOptions{
+	result, err := db.ApplyBackupRetention(pebble.BackupRetentionOptions{
 		KeepLatestSet: true,
 		KeepLatest:    1,
 		MaxAgeSet:     true,
@@ -473,7 +474,7 @@ func TestCreateBackupRefusesExistingCheckpointDir(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir pebble: %v", err)
 	}
-	d2, err := storage.Open(storage.Options{Path: root})
+	d2, err := pebble.Open(pebble.Options{Path: root})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -489,7 +490,7 @@ func TestCreateBackupRefusesExistingCheckpointDir(t *testing.T) {
 	_ = db
 }
 
-func setBackupCreatedAt(t *testing.T, db *storage.DB, name string, createdAt int64) storage.BackupMetadata {
+func setBackupCreatedAt(t *testing.T, db *pebble.DB, name string, createdAt int64) pebble.BackupMetadata {
 	t.Helper()
 	meta, err := db.GetBackup(name)
 	if err != nil {
@@ -509,7 +510,7 @@ func setBackupCreatedAt(t *testing.T, db *storage.DB, name string, createdAt int
 	return *meta
 }
 
-func seedBackupTable(t *testing.T, db *storage.DB, table string, ids ...string) {
+func seedBackupTable(t *testing.T, db *pebble.DB, table string, ids ...string) {
 	t.Helper()
 	td := types.TableDescriptor{
 		Name:      table,
@@ -527,7 +528,7 @@ func seedBackupTable(t *testing.T, db *storage.DB, table string, ids ...string) 
 			"id": types.AttributeValue{T: types.AttrS, S: id},
 			"v":  types.AttributeValue{T: types.AttrS, S: id + "-value"},
 		}
-		if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s/%s: %v", table, id, err)
 		}
 	}

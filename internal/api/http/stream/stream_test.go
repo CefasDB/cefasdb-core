@@ -11,16 +11,16 @@ import (
 	streamhttp "github.com/osvaldoandrade/cefas/internal/api/http/stream"
 	"github.com/osvaldoandrade/cefas/internal/api/streamcore"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 // newHandlers spins up a tempdir-backed storage + catalog and returns
 // a Handlers instance with no ChangeStream and no metric observers
 // (the SSE-off and metrics-off paths are exercised separately).
-func newHandlers(t *testing.T) (*streamhttp.Handlers, *storage.DB, *catalog.Catalog, func()) {
+func newHandlers(t *testing.T) (*streamhttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestHandleGetRecordsHappyPath(t *testing.T) {
 	if err := db.PutItemWith(td, types.Item{
 		"pk": {T: types.AttrS, S: "event-1"},
 		"v":  {T: types.AttrS, S: "payload"},
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put item: %v", err)
 	}
 
@@ -227,7 +227,7 @@ func (s stubChangeStream) SubscribeChanges(ctx context.Context) (<-chan streamco
 
 func TestHandleStreamForwardsEvents(t *testing.T) {
 	t.Parallel()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}

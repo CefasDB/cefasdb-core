@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/api"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/internal/api"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func TestHTTPClusterStatusIncludesRangeHotspots(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestHTTPClusterStatusIncludesRangeHotspots(t *testing.T) {
 }
 
 func TestHTTPClusterStatusIncludesBackupScheduler(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestHTTPClusterStatusIncludesBackupScheduler(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := api.New(db, cat)
-	srv.AttachBackupScheduler(storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+	srv.AttachBackupScheduler(pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,
 		DryRun:       true,
 		Interval:     time.Minute,
@@ -97,7 +97,7 @@ func TestHTTPClusterStatusIncludesBackupScheduler(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		BackupScheduler *storage.ScheduledBackupStatus `json:"backupScheduler"`
+		BackupScheduler *pebble.ScheduledBackupStatus `json:"backupScheduler"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatal(err)

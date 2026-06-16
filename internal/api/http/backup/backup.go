@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -34,20 +35,20 @@ type ChangeStream interface {
 	ListSnapshots() ([]SnapshotMetadata, error)
 }
 
-// ShardsFunc returns every storage.DB this server manages. Shard 0
+// ShardsFunc returns every pebble.DB this server manages. Shard 0
 // already has the descriptor by virtue of Catalog.Create; the restore
 // path uses this to mirror it onto every other shard.
-type ShardsFunc func() []*storage.DB
+type ShardsFunc func() []*pebble.DB
 
 // CompactFunc runs a compaction across every shard, scoped either to
 // a table or a base64-encoded key range. The Server retains this
 // helper because it is shared with paths outside the backup package;
 // here we only need the callback shape.
-type CompactFunc func(table, lowerB64, upperB64 string, parallelize bool) ([]storage.CompactionResult, error)
+type CompactFunc func(table, lowerB64, upperB64 string, parallelize bool) ([]pebble.CompactionResult, error)
 
 // Handlers carries the dependencies every backup/admin handler needs.
 type Handlers struct {
-	db      *storage.DB
+	db      *pebble.DB
 	cat     *catalog.Catalog
 	stream  ChangeStream
 	shards  ShardsFunc
@@ -57,7 +58,7 @@ type Handlers struct {
 // New constructs the handler set. stream may be nil (no CDC source
 // attached); shards may be nil (single-shard mode); compact must be
 // non-nil — handleCompact has no useful behaviour without it.
-func New(db *storage.DB, cat *catalog.Catalog, stream ChangeStream, shards ShardsFunc, compact CompactFunc) *Handlers {
+func New(db *pebble.DB, cat *catalog.Catalog, stream ChangeStream, shards ShardsFunc, compact CompactFunc) *Handlers {
 	return &Handlers{db: db, cat: cat, stream: stream, shards: shards, compact: compact}
 }
 
@@ -69,13 +70,13 @@ type restoreTableFromBackupRequest struct {
 }
 
 type restoreTableFromBackupResponse struct {
-	TargetTableName  string                   `json:"targetTableName"`
-	RowsCopied       int                      `json:"rowsCopied"`
-	DryRun           bool                     `json:"dryRun"`
-	SourceTableStats storage.BackupTableStats `json:"sourceTableStats"`
-	ManifestVersion  int                      `json:"manifestVersion"`
-	ManifestStatus   string                   `json:"manifestStatus"`
-	TableStatus      string                   `json:"tableStatus"`
+	TargetTableName  string                  `json:"targetTableName"`
+	RowsCopied       int                     `json:"rowsCopied"`
+	DryRun           bool                    `json:"dryRun"`
+	SourceTableStats pebble.BackupTableStats `json:"sourceTableStats"`
+	ManifestVersion  int                     `json:"manifestVersion"`
+	ManifestStatus   string                  `json:"manifestStatus"`
+	TableStatus      string                  `json:"tableStatus"`
 }
 
 type deleteBackupRequest struct {
@@ -135,7 +136,7 @@ func (h *Handlers) HandleRestoreTableFromBackup(w http.ResponseWriter, r *http.R
 		req.BackupName,
 		req.SourceTableName,
 		req.TargetTableName,
-		storage.RestoreOptions{DryRun: req.DryRun},
+		pebble.RestoreOptions{DryRun: req.DryRun},
 		register,
 	)
 	if err != nil {
@@ -208,7 +209,7 @@ func (h *Handlers) HandleApplyBackupRetention(w http.ResponseWriter, r *http.Req
 		maxAge = parsed
 		maxAgeSet = true
 	}
-	result, err := h.db.ApplyBackupRetention(storage.BackupRetentionOptions{
+	result, err := h.db.ApplyBackupRetention(pebble.BackupRetentionOptions{
 		KeepLatest:    req.KeepLatest,
 		KeepLatestSet: req.KeepLatestSet,
 		MaxAge:        maxAge,
@@ -274,9 +275,9 @@ func (h *Handlers) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"compactions": compactionResultsJSON(results)})
 }
 
-// compactionResultsJSON shapes storage.CompactionResult slices into
+// compactionResultsJSON shapes pebble.CompactionResult slices into
 // the wire form the admin endpoint emits.
-func compactionResultsJSON(results []storage.CompactionResult) []map[string]any {
+func compactionResultsJSON(results []pebble.CompactionResult) []map[string]any {
 	out := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		out = append(out, map[string]any{
@@ -302,11 +303,11 @@ func compactionResultsJSON(results []storage.CompactionResult) []map[string]any 
 // reachable from these handlers are reproduced here.
 func mapBackupErr(err error) int {
 	switch {
-	case errors.Is(err, storage.ErrBackupNotFound):
+	case errors.Is(err, pebble.ErrBackupNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, storage.ErrBackupInUse):
+	case errors.Is(err, pebble.ErrBackupInUse):
 		return http.StatusConflict
-	case errors.Is(err, storage.ErrInvalidBackupRetention):
+	case errors.Is(err, pebble.ErrInvalidBackupRetention):
 		return http.StatusBadRequest
 	case errors.Is(err, types.ErrTableAlreadyExists):
 		return http.StatusConflict
@@ -316,7 +317,7 @@ func mapBackupErr(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, storage.ErrConditionFailed):
 		return http.StatusPreconditionFailed
-	case errors.Is(err, storage.ErrThrottled):
+	case errors.Is(err, pebble.ErrThrottled):
 		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError

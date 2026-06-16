@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -25,10 +26,10 @@ type ObserveFunc func(pkBytes []byte, item types.Item, started time.Time)
 // WriteTargets is the minimum surface a PK-routed write needs. The
 // production implementation lives in internal/api (routedWriteTargets)
 // and replicates writes to mirrors when the cluster manager is wired;
-// the single-shard / test implementation collapses to one storage.DB.
+// the single-shard / test implementation collapses to one pebble.DB.
 type WriteTargets interface {
-	PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error
-	DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error
+	PutItemWith(td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error
+	DeleteItemWith(td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error
 	Release()
 }
 
@@ -37,14 +38,14 @@ type WriteTargets interface {
 type Deps struct {
 	// Cat resolves table descriptors. Required.
 	Cat *catalog.Catalog
-	// StorageFor returns the storage.DB that owns pkBytes. Required.
-	StorageFor func(pkBytes []byte) *storage.DB
+	// StorageFor returns the pebble.DB that owns pkBytes. Required.
+	StorageFor func(pkBytes []byte) *pebble.DB
 	// WriteTargetsForPK returns the routed write fan-out for pkBytes.
 	// Required.
 	WriteTargetsForPK func(pkBytes []byte) (WriteTargets, error)
 	// BatchWriteByShard groups ops by owning shard and issues per-shard
 	// batches. Required.
-	BatchWriteByShard func(td types.TableDescriptor, ops []storage.BatchOp) error
+	BatchWriteByShard func(td types.TableDescriptor, ops []pebble.BatchOp) error
 	// BatchGetByShard routes keys to owning shards and preserves input
 	// order. Required.
 	BatchGetByShard func(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error)
@@ -155,7 +156,7 @@ func (h *Handlers) HandlePutItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer targets.Release()
-	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds}); err != nil {
+	if err := targets.PutItemWith(td, item, pebble.PutOptions{Condition: req.Condition, Binds: binds}); err != nil {
 		h.deps.WriteWriteErr(w, r, err)
 		return
 	}
@@ -262,7 +263,7 @@ func (h *Handlers) HandleDeleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer targets.Release()
-	if err := targets.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds}); err != nil {
+	if err := targets.DeleteItemWith(td, keyAttrs, pebble.DeleteOptions{Condition: req.Condition, Binds: binds}); err != nil {
 		h.deps.WriteWriteErr(w, r, err)
 		return
 	}
@@ -294,7 +295,7 @@ func (h *Handlers) HandleBatchWriteItem(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ops := make([]storage.BatchOp, 0, len(req.Ops))
+	ops := make([]pebble.BatchOp, 0, len(req.Ops))
 	for i, raw := range req.Ops {
 		switch raw.Op {
 		case "put":
@@ -303,14 +304,14 @@ func (h *Handlers) HandleBatchWriteItem(w http.ResponseWriter, r *http.Request) 
 				httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
 				return
 			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
+			ops = append(ops, pebble.BatchOp{Op: pebble.BatchOpPut, Item: item})
 		case "delete":
 			keyAttrs, err := ddbjson.DecodeItem(raw.Key)
 			if err != nil {
 				httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
 				return
 			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpDelete, Key: keyAttrs})
+			ops = append(ops, pebble.BatchOp{Op: pebble.BatchOpDelete, Key: keyAttrs})
 		default:
 			httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("op %d: unknown op %q", i, raw.Op))
 			return

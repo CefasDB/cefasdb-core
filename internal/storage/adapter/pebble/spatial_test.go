@@ -1,4 +1,4 @@
-package storage_test
+package pebble_test
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/spatial"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -16,7 +16,7 @@ func tableWithGeo() types.TableDescriptor {
 		KeySchema: types.KeySchema{PK: "id"},
 		SpatialIndexes: []types.SpatialIndexDescriptor{{
 			Name:       "by_location",
-			Kind:       storage.SpatialKindGeohash,
+			Kind:       pebble.SpatialKindGeohash,
 			Attributes: []string{"lat", "lon"},
 			Precision:  6,
 		}},
@@ -29,7 +29,7 @@ func tableWithZorder() types.TableDescriptor {
 		KeySchema: types.KeySchema{PK: "id"},
 		SpatialIndexes: []types.SpatialIndexDescriptor{{
 			Name:       "by_xy",
-			Kind:       storage.SpatialKindZorder,
+			Kind:       pebble.SpatialKindZorder,
 			Attributes: []string{"x", "y"},
 			Ranges:     []types.NumRange{{Lo: 0, Hi: 1000}, {Lo: 0, Hi: 1000}},
 		}},
@@ -46,7 +46,7 @@ func TestSpatialGeohashBBox(t *testing.T) {
 			"id":  sAttr(id),
 			"lat": nAttr(fmt.Sprintf("%.6f", lat)),
 			"lon": nAttr(fmt.Sprintf("%.6f", lon)),
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -57,7 +57,7 @@ func TestSpatialGeohashBBox(t *testing.T) {
 
 	// BBox tight around NYC area should match NYC + Brooklyn only.
 	box := spatial.BBox{MinLat: 40.6, MinLon: -74.1, MaxLat: 40.8, MaxLon: -73.9}
-	items, err := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &box})
+	items, err := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &box})
 	if err != nil {
 		t.Fatalf("spatial query: %v", err)
 	}
@@ -79,12 +79,12 @@ func TestSpatialGeohashRadius(t *testing.T) {
 
 	// Cluster of points around (37.7749, -122.4194). Radius 2 km
 	// should catch the cluster but not the distant cousin.
-	_ = db.PutItemWith(td, types.Item{"id": sAttr("near1"), "lat": nAttr("37.7745"), "lon": nAttr("-122.4194")}, storage.PutOptions{})
-	_ = db.PutItemWith(td, types.Item{"id": sAttr("near2"), "lat": nAttr("37.7752"), "lon": nAttr("-122.4181")}, storage.PutOptions{})
-	_ = db.PutItemWith(td, types.Item{"id": sAttr("far"), "lat": nAttr("37.6"), "lon": nAttr("-122.5")}, storage.PutOptions{})
+	_ = db.PutItemWith(td, types.Item{"id": sAttr("near1"), "lat": nAttr("37.7745"), "lon": nAttr("-122.4194")}, pebble.PutOptions{})
+	_ = db.PutItemWith(td, types.Item{"id": sAttr("near2"), "lat": nAttr("37.7752"), "lon": nAttr("-122.4181")}, pebble.PutOptions{})
+	_ = db.PutItemWith(td, types.Item{"id": sAttr("far"), "lat": nAttr("37.6"), "lon": nAttr("-122.5")}, pebble.PutOptions{})
 
-	items, err := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{
-		Radius: &storage.RadiusQuery{Lat: 37.7749, Lon: -122.4194, Meters: 2000},
+	items, err := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{
+		Radius: &pebble.RadiusQuery{Lat: 37.7749, Lon: -122.4194, Meters: 2000},
 	})
 	if err != nil {
 		t.Fatalf("radius query: %v", err)
@@ -106,25 +106,25 @@ func TestSpatialGeohashUpdateRoutes(t *testing.T) {
 	td := tableWithGeo()
 
 	item := types.Item{"id": sAttr("mover"), "lat": nAttr("40.7128"), "lon": nAttr("-74.0060")}
-	if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("initial put: %v", err)
 	}
 	// Move to SF.
 	item["lat"] = nAttr("37.7749")
 	item["lon"] = nAttr("-122.4194")
-	if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("move: %v", err)
 	}
 
 	// NYC box should not find the item anymore.
 	nyc := spatial.BBox{MinLat: 40.6, MinLon: -74.1, MaxLat: 40.8, MaxLon: -73.9}
-	items, _ := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &nyc})
+	items, _ := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &nyc})
 	if len(items) != 0 {
 		t.Fatalf("item still indexed under NYC: %+v", items)
 	}
 	// SF box should.
 	sf := spatial.BBox{MinLat: 37.7, MinLon: -122.5, MaxLat: 37.8, MaxLon: -122.4}
-	items, _ = db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &sf})
+	items, _ = db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &sf})
 	if len(items) != 1 || items[0]["id"].S != "mover" {
 		t.Fatalf("SF index missing mover: %+v", items)
 	}
@@ -135,13 +135,13 @@ func TestSpatialGeohashDeleteCleansPointer(t *testing.T) {
 	td := tableWithGeo()
 
 	item := types.Item{"id": sAttr("gone"), "lat": nAttr("40.7128"), "lon": nAttr("-74.0060")}
-	_ = db.PutItemWith(td, item, storage.PutOptions{})
-	if err := db.DeleteItemWith(td, types.Item{"id": sAttr("gone")}, storage.DeleteOptions{}); err != nil {
+	_ = db.PutItemWith(td, item, pebble.PutOptions{})
+	if err := db.DeleteItemWith(td, types.Item{"id": sAttr("gone")}, pebble.DeleteOptions{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	nyc := spatial.BBox{MinLat: 40.6, MinLon: -74.1, MaxLat: 40.8, MaxLon: -73.9}
-	items, _ := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &nyc})
+	items, _ := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &nyc})
 	if len(items) != 0 {
 		t.Fatalf("spatial pointer not cleaned: %+v", items)
 	}
@@ -152,13 +152,13 @@ func TestSpatialSparseIndex(t *testing.T) {
 	td := tableWithGeo()
 
 	// Item without coordinates should not appear in any spatial scan.
-	if err := db.PutItemWith(td, types.Item{"id": sAttr("ghost"), "other": sAttr("x")}, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("ghost"), "other": sAttr("x")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	// Use a small bbox — a world-wide bbox at precision 6 would
 	// exceed MaxCoverCells, which is intentional behaviour.
 	bbox := spatial.BBox{MinLat: -1, MinLon: -1, MaxLat: 1, MaxLon: 1}
-	items, _ := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &bbox})
+	items, _ := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &bbox})
 	if len(items) != 0 {
 		t.Fatalf("sparse item leaked: %+v", items)
 	}
@@ -171,7 +171,7 @@ func TestSpatialCoverBudget(t *testing.T) {
 	// A worldwide bbox at high precision should be rejected as too
 	// large rather than scanning billions of cells.
 	world := spatial.BBox{MinLat: -90, MinLon: -180, MaxLat: 90, MaxLon: 180}
-	_, err := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &world})
+	_, err := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &world})
 	if err == nil {
 		t.Fatalf("expected ErrCoverTooLarge, got nil")
 	}
@@ -186,7 +186,7 @@ func TestSpatialZorderBox(t *testing.T) {
 			"id": sAttr(fmt.Sprintf("p%d", i)),
 			"x":  nAttr(fmt.Sprintf("%f", p[0])),
 			"y":  nAttr(fmt.Sprintf("%f", p[1])),
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}
@@ -196,7 +196,7 @@ func TestSpatialZorderBox(t *testing.T) {
 	low := []uint32{zr.Normalize(0), zr.Normalize(0)}
 	high := []uint32{zr.Normalize(30), zr.Normalize(30)}
 	box := &spatial.ZBBox{Lo: low, Hi: high}
-	items, err := db.SpatialQueryItems(td, "by_xy", storage.SpatialQuery{Z: box})
+	items, err := db.SpatialQueryItems(td, "by_xy", pebble.SpatialQuery{Z: box})
 	if err != nil {
 		t.Fatalf("zorder query: %v", err)
 	}
@@ -230,15 +230,15 @@ func TestSpatialBruteForceAgreement(t *testing.T) {
 	for i := 0; i < N; i++ {
 		p := point{
 			id:  fmt.Sprintf("p%d", i),
-			lat: 40 + rng.Float64()*2,    // [40, 42)
-			lon: -74 + rng.Float64()*2,   // [-74, -72)
+			lat: 40 + rng.Float64()*2,  // [40, 42)
+			lon: -74 + rng.Float64()*2, // [-74, -72)
 		}
 		all[i] = p
 		if err := db.PutItemWith(td, types.Item{
 			"id":  sAttr(p.id),
 			"lat": nAttr(fmt.Sprintf("%.6f", p.lat)),
 			"lon": nAttr(fmt.Sprintf("%.6f", p.lon)),
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}
@@ -251,7 +251,7 @@ func TestSpatialBruteForceAgreement(t *testing.T) {
 		}
 	}
 
-	items, err := db.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &box})
+	items, err := db.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &box})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -278,10 +278,10 @@ func BenchmarkSpatialBBoxQuery(b *testing.B) {
 			"id":  sAttr(fmt.Sprintf("p%d", i)),
 			"lat": nAttr(fmt.Sprintf("%.6f", 40+rng.Float64()*2)),
 			"lon": nAttr(fmt.Sprintf("%.6f", -74+rng.Float64()*2)),
-		}, storage.PutOptions{})
+		}, pebble.PutOptions{})
 	}
 	box := spatial.BBox{MinLat: 40.5, MinLon: -73.6, MaxLat: 41.0, MaxLon: -73.0}
-	q := storage.SpatialQuery{BBox: &box}
+	q := pebble.SpatialQuery{BBox: &box}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := db.SpatialQueryItems(td, "by_location", q); err != nil {

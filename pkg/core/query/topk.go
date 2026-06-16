@@ -82,10 +82,10 @@ func (e *TopKEngine) Result() []TopKResult {
 // so we can cheaply drop it when a better one arrives).
 type topKHeap []TopKResult
 
-func (h topKHeap) Len() int            { return len(h) }
-func (h topKHeap) Less(i, j int) bool  { return h[i].Distance > h[j].Distance }
-func (h topKHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *topKHeap) Push(x any)         { *h = append(*h, x.(TopKResult)) }
+func (h topKHeap) Len() int           { return len(h) }
+func (h topKHeap) Less(i, j int) bool { return h[i].Distance > h[j].Distance }
+func (h topKHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *topKHeap) Push(x any)        { *h = append(*h, x.(TopKResult)) }
 func (h *topKHeap) Pop() any {
 	old := *h
 	n := len(old)

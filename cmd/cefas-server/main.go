@@ -25,12 +25,13 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/rebalance"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	craft "github.com/osvaldoandrade/cefas/internal/replication"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/config"
+
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
@@ -191,7 +192,7 @@ func main() {
 	}
 
 	var (
-		db     *storage.DB
+		db     *pebble.DB
 		cat    *catalog.Catalog
 		mgr    *cluster.Manager
 		raftDB *craft.DB
@@ -230,7 +231,7 @@ func main() {
 		logger.Info("multi-Raft enabled", "shards", cfg.Cluster.Shards, "mux", cfg.Cluster.MuxAddr, "peers", cfg.Cluster.Peers)
 	} else {
 		var err error
-		db, err = storage.Open(bootstrapserver.StorageOptions(cfg, cfg.Data))
+		db, err = pebble.Open(bootstrapserver.StorageOptions(cfg, cfg.Data))
 		if err != nil {
 			logger.Error("open pebble", "err", err)
 			os.Exit(1)
@@ -243,7 +244,7 @@ func main() {
 		}
 	}
 
-	var raftStore *storage.DB
+	var raftStore *pebble.DB
 	if mgr == nil && cfg.Raft.Bind != "" {
 		if cfg.Cluster.SelfID == "" {
 			logger.Error("invalid flags", "reason", "-raft-id is required when -raft-bind is set")
@@ -259,9 +260,9 @@ func main() {
 		}
 		raftProfile := cfg.Storage.RaftProfile
 		if raftProfile == "" {
-			raftProfile = storage.ProfileRaft
+			raftProfile = pebble.ProfileRaft
 		}
-		raftStore, err = storage.Open(storage.Options{
+		raftStore, err = pebble.Open(pebble.Options{
 			Path:          storePath,
 			FsyncOnCommit: cfg.Storage.FsyncOnCommit,
 			Profile:       raftProfile,
@@ -306,7 +307,7 @@ func main() {
 
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
-	backupScheduler := storage.NewScheduledBackupRunner(db, bootstrapserver.ScheduledBackupConfig(cfg, prom, logf))
+	backupScheduler := pebble.NewScheduledBackupRunner(db, bootstrapserver.ScheduledBackupConfig(cfg, prom, logf))
 
 	mux := http.NewServeMux()
 	apiSrv := api.New(db, cat)

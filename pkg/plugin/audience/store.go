@@ -538,4 +538,3 @@ func (b *MemoryBackend) Len() int {
 	defer b.mu.Unlock()
 	return len(b.m)
 }
-

@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -350,7 +350,7 @@ func (emptyMaintenanceCandidateSet) Close() error                   { return nil
 func newPluginIndexMaintenanceServer(t *testing.T, reg *plugin.Registry) (*GRPCServer, func()) {
 	t.Helper()
 	clearPluginIndexBookForTest()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}

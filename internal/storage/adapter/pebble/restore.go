@@ -1,10 +1,12 @@
-package storage
+package pebble
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -89,7 +91,7 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 		return RestoreResult{}, fmt.Errorf("register target descriptor: %w", err)
 	}
 
-	lower, upper := PrefixPrimaryAll(sourceTable)
+	lower, upper := storage.PrefixPrimaryAll(sourceTable)
 	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("checkpoint iter: %w", err)
@@ -101,7 +103,7 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 		v := iter.Value()
 		cp := make([]byte, len(v))
 		copy(cp, v)
-		item, err := DecodeItem(cp)
+		item, err := storage.DecodeItem(cp)
 		if err != nil {
 			return RestoreResult{}, fmt.Errorf("decode item at %s: %w", iter.Key(), err)
 		}
@@ -153,7 +155,7 @@ func (d *DB) restoreTablePreflight(
 	if backupName == "" {
 		return RestorePreflightResult{}, nil, fmt.Errorf("backup name required")
 	}
-	if exists, err := d.Has(KeyCatalog(targetTable)); err != nil {
+	if exists, err := d.Has(storage.KeyCatalog(targetTable)); err != nil {
 		return RestorePreflightResult{}, nil, err
 	} else if exists {
 		return RestorePreflightResult{}, nil, fmt.Errorf("%w: target table %q", types.ErrTableAlreadyExists, targetTable)
@@ -171,7 +173,7 @@ func (d *DB) restoreTablePreflight(
 		return RestorePreflightResult{}, nil, fmt.Errorf("open checkpoint: %w", err)
 	}
 
-	srcDescBytes, closer, err := checkpoint.Get(KeyCatalog(sourceTable))
+	srcDescBytes, closer, err := checkpoint.Get(storage.KeyCatalog(sourceTable))
 	if err != nil {
 		_ = checkpoint.Close()
 		if errors.Is(err, ErrNotFound) {

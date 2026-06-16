@@ -216,7 +216,7 @@ func (p *parser) expect(k tokenKind, want string) (token, error) {
 	return t, nil
 }
 
-func (p *parser) parseExpr() (node, error)  { return p.parseOr() }
+func (p *parser) parseExpr() (node, error) { return p.parseOr() }
 
 func (p *parser) parseOr() (node, error) {
 	left, err := p.parseAnd()

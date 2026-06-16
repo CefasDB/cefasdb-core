@@ -18,6 +18,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/rebalance"
 	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -259,7 +260,7 @@ func writeFixedLoad(t *testing.T, mgr *cluster.Manager, td types.TableDescriptor
 			targets.Release()
 			t.Fatalf("missing primary target for %s", record.ID)
 		}
-		if err := targets.Primary.Storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := targets.Primary.Storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			targets.Release()
 			t.Fatalf("put primary %s: %v", record.ID, err)
 		}
@@ -268,7 +269,7 @@ func writeFixedLoad(t *testing.T, mgr *cluster.Manager, td types.TableDescriptor
 				targets.Release()
 				t.Fatalf("missing mirror target for %s", record.ID)
 			}
-			if err := mirror.Storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+			if err := mirror.Storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 				targets.Release()
 				t.Fatalf("put mirror %s: %v", record.ID, err)
 			}

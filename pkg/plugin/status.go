@@ -6,7 +6,7 @@ import "time"
 type State uint8
 
 const (
-	StateUnknown State = iota
+	StateUnknown  State = iota
 	StateLoaded         // registered, not started
 	StateRunning        // Start completed without error
 	StateDisabled       // Disable() called; persisted data untouched
@@ -29,15 +29,15 @@ func (s State) String() string {
 
 // Status is the snapshot the engine + CLI surface for a single plugin.
 type Status struct {
-	Name              string `json:"name"`
-	Kind              string `json:"kind"`
-	Version           string `json:"version,omitempty"`
-	Description       string `json:"description,omitempty"`
-	State             string `json:"state"`
-	LastError         string `json:"lastError,omitempty"`
-	LastErrorAtUnix   int64  `json:"lastErrorAtUnix,omitempty"`
-	ItemsIndexed      int64  `json:"itemsIndexed,omitempty"`
-	StartedAtUnix     int64  `json:"startedAtUnix,omitempty"`
+	Name            string `json:"name"`
+	Kind            string `json:"kind"`
+	Version         string `json:"version,omitempty"`
+	Description     string `json:"description,omitempty"`
+	State           string `json:"state"`
+	LastError       string `json:"lastError,omitempty"`
+	LastErrorAtUnix int64  `json:"lastErrorAtUnix,omitempty"`
+	ItemsIndexed    int64  `json:"itemsIndexed,omitempty"`
+	StartedAtUnix   int64  `json:"startedAtUnix,omitempty"`
 }
 
 // StatusProvider is an optional interface plugins implement when they

@@ -8,7 +8,7 @@ import (
 	_ "unsafe" // for go:linkname placeholder; kept inert today
 
 	"github.com/osvaldoandrade/cefas/internal/spatial"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -655,9 +655,9 @@ func isMinimalRowPredicate(where Expr, pkAttr, skAttr string) bool {
 // extractSpatialQuery looks for ST_Within / ST_DWithin in the WHERE
 // tree. When present, returns the constructed SpatialQuery and the
 // resolved spatial index name.
-func extractSpatialQuery(where Expr, td types.TableDescriptor, hintIndex string) (storage.SpatialQuery, string, bool) {
+func extractSpatialQuery(where Expr, td types.TableDescriptor, hintIndex string) (pebble.SpatialQuery, string, bool) {
 	if where == nil {
-		return storage.SpatialQuery{}, "", false
+		return pebble.SpatialQuery{}, "", false
 	}
 	for _, c := range flattenAnd(where) {
 		fn, ok := c.(*FuncCall)
@@ -667,31 +667,31 @@ func extractSpatialQuery(where Expr, td types.TableDescriptor, hintIndex string)
 		switch fn.Name {
 		case "ST_WITHIN":
 			if len(fn.Args) != 2 {
-				return storage.SpatialQuery{}, "", false
+				return pebble.SpatialQuery{}, "", false
 			}
 			box, ok := bboxFromExpr(fn.Args[1])
 			if !ok {
-				return storage.SpatialQuery{}, "", false
+				return pebble.SpatialQuery{}, "", false
 			}
 			idx := resolveSpatialIndex(td, hintIndex, fn.Args[0])
-			return storage.SpatialQuery{BBox: &box}, idx, true
+			return pebble.SpatialQuery{BBox: &box}, idx, true
 		case "ST_DWITHIN":
 			if len(fn.Args) != 3 {
-				return storage.SpatialQuery{}, "", false
+				return pebble.SpatialQuery{}, "", false
 			}
 			pt, ok := pointFromExpr(fn.Args[1])
 			if !ok {
-				return storage.SpatialQuery{}, "", false
+				return pebble.SpatialQuery{}, "", false
 			}
 			meters, err := numberFromExpr(fn.Args[2])
 			if err != nil {
-				return storage.SpatialQuery{}, "", false
+				return pebble.SpatialQuery{}, "", false
 			}
 			idx := resolveSpatialIndex(td, hintIndex, fn.Args[0])
-			return storage.SpatialQuery{Radius: &storage.RadiusQuery{Lat: pt[0], Lon: pt[1], Meters: meters}}, idx, true
+			return pebble.SpatialQuery{Radius: &pebble.RadiusQuery{Lat: pt[0], Lon: pt[1], Meters: meters}}, idx, true
 		}
 	}
-	return storage.SpatialQuery{}, "", false
+	return pebble.SpatialQuery{}, "", false
 }
 
 func bboxFromExpr(e Expr) (spatial.BBox, bool) {

@@ -3,7 +3,7 @@
 // but registers under its own gRPC service name to keep the proto
 // strictly append-only (the existing Cefas service is unchanged).
 //
-// AtomicUpdate delegates to internal/storage.DB.AtomicUpdate, which
+// AtomicUpdate delegates to internal/pebble.DB.AtomicUpdate, which
 // performs the read-modify-write under a per-key mutex inside one
 // pebble.Batch — see internal/storage/atomic.go for the contract.
 package api
@@ -20,6 +20,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -84,7 +85,7 @@ func (s *AtomicServer) AtomicUpdate(ctx context.Context, req *cefaspb.AtomicUpda
 	}
 	defer targets.Release()
 
-	res, err := targets.primary.AtomicUpdate(td, key, storage.AtomicOptions{
+	res, err := targets.primary.AtomicUpdate(td, key, pebble.AtomicOptions{
 		Condition: req.GetCondition(),
 		Binds:     binds,
 		Actions:   actions,
@@ -93,7 +94,7 @@ func (s *AtomicServer) AtomicUpdate(ctx context.Context, req *cefaspb.AtomicUpda
 		if errors.Is(err, storage.ErrConditionFailed) {
 			return nil, status.Error(codes.FailedPrecondition, "condition failed")
 		}
-		if errors.Is(err, storage.ErrAtomicUnsupported) {
+		if errors.Is(err, pebble.ErrAtomicUnsupported) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		return nil, mapStorageErr(err)
@@ -130,8 +131,8 @@ func (s *AtomicServer) AtomicUpdate(ctx context.Context, req *cefaspb.AtomicUpda
 	return resp, nil
 }
 
-func pbToAtomicActions(in []*cefaspb.AtomicAction) ([]storage.AtomicAction, error) {
-	out := make([]storage.AtomicAction, 0, len(in))
+func pbToAtomicActions(in []*cefaspb.AtomicAction) ([]pebble.AtomicAction, error) {
+	out := make([]pebble.AtomicAction, 0, len(in))
 	for i, a := range in {
 		if a == nil {
 			return nil, fmt.Errorf("action %d: nil", i)
@@ -147,7 +148,7 @@ func pbToAtomicActions(in []*cefaspb.AtomicAction) ([]storage.AtomicAction, erro
 				return nil, fmt.Errorf("action %d value: %w", i, err)
 			}
 		}
-		out = append(out, storage.AtomicAction{
+		out = append(out, pebble.AtomicAction{
 			Kind:       kind,
 			Attribute:  a.GetAttribute(),
 			Value:      val,
@@ -157,16 +158,16 @@ func pbToAtomicActions(in []*cefaspb.AtomicAction) ([]storage.AtomicAction, erro
 	return out, nil
 }
 
-func pbAtomicKind(k cefaspb.AtomicActionKind) (storage.AtomicActionKind, error) {
+func pbAtomicKind(k cefaspb.AtomicActionKind) (pebble.AtomicActionKind, error) {
 	switch k {
 	case cefaspb.AtomicActionKind_ATOMIC_SET:
-		return storage.AtomicActionSet, nil
+		return pebble.AtomicActionSet, nil
 	case cefaspb.AtomicActionKind_ATOMIC_INCR_RETURN:
-		return storage.AtomicActionIncrReturn, nil
+		return pebble.AtomicActionIncrReturn, nil
 	case cefaspb.AtomicActionKind_ATOMIC_ADD_RETURN:
-		return storage.AtomicActionAddReturn, nil
+		return pebble.AtomicActionAddReturn, nil
 	case cefaspb.AtomicActionKind_ATOMIC_APPLY:
-		return storage.AtomicActionApply, nil
+		return pebble.AtomicActionApply, nil
 	}
 	return 0, fmt.Errorf("unsupported AtomicActionKind %v", k)
 }

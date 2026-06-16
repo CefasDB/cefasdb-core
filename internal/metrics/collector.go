@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 )
 
 type LeaderGate interface {
@@ -60,7 +60,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 
 // RunStorageCollector samples one storage engine. It is used by the
 // single-shard server path where there is no cluster.Manager.
-func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *storage.DB, leader LeaderGate, interval time.Duration) {
+func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebble.DB, leader LeaderGate, interval time.Duration) {
 	if m == nil || st == nil {
 		return
 	}
@@ -91,7 +91,7 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *stor
 	}
 }
 
-func collectPebble(m *Metrics, label string, st *storage.DB) {
+func collectPebble(m *Metrics, label string, st *pebble.DB) {
 	if m == nil || st == nil {
 		return
 	}
@@ -119,7 +119,7 @@ func collectPebble(m *Metrics, label string, st *storage.DB) {
 	}
 }
 
-func collectBackpressure(m *Metrics, label string, st *storage.DB) {
+func collectBackpressure(m *Metrics, label string, st *pebble.DB) {
 	if m == nil || st == nil {
 		return
 	}
@@ -127,16 +127,16 @@ func collectBackpressure(m *Metrics, label string, st *storage.DB) {
 	m.BackpressureState.WithLabelValues(label).Set(float64(snap.State))
 	pm := st.Metrics()
 	m.ObserveRangePressure(label, pm.Compact.EstimatedDebt, int(snap.State))
-	for _, reason := range storage.BackpressureReasons() {
+	for _, reason := range pebble.BackpressureReasons() {
 		active := 0.0
-		if snap.Enabled && snap.State != storage.PressureNormal && snap.Reason == reason {
+		if snap.Enabled && snap.State != pebble.PressureNormal && snap.Reason == reason {
 			active = 1.0
 		}
 		m.BackpressureReason.WithLabelValues(label, reason).Set(active)
 	}
 }
 
-func collectStreamRetention(m *Metrics, label string, st *storage.DB) {
+func collectStreamRetention(m *Metrics, label string, st *pebble.DB) {
 	if m == nil || st == nil {
 		return
 	}

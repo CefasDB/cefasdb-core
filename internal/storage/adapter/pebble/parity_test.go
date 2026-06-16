@@ -1,4 +1,4 @@
-package storage_test
+package pebble_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -37,14 +37,14 @@ func TestLSIQueryByLocalSK(t *testing.T) {
 			"thread_id": sAttr(m.thread),
 			"msg_id":    sAttr(m.msg),
 			"author":    sAttr(m.author),
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s/%s: %v", m.thread, m.msg, err)
 		}
 	}
 
 	// All messages by author within thread t1, in alphabetical order
 	// (alice comes before bob lexicographically).
-	got, err := db.QueryByLSI(td, "by_author", sAttr("t1"), storage.QueryOptions{})
+	got, err := db.QueryByLSI(td, "by_author", sAttr("t1"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("QueryByLSI: %v", err)
 	}
@@ -74,9 +74,9 @@ func TestLSIRangeOnSK(t *testing.T) {
 			"thread_id": sAttr(m.thread),
 			"msg_id":    sAttr(m.msg),
 			"author":    sAttr(m.author),
-		}, storage.PutOptions{})
+		}, pebble.PutOptions{})
 	}
-	got, err := db.QueryByLSI(td, "by_author", sAttr("t1"), storage.QueryOptions{
+	got, err := db.QueryByLSI(td, "by_author", sAttr("t1"), pebble.QueryOptions{
 		SKLow:  sAttr("b"),
 		SKHigh: sAttr("d"),
 	})
@@ -100,10 +100,10 @@ func TestLSISparseExclusion(t *testing.T) {
 		"thread_id": sAttr("t1"),
 		"msg_id":    sAttr("001"),
 		// author intentionally missing — sparse exclusion.
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := db.QueryByLSI(td, "by_author", sAttr("t1"), storage.QueryOptions{})
+	got, _ := db.QueryByLSI(td, "by_author", sAttr("t1"), pebble.QueryOptions{})
 	if len(got) != 0 {
 		t.Fatalf("sparse item leaked into LSI: %+v", got)
 	}
@@ -117,14 +117,14 @@ func TestLSIDeleteRemovesPointer(t *testing.T) {
 		"msg_id":    sAttr("001"),
 		"author":    sAttr("alice"),
 	}
-	_ = db.PutItemWith(td, item, storage.PutOptions{})
+	_ = db.PutItemWith(td, item, pebble.PutOptions{})
 	if err := db.DeleteItemWith(td, types.Item{
 		"thread_id": sAttr("t1"),
 		"msg_id":    sAttr("001"),
-	}, storage.DeleteOptions{}); err != nil {
+	}, pebble.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := db.QueryByLSI(td, "by_author", sAttr("t1"), storage.QueryOptions{})
+	got, _ := db.QueryByLSI(td, "by_author", sAttr("t1"), pebble.QueryOptions{})
 	if len(got) != 0 {
 		t.Fatalf("LSI pointer leaked after delete: %+v", got)
 	}
@@ -151,17 +151,17 @@ func TestTTLReaperSweepsExpired(t *testing.T) {
 	_ = db.PutItemWith(td, types.Item{
 		"id":         sAttr("old1"),
 		"expires_at": nAttr(fmt.Sprintf("%d", now.Add(-2*time.Hour).Unix())),
-	}, storage.PutOptions{})
+	}, pebble.PutOptions{})
 	_ = db.PutItemWith(td, types.Item{
 		"id":         sAttr("old2"),
 		"expires_at": nAttr(fmt.Sprintf("%d", now.Add(-1*time.Hour).Unix())),
-	}, storage.PutOptions{})
+	}, pebble.PutOptions{})
 	_ = db.PutItemWith(td, types.Item{
 		"id":         sAttr("fresh"),
 		"expires_at": nAttr(fmt.Sprintf("%d", now.Add(time.Hour).Unix())),
-	}, storage.PutOptions{})
+	}, pebble.PutOptions{})
 
-	reaper := storage.NewReaper(db, &fakeCatalog{tables: []types.TableDescriptor{td}}, nil, storage.ReaperConfig{
+	reaper := pebble.NewReaper(db, &fakeCatalog{tables: []types.TableDescriptor{td}}, nil, pebble.ReaperConfig{
 		BatchSize: 1024,
 		Now:       func() time.Time { return now },
 	})
@@ -191,10 +191,10 @@ func TestTTLNoAttributeNoop(t *testing.T) {
 		TTLAttribute: "expires_at",
 	}
 	// Item without the TTL attribute → sparse, no reaper action.
-	if err := db.PutItemWith(td, types.Item{"id": sAttr("k")}, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("k")}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	reaper := storage.NewReaper(db, &fakeCatalog{tables: []types.TableDescriptor{td}}, nil, storage.ReaperConfig{
+	reaper := pebble.NewReaper(db, &fakeCatalog{tables: []types.TableDescriptor{td}}, nil, pebble.ReaperConfig{
 		Now: func() time.Time { return time.Now().Add(100 * 365 * 24 * time.Hour) },
 	})
 	if err := reaper.Tick(context.Background()); err != nil {
@@ -231,17 +231,17 @@ func TestGSIProjectionAll(t *testing.T) {
 		"ts":      sAttr("001"),
 		"event":   sAttr("login"),
 		"city":    sAttr("Vancouver"),
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// Wipe the primary item so a KEYS_ONLY-style dereference would
 	// fail; the ALL projection must satisfy the read entirely from
 	// the index value.
-	if err := db.Delete([]byte("cefas/t/events/p/__nonexistent__")); err != nil && err != storage.ErrNotFound {
+	if err := db.Delete([]byte("cefas/t/events/p/__nonexistent__")); err != nil && err != pebble.ErrNotFound {
 		// Best-effort; the goal is just to confirm we can serve
 		// reads when the projection is ALL.
 	}
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +262,10 @@ func TestGSIProjectionInclude(t *testing.T) {
 		"event":   sAttr("login"),
 		"city":    sAttr("Lisboa"),
 		"agent":   sAttr("cli/0.1"), // NOT projected
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,8 +287,8 @@ func TestGSIProjectionKeysOnlyBackwardCompat(t *testing.T) {
 		"user_id": sAttr("alice"),
 		"ts":      sAttr("001"),
 		"event":   sAttr("login"),
-	}, storage.PutOptions{})
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	}, pebble.PutOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -72,7 +73,7 @@ type SnapshotMetadata struct {
 }
 
 type Server struct {
-	db        *storage.DB
+	db        *pebble.DB
 	cat       *catalog.Catalog
 	cluster   Cluster          // nil when not running in raft mode
 	stream    ChangeStream     // nil when no CDC source attached
@@ -83,7 +84,7 @@ type Server struct {
 }
 
 type BackupSchedulerStatusProvider interface {
-	Status() storage.ScheduledBackupStatus
+	Status() pebble.ScheduledBackupStatus
 }
 
 // AttachChangeStream wires the CDC source. Passing nil keeps the
@@ -128,7 +129,7 @@ func (s *Server) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.back
 // handler records latency + outcome; /metrics serves the registry.
 func (s *Server) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
-func New(db *storage.DB, cat *catalog.Catalog) *Server {
+func New(db *pebble.DB, cat *catalog.Catalog) *Server {
 	return &Server{db: db, cat: cat}
 }
 
@@ -138,9 +139,9 @@ func New(db *storage.DB, cat *catalog.Catalog) *Server {
 // routes the actual write/read to the shard that owns the PK.
 func (s *Server) AttachManager(m *cluster.Manager) { s.manager = m }
 
-// storageFor returns the storage.DB that owns the supplied partition
+// storageFor returns the pebble.DB that owns the supplied partition
 // key bytes. Single-shard mode always returns s.db.
-func (s *Server) storageFor(pkBytes []byte) *storage.DB {
+func (s *Server) storageFor(pkBytes []byte) *pebble.DB {
 	if s.manager == nil {
 		return s.db
 	}
@@ -150,23 +151,23 @@ func (s *Server) storageFor(pkBytes []byte) *storage.DB {
 	return s.db
 }
 
-// allShards iterates every storage.DB this server manages. Catalog
+// allShards iterates every pebble.DB this server manages. Catalog
 // fan-out (CreateTable, DropTable) uses this so descriptors land on
 // every shard.
-func (s *Server) allShards() []*storage.DB {
+func (s *Server) allShards() []*pebble.DB {
 	if s.manager == nil {
-		return []*storage.DB{s.db}
+		return []*pebble.DB{s.db}
 	}
-	out := make([]*storage.DB, 0, len(s.manager.Shards()))
+	out := make([]*pebble.DB, 0, len(s.manager.Shards()))
 	for _, sh := range s.manager.Shards() {
 		out = append(out, sh.Storage)
 	}
 	return out
 }
 
-func (s *Server) compact(table, lowerB64, upperB64 string, parallelize bool) ([]storage.CompactionResult, error) {
+func (s *Server) compact(table, lowerB64, upperB64 string, parallelize bool) ([]pebble.CompactionResult, error) {
 	dbs := s.allShards()
-	results := make([]storage.CompactionResult, 0, len(dbs))
+	results := make([]pebble.CompactionResult, 0, len(dbs))
 	if table != "" {
 		if _, err := s.cat.Describe(table); err != nil {
 			return nil, err
@@ -370,7 +371,7 @@ func (s *Server) ensureStrongRead(w http.ResponseWriter, r *http.Request) bool {
 // and issues a per-shard BatchWriteItem. Multi-shard mode loses the
 // global atomicity guarantee — the trade-off for horizontal scale.
 // Single-shard mode collapses to one batch.
-func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.BatchOp) error {
+func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if s.manager == nil {
 		started := time.Now()
 		if err := s.db.BatchWriteItem(td, ops); err != nil {
@@ -379,7 +380,7 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 		for _, op := range ops {
 			probe := op.Item
 			approxBytes := estimatedItemBytes(op.Item)
-			if op.Op == storage.BatchOpDelete {
+			if op.Op == pebble.BatchOpDelete {
 				probe = op.Key
 				approxBytes = estimatedItemBytes(op.Key)
 			}
@@ -391,8 +392,8 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 		}
 		return nil
 	}
-	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
-	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp)
+	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp)
 	type observation struct {
 		pkBytes     []byte
 		approxBytes uint64
@@ -407,7 +408,7 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []storage.Batch
 	for _, op := range ops {
 		probe := op.Item
 		approxBytes := estimatedItemBytes(op.Item)
-		if op.Op == storage.BatchOpDelete {
+		if op.Op == pebble.BatchOpDelete {
 			probe = op.Key
 			approxBytes = estimatedItemBytes(op.Key)
 		}
@@ -493,7 +494,7 @@ func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.
 // shard. Spatial indexes are partitioned by the item's PK (same as
 // every other write), so the matching rows can live on any shard.
 // We merge results client-side; honouring the limit globally.
-func (s *Server) spatialAllShards(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error) {
+func (s *Server) spatialAllShards(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error) {
 	if s.manager == nil {
 		return s.db.SpatialQueryItems(td, idxName, q)
 	}
@@ -618,13 +619,13 @@ func mapWriteErr(err error) int {
 	if errors.Is(err, types.ErrStreamIteratorExpired) || errors.Is(err, types.ErrStreamTrimmed) {
 		return http.StatusPreconditionFailed
 	}
-	if errors.Is(err, storage.ErrBackupNotFound) {
+	if errors.Is(err, pebble.ErrBackupNotFound) {
 		return http.StatusNotFound
 	}
-	if errors.Is(err, storage.ErrBackupInUse) {
+	if errors.Is(err, pebble.ErrBackupInUse) {
 		return http.StatusConflict
 	}
-	if errors.Is(err, storage.ErrInvalidBackupRetention) {
+	if errors.Is(err, pebble.ErrInvalidBackupRetention) {
 		return http.StatusBadRequest
 	}
 	if errors.Is(err, placement.ErrInvalidPlacementPlan) {
@@ -638,7 +639,7 @@ func mapWriteErr(err error) int {
 		// optimistic-concurrency check that did not hold.
 		return http.StatusPreconditionFailed
 	}
-	if errors.Is(err, storage.ErrNotLeader) {
+	if errors.Is(err, pebble.ErrNotLeader) {
 		// Handled separately in writeWriteErr — we want 307 with a
 		// Location header, not a JSON body.
 		return http.StatusTemporaryRedirect
@@ -646,7 +647,7 @@ func mapWriteErr(err error) int {
 	if errors.Is(err, craft.ErrNotLeader) {
 		return http.StatusServiceUnavailable
 	}
-	if errors.Is(err, storage.ErrThrottled) {
+	if errors.Is(err, pebble.ErrThrottled) {
 		return http.StatusTooManyRequests
 	}
 	return http.StatusInternalServerError
@@ -656,8 +657,8 @@ func mapWriteErr(err error) int {
 // turns a NotLeaderError into a real 307 redirect when the leader's
 // HTTP URL is known; falls back to JSON otherwise.
 func writeWriteErr(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, storage.ErrNotLeader) {
-		var nle *storage.NotLeaderError
+	if errors.Is(err, pebble.ErrNotLeader) {
+		var nle *pebble.NotLeaderError
 		leader := ""
 		if errors.As(err, &nle) {
 			leader = nle.LeaderURL

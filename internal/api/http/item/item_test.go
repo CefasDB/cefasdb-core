@@ -11,7 +11,7 @@ import (
 
 	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -19,22 +19,22 @@ import (
 // localWriteTargets is the single-shard test stand-in for
 // routedWriteTargets. The item package uses it through the
 // itemhttp.WriteTargets interface so the tests exercise the real Put /
-// Delete code paths against a real storage.DB.
-type localWriteTargets struct{ db *storage.DB }
+// Delete code paths against a real pebble.DB.
+type localWriteTargets struct{ db *pebble.DB }
 
-func (t localWriteTargets) PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error {
+func (t localWriteTargets) PutItemWith(td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error {
 	return t.db.PutItemWith(td, item, opts)
 }
 
-func (t localWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error {
+func (t localWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error {
 	return t.db.DeleteItemWith(td, key, opts)
 }
 
 func (t localWriteTargets) Release() {}
 
-func newHandlers(t *testing.T) (*itemhttp.Handlers, *storage.DB, *catalog.Catalog, func()) {
+func newHandlers(t *testing.T) (*itemhttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -44,11 +44,11 @@ func newHandlers(t *testing.T) (*itemhttp.Handlers, *storage.DB, *catalog.Catalo
 	}
 	deps := itemhttp.Deps{
 		Cat:        cat,
-		StorageFor: func(_ []byte) *storage.DB { return db },
+		StorageFor: func(_ []byte) *pebble.DB { return db },
 		WriteTargetsForPK: func(_ []byte) (itemhttp.WriteTargets, error) {
 			return localWriteTargets{db: db}, nil
 		},
-		BatchWriteByShard: func(td types.TableDescriptor, ops []storage.BatchOp) error {
+		BatchWriteByShard: func(td types.TableDescriptor, ops []pebble.BatchOp) error {
 			return db.BatchWriteItem(td, ops)
 		},
 		BatchGetByShard: func(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
@@ -163,7 +163,7 @@ func TestHandleBatchWriteItemMixedPutDelete(t *testing.T) {
 
 	// Seed an item that the batch will delete.
 	if err := db.PutItemWith(types.TableDescriptor{Name: "events", KeySchema: types.KeySchema{PK: "id"}},
-		types.Item{"id": types.AttributeValue{T: types.AttrS, S: "old"}}, storage.PutOptions{}); err != nil {
+		types.Item{"id": types.AttributeValue{T: types.AttrS, S: "old"}}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func TestHandleBatchGetItemMultipleKeys(t *testing.T) {
 		if err := db.PutItemWith(td, types.Item{
 			"id":   types.AttributeValue{T: types.AttrS, S: v},
 			"slot": types.AttributeValue{T: types.AttrS, S: v + "-slot"},
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("seed %s: %v", v, err)
 		}
 	}

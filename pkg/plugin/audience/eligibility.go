@@ -11,12 +11,12 @@ import (
 // single value the planner can evaluate without re-shaping the
 // audience plugin's individual primitives.
 type EligibilityRequest struct {
-	Campaign    string
-	UserKey     string
-	Audience    plugin.AudienceRequest
-	DedupTTL    time.Duration
-	FreqLimit   int
-	FreqWindow  time.Duration
+	Campaign   string
+	UserKey    string
+	Audience   plugin.AudienceRequest
+	DedupTTL   time.Duration
+	FreqLimit  int
+	FreqWindow time.Duration
 }
 
 // EligibilityResult tells the caller whether to deliver + why if not.

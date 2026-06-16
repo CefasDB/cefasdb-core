@@ -11,23 +11,23 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func newStreamIteratorTestServer(t *testing.T) (*GRPCServer, *storage.DB, *catalog.Catalog, func()) {
-	return newStreamIteratorTestServerWithStorageOptions(t, storage.Options{Path: t.TempDir()})
+func newStreamIteratorTestServer(t *testing.T) (*GRPCServer, *pebble.DB, *catalog.Catalog, func()) {
+	return newStreamIteratorTestServerWithStorageOptions(t, pebble.Options{Path: t.TempDir()})
 }
 
-func newStreamIteratorTestServerWithStorageOptions(t *testing.T, opts storage.Options) (*GRPCServer, *storage.DB, *catalog.Catalog, func()) {
+func newStreamIteratorTestServerWithStorageOptions(t *testing.T, opts pebble.Options) (*GRPCServer, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
 	if opts.Path == "" {
 		opts.Path = t.TempDir()
 	}
-	db, err := storage.Open(opts)
+	db, err := pebble.Open(opts)
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -62,11 +62,11 @@ func createIteratorStreamWithView(t *testing.T, srv *GRPCServer, table, view str
 	return resp.GetDescriptor_().GetLatestStreamArn()
 }
 
-func appendIteratorStreamRecords(t *testing.T, db *storage.DB, catStore *catalog.Catalog, count int) {
+func appendIteratorStreamRecords(t *testing.T, db *pebble.DB, catStore *catalog.Catalog, count int) {
 	appendIteratorStreamRecordsForTable(t, db, catStore, "Events", count)
 }
 
-func appendIteratorStreamRecordsForTable(t *testing.T, db *storage.DB, catStore *catalog.Catalog, table string, count int) {
+func appendIteratorStreamRecordsForTable(t *testing.T, db *pebble.DB, catStore *catalog.Catalog, table string, count int) {
 	t.Helper()
 	td, err := catStore.Describe(table)
 	if err != nil {
@@ -78,13 +78,13 @@ func appendIteratorStreamRecordsForTable(t *testing.T, db *storage.DB, catStore 
 			"sk": {T: types.AttrS, S: fmt.Sprintf("%03d", i)},
 			"v":  {T: types.AttrN, N: fmt.Sprint(i)},
 		}
-		if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put stream record %d: %v", i, err)
 		}
 	}
 }
 
-func appendInsertModifyRemove(t *testing.T, db *storage.DB, catStore *catalog.Catalog, table string) {
+func appendInsertModifyRemove(t *testing.T, db *pebble.DB, catStore *catalog.Catalog, table string) {
 	t.Helper()
 	td, err := catStore.Describe(table)
 	if err != nil {
@@ -95,7 +95,7 @@ func appendInsertModifyRemove(t *testing.T, db *storage.DB, catStore *catalog.Ca
 		"sk":     {T: types.AttrS, S: "001"},
 		"status": {T: types.AttrS, S: "new"},
 	}
-	if err := db.PutItemWith(td, first, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, first, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put first: %v", err)
 	}
 	updated := types.Item{
@@ -103,13 +103,13 @@ func appendInsertModifyRemove(t *testing.T, db *storage.DB, catStore *catalog.Ca
 		"sk":     {T: types.AttrS, S: "001"},
 		"status": {T: types.AttrS, S: "updated"},
 	}
-	if err := db.PutItemWith(td, updated, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, updated, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put updated: %v", err)
 	}
 	if err := db.DeleteItemWith(td, types.Item{
 		"pk": {T: types.AttrS, S: "account"},
 		"sk": {T: types.AttrS, S: "001"},
-	}, storage.DeleteOptions{}); err != nil {
+	}, pebble.DeleteOptions{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 }
@@ -508,9 +508,9 @@ func TestGetRecordsRejectsExpiredMalformedAndTrimmedIterators(t *testing.T) {
 }
 
 func TestStreamRetentionTrimPointRejectsOldIterators(t *testing.T) {
-	srv, db, catStore, cleanup := newStreamIteratorTestServerWithStorageOptions(t, storage.Options{
+	srv, db, catStore, cleanup := newStreamIteratorTestServerWithStorageOptions(t, pebble.Options{
 		Path:            t.TempDir(),
-		StreamRetention: storage.StreamRetentionOptions{Retention: 100 * time.Millisecond},
+		StreamRetention: pebble.StreamRetentionOptions{Retention: 100 * time.Millisecond},
 	})
 	defer cleanup()
 	arn := createIteratorStream(t, srv)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/core/query/mmr"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -47,8 +48,8 @@ type Reader interface {
 	GetItem(table string, ks types.KeySchema, key types.Item) (types.Item, error)
 	QueryByPK(table string, ks types.KeySchema, pkAttr types.AttributeValue, limit int) ([]types.Item, error)
 	QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skHigh types.AttributeValue, limit int) ([]types.Item, error)
-	QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error)
-	SpatialQueryItems(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error)
+	QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error)
+	SpatialQueryItems(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error)
 	ScanTable(table string, limit int) ([]types.Item, error)
 }
 
@@ -56,11 +57,11 @@ type Reader interface {
 // PutItemWith covers INSERT and UPDATE (read-modify-write through
 // Reader.GetItem first), DeleteItemWith covers DELETE.
 type Writer interface {
-	PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error
-	DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error
+	PutItemWith(td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error
+	DeleteItemWith(td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error
 }
 
-// Storage composes Reader and Writer. The real *storage.DB satisfies
+// Storage composes Reader and Writer. The real *pebble.DB satisfies
 // it; tests that need only one side can take Reader or Writer and let
 // the executor reject the unused half via a nil-method panic.
 type Storage interface {
@@ -150,7 +151,7 @@ func (e *Executor) execInsert(p *PlanPutItem) (*Result, error) {
 			}
 		}
 	}
-	if err := e.Storage.PutItemWith(p.Descriptor, p.Item, storage.PutOptions{}); err != nil {
+	if err := e.Storage.PutItemWith(p.Descriptor, p.Item, pebble.PutOptions{}); err != nil {
 		return nil, err
 	}
 	if e.MutationHook != nil {
@@ -189,7 +190,7 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 			return nil, fmt.Errorf("UPDATE %s %q: %w", actionKindName(a.Kind), a.Column, err)
 		}
 	}
-	if err := e.Storage.PutItemWith(p.Descriptor, prior, storage.PutOptions{}); err != nil {
+	if err := e.Storage.PutItemWith(p.Descriptor, prior, pebble.PutOptions{}); err != nil {
 		return nil, err
 	}
 	if e.MutationHook != nil {
@@ -225,7 +226,7 @@ func (e *Executor) execDelete(p *PlanDelete) (*Result, error) {
 			}
 		}
 	}
-	if err := e.Storage.DeleteItemWith(p.Descriptor, p.Key, storage.DeleteOptions{}); err != nil {
+	if err := e.Storage.DeleteItemWith(p.Descriptor, p.Key, pebble.DeleteOptions{}); err != nil {
 		return nil, err
 	}
 	if e.MutationHook != nil {
@@ -474,7 +475,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 
 	switch {
 	case p.IndexName != "":
-		items, err = e.Storage.QueryByGSI(p.Descriptor, p.IndexName, p.PKValue, storage.QueryOptions{
+		items, err = e.Storage.QueryByGSI(p.Descriptor, p.IndexName, p.PKValue, pebble.QueryOptions{
 			SKLow:  p.SKLow,
 			SKHigh: p.SKHigh,
 			Limit:  p.Limit,

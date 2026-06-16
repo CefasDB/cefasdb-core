@@ -18,8 +18,9 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -457,14 +458,14 @@ func putElasticityItem(mgr *Manager, td types.TableDescriptor, item types.Item) 
 	if targets.Primary == nil || targets.Primary.Storage == nil {
 		return fmt.Errorf("missing primary target")
 	}
-	if err := targets.Primary.Storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := targets.Primary.Storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		return err
 	}
 	for _, mirror := range targets.Mirrors {
 		if mirror == nil || mirror.Storage == nil {
 			return fmt.Errorf("missing mirror target")
 		}
-		if err := mirror.Storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := mirror.Storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			return err
 		}
 	}
@@ -667,7 +668,7 @@ func verifyElasticityConsistency(t *testing.T, mgr *Manager, td types.TableDescr
 		if shard == nil || shard.Storage == nil || shard.State == placement.ShardStateDecommissioned {
 			continue
 		}
-		items, err := shard.Storage.QueryByGSI(td, elasticityChaosIndex, sAttrElasticity(bucket), storage.QueryOptions{})
+		items, err := shard.Storage.QueryByGSI(td, elasticityChaosIndex, sAttrElasticity(bucket), pebble.QueryOptions{})
 		if err != nil {
 			return elasticityConsistency{verdict: "fail", problems: []string{fmt.Sprintf("gsi shard %d: %v", shard.ID, err)}}
 		}

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 )
 
 func TestMetricsHandlerExposesRegisteredSeries(t *testing.T) {
@@ -15,7 +15,7 @@ func TestMetricsHandlerExposesRegisteredSeries(t *testing.T) {
 	m.Observe("PutItem", "events", "ok", 0.0012)
 	m.Observe("GetItem", "events", "notfound", 0.0001)
 	m.AuthRejected("missing_token")
-	m.ObserveStreamRetention("0", storage.StreamRetentionStats{
+	m.ObserveStreamRetention("0", pebble.StreamRetentionStats{
 		Table:           "events",
 		OldestSequence:  2,
 		NewestSequence:  5,

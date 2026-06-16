@@ -8,15 +8,15 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func newHandlers(t *testing.T) (*tablehttp.Handlers, *storage.DB, *catalog.Catalog, func()) {
+func newHandlers(t *testing.T) (*tablehttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestHandleTableEmptyName(t *testing.T) {
 
 func TestHandleTablesCreateFansOut(t *testing.T) {
 	t.Parallel()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

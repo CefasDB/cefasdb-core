@@ -1,10 +1,12 @@
-package storage
+package pebble
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 )
@@ -311,7 +313,7 @@ func (d *DB) Health(ctx context.Context) error {
 	if d == nil || d.db == nil {
 		return fmt.Errorf("db not open")
 	}
-	_, _, err := d.db.Get([]byte(Namespace + "__health__"))
+	_, _, err := d.db.Get([]byte(storage.Namespace + "__health__"))
 	if err != nil && err != pebbledb.ErrNotFound {
 		return err
 	}

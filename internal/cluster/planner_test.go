@@ -18,6 +18,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -810,7 +811,7 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		}},
 		SpatialIndexes: []types.SpatialIndexDescriptor{{
 			Name:       "by_location",
-			Kind:       storage.SpatialKindGeohash,
+			Kind:       pebble.SpatialKindGeohash,
 			Attributes: []string{"lat", "lon"},
 			Precision:  5,
 		}},
@@ -835,12 +836,12 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		"lon":        splitNAttr("-74.0060"),
 		"expires_at": splitNAttr(fmt.Sprintf("%d", now.Add(time.Hour).Unix())),
 	}
-	if err := parent.Storage.PutItemWith(td, moved, storage.PutOptions{}); err != nil {
+	if err := parent.Storage.PutItemWith(td, moved, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put seed: %v", err)
 	}
 	moved["event"] = splitSAttr("login")
 	moved["author"] = splitSAttr("alice")
-	if err := parent.Storage.PutItemWith(td, moved, storage.PutOptions{}); err != nil {
+	if err := parent.Storage.PutItemWith(td, moved, pebble.PutOptions{}); err != nil {
 		t.Fatalf("update indexed row: %v", err)
 	}
 
@@ -852,10 +853,10 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		"lat":     splitNAttr("40.7300"),
 		"lon":     splitNAttr("-73.9900"),
 	}
-	if err := parent.Storage.PutItemWith(td, deleted, storage.PutOptions{}); err != nil {
+	if err := parent.Storage.PutItemWith(td, deleted, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put deleted seed: %v", err)
 	}
-	if err := parent.Storage.DeleteItemWith(td, deleted, storage.DeleteOptions{}); err != nil {
+	if err := parent.Storage.DeleteItemWith(td, deleted, pebble.DeleteOptions{}); err != nil {
 		t.Fatalf("delete seed: %v", err)
 	}
 
@@ -868,7 +869,7 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		"lon":        splitNAttr("-74.0100"),
 		"expires_at": splitNAttr(fmt.Sprintf("%d", now.Add(-time.Hour).Unix())),
 	}
-	if err := parent.Storage.PutItemWith(td, expired, storage.PutOptions{}); err != nil {
+	if err := parent.Storage.PutItemWith(td, expired, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put expired row: %v", err)
 	}
 
@@ -884,14 +885,14 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		t.Fatalf("unexpected copy/delete counts: %+v", result)
 	}
 
-	gsiHits, err := child.Storage.QueryByGSI(td, "by_event", splitSAttr("login"), storage.QueryOptions{})
+	gsiHits, err := child.Storage.QueryByGSI(td, "by_event", splitSAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("child GSI query: %v", err)
 	}
 	if len(gsiHits) != 1 || gsiHits[0]["user_id"].S != keys[0] || gsiHits[0]["author"].S != "alice" {
 		t.Fatalf("child GSI hits = %+v", gsiHits)
 	}
-	lsiHits, err := child.Storage.QueryByLSI(td, "by_author", splitSAttr(keys[0]), storage.QueryOptions{})
+	lsiHits, err := child.Storage.QueryByLSI(td, "by_author", splitSAttr(keys[0]), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("child LSI query: %v", err)
 	}
@@ -899,7 +900,7 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		t.Fatalf("child LSI hits = %+v", lsiHits)
 	}
 	box := spatial.BBox{MinLat: 40.6, MinLon: -74.1, MaxLat: 40.8, MaxLon: -73.9}
-	spatialHits, err := child.Storage.SpatialQueryItems(td, "by_location", storage.SpatialQuery{BBox: &box})
+	spatialHits, err := child.Storage.SpatialQueryItems(td, "by_location", pebble.SpatialQuery{BBox: &box})
 	if err != nil {
 		t.Fatalf("child spatial query: %v", err)
 	}
@@ -911,7 +912,7 @@ func TestFinalizeSplitMigratesIndexesAndTTL(t *testing.T) {
 		t.Fatalf("parent table data keys = %d, want 0", got)
 	}
 
-	reaper := storage.NewReaper(child.Storage, splitCatalog{tables: []types.TableDescriptor{td}}, nil, storage.ReaperConfig{
+	reaper := pebble.NewReaper(child.Storage, splitCatalog{tables: []types.TableDescriptor{td}}, nil, pebble.ReaperConfig{
 		BatchSize: 1024,
 		Now:       func() time.Time { return now },
 	})
@@ -1102,7 +1103,7 @@ type splitCatalog struct {
 
 func (c splitCatalog) List() []types.TableDescriptor { return c.tables }
 
-func countTableDataKeys(t *testing.T, db *storage.DB, table string) int {
+func countTableDataKeys(t *testing.T, db *pebble.DB, table string) int {
 	t.Helper()
 	lower, upper := storage.PrefixTable(table)
 	iter, err := db.Iter(lower, upper)

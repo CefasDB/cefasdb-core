@@ -16,22 +16,22 @@ import (
 // transactWriteEntry mirrors one entry in the aws --transact-items array.
 type transactWriteEntry struct {
 	Put *struct {
-		TableName                 string                         `json:"TableName"`
-		Item                      map[string]ddbjson.Attribute   `json:"Item"`
-		ConditionExpression       string                         `json:"ConditionExpression,omitempty"`
-		ExpressionAttributeValues map[string]ddbjson.Attribute   `json:"ExpressionAttributeValues,omitempty"`
+		TableName                 string                       `json:"TableName"`
+		Item                      map[string]ddbjson.Attribute `json:"Item"`
+		ConditionExpression       string                       `json:"ConditionExpression,omitempty"`
+		ExpressionAttributeValues map[string]ddbjson.Attribute `json:"ExpressionAttributeValues,omitempty"`
 	} `json:"Put,omitempty"`
 	Delete *struct {
-		TableName                 string                         `json:"TableName"`
-		Key                       map[string]ddbjson.Attribute   `json:"Key"`
-		ConditionExpression       string                         `json:"ConditionExpression,omitempty"`
-		ExpressionAttributeValues map[string]ddbjson.Attribute   `json:"ExpressionAttributeValues,omitempty"`
+		TableName                 string                       `json:"TableName"`
+		Key                       map[string]ddbjson.Attribute `json:"Key"`
+		ConditionExpression       string                       `json:"ConditionExpression,omitempty"`
+		ExpressionAttributeValues map[string]ddbjson.Attribute `json:"ExpressionAttributeValues,omitempty"`
 	} `json:"Delete,omitempty"`
 	ConditionCheck *struct {
-		TableName                 string                         `json:"TableName"`
-		Key                       map[string]ddbjson.Attribute   `json:"Key"`
-		ConditionExpression       string                         `json:"ConditionExpression"`
-		ExpressionAttributeValues map[string]ddbjson.Attribute   `json:"ExpressionAttributeValues,omitempty"`
+		TableName                 string                       `json:"TableName"`
+		Key                       map[string]ddbjson.Attribute `json:"Key"`
+		ConditionExpression       string                       `json:"ConditionExpression"`
+		ExpressionAttributeValues map[string]ddbjson.Attribute `json:"ExpressionAttributeValues,omitempty"`
 	} `json:"ConditionCheck,omitempty"`
 }
 

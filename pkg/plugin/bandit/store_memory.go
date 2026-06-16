@@ -11,7 +11,7 @@ import (
 // traffic. Safe for concurrent use.
 type MemoryStore struct {
 	mu   sync.Mutex
-	meta map[string]*MetaRecord       // banditID → meta
+	meta map[string]*MetaRecord           // banditID → meta
 	arms map[string]map[string]*ArmRecord // banditID → armID → arm
 }
 

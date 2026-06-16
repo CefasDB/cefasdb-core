@@ -10,16 +10,19 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 )
 
 // stubPlug satisfies plugin.Plugin so we can pre-seed a registry
 // without dragging in a real plugin implementation.
-type stubPlug struct{ name string; kind plugin.Kind }
+type stubPlug struct {
+	name string
+	kind plugin.Kind
+}
 
 func (s *stubPlug) Manifest() plugin.Manifest {
 	return plugin.Manifest{Name: s.name, Kind: s.kind, Version: "1"}
@@ -31,7 +34,7 @@ func (s *stubPlug) Manifest() plugin.Manifest {
 func fixtureWithRegistry(t *testing.T, r *plugin.Registry) (cefaspb.CefasClient, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}

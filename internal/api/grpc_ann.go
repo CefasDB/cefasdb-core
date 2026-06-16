@@ -10,7 +10,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/placement"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -191,7 +191,7 @@ func (s *GRPCServer) exactScanTopK(table, field string, target model.AttributeVa
 	return eng.Result(), scanned, nil
 }
 
-func localExactScanTopK(db *storage.DB, table, field string, target model.AttributeValue, limit int, dist cquery.DistanceOp) ([]cquery.TopKResult, int, error) {
+func localExactScanTopK(db *pebble.DB, table, field string, target model.AttributeValue, limit int, dist cquery.DistanceOp) ([]cquery.TopKResult, int, error) {
 	eng, err := cquery.NewTopK(dist, field, target, limit)
 	if err != nil {
 		return nil, 0, status.Error(codes.InvalidArgument, err.Error())
@@ -208,12 +208,12 @@ func localExactScanTopK(db *storage.DB, table, field string, target model.Attrib
 	return eng.Result(), len(items), nil
 }
 
-func (s *GRPCServer) scatterReadStores() []*storage.DB {
+func (s *GRPCServer) scatterReadStores() []*pebble.DB {
 	if s.manager == nil {
-		return []*storage.DB{s.db}
+		return []*pebble.DB{s.db}
 	}
-	out := make([]*storage.DB, 0)
-	seen := map[*storage.DB]struct{}{}
+	out := make([]*pebble.DB, 0)
+	seen := map[*pebble.DB]struct{}{}
 	for _, sh := range s.manager.Shards() {
 		if !scatterReadableShard(sh) || sh.Storage == nil {
 			continue

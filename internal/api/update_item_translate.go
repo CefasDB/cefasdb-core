@@ -185,7 +185,7 @@ func substituteValues(src string, values map[string]types.AttributeValue) (strin
 }
 
 // scanQuoted returns the index past the closing quote of a single-
-// quoted SQL string that starts at r[i]. Handles `''` escapes.
+// quoted SQL string that starts at r[i]. Handles `”` escapes.
 func scanQuoted(r []rune, i int) int {
 	j := i + 1
 	for j < len(r) {

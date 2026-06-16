@@ -10,15 +10,15 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	"github.com/osvaldoandrade/cefas/internal/rebalance"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/config"
 )
 
-// StorageOptions assembles the storage.Options struct that storage.Open
+// StorageOptions assembles the pebble.Options struct that pebble.Open
 // expects, threading the Pebble tuning, backpressure, and stream
 // retention sub-configs alongside the on-disk path.
-func StorageOptions(cfg config.Config, path string) storage.Options {
-	return storage.Options{
+func StorageOptions(cfg config.Config, path string) pebble.Options {
+	return pebble.Options{
 		Path:            path,
 		FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
 		Profile:         cfg.Storage.Profile,
@@ -29,9 +29,9 @@ func StorageOptions(cfg config.Config, path string) storage.Options {
 }
 
 // StorageTuning projects the Pebble tuning knobs that ship with the
-// Storage stanza of the config into the storage.PebbleTuning shape.
-func StorageTuning(cfg config.Config) storage.PebbleTuning {
-	return storage.PebbleTuning{
+// Storage stanza of the config into the pebble.PebbleTuning shape.
+func StorageTuning(cfg config.Config) pebble.PebbleTuning {
+	return pebble.PebbleTuning{
 		BlockCacheSizeBytes:       cfg.Storage.BlockCacheSizeBytes,
 		MemTableSizeBytes:         cfg.Storage.MemTableSizeBytes,
 		MemTableStopWrites:        cfg.Storage.MemTableStopWritesThreshold,
@@ -79,18 +79,18 @@ func RebalancerConfig(cfg config.Config) rebalance.Config {
 	}
 }
 
-// ScheduledBackupConfig builds the storage.ScheduledBackupConfig used by
+// ScheduledBackupConfig builds the pebble.ScheduledBackupConfig used by
 // NewScheduledBackupRunner, injecting the Prometheus metrics handle and
 // the host logger so the runner can report without reaching back into
 // main.
-func ScheduledBackupConfig(cfg config.Config, prom *metrics.Metrics, logger func(string, ...any)) storage.ScheduledBackupConfig {
-	return storage.ScheduledBackupConfig{
+func ScheduledBackupConfig(cfg config.Config, prom *metrics.Metrics, logger func(string, ...any)) pebble.ScheduledBackupConfig {
+	return pebble.ScheduledBackupConfig{
 		Enabled:      cfg.BackupScheduler.Enabled,
 		DryRun:       cfg.BackupScheduler.DryRun,
 		Interval:     cfg.BackupScheduler.Interval,
 		NameTemplate: cfg.BackupScheduler.NameTemplate,
 		Tables:       append([]string(nil), cfg.BackupScheduler.Tables...),
-		Retention: storage.BackupRetentionOptions{
+		Retention: pebble.BackupRetentionOptions{
 			KeepLatest:    cfg.BackupScheduler.Retention.KeepLatest,
 			KeepLatestSet: cfg.BackupScheduler.Retention.KeepLatestSet,
 			MaxAge:        cfg.BackupScheduler.Retention.MaxAge,
@@ -104,8 +104,8 @@ func ScheduledBackupConfig(cfg config.Config, prom *metrics.Metrics, logger func
 
 // BackpressureOptions extracts the adaptive write-backpressure thresholds
 // from the Storage stanza.
-func BackpressureOptions(cfg config.Config) storage.BackpressureOptions {
-	return storage.BackpressureOptions{
+func BackpressureOptions(cfg config.Config) pebble.BackpressureOptions {
+	return pebble.BackpressureOptions{
 		Enabled:                     cfg.Storage.BackpressureEnabled,
 		RejectOnCritical:            cfg.Storage.BackpressureRejectCritical,
 		WarningL0Files:              cfg.Storage.BackpressureWarningL0Files,
@@ -121,8 +121,8 @@ func BackpressureOptions(cfg config.Config) storage.BackpressureOptions {
 
 // StreamRetentionOptions extracts the DynamoDB Streams retention knobs
 // that bound the in-memory change feed.
-func StreamRetentionOptions(cfg config.Config) storage.StreamRetentionOptions {
-	return storage.StreamRetentionOptions{
+func StreamRetentionOptions(cfg config.Config) pebble.StreamRetentionOptions {
+	return pebble.StreamRetentionOptions{
 		Retention: cfg.Storage.StreamRetention,
 		MaxBytes:  cfg.Storage.StreamRetentionMaxBytes,
 	}

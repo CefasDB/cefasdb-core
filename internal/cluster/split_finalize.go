@@ -8,8 +8,9 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -55,47 +56,47 @@ type SplitVerification struct {
 }
 
 type SplitFinalizeState struct {
-	ParentShardID     uint32             `json:"parentShardId"`
-	ChildShardID      uint32             `json:"childShardId"`
-	BeforeEpoch       uint64             `json:"beforeEpoch"`
-	AfterEpoch        uint64             `json:"afterEpoch,omitempty"`
-	ParentRangeBefore placement.TokenRange         `json:"parentRangeBefore"`
-	ParentRangeAfter  placement.TokenRange         `json:"parentRangeAfter"`
-	ChildRange        placement.TokenRange         `json:"childRange"`
-	Phase             SplitFinalizePhase `json:"phase"`
-	CopiedKeys        int64              `json:"copiedKeys,omitempty"`
-	CopiedCatalogKeys int64              `json:"copiedCatalogKeys,omitempty"`
-	DeletedKeys       int64              `json:"deletedKeys,omitempty"`
-	Verification      SplitVerification  `json:"verification,omitempty"`
-	UpdatedAtUnix     int64              `json:"updatedAtUnix"`
-	LastError         string             `json:"lastError,omitempty"`
+	ParentShardID     uint32               `json:"parentShardId"`
+	ChildShardID      uint32               `json:"childShardId"`
+	BeforeEpoch       uint64               `json:"beforeEpoch"`
+	AfterEpoch        uint64               `json:"afterEpoch,omitempty"`
+	ParentRangeBefore placement.TokenRange `json:"parentRangeBefore"`
+	ParentRangeAfter  placement.TokenRange `json:"parentRangeAfter"`
+	ChildRange        placement.TokenRange `json:"childRange"`
+	Phase             SplitFinalizePhase   `json:"phase"`
+	CopiedKeys        int64                `json:"copiedKeys,omitempty"`
+	CopiedCatalogKeys int64                `json:"copiedCatalogKeys,omitempty"`
+	DeletedKeys       int64                `json:"deletedKeys,omitempty"`
+	Verification      SplitVerification    `json:"verification,omitempty"`
+	UpdatedAtUnix     int64                `json:"updatedAtUnix"`
+	LastError         string               `json:"lastError,omitempty"`
 }
 
 type SplitFinalizeResult struct {
-	ParentShardID     uint32            `json:"parentShardId"`
-	ChildShardID      uint32            `json:"childShardId"`
-	BeforeEpoch       uint64            `json:"beforeEpoch"`
-	AfterEpoch        uint64            `json:"afterEpoch"`
-	ParentRangeBefore placement.TokenRange        `json:"parentRangeBefore"`
-	ParentRangeAfter  placement.TokenRange        `json:"parentRangeAfter"`
-	ChildRange        placement.TokenRange        `json:"childRange"`
-	CopiedKeys        int64             `json:"copiedKeys"`
-	CopiedCatalogKeys int64             `json:"copiedCatalogKeys"`
-	DeletedKeys       int64             `json:"deletedKeys"`
-	Phase             string            `json:"phase,omitempty"`
-	Verification      SplitVerification `json:"verification,omitempty"`
-	Placement         placement.PlacementCatalog  `json:"placement"`
+	ParentShardID     uint32                     `json:"parentShardId"`
+	ChildShardID      uint32                     `json:"childShardId"`
+	BeforeEpoch       uint64                     `json:"beforeEpoch"`
+	AfterEpoch        uint64                     `json:"afterEpoch"`
+	ParentRangeBefore placement.TokenRange       `json:"parentRangeBefore"`
+	ParentRangeAfter  placement.TokenRange       `json:"parentRangeAfter"`
+	ChildRange        placement.TokenRange       `json:"childRange"`
+	CopiedKeys        int64                      `json:"copiedKeys"`
+	CopiedCatalogKeys int64                      `json:"copiedCatalogKeys"`
+	DeletedKeys       int64                      `json:"deletedKeys"`
+	Phase             string                     `json:"phase,omitempty"`
+	Verification      SplitVerification          `json:"verification,omitempty"`
+	Placement         placement.PlacementCatalog `json:"placement"`
 }
 
 type SplitRollbackResult struct {
-	ParentShardID      uint32           `json:"parentShardId"`
-	ChildShardID       uint32           `json:"childShardId"`
-	BeforeEpoch        uint64           `json:"beforeEpoch"`
-	AfterEpoch         uint64           `json:"afterEpoch"`
+	ParentShardID      uint32                     `json:"parentShardId"`
+	ChildShardID       uint32                     `json:"childShardId"`
+	BeforeEpoch        uint64                     `json:"beforeEpoch"`
+	AfterEpoch         uint64                     `json:"afterEpoch"`
 	ChildRange         placement.TokenRange       `json:"childRange"`
-	DeletedChildKeys   int64            `json:"deletedChildKeys"`
-	DeletedCatalogKeys int64            `json:"deletedCatalogKeys"`
-	Phase              string           `json:"phase"`
+	DeletedChildKeys   int64                      `json:"deletedChildKeys"`
+	DeletedCatalogKeys int64                      `json:"deletedCatalogKeys"`
+	Phase              string                     `json:"phase"`
 	Placement          placement.PlacementCatalog `json:"placement"`
 }
 
@@ -493,7 +494,7 @@ func validateFinalizeSplit(cat placement.PlacementCatalog, req SplitFinalizeRequ
 	return parentIdx, childIdx, parent, child, parentRangeAfter, nil
 }
 
-func loadSplitCopyTables(db *storage.DB) ([]types.TableDescriptor, error) {
+func loadSplitCopyTables(db *pebble.DB) ([]types.TableDescriptor, error) {
 	cat, err := catalog.New(db)
 	if err != nil {
 		return nil, fmt.Errorf("load catalog before split finalize: %w", err)
@@ -511,7 +512,7 @@ func (m *Manager) loadSplitFinalizeState(parentShardID, childShardID uint32) (Sp
 		return SplitFinalizeState{}, false, fmt.Errorf("cluster: shard 0 unavailable")
 	}
 	raw, err := shard0.Storage.Get(splitFinalizeStateKey(parentShardID, childShardID))
-	if err == storage.ErrNotFound {
+	if err == pebble.ErrNotFound {
 		return SplitFinalizeState{}, false, nil
 	}
 	if err != nil {
@@ -548,12 +549,12 @@ func runSplitFinalizeHook(phase SplitFinalizePhase, state SplitFinalizeState) er
 	return splitFinalizeTestHook(phase, state)
 }
 
-func copyCatalogKeys(ctx context.Context, src, dst *storage.DB) (int64, error) {
+func copyCatalogKeys(ctx context.Context, src, dst *pebble.DB) (int64, error) {
 	lower, upper := storage.PrefixCatalog()
 	return copyKeys(ctx, src, dst, lower, upper, nil)
 }
 
-func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng placement.TokenRange) (int64, error) {
+func copyPrimaryTokenRange(ctx context.Context, src, dst *pebble.DB, rng placement.TokenRange) (int64, error) {
 	lower, upper := storage.PrefixTables()
 	return copyKeys(ctx, src, dst, lower, upper, func(key []byte) bool {
 		token, ok := storage.PrimaryTokenFromKey(key)
@@ -561,7 +562,7 @@ func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng placem
 	})
 }
 
-func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, src, dst *storage.DB, rng placement.TokenRange) (int64, error) {
+func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, src, dst *pebble.DB, rng placement.TokenRange) (int64, error) {
 	if src == nil || dst == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}
@@ -587,7 +588,7 @@ func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableD
 				_ = iter.Close()
 				return copied, fmt.Errorf("decode %s primary row: %w", td.Name, err)
 			}
-			if err := dst.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+			if err := dst.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 				_ = iter.Close()
 				return copied, fmt.Errorf("put %s primary row on child: %w", td.Name, err)
 			}
@@ -604,7 +605,7 @@ func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableD
 	return copied, nil
 }
 
-func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, parent, child *storage.DB, rng placement.TokenRange) (SplitVerification, error) {
+func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, parent, child *pebble.DB, rng placement.TokenRange) (SplitVerification, error) {
 	parentDigest, err := digestPrimaryTokenRange(ctx, tables, parent, rng)
 	if err != nil {
 		return SplitVerification{}, fmt.Errorf("digest parent range: %w", err)
@@ -631,7 +632,7 @@ type splitDigest struct {
 	checksum uint64
 }
 
-func digestPrimaryTokenRange(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng placement.TokenRange) (splitDigest, error) {
+func digestPrimaryTokenRange(ctx context.Context, tables []types.TableDescriptor, db *pebble.DB, rng placement.TokenRange) (splitDigest, error) {
 	var out splitDigest
 	for _, td := range tables {
 		lower, upper := storage.PrefixPrimaryAll(td.Name)
@@ -670,7 +671,7 @@ func checksumKV(key, value []byte) uint64 {
 	return h.Sum64()
 }
 
-func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng placement.TokenRange) (int64, error) {
+func deletePrimaryTokenRange(ctx context.Context, db *pebble.DB, rng placement.TokenRange) (int64, error) {
 	lower, upper := storage.PrefixTables()
 	return deleteKeys(ctx, db, lower, upper, func(key []byte) bool {
 		token, ok := storage.PrimaryTokenFromKey(key)
@@ -678,7 +679,7 @@ func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng placement.
 	})
 }
 
-func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng placement.TokenRange) (int64, error) {
+func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, db *pebble.DB, rng placement.TokenRange) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}
@@ -692,7 +693,7 @@ func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.Tabl
 			if err := ctx.Err(); err != nil {
 				return deleted, err
 			}
-			if err := db.DeleteItemWith(td, item, storage.DeleteOptions{}); err != nil {
+			if err := db.DeleteItemWith(td, item, pebble.DeleteOptions{}); err != nil {
 				return deleted, fmt.Errorf("delete %s primary row from parent: %w", td.Name, err)
 			}
 			deleted++
@@ -701,7 +702,7 @@ func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.Tabl
 	return deleted, nil
 }
 
-func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDescriptor, rng placement.TokenRange) ([]types.Item, error) {
+func primaryItemsInRange(ctx context.Context, db *pebble.DB, td types.TableDescriptor, rng placement.TokenRange) ([]types.Item, error) {
 	lower, upper := storage.PrefixPrimaryAll(td.Name)
 	iter, err := db.Iter(lower, upper)
 	if err != nil {
@@ -730,12 +731,12 @@ func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDesc
 	return items, nil
 }
 
-func deleteAllKeys(ctx context.Context, db *storage.DB, bounds func() ([]byte, []byte)) (int64, error) {
+func deleteAllKeys(ctx context.Context, db *pebble.DB, bounds func() ([]byte, []byte)) (int64, error) {
 	lower, upper := bounds()
 	return deleteKeys(ctx, db, lower, upper, nil)
 }
 
-func copyKeys(ctx context.Context, src, dst *storage.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {
+func copyKeys(ctx context.Context, src, dst *pebble.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {
 	if src == nil || dst == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}
@@ -791,7 +792,7 @@ func copyKeys(ctx context.Context, src, dst *storage.DB, lower, upper []byte, in
 	return copied, nil
 }
 
-func deleteKeys(ctx context.Context, db *storage.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {
+func deleteKeys(ctx context.Context, db *pebble.DB, lower, upper []byte, include func([]byte) bool) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}

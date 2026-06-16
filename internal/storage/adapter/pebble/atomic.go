@@ -22,7 +22,7 @@
 //
 //	alpha = alpha + reward                  // ADD_RETURN with delta=reward
 //	beta  = clamp(beta + 1 - reward, 0, 1)  // APPLY beta = clamp(beta + 1 - reward, 0, 1)
-package storage
+package pebble
 
 import (
 	"errors"
@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -65,7 +67,7 @@ type AtomicAction struct {
 
 // AtomicOptions bundles the precondition + actions for one AtomicUpdate.
 type AtomicOptions struct {
-	// Condition is the optional ConditionExpression — same grammar
+	// storage.Condition is the optional ConditionExpression — same grammar
 	// as PutItem / DeleteItem.
 	Condition string
 	Binds     map[string]types.AttributeValue
@@ -126,9 +128,9 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if err != nil {
 		return AtomicResult{}, err
 	}
-	primaryKey := KeyPrimary(td.Name, pk, sk)
+	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
 
-	cond, err := ParseCondition(opts.Condition)
+	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("condition: %w", err)
 	}
@@ -144,7 +146,7 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	var priorItem types.Item
 	created := prior == nil
 	if prior != nil {
-		priorItem, err = DecodeItem(prior)
+		priorItem, err = storage.DecodeItem(prior)
 		if err != nil {
 			return AtomicResult{}, fmt.Errorf("decode prior: %w", err)
 		}
@@ -156,7 +158,7 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 			return AtomicResult{}, fmt.Errorf("evaluate condition: %w", err)
 		}
 		if !ok {
-			return AtomicResult{}, ErrConditionFailed
+			return AtomicResult{}, storage.ErrConditionFailed
 		}
 	}
 
@@ -223,16 +225,16 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 		return AtomicResult{}, err
 	}
 
-	encoded, err := EncodeItem(newItem)
+	encoded, err := storage.EncodeItem(newItem)
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("encode item: %w", err)
 	}
 
-	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, newItem)
+	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, newItem)
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("plan gsi: %w", err)
 	}
-	lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, newItem)
+	lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, newItem)
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("plan lsi: %w", err)
 	}

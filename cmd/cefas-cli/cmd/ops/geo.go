@@ -25,7 +25,7 @@ func registerGeo(root *cobra.Command) {
 func geoAudienceCmd() *cobra.Command {
 	var (
 		table, index, center, radius string
-		limit                         int
+		limit                        int
 	)
 	c := &cobra.Command{
 		Use:   "audience",

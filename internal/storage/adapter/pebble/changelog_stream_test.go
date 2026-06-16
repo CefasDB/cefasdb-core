@@ -1,4 +1,4 @@
-package storage
+package pebble
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -197,8 +198,8 @@ func TestFailedConditionalWriteDoesNotAppendStreamRecord(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	err := db.PutItemWith(td, item, PutOptions{Condition: "attribute_not_exists(id)"})
-	if !errors.Is(err, ErrConditionFailed) {
-		t.Fatalf("want ErrConditionFailed, got %v", err)
+	if !errors.Is(err, storage.ErrConditionFailed) {
+		t.Fatalf("want storage.ErrConditionFailed, got %v", err)
 	}
 	records, err := db.changeRecordsAfter(td.Name, 0, 0, 0)
 	if err != nil {

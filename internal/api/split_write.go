@@ -5,17 +5,17 @@ import (
 
 	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 type routedWriteTargets struct {
-	primary *storage.DB
-	mirrors []*storage.DB
+	primary *pebble.DB
+	mirrors []*pebble.DB
 	release func()
 }
 
-func routeWriteTargets(fallback *storage.DB, mgr *cluster.Manager, pkBytes []byte) (routedWriteTargets, error) {
+func routeWriteTargets(fallback *pebble.DB, mgr *cluster.Manager, pkBytes []byte) (routedWriteTargets, error) {
 	if mgr == nil {
 		return routedWriteTargets{primary: fallback, release: func() {}}, nil
 	}
@@ -31,7 +31,7 @@ func routeWriteTargets(fallback *storage.DB, mgr *cluster.Manager, pkBytes []byt
 		return routedWriteTargets{}, fmt.Errorf("cluster: primary write shard is not open locally")
 	}
 	out.primary = targets.Primary.Storage
-	seen := map[*storage.DB]struct{}{out.primary: {}}
+	seen := map[*pebble.DB]struct{}{out.primary: {}}
 	for _, sh := range targets.Mirrors {
 		if sh == nil || sh.Storage == nil {
 			targets.Release()
@@ -52,24 +52,24 @@ func (t routedWriteTargets) Release() {
 	}
 }
 
-func (t routedWriteTargets) PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error {
+func (t routedWriteTargets) PutItemWith(td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error {
 	if err := t.primary.PutItemWith(td, item, opts); err != nil {
 		return err
 	}
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := mirror.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error {
+func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error {
 	if err := t.primary.DeleteItemWith(td, key, opts); err != nil {
 		return err
 	}
 	for _, mirror := range t.mirrors {
-		if err := mirror.DeleteItemWith(td, key, storage.DeleteOptions{}); err != nil {
+		if err := mirror.DeleteItemWith(td, key, pebble.DeleteOptions{}); err != nil {
 			return err
 		}
 	}
@@ -78,7 +78,7 @@ func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.I
 
 func (t routedWriteTargets) MirrorPutItem(td types.TableDescriptor, item types.Item) error {
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := mirror.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			return err
 		}
 	}

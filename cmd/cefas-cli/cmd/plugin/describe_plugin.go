@@ -41,15 +41,15 @@ Example:
 			}
 			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{
 				"Plugin": map[string]any{
-					"Name":           p.Name,
-					"Kind":           p.Kind,
-					"Version":        p.Version,
-					"Description":    p.Description,
-					"State":          p.State,
-					"LastError":      p.LastError,
-					"LastErrorUnix":  p.LastErrorUnix,
-					"ItemsIndexed":   p.ItemsIndexed,
-					"StartedAtUnix":  p.StartedAtUnix,
+					"Name":          p.Name,
+					"Kind":          p.Kind,
+					"Version":       p.Version,
+					"Description":   p.Description,
+					"State":         p.State,
+					"LastError":     p.LastError,
+					"LastErrorUnix": p.LastErrorUnix,
+					"ItemsIndexed":  p.ItemsIndexed,
+					"StartedAtUnix": p.StartedAtUnix,
 				},
 			})
 		},

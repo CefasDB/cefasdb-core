@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 )
 
 type Mode string
@@ -67,23 +67,23 @@ type Controller struct {
 type Candidate struct {
 	Operation     placement.PlacementOperation   `json:"operation"`
 	Request       placement.PlacementPlanRequest `json:"request"`
-	SourceShardID uint32                       `json:"sourceShardId,omitempty"`
-	NodeID        string                       `json:"nodeId,omitempty"`
-	Reason        string                       `json:"reason"`
-	HotRange      metrics.RangeHotspotSummary  `json:"hotRange,omitempty"`
-	Priority      uint64                       `json:"priority"`
+	SourceShardID uint32                         `json:"sourceShardId,omitempty"`
+	NodeID        string                         `json:"nodeId,omitempty"`
+	Reason        string                         `json:"reason"`
+	HotRange      metrics.RangeHotspotSummary    `json:"hotRange,omitempty"`
+	Priority      uint64                         `json:"priority"`
 }
 
 type Decision struct {
-	Mode        Mode                         `json:"mode"`
-	Status      string                       `json:"status"`
-	Reason      string                       `json:"reason,omitempty"`
-	Candidate   Candidate                    `json:"candidate,omitempty"`
+	Mode        Mode                           `json:"mode"`
+	Status      string                         `json:"status"`
+	Reason      string                         `json:"reason,omitempty"`
+	Candidate   Candidate                      `json:"candidate,omitempty"`
 	Plan        placement.PlacementPlan        `json:"plan,omitempty"`
 	ApplyResult placement.PlacementApplyResult `json:"applyResult,omitempty"`
-	WrittenPath string                       `json:"writtenPath,omitempty"`
-	Error       string                       `json:"error,omitempty"`
-	CreatedAt   time.Time                    `json:"createdAt"`
+	WrittenPath string                         `json:"writtenPath,omitempty"`
+	Error       string                         `json:"error,omitempty"`
+	CreatedAt   time.Time                      `json:"createdAt"`
 }
 
 func NormalizeConfig(cfg Config) Config {

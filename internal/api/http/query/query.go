@@ -12,23 +12,24 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-// StorageForFunc returns the storage.DB that owns the supplied
+// StorageForFunc returns the pebble.DB that owns the supplied
 // partition-key bytes. Single-shard mode always returns the same DB.
-type StorageForFunc func(pkBytes []byte) *storage.DB
+type StorageForFunc func(pkBytes []byte) *pebble.DB
 
-// AllShardsFunc enumerates every storage.DB this server manages so a
+// AllShardsFunc enumerates every pebble.DB this server manages so a
 // cross-shard query can scatter-gather.
-type AllShardsFunc func() []*storage.DB
+type AllShardsFunc func() []*pebble.DB
 
 // SpatialAllShardsFunc fans a spatial query across every shard and
 // merges the results, honouring the global limit.
-type SpatialAllShardsFunc func(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error)
+type SpatialAllShardsFunc func(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error)
 
 // EnsureStrongReadFunc gates a "strong" read on the raft leader and a
 // barrier. It writes the redirect/error response and returns false when
@@ -52,7 +53,7 @@ const (
 // the methods with its existing middleware stack.
 type Handlers struct {
 	cat              *catalog.Catalog
-	db               *storage.DB
+	db               *pebble.DB
 	storageFor       StorageForFunc
 	allShards        AllShardsFunc
 	spatialAllShards SpatialAllShardsFunc
@@ -66,7 +67,7 @@ type Handlers struct {
 // returns true to keep the route open in single-node setups.
 func New(
 	cat *catalog.Catalog,
-	db *storage.DB,
+	db *pebble.DB,
 	storageFor StorageForFunc,
 	allShards AllShardsFunc,
 	spatialAllShards SpatialAllShardsFunc,
@@ -196,7 +197,7 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	queryDB := h.storageFor(pkBytes)
 	var items []types.Item
 	if req.IndexName != "" {
-		items, err = h.queryByIndex(td, req.IndexName, pkVal, storage.QueryOptions{
+		items, err = h.queryByIndex(td, req.IndexName, pkVal, pebble.QueryOptions{
 			SKLow:  lo,
 			SKHigh: hi,
 			Limit:  req.Limit,
@@ -245,7 +246,7 @@ func (h *Handlers) HandleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusNotFound, err)
 		return
 	}
-	q := storage.SpatialQuery{Limit: req.Limit}
+	q := pebble.SpatialQuery{Limit: req.Limit}
 	switch {
 	case req.BBox != nil:
 		b := spatial.BBox{
@@ -256,7 +257,7 @@ func (h *Handlers) HandleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		q.BBox = &b
 	case req.Radius != nil:
-		q.Radius = &storage.RadiusQuery{
+		q.Radius = &pebble.RadiusQuery{
 			Lat:    req.Radius.Lat,
 			Lon:    req.Radius.Lon,
 			Meters: req.Radius.Meters,
@@ -408,7 +409,7 @@ func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt)
 // queryByIndex picks the right shard pattern for an indexed query. GSI
 // hits scatter-gather across every shard; LSI hits target the single
 // shard that owns the primary PK.
-func (h *Handlers) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
+func (h *Handlers) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	if hasGSI(td, indexName) {
 		return queryGSIAcrossShards(h.allShards(), td, indexName, pkVal, opts)
 	}
@@ -422,7 +423,7 @@ func (h *Handlers) queryByIndex(td types.TableDescriptor, indexName string, pkVa
 	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
 }
 
-func queryGSIAcrossShards(dbs []*storage.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
+func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	var out []types.Item
 	seen := make(map[string]struct{})
 	shardOpts := opts

@@ -15,7 +15,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/routing"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -155,7 +155,7 @@ func TestManagerCreatesTokenRangePlacementForFreshRoot(t *testing.T) {
 
 func TestManagerPreservesLegacyModuloForExistingShardState(t *testing.T) {
 	root := t.TempDir()
-	st, err := storage.Open(storage.Options{Path: filepath.Join(root, "shards", "0", "state")})
+	st, err := pebble.Open(pebble.Options{Path: filepath.Join(root, "shards", "0", "state")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestMultiShardCluster(t *testing.T) {
 	}
 }
 
-func hasPrefix(t testing.TB, db *storage.DB, prefix []byte) bool {
+func hasPrefix(t testing.TB, db *pebble.DB, prefix []byte) bool {
 	t.Helper()
 	upper := append([]byte(nil), prefix...)
 	upper[len(upper)-1]++

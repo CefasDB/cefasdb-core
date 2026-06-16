@@ -1,9 +1,9 @@
-package storage_test
+package pebble_test
 
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
@@ -16,11 +16,11 @@ func TestPluginIndexDescriptorEncodeDecode(t *testing.T) {
 		PluginConfig: []byte(`{"field":"emb","dim":3,"metric":"cosine"}`),
 		KeySchema:    model.KeySchema{PK: "id"},
 	}
-	raw, err := storage.EncodePluginIndexDescriptor(desc)
+	raw, err := pebble.EncodePluginIndexDescriptor(desc)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	got, err := storage.DecodePluginIndexDescriptor(raw)
+	got, err := pebble.DecodePluginIndexDescriptor(raw)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestPluginIndexDescriptorIncludedInBackupCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create backup: %v", err)
 	}
-	checkpoint, err := storage.Open(storage.Options{Path: meta.CheckpointAt})
+	checkpoint, err := pebble.Open(pebble.Options{Path: meta.CheckpointAt})
 	if err != nil {
 		t.Fatalf("open checkpoint: %v", err)
 	}

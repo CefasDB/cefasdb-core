@@ -268,7 +268,6 @@ func auditTokenCoverage(cat PlacementCatalog, collector *placementAuditCollector
 	}
 }
 
-
 func gapIssue(start, end *big.Int) PlacementAuditIssue {
 	rangeStart := auditTokenFromBig(start)
 	rangeEnd := auditTokenFromBig(end)

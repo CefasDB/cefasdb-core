@@ -149,9 +149,9 @@ func TestStreamShardIDValidation(t *testing.T) {
 		"",
 		"shard-1",
 		"shardId-",
-		"shardId-1",                  // too short
-		"shardId-0000000000000",      // too long
-		"shardId-00000000000a",       // non-digit
+		"shardId-1",             // too short
+		"shardId-0000000000000", // too long
+		"shardId-00000000000a",  // non-digit
 		strings.Repeat("shardId-", 2),
 	}
 	for _, v := range bad {

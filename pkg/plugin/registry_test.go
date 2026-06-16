@@ -6,7 +6,10 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 )
 
-type stubPlugin struct{ name string; kind plugin.Kind }
+type stubPlugin struct {
+	name string
+	kind plugin.Kind
+}
 
 func (s *stubPlugin) Manifest() plugin.Manifest {
 	return plugin.Manifest{Name: s.name, Kind: s.kind, Version: "1"}

@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/osvaldoandrade/cefas/cmd/cefas-cli/internal/runtime"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 )
 
@@ -315,7 +315,7 @@ type replCLIFixture struct {
 
 func newREPLCLIFixture(t *testing.T) replCLIFixture {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("storage open: %v", err)
 	}

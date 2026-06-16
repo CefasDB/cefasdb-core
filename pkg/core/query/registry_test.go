@@ -15,8 +15,8 @@ type fakeOp struct {
 	err      error
 }
 
-func (f *fakeOp) Name() string                         { return f.name }
-func (f *fakeOp) Supports(a, b model.AttrType) bool    { return f.supports }
+func (f *fakeOp) Name() string                      { return f.name }
+func (f *fakeOp) Supports(a, b model.AttrType) bool { return f.supports }
 func (f *fakeOp) Eval(a, b model.AttributeValue) (float64, error) {
 	return f.out, f.err
 }
