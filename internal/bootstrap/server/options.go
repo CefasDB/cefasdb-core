@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/rebalancer"
+	"github.com/osvaldoandrade/cefas/internal/rebalance"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/config"
 )
@@ -66,9 +66,9 @@ func RangeHotspotConfig(cfg config.Config) metrics.RangeHotspotConfig {
 // RebalancerConfig copies the Rebalancer stanza into the controller's
 // internal Config form, including the duration-to-millis conversion the
 // rebalancer expects for ApplyTimeout.
-func RebalancerConfig(cfg config.Config) rebalancer.Config {
-	return rebalancer.Config{
-		Mode:                    rebalancer.Mode(cfg.Rebalancer.Mode),
+func RebalancerConfig(cfg config.Config) rebalance.Config {
+	return rebalance.Config{
+		Mode:                    rebalance.Mode(cfg.Rebalancer.Mode),
 		Interval:                cfg.Rebalancer.Interval,
 		MinInterval:             cfg.Rebalancer.MinInterval,
 		MaxConcurrentOperations: cfg.Rebalancer.MaxConcurrentOperations,

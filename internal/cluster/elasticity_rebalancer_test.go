@@ -14,7 +14,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/rebalancer"
+	"github.com/osvaldoandrade/cefas/internal/rebalance"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -99,8 +99,8 @@ func TestAutonomousRebalancerSkewReductionGate(t *testing.T) {
 	)
 	beforeStats := writeFixedLoad(t, mgr, td, beforeRecords)
 
-	ctrl := rebalancer.NewController(rebalancer.Config{
-		Mode:                    rebalancer.ModeAuto,
+	ctrl := rebalance.NewController(rebalance.Config{
+		Mode:                    rebalance.ModeAuto,
 		MinInterval:             time.Millisecond,
 		MaxConcurrentOperations: 1,
 		MaxHotspots:             1,

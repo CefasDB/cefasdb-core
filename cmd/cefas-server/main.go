@@ -26,7 +26,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
-	"github.com/osvaldoandrade/cefas/internal/rebalancer"
+	"github.com/osvaldoandrade/cefas/internal/rebalance"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -353,7 +353,7 @@ func main() {
 		} else if prom == nil {
 			logger.Info("rebalancer disabled", "reason", "metrics must be enabled for hotspot input")
 		} else {
-			ctrl := rebalancer.NewController(bootstrapserver.RebalancerConfig(cfg), mgr, prom, nil)
+			ctrl := rebalance.NewController(bootstrapserver.RebalancerConfig(cfg), mgr, prom, nil)
 			ctrl.SetLogger(logf)
 			go ctrl.Run(runtimeCtx)
 			logger.Info("rebalancer enabled", "mode", cfg.Rebalancer.Mode, "interval", cfg.Rebalancer.Interval, "maxConcurrent", cfg.Rebalancer.MaxConcurrentOperations)
