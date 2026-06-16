@@ -1,4 +1,4 @@
-// Package server hosts construction-time wiring for cmd/cefas-server.
+// Package server hosts construction-time wiring for cmd/cefasdb.
 // It keeps the binary entry point thin by hosting the small adapters
 // and helpers that bridge internal packages without forcing them to
 // depend on each other.

@@ -87,7 +87,7 @@ type Metrics struct {
 }
 
 // New builds a Metrics with every collector pre-registered against a
-// fresh registry. Single-process pattern: one Metrics per cefas-server.
+// fresh registry. Single-process pattern: one Metrics per cefasdb.
 func New() *Metrics {
 	return NewWithRangeHotspots(DefaultRangeHotspotConfig())
 }

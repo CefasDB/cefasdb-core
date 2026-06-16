@@ -39,7 +39,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: go test ./cmd/cefas-cli/...
+        run: go test ./cmd/cefasctl/...
 
       - name: Build binaries
         shell: bash
@@ -58,18 +58,18 @@ jobs:
               fi
               ext=""
               if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-              echo "Building cefas-cli $GOOS/$GOARCH"
+              echo "Building cefasctl $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
-                -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefas-cli/cmd.Version=${VERSION}" \
+                -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd.Version=${VERSION}" \
                 -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
-                ./cmd/cefas-cli
-              echo "Building cefas-server $GOOS/$GOARCH"
+                ./cmd/cefasctl
+              echo "Building cefasdb $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
                 -ldflags "-s -w" \
                 -o "dist/${BIN_NAME}-server-${GOOS}-${GOARCH}${ext}" \
-                ./cmd/cefas-server
+                ./cmd/cefasdb
             done
           done
 

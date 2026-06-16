@@ -7,7 +7,7 @@ direct control over deployment, storage, replication, and extensions.
 
 The repository ships two main binaries:
 
-- `cefas-server`: a Go database server backed by Pebble, with HTTP/JSON and gRPC APIs.
+- `cefasdb`: a Go database server backed by Pebble, with HTTP/JSON and gRPC APIs.
 - `cefas`: a command-line client distributed as a prebuilt Go binary through npm.
 
 Long-form documentation lives in the GitHub Wiki.
@@ -53,14 +53,14 @@ is the native Go CLI.
 ## Build Locally
 
 ```sh
-go build -o ./bin/cefas-server ./cmd/cefas-server
-go build -o ./bin/cefas ./cmd/cefas-cli
+go build -o ./bin/cefasdb ./cmd/cefasdb
+go build -o ./bin/cefas ./cmd/cefasctl
 ```
 
 Run the local server with HTTP and gRPC enabled:
 
 ```sh
-./bin/cefas-server \
+./bin/cefasdb \
   -data ./cefas-data \
   -http :8080 \
   -grpc :9090 \
@@ -194,7 +194,7 @@ cefas --endpoint localhost:9090 --insecure restore-table-from-backup \
 
 ## Run With Docker
 
-The demo Compose stack runs `cefas-server`, Prometheus, and Grafana:
+The demo Compose stack runs `cefasdb`, Prometheus, and Grafana:
 
 ```sh
 docker compose -f deploy/docker-compose.yml up --build
@@ -211,7 +211,7 @@ Kubernetes deployment files live under `deploy/helm/cefas`.
 
 ## Configuration
 
-`cefas-server` accepts flags, environment variables, and a YAML file. Precedence is:
+`cefasdb` accepts flags, environment variables, and a YAML file. Precedence is:
 
 ```text
 flags > CEFAS_* environment variables > YAML file > defaults
@@ -344,7 +344,7 @@ cefas restore-table-from-backup \
   --dry-run
 cefas apply-backup-retention --keep-latest 7 --max-age 720h --dry-run
 cefas delete-backup --backup-name before-maintenance
-cefas-server \
+cefasdb \
   -backup-scheduler-enabled \
   -backup-scheduler-dry-run \
   -backup-scheduler-interval 1h \
@@ -365,8 +365,8 @@ curl -s -X POST "$CEFAS_HTTP/v1/ApplyBackupRetention" \
 ## Project Layout
 
 ```text
-cmd/cefas-server        server entrypoint
-cmd/cefas-cli           CLI entrypoint and subcommands
+cmd/cefasdb        server entrypoint
+cmd/cefasctl           CLI entrypoint and subcommands
 internal/storage        Pebble storage, keys, TTL, backup, restore, indexes
 internal/raft           Raft replication, snapshots, change stream plumbing
 internal/cluster        multi-shard routing and cluster manager
@@ -392,8 +392,8 @@ Useful checks before publishing changes:
 ```sh
 go test ./...
 go vet ./...
-go build ./cmd/cefas-server
-go build ./cmd/cefas-cli
+go build ./cmd/cefasdb
+go build ./cmd/cefasctl
 ```
 
 Releases are produced by GitHub Actions. The release workflow builds the CLI,

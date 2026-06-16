@@ -1,7 +1,7 @@
-// Package server hosts the cefas-server bootstrap helpers that lift
+// Package server hosts the cefasdb bootstrap helpers that lift
 // configuration values into the concrete option structs consumed by
 // storage, metrics, and rebalancer subsystems. The package exists so
-// cmd/cefas-server/main.go can stay close to a thin wiring shell while
+// cmd/cefasdb/main.go can stay close to a thin wiring shell while
 // the config-to-options translation stays unit-testable in isolation.
 package server
 
@@ -131,5 +131,5 @@ func StreamRetentionOptions(cfg config.Config) pebble.StreamRetentionOptions {
 // ParsePeers parses the "id1=addr1,id2=addr2" form used by both
 // -raft-peers and -raft-http-peers. It is a thin wrapper over
 // config.ParsePeers retained so the bootstrap package owns the surface
-// area cmd/cefas-server depends on.
+// area cmd/cefasdb depends on.
 func ParsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
