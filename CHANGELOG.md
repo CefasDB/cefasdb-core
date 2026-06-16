@@ -75,6 +75,16 @@ warranted.
   `.String()` only at the wire boundary. Both values resolve to
   `"shardId-000000000000"`.
 
+### Moved
+
+- `pkg/api/*` (HTTP + gRPC server implementations, helpers,
+  sub-packages) → `internal/api/`. Server-side code no longer
+  pretends to be a public library surface. `pkg/api/proto/` stays
+  put because `pkg/client` (the SDK) imports it as the external
+  wire contract. Package name unchanged (`package api`). Six
+  import-path updates across the codebase. ADR-0006 records the
+  decision and what remains pending.
+
 ### Tooling
 
 - Default `go test ./...` no longer runs
