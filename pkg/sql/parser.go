@@ -150,6 +150,14 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		stmt.IndexName = idx.Lit
 	}
 
+	if p.peek().Kind == tAllow {
+		p.consume()
+		if _, err := p.expect(tScan, "SCAN"); err != nil {
+			return nil, err
+		}
+		stmt.AllowScan = true
+	}
+
 	if p.peek().Kind == tWhere {
 		p.consume()
 		w, err := p.parseExpr()

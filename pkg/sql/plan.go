@@ -53,6 +53,18 @@ type PlanQuery struct {
 	Count bool
 }
 
+// PlanScan is an explicit scan-backed SELECT. The planner only emits
+// it when the statement opts in with ALLOW SCAN, keeping accidental
+// full-table reads out of the default SQL path.
+type PlanScan struct {
+	Table      string
+	Limit      int
+	Project    []string
+	Predicate  Expr
+	Descriptor types.TableDescriptor
+	Count      bool
+}
+
 // PlanSpatial is a geohash / Z-order / radius scan.
 type PlanSpatial struct {
 	Table      string
@@ -126,6 +138,7 @@ func (*PlanCreateTable) plan() {}
 func (*PlanDropTable) plan()   {}
 func (*PlanGetItem) plan()     {}
 func (*PlanQuery) plan()       {}
+func (*PlanScan) plan()        {}
 func (*PlanSpatial) plan()     {}
 func (*PlanANN) plan()         {}
 func (*PlanPutItem) plan()     {}

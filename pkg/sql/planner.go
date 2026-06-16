@@ -175,6 +175,26 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		return plan, nil
 	}
 
+	if s.AllowScan {
+		if s.IndexName != "" {
+			return nil, fmt.Errorf("ALLOW SCAN cannot be combined with USE INDEX")
+		}
+		if s.OrderBy != "" {
+			return nil, fmt.Errorf("scalar ORDER BY with ALLOW SCAN is not supported yet")
+		}
+		if !s.Count && s.Limit <= 0 {
+			return nil, fmt.Errorf("ALLOW SCAN requires LIMIT for row-returning SELECT")
+		}
+		return &PlanScan{
+			Table:      s.Table,
+			Limit:      s.Limit,
+			Project:    s.Columns,
+			Predicate:  s.Where,
+			Descriptor: td,
+			Count:      s.Count,
+		}, nil
+	}
+
 	// Spatial path: WHERE includes a ST_Within / ST_DWithin call.
 	if spq, indexName, ok := extractSpatialQuery(s.Where, td, s.IndexName); ok {
 		return &PlanSpatial{
