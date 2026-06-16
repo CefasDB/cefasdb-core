@@ -28,7 +28,7 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	tablehttp "github.com/osvaldoandrade/cefas/pkg/api/http/table"
+	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"

@@ -14,7 +14,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/pkg/api"
+	"github.com/osvaldoandrade/cefas/internal/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 )
 

@@ -31,7 +31,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/rebalancer"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
-	"github.com/osvaldoandrade/cefas/pkg/api"
+	"github.com/osvaldoandrade/cefas/internal/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/config"
 	// Side-effect import: every built-in plugin registers against

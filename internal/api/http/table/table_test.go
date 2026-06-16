@@ -10,7 +10,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	tablehttp "github.com/osvaldoandrade/cefas/pkg/api/http/table"
+	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

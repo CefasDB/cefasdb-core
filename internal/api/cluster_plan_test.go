@@ -12,7 +12,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/pkg/api"
+	"github.com/osvaldoandrade/cefas/internal/api"
 )
 
 func TestHTTPPlacementPlanSplit(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/pkg/api/http/httpx"
+	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
