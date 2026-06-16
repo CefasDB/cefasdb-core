@@ -3,6 +3,7 @@ package sql
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,8 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execQuery(p)
 	case *PlanScan:
 		return e.execScan(p)
+	case *PlanJoin:
+		return e.execJoin(p)
 	case *PlanSpatial:
 		return e.execSpatial(p)
 	case *PlanANN:
@@ -524,6 +527,57 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	return &Result{Rows: items}, nil
 }
 
+func (e *Executor) execJoin(p *PlanJoin) (*Result, error) {
+	leftItems, err := e.Storage.ScanTable(p.LeftTable, 0)
+	if err != nil {
+		return nil, err
+	}
+	rightItems, err := e.Storage.ScanTable(p.RightTable, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	rightByKey := make(map[string][]types.Item)
+	for _, right := range rightItems {
+		av, ok := right[p.RightColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		key := joinAttrKey(av)
+		rightByKey[key] = append(rightByKey[key], right)
+	}
+
+	var rows []types.Item
+	for _, left := range leftItems {
+		av, ok := left[p.LeftColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		for _, right := range rightByKey[joinAttrKey(av)] {
+			row := joinItems(p.LeftAlias, left, p.RightAlias, right)
+			if p.Predicate != nil {
+				keep, err := EvalBool(p.Predicate, row, nil)
+				if err != nil {
+					return nil, err
+				}
+				if !keep {
+					continue
+				}
+			}
+			if len(p.Project) > 0 {
+				projected := []types.Item{row}
+				project(projected, p.Project)
+				row = projected[0]
+			}
+			rows = append(rows, row)
+			if p.Limit > 0 && len(rows) >= p.Limit {
+				return &Result{Rows: rows}, nil
+			}
+		}
+	}
+	return &Result{Rows: rows}, nil
+}
+
 func (e *Executor) execSpatial(p *PlanSpatial) (*Result, error) {
 	items, err := e.Storage.SpatialQueryItems(p.Descriptor, p.IndexName, p.Query)
 	if err != nil {
@@ -701,6 +755,87 @@ func (e *Executor) finishANN(p *PlanANN, rows []cquery.TopKResult, op cquery.Dis
 func reverse(items []types.Item) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]
+	}
+}
+
+func joinItems(leftAlias string, left types.Item, rightAlias string, right types.Item) types.Item {
+	out := make(types.Item, len(left)+len(right))
+	for k, v := range left {
+		out[leftAlias+"."+k] = v
+	}
+	for k, v := range right {
+		out[rightAlias+"."+k] = v
+	}
+	return out
+}
+
+func joinAttrKey(av types.AttributeValue) string {
+	var b strings.Builder
+	writeJoinAttrKey(&b, av)
+	return b.String()
+}
+
+func writeJoinAttrKey(b *strings.Builder, av types.AttributeValue) {
+	b.WriteString(strconv.Itoa(int(av.T)))
+	b.WriteByte(':')
+	switch av.T {
+	case types.AttrNull:
+		return
+	case types.AttrS:
+		b.WriteString(strconv.Quote(av.S))
+	case types.AttrN:
+		b.WriteString(strconv.Quote(av.N))
+	case types.AttrB:
+		b.WriteString(strconv.Quote(string(av.B)))
+	case types.AttrBOOL:
+		if av.BOOL {
+			b.WriteByte('1')
+		} else {
+			b.WriteByte('0')
+		}
+	case types.AttrSS:
+		values := append([]string(nil), av.SS...)
+		sort.Strings(values)
+		for _, v := range values {
+			b.WriteString(strconv.Quote(v))
+			b.WriteByte(',')
+		}
+	case types.AttrNS:
+		values := append([]string(nil), av.NS...)
+		sort.Strings(values)
+		for _, v := range values {
+			b.WriteString(strconv.Quote(v))
+			b.WriteByte(',')
+		}
+	case types.AttrBS:
+		values := append([][]byte(nil), av.BS...)
+		sort.Slice(values, func(i, j int) bool { return bytesCompare(values[i], values[j]) < 0 })
+		for _, v := range values {
+			b.WriteString(strconv.Quote(string(v)))
+			b.WriteByte(',')
+		}
+	case types.AttrL:
+		for _, v := range av.L {
+			writeJoinAttrKey(b, v)
+			b.WriteByte(',')
+		}
+	case types.AttrM:
+		keys := make([]string, 0, len(av.M))
+		for k := range av.M {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString(strconv.Quote(k))
+			b.WriteByte('=')
+			writeJoinAttrKey(b, av.M[k])
+			b.WriteByte(',')
+		}
+	case types.AttrVec:
+		for _, v := range av.Vec {
+			b.WriteString(strconv.FormatFloat(v, 'g', -1, 64))
+			b.WriteByte(',')
+		}
 	}
 }
 
