@@ -3,7 +3,7 @@
 // Supported statements:
 //
 //	SELECT * | col,...  FROM <table> [USE INDEX (<idx>)]
-//	  [WHERE <pred>] [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
+//	  [ALLOW SCAN] [WHERE <pred>] [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
 //
 //	INSERT INTO <table> (col,...) VALUES (v,...)
 //
@@ -101,6 +101,8 @@ const (
 	tTo
 	tWith
 	tStorage
+	tAllow
+	tScan
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -156,6 +158,8 @@ var keywords = map[string]TokenKind{
 	"TO":        tTo,
 	"WITH":      tWith,
 	"STORAGE":   tStorage,
+	"ALLOW":     tAllow,
+	"SCAN":      tScan,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of

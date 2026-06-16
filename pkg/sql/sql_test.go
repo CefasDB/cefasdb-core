@@ -49,6 +49,20 @@ func TestParserSelectShape(t *testing.T) {
 	}
 }
 
+func TestParserSelectAllowScan(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT id FROM t ALLOW SCAN WHERE status = 'active' LIMIT 10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T, want *SelectStmt", stmt)
+	}
+	if !sel.AllowScan || sel.Table != "t" || sel.Limit != 10 {
+		t.Fatalf("unexpected select: %+v", sel)
+	}
+}
+
 func TestParserCreateTable(t *testing.T) {
 	stmt, err := cefassql.Parse("CREATE TABLE events (PRIMARY KEY (user_id, ts))")
 	if err != nil {
@@ -191,6 +205,56 @@ func TestSelectRequiresWhere(t *testing.T) {
 	_, err := cefassql.Compile("SELECT * FROM t", cat)
 	if err == nil || !strings.Contains(err.Error(), "scan") {
 		t.Fatalf("expected scan refusal, got %v", err)
+	}
+}
+
+func TestAllowScanSelectsNonKeyPredicate(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('a', 'active', 10)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('b', 'inactive', 20)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('c', 'active', 30)")
+
+	_, err := cefassql.Compile("SELECT * FROM t WHERE status = 'active' LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), `WHERE must equate "id"`) {
+		t.Fatalf("expected key-first refusal, got %v", err)
+	}
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN WHERE status = 'active' LIMIT 10")
+	if len(res.Rows) != 2 {
+		t.Fatalf("scan filter want 2 rows, got %+v", res.Rows)
+	}
+	for _, row := range res.Rows {
+		if _, ok := row["status"]; ok {
+			t.Fatalf("projection leaked status: %+v", row)
+		}
+	}
+}
+
+func TestAllowScanRequiresLimitForRows(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "t", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT * FROM t ALLOW SCAN", cat)
+	if err == nil || !strings.Contains(err.Error(), "ALLOW SCAN requires LIMIT") {
+		t.Fatalf("expected ALLOW SCAN LIMIT refusal, got %v", err)
+	}
+}
+
+func TestAllowScanCountDoesNotRequireLimit(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('a', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('b', 'inactive')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('c', 'active')")
+
+	res := mustExec(t, ex, cat, "SELECT COUNT(*) FROM t ALLOW SCAN WHERE status = 'active'")
+	if res.AffectedRows != 2 {
+		t.Fatalf("scan count = %d, want 2", res.AffectedRows)
+	}
+	if len(res.Rows) != 0 {
+		t.Fatalf("count should not return rows: %+v", res.Rows)
 	}
 }
 

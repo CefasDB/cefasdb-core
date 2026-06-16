@@ -13,6 +13,7 @@ type SelectStmt struct {
 	Table     string
 	Columns   []string // nil → SELECT *
 	IndexName string   // "" → primary; else USE INDEX (idx)
+	AllowScan bool     // explicit opt-in for scan-backed analytical SELECTs
 	Where     Expr     // nil → unconditional
 	OrderBy   string
 	OrderDesc bool

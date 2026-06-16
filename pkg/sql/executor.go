@@ -81,6 +81,8 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execGet(p)
 	case *PlanQuery:
 		return e.execQuery(p)
+	case *PlanScan:
+		return e.execScan(p)
 	case *PlanSpatial:
 		return e.execSpatial(p)
 	case *PlanANN:
@@ -481,6 +483,40 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	}
 	if p.OrderDesc {
 		reverse(items)
+	}
+	if len(p.Project) > 0 {
+		project(items, p.Project)
+	}
+	return &Result{Rows: items}, nil
+}
+
+func (e *Executor) execScan(p *PlanScan) (*Result, error) {
+	sourceLimit := p.Limit
+	if p.Predicate != nil || p.Count {
+		sourceLimit = 0
+	}
+	items, err := e.Storage.ScanTable(p.Table, sourceLimit)
+	if err != nil {
+		return nil, err
+	}
+	if p.Predicate != nil {
+		filtered := items[:0]
+		for _, it := range items {
+			keep, err := EvalBool(p.Predicate, it, nil)
+			if err != nil {
+				return nil, err
+			}
+			if keep {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+	}
+	if p.Limit > 0 && len(items) > p.Limit {
+		items = items[:p.Limit]
+	}
+	if p.Count {
+		return &Result{AffectedRows: len(items)}, nil
 	}
 	if len(p.Project) > 0 {
 		project(items, p.Project)
