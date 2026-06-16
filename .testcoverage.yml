@@ -1,0 +1,19 @@
+profile: cover.out
+
+# Phase 0a — gates set to 0 (warn-only).
+# Subsequent sub-PRs ratchet these toward the playbook §8.1 floors:
+#   pkg/core/         >= 95% statement / 90% branch
+#   internal/storage/ >= 80%
+#   overall           >= 90%
+threshold:
+  file: 0
+  package: 0
+  total: 0
+
+exclude:
+  paths:
+    - \.pb\.go$
+    - _test\.go$
+    - ^third_party/
+    - ^npm/
+    - ^deploy/

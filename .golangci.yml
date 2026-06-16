@@ -1,0 +1,161 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - depguard
+    - dupl
+    - durationcheck
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gomoddirectives
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - intrange
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nonamedreturns
+    - nosprintfhostport
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - tagalign
+    - tagliatelle
+    - testableexamples
+    - testifylint
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+    - wrapcheck
+
+  settings:
+    cyclop:
+      max-complexity: 10
+      package-average: 6.0
+    gocyclo:
+      min-complexity: 10
+    gocognit:
+      min-complexity: 15
+    funlen:
+      lines: 40
+      statements: 60
+    lll:
+      line-length: 120
+    nestif:
+      min-complexity: 4
+    dupl:
+      threshold: 100
+    revive:
+      severity: warning
+      rules:
+        - name: argument-limit
+          arguments: [4]
+        - name: max-public-structs
+          arguments: [7]
+        - name: function-result-limit
+          arguments: [3]
+        - name: cognitive-complexity
+          arguments: [15]
+        - name: cyclomatic
+          arguments: [10]
+    depguard:
+      rules:
+        domain:
+          files:
+            - "**/pkg/core/**/*.go"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/shopspring/decimal
+            - github.com/osvaldoandrade/cefas/pkg/core
+            - github.com/osvaldoandrade/cefas/pkg/plugin
+            - github.com/osvaldoandrade/cefas/pkg/types
+          deny:
+            - pkg: database/sql
+              desc: "domain must not depend on persistence"
+            - pkg: net/http
+              desc: "domain must not depend on transport"
+            - pkg: google.golang.org/grpc
+              desc: "domain must not depend on transport"
+
+  exclusions:
+    generated: lax
+    paths:
+      - third_party
+      - npm
+      - deploy
+      - .*\.pb\.go$
+      - .*_gen\.go$
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/osvaldoandrade/cefas)
