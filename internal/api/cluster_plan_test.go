@@ -12,6 +12,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/api"
 )
 
@@ -27,11 +28,11 @@ func TestHTTPPlacementPlanSplit(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var plan cluster.PlacementPlan
+	var plan placement.PlacementPlan
 	if err := json.NewDecoder(rec.Body).Decode(&plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan.Operation != cluster.PlacementOperationSplit || len(plan.After.Shards) != 2 {
+	if plan.Operation != placement.PlacementOperationSplit || len(plan.After.Shards) != 2 {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 }
@@ -48,11 +49,11 @@ func TestHTTPPlacementPlanRangeMove(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var plan cluster.PlacementPlan
+	var plan placement.PlacementPlan
 	if err := json.NewDecoder(rec.Body).Decode(&plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan.Operation != cluster.PlacementOperationRangeMove || len(plan.After.Shards) != 2 || plan.After.Shards[0].State != cluster.ShardStateMoving {
+	if plan.Operation != placement.PlacementOperationRangeMove || len(plan.After.Shards) != 2 || plan.After.Shards[0].State != placement.ShardStateMoving {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 }
@@ -68,11 +69,11 @@ func TestHTTPPlacementApplyNoopMove(t *testing.T) {
 	if planRec.Code != http.StatusOK {
 		t.Fatalf("plan status = %d body=%s", planRec.Code, planRec.Body.String())
 	}
-	var plan cluster.PlacementPlan
+	var plan placement.PlacementPlan
 	if err := json.NewDecoder(planRec.Body).Decode(&plan); err != nil {
 		t.Fatal(err)
 	}
-	rawApply, err := json.Marshal(cluster.PlacementApplyRequest{Plan: plan, ExpectedEpoch: plan.BeforeEpoch})
+	rawApply, err := json.Marshal(placement.PlacementApplyRequest{Plan: plan, ExpectedEpoch: plan.BeforeEpoch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestHTTPPlacementApplyNoopMove(t *testing.T) {
 	if applyRec.Code != http.StatusOK {
 		t.Fatalf("apply status = %d body=%s", applyRec.Code, applyRec.Body.String())
 	}
-	var result cluster.PlacementApplyResult
+	var result placement.PlacementApplyResult
 	if err := json.NewDecoder(applyRec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestHTTPPlacementAuditCleanReport(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var report cluster.PlacementAuditReport
+	var report placement.PlacementAuditReport
 	if err := json.NewDecoder(rec.Body).Decode(&report); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestHTTPFinalizeRangeMove(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.AfterEpoch != plan.AfterEpoch+1 || len(result.Placement.Shards) != 2 || result.Placement.Shards[1].State != cluster.ShardStateActive {
+	if result.AfterEpoch != plan.AfterEpoch+1 || len(result.Placement.Shards) != 2 || result.Placement.Shards[1].State != placement.ShardStateActive {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
@@ -221,13 +222,13 @@ func placementTestMux(t *testing.T) (*http.ServeMux, func()) {
 	return mux, func() { _ = mgr.Close() }
 }
 
-func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.PlacementPlan) {
+func transitionPlacementTestMux(t *testing.T) (*http.ServeMux, func(), placement.PlacementPlan) {
 	t.Helper()
 	env := transitionPlacementTestEnv(t)
 	return env.Mux, env.Cleanup, env.Plan
 }
 
-func transitionRangeMovePlacementTestMux(t *testing.T) (*http.ServeMux, func(), cluster.PlacementPlan) {
+func transitionRangeMovePlacementTestMux(t *testing.T) (*http.ServeMux, func(), placement.PlacementPlan) {
 	t.Helper()
 	env := transitionRangeMovePlacementTestEnv(t)
 	return env.Mux, env.Cleanup, env.Plan
@@ -237,18 +238,18 @@ type transitionPlacementEnv struct {
 	Mux     *http.ServeMux
 	Manager *cluster.Manager
 	Catalog *catalog.Catalog
-	Plan    cluster.PlacementPlan
+	Plan    placement.PlacementPlan
 	Cleanup func()
 }
 
 func transitionRangeMovePlacementTestEnv(t *testing.T) transitionPlacementEnv {
 	t.Helper()
 	root := t.TempDir()
-	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationRangeMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -256,7 +257,7 @@ func transitionRangeMovePlacementTestEnv(t *testing.T) transitionPlacementEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -291,15 +292,15 @@ func transitionRangeMovePlacementTestEnv(t *testing.T) transitionPlacementEnv {
 func transitionPlacementTestEnv(t *testing.T) transitionPlacementEnv {
 	t.Helper()
 	root := t.TempDir()
-	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := cluster.Open(context.Background(), cluster.Config{

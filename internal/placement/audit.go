@@ -1,11 +1,8 @@
-package cluster
+package placement
 
 import (
 	"bytes"
-	"context"
-	"encoding/hex"
 	"fmt"
-	"hash/fnv"
 	"math/big"
 	"sort"
 	"strings"
@@ -103,33 +100,8 @@ func (c *placementAuditCollector) add(issue PlacementAuditIssue) bool {
 	return true
 }
 
-func (m *Manager) AuditPlacement(ctx context.Context, req PlacementAuditRequest) (PlacementAuditReport, error) {
-	if err := m.RefreshPlacement(); err != nil {
-		return PlacementAuditReport{}, err
-	}
-	cat := m.Placement()
-	report := AuditPlacementCatalog(cat, req)
-	if err := ctx.Err(); err != nil {
-		return PlacementAuditReport{}, err
-	}
-	catalogsByShard, descriptorSources, scannedCatalogs, err := m.auditCatalogDescriptors(ctx)
-	if err != nil {
-		return PlacementAuditReport{}, err
-	}
-	report.ScannedCatalogKeys = scannedCatalogs
-	scannedPrimary, checksum, truncated, err := m.auditPrimaryKeys(ctx, cat, req, catalogsByShard, descriptorSources, &report)
-	if err != nil {
-		return PlacementAuditReport{}, err
-	}
-	report.ScannedPrimaryKeys = scannedPrimary
-	report.PrimaryKeyChecksum = checksum
-	report.Truncated = report.Truncated || truncated
-	report.finish(req)
-	return report, nil
-}
-
 func AuditPlacementCatalog(cat PlacementCatalog, req PlacementAuditRequest) PlacementAuditReport {
-	cat.normalize()
+	cat.Normalize()
 	report := PlacementAuditReport{
 		CheckedAtUnix:          time.Now().Unix(),
 		PlacementEpoch:         cat.Epoch,
@@ -244,7 +216,7 @@ func auditTokenCoverage(cat PlacementCatalog, collector *placementAuditCollector
 	}
 	var segs []ownedSegment
 	for _, sh := range cat.Shards {
-		if !sh.State.routable() {
+		if !sh.State.Routable() {
 			continue
 		}
 		for _, rng := range sh.Ranges {
@@ -296,145 +268,6 @@ func auditTokenCoverage(cat PlacementCatalog, collector *placementAuditCollector
 	}
 }
 
-func (m *Manager) auditCatalogDescriptors(ctx context.Context) (map[uint32]map[string]struct{}, map[string][]uint32, int64, error) {
-	catalogsByShard := map[uint32]map[string]struct{}{}
-	descriptorSources := map[string][]uint32{}
-	var scanned int64
-	for _, shard := range m.Shards() {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, scanned, err
-		}
-		if shard == nil || shard.Storage == nil {
-			continue
-		}
-		tables := map[string]struct{}{}
-		lower, upper := storage.PrefixCatalog()
-		iter, err := shard.Storage.Iter(lower, upper)
-		if err != nil {
-			return nil, nil, scanned, err
-		}
-		for valid := iter.First(); valid; valid = iter.Next() {
-			table, ok := auditCatalogTableFromKey(iter.Key())
-			if !ok {
-				continue
-			}
-			tables[table] = struct{}{}
-			descriptorSources[table] = append(descriptorSources[table], shard.ID)
-			scanned++
-		}
-		if err := iter.Error(); err != nil {
-			_ = iter.Close()
-			return nil, nil, scanned, err
-		}
-		if err := iter.Close(); err != nil {
-			return nil, nil, scanned, err
-		}
-		catalogsByShard[shard.ID] = tables
-	}
-	for table := range descriptorSources {
-		sort.Slice(descriptorSources[table], func(i, j int) bool { return descriptorSources[table][i] < descriptorSources[table][j] })
-	}
-	return catalogsByShard, descriptorSources, scanned, nil
-}
-
-func (m *Manager) auditPrimaryKeys(ctx context.Context, cat PlacementCatalog, req PlacementAuditRequest, catalogsByShard map[uint32]map[string]struct{}, descriptorSources map[string][]uint32, report *PlacementAuditReport) (int64, string, bool, error) {
-	collector := placementAuditCollector{
-		max:       auditMaxIssues(req.MaxIssues),
-		issues:    append([]PlacementAuditIssue(nil), report.Issues...),
-		truncated: report.Truncated,
-	}
-	maxPerShard := auditMaxPrimaryKeysPerShard(req.MaxPrimaryKeysPerShard)
-	checksum := fnv.New64a()
-	var scanned int64
-	for _, shard := range m.Shards() {
-		if err := ctx.Err(); err != nil {
-			return scanned, "", collector.truncated, err
-		}
-		if shard == nil || shard.Storage == nil || shard.State == ShardStateDecommissioned {
-			continue
-		}
-		lower, upper := storage.PrefixTables()
-		iter, err := shard.Storage.Iter(lower, upper)
-		if err != nil {
-			return scanned, "", collector.truncated, err
-		}
-		shardScanned := 0
-		for valid := iter.First(); valid; valid = iter.Next() {
-			if err := ctx.Err(); err != nil {
-				_ = iter.Close()
-				return scanned, "", collector.truncated, err
-			}
-			token, ok := storage.PrimaryTokenFromKey(iter.Key())
-			if !ok {
-				continue
-			}
-			shardScanned++
-			scanned++
-			if shardScanned > maxPerShard {
-				collector.truncated = true
-				break
-			}
-			key := append([]byte(nil), iter.Key()...)
-			_, _ = checksum.Write(key)
-			_, _ = checksum.Write([]byte{0xff})
-			table, tableOK := auditPrimaryTableFromKey(key)
-			owners := activeOwnersForToken(cat, token)
-			if !containsUint32(owners, shard.ID) {
-				issue := PlacementAuditIssue{
-					Kind:          PlacementAuditKindOrphanedPrimaryKey,
-					Severity:      PlacementAuditSeverityError,
-					Detail:        fmt.Sprintf("primary key is stored on shard %d but token owners are %v", shard.ID, owners),
-					ShardID:       u32ptr(shard.ID),
-					OwnerShardIDs: owners,
-					KeyHex:        hex.EncodeToString(key),
-					Token:         u64ptr(token),
-				}
-				if tableOK {
-					issue.Table = table
-				}
-				if len(owners) == 1 {
-					issue.ExpectedShardID = u32ptr(owners[0])
-				}
-				if !collector.add(issue) {
-					break
-				}
-			}
-			if tableOK {
-				if _, ok := catalogsByShard[shard.ID][table]; !ok {
-					issue := PlacementAuditIssue{
-						Kind:                     PlacementAuditKindMissingCatalogDescriptor,
-						Severity:                 PlacementAuditSeverityError,
-						Detail:                   fmt.Sprintf("primary key for table %q exists on shard %d but that shard has no catalog descriptor", table, shard.ID),
-						ShardID:                  u32ptr(shard.ID),
-						Table:                    table,
-						KeyHex:                   hex.EncodeToString(key),
-						Token:                    u64ptr(token),
-						DescriptorSourceShardIDs: append([]uint32(nil), descriptorSources[table]...),
-					}
-					if !collector.add(issue) {
-						break
-					}
-				}
-			}
-		}
-		if err := iter.Error(); err != nil {
-			_ = iter.Close()
-			return scanned, "", collector.truncated, err
-		}
-		if err := iter.Close(); err != nil {
-			return scanned, "", collector.truncated, err
-		}
-		if collector.truncated {
-			break
-		}
-	}
-	report.Issues = collector.issues
-	report.Truncated = collector.truncated
-	if scanned == 0 {
-		return scanned, "", collector.truncated, nil
-	}
-	return scanned, fmt.Sprintf("%016x", checksum.Sum64()), collector.truncated, nil
-}
 
 func gapIssue(start, end *big.Int) PlacementAuditIssue {
 	rangeStart := auditTokenFromBig(start)
@@ -465,7 +298,7 @@ func overlapIssue(shardID uint32, owners []uint32, start, end *big.Int) Placemen
 func activeOwnersForToken(cat PlacementCatalog, token uint64) []uint32 {
 	var owners []uint32
 	for _, sh := range cat.Shards {
-		if !sh.State.routable() {
+		if !sh.State.Routable() {
 			continue
 		}
 		for _, rng := range sh.Ranges {

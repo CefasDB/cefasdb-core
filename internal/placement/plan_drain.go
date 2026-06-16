@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 	if err != nil {
 		return PlacementPlan{}, err
 	}
-	after.normalize()
+	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementPlan{}, err
 	}
@@ -39,10 +39,10 @@ func planDrain(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 func validateDrainInputs(cat PlacementCatalog, req PlacementPlanRequest) (model.NodeID, error) {
 	nodeID, err := model.NewNodeID(req.NodeID)
 	if err != nil {
-		return model.NodeID{}, invalidPlan("drain requires nodeId")
+		return model.NodeID{}, InvalidPlan("drain requires nodeId")
 	}
 	if _, ok := cat.Nodes[nodeID.String()]; !ok {
-		return model.NodeID{}, invalidPlan("node %q does not exist in placement", nodeID.String())
+		return model.NodeID{}, InvalidPlan("node %q does not exist in placement", nodeID.String())
 	}
 	return nodeID, nil
 }
@@ -51,7 +51,7 @@ func validateDrainInputs(cat PlacementCatalog, req PlacementPlanRequest) (model.
 // state flipped to NodeStateDraining. Subsequent helpers mutate the
 // returned catalog's shard membership in place.
 func markNodeDraining(cat PlacementCatalog, nodeID model.NodeID) PlacementCatalog {
-	after := nextCatalog(cat)
+	after := NextCatalog(cat)
 	key := nodeID.String()
 	node := after.Nodes[key]
 	node.State = NodeStateDraining
@@ -67,7 +67,7 @@ func executeDrainShards(after PlacementCatalog, req PlacementPlanRequest, nodeID
 		return nil, nil, err
 	}
 	if affected == 0 {
-		return nil, nil, invalidPlan("node %q is not present in any shard membership", nodeID.String())
+		return nil, nil, InvalidPlan("node %q is not present in any shard membership", nodeID.String())
 	}
 	return steps, policyWarnings, nil
 }
@@ -107,7 +107,7 @@ func drainTargets(cat PlacementCatalog, req PlacementPlanRequest) ([]string, err
 		return nil, err
 	}
 	if containsString(targets, req.NodeID) {
-		return nil, invalidPlan("drain target nodes cannot include draining node %q", req.NodeID)
+		return nil, InvalidPlan("drain target nodes cannot include draining node %q", req.NodeID)
 	}
 	return targets, nil
 }
@@ -127,7 +127,7 @@ func drainShards(after PlacementCatalog, req PlacementPlanRequest, targets []str
 		}
 		affected++
 		currentVoters := append([]string(nil), sh.Voters...)
-		remainingVoters := removeString(append([]string(nil), sh.Voters...), req.NodeID)
+		remainingVoters := RemoveString(append([]string(nil), sh.Voters...), req.NodeID)
 		voters, shardWarnings, err := drainPickVoters(after, *sh, remainingVoters, targets, req)
 		if err != nil {
 			return nil, nil, 0, err
@@ -135,7 +135,7 @@ func drainShards(after PlacementCatalog, req PlacementPlanRequest, targets []str
 		policyWarnings = append(policyWarnings, shardWarnings...)
 		steps = append(steps, membershipDiffSteps(after, sh.ID, currentVoters, voters)...)
 		sh.Voters = voters
-		sh.NonVoters = removeString(sh.NonVoters, req.NodeID)
+		sh.NonVoters = RemoveString(sh.NonVoters, req.NodeID)
 		if sh.LeaderHint == req.NodeID {
 			sh.LeaderHint = ""
 		}
@@ -164,7 +164,7 @@ func drainPickVoters(cat PlacementCatalog, sh ShardPlacement, remainingVoters, t
 		}
 		sort.Strings(voters)
 		if len(voters) < minVoters(req.MinVoters) {
-			return nil, nil, invalidPlan("drain would leave shard %d with %d voters; minVoters=%d", sh.ID, len(voters), minVoters(req.MinVoters))
+			return nil, nil, InvalidPlan("drain would leave shard %d with %d voters; minVoters=%d", sh.ID, len(voters), minVoters(req.MinVoters))
 		}
 		return voters, nil, nil
 	}

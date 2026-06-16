@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"encoding/json"
@@ -40,7 +40,7 @@ const (
 	ShardStateDecommissioned ShardState = "decommissioned"
 )
 
-func (s ShardState) routable() bool {
+func (s ShardState) Routable() bool {
 	switch s {
 	case "", ShardStateActive, ShardStateSplitting, ShardStateMoving, ShardStateReadOnly:
 		return true
@@ -140,7 +140,7 @@ func (c PlacementCatalog) Clone() PlacementCatalog {
 	return out
 }
 
-func (c *PlacementCatalog) normalize() {
+func (c *PlacementCatalog) Normalize() {
 	if c.Version == 0 {
 		c.Version = PlacementVersion
 	}
@@ -235,7 +235,7 @@ func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 		Nodes:         nodes,
 		UpdatedAtUnix: now,
 	}
-	cat.normalize()
+	cat.Normalize()
 	return cat
 }
 
@@ -290,7 +290,7 @@ func splitTokenRanges(n int) []TokenRange {
 // ValidatePlacement rejects catalogs that cannot drive deterministic
 // routing on this node.
 func ValidatePlacement(cat PlacementCatalog) error {
-	cat.normalize()
+	cat.Normalize()
 	if cat.Version != PlacementVersion {
 		return fmt.Errorf("cluster: unsupported placement version %d", cat.Version)
 	}
@@ -312,10 +312,10 @@ func ValidatePlacement(cat PlacementCatalog) error {
 		if sh.State == ShardStateDecommissioned {
 			continue
 		}
-		if !sh.State.routable() && sh.State != ShardStateDraining && sh.State != ShardStateCreating {
+		if !sh.State.Routable() && sh.State != ShardStateDraining && sh.State != ShardStateCreating {
 			return fmt.Errorf("cluster: invalid shard %d state %q", sh.ID, sh.State)
 		}
-		if cat.Strategy == PlacementStrategyTokenRange && sh.State.routable() && len(sh.Ranges) == 0 {
+		if cat.Strategy == PlacementStrategyTokenRange && sh.State.Routable() && len(sh.Ranges) == 0 {
 			return fmt.Errorf("cluster: token-range shard %d has no ranges", sh.ID)
 		}
 	}
@@ -328,7 +328,7 @@ func ValidatePlacement(cat PlacementCatalog) error {
 func validateTokenCoverage(shards []ShardPlacement) error {
 	var segs []tokenSegment
 	for _, sh := range shards {
-		if !sh.State.routable() {
+		if !sh.State.Routable() {
 			continue
 		}
 		for _, r := range sh.Ranges {
@@ -394,7 +394,7 @@ func LoadPlacementFile(path string) (PlacementCatalog, error) {
 	if err := json.Unmarshal(b, &cat); err != nil {
 		return PlacementCatalog{}, fmt.Errorf("cluster: decode placement: %w", err)
 	}
-	cat.normalize()
+	cat.Normalize()
 	if err := ValidatePlacement(cat); err != nil {
 		return PlacementCatalog{}, err
 	}
@@ -402,7 +402,7 @@ func LoadPlacementFile(path string) (PlacementCatalog, error) {
 }
 
 func SavePlacementFile(path string, cat PlacementCatalog) error {
-	cat.normalize()
+	cat.Normalize()
 	if err := ValidatePlacement(cat); err != nil {
 		return err
 	}
@@ -417,20 +417,20 @@ func SavePlacementFile(path string, cat PlacementCatalog) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-func parsePlacement(raw []byte) (PlacementCatalog, error) {
+func ParsePlacement(raw []byte) (PlacementCatalog, error) {
 	var cat PlacementCatalog
 	if err := json.Unmarshal(raw, &cat); err != nil {
 		return PlacementCatalog{}, fmt.Errorf("cluster: decode placement: %w", err)
 	}
-	cat.normalize()
+	cat.Normalize()
 	if err := ValidatePlacement(cat); err != nil {
 		return PlacementCatalog{}, err
 	}
 	return cat, nil
 }
 
-func encodePlacement(cat PlacementCatalog) ([]byte, error) {
-	cat.normalize()
+func EncodePlacement(cat PlacementCatalog) ([]byte, error) {
+	cat.Normalize()
 	if err := ValidatePlacement(cat); err != nil {
 		return nil, err
 	}

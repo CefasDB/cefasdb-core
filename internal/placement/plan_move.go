@@ -1,15 +1,15 @@
-package cluster
+package placement
 
 // planMove derives the placement-plan that replaces a voter on a
 // shard. ApplyPlacement executes the Raft membership steps before
 // publishing the new placement epoch.
 func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
-	shardIdx, shard, err := findShard(cat, req.ShardID)
+	shardIdx, shard, err := FindShard(cat, req.ShardID)
 	if err != nil {
 		return PlacementPlan{}, err
 	}
 	if len(shard.Voters) == 0 {
-		return PlacementPlan{}, invalidPlan("shard %d has no voters to move", shard.ID)
+		return PlacementPlan{}, InvalidPlan("shard %d has no voters to move", shard.ID)
 	}
 
 	voters, steps, err := moveVoterPlan(cat, shard, req)
@@ -17,12 +17,12 @@ func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, er
 		return PlacementPlan{}, err
 	}
 
-	after := nextCatalog(cat)
+	after := NextCatalog(cat)
 	after.Shards[shardIdx].State = ShardStateActive
 	after.Shards[shardIdx].Epoch = after.Epoch
 	after.Shards[shardIdx].Voters = voters
 	after.Shards[shardIdx].NonVoters = removeAny(after.Shards[shardIdx].NonVoters, voters)
-	after.normalize()
+	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementPlan{}, err
 	}
@@ -54,20 +54,20 @@ func moveVoterPlan(cat PlacementCatalog, shard ShardPlacement, req PlacementPlan
 		return voters, membershipDiffSteps(cat, shard.ID, shard.Voters, voters), nil
 	}
 	if req.SourceNode == "" || req.TargetNode == "" {
-		return nil, nil, invalidPlan("move requires sourceNode and targetNode when targetVoters is empty")
+		return nil, nil, InvalidPlan("move requires sourceNode and targetNode when targetVoters is empty")
 	}
 	if req.SourceNode == req.TargetNode {
-		return nil, nil, invalidPlan("sourceNode and targetNode must differ")
+		return nil, nil, InvalidPlan("sourceNode and targetNode must differ")
 	}
 	if err := validateNodeSet(cat, []string{req.TargetNode}, 1); err != nil {
 		return nil, nil, err
 	}
 	if !containsString(shard.Voters, req.SourceNode) {
-		return nil, nil, invalidPlan("source node %q is not a voter for shard %d", req.SourceNode, shard.ID)
+		return nil, nil, InvalidPlan("source node %q is not a voter for shard %d", req.SourceNode, shard.ID)
 	}
 	voters := replaceVoter(shard.Voters, req.SourceNode, req.TargetNode)
 	if len(voters) < minV {
-		return nil, nil, invalidPlan("move would leave shard %d with %d voters; minVoters=%d", shard.ID, len(voters), minV)
+		return nil, nil, InvalidPlan("move would leave shard %d with %d voters; minVoters=%d", shard.ID, len(voters), minV)
 	}
 	steps := []PlacementPlanStep{
 		{Action: "add_voter", ShardID: u32ptr(shard.ID), NodeID: req.TargetNode, Addr: cat.Nodes[req.TargetNode].RaftAddr},

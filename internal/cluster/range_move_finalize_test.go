@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -56,14 +57,14 @@ func TestFinalizeRangeMoveRetriesCleanupAfterPublishFailure(t *testing.T) {
 	}
 }
 
-func openTransitionRangeMoveManagerForResume(t *testing.T) (*Manager, PlacementPlan) {
+func openTransitionRangeMoveManagerForResume(t *testing.T) (*Manager, placement.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
-	cat := DefaultPlacement(1, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := BuildPlacementPlan(cat, PlacementPlanRequest{
-		Operation:  PlacementOperationRangeMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -71,7 +72,7 @@ func openTransitionRangeMoveManagerForResume(t *testing.T) (*Manager, PlacementP
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := Open(context.Background(), Config{

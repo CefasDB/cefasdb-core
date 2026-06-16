@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 // PlanStrategy resolves a PlacementPlanRequest of a specific
 // PlacementOperation into a PlacementPlan. Every operation

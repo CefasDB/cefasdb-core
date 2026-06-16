@@ -31,6 +31,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -321,9 +322,9 @@ func (s *Server) clusterStatusExtras() map[string]any {
 	return out
 }
 
-func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDescriptor {
-	out := make([]cluster.NodeDescriptor, 0, len(placement.Nodes))
-	for _, node := range placement.Nodes {
+func sortedPlacementNodes(cat placement.PlacementCatalog) []placement.NodeDescriptor {
+	out := make([]placement.NodeDescriptor, 0, len(cat.Nodes))
+	for _, node := range cat.Nodes {
 		node.Capacity.Tags = append([]string(nil), node.Capacity.Tags...)
 		out = append(out, node)
 	}
@@ -626,7 +627,7 @@ func mapWriteErr(err error) int {
 	if errors.Is(err, storage.ErrInvalidBackupRetention) {
 		return http.StatusBadRequest
 	}
-	if errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+	if errors.Is(err, placement.ErrInvalidPlacementPlan) {
 		return http.StatusBadRequest
 	}
 	if errors.Is(err, cluster.ErrStaleRoute) {

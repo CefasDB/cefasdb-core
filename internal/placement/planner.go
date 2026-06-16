@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"errors"
@@ -80,66 +80,59 @@ type PlacementApplyResult struct {
 
 var ErrInvalidPlacementPlan = errors.New("cluster: invalid placement plan")
 
-func (m *Manager) PlanPlacement(req PlacementPlanRequest) (PlacementPlan, error) {
-	if err := m.RefreshPlacement(); err != nil {
-		return PlacementPlan{}, err
-	}
-	return BuildPlacementPlan(m.Placement(), req)
-}
-
 func BuildPlacementPlan(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
-	cat.normalize()
+	cat.Normalize()
 	if err := ValidatePlacement(cat); err != nil {
 		return PlacementPlan{}, err
 	}
 	strategy, ok := defaultPlanStrategies[req.Operation]
 	if !ok {
-		return PlacementPlan{}, invalidPlan("unknown placement operation %q", req.Operation)
+		return PlacementPlan{}, InvalidPlan("unknown placement operation %q", req.Operation)
 	}
 	return strategy.Plan(cat, req)
 }
 
-func nextCatalog(cat PlacementCatalog) PlacementCatalog {
+func NextCatalog(cat PlacementCatalog) PlacementCatalog {
 	after := cat.Clone()
 	after.Epoch = cat.Epoch + 1
 	after.UpdatedAtUnix = time.Now().Unix()
 	return after
 }
 
-func findShard(cat PlacementCatalog, shardID uint32) (int, ShardPlacement, error) {
+func FindShard(cat PlacementCatalog, shardID uint32) (int, ShardPlacement, error) {
 	for i, sh := range cat.Shards {
 		if sh.ID == shardID {
 			return i, sh, nil
 		}
 	}
-	return 0, ShardPlacement{}, invalidPlan("shard %d does not exist", shardID)
+	return 0, ShardPlacement{}, InvalidPlan("shard %d does not exist", shardID)
 }
 
 func validateNodeSet(cat PlacementCatalog, ids []string, min int) error {
 	if len(ids) < min {
-		return invalidPlan("need at least %d nodes, got %d", min, len(ids))
+		return InvalidPlan("need at least %d nodes, got %d", min, len(ids))
 	}
 	seen := map[string]struct{}{}
 	for _, id := range ids {
 		if id == "" {
-			return invalidPlan("node id cannot be empty")
+			return InvalidPlan("node id cannot be empty")
 		}
 		if _, dup := seen[id]; dup {
-			return invalidPlan("duplicate node %q", id)
+			return InvalidPlan("duplicate node %q", id)
 		}
 		seen[id] = struct{}{}
 		node, ok := cat.Nodes[id]
 		if !ok {
-			return invalidPlan("node %q does not exist in placement", id)
+			return InvalidPlan("node %q does not exist in placement", id)
 		}
 		if node.State != "" && node.State != NodeStateActive {
-			return invalidPlan("node %q is not active: %s", id, node.State)
+			return InvalidPlan("node %q is not active: %s", id, node.State)
 		}
 	}
 	return nil
 }
 
-func placementNodeActiveReferences(cat PlacementCatalog, nodeID model.NodeID) []string {
+func PlacementNodeActiveReferences(cat PlacementCatalog, nodeID model.NodeID) []string {
 	key := nodeID.String()
 	var blockers []string
 	for _, shard := range cat.Shards {
@@ -167,6 +160,6 @@ func minVoters(v int) int {
 	return v
 }
 
-func invalidPlan(format string, args ...any) error {
+func InvalidPlan(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidPlacementPlan, fmt.Sprintf(format, args...))
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
@@ -60,19 +61,19 @@ func New(cls Cluster, mgr *cluster.Manager, writeErr WriteErrFunc, extra ExtraSt
 }
 
 type clusterStatusResponse struct {
-	Mode              string                   `json:"mode"` // "single-node" or "raft"
-	IsLeader          bool                     `json:"isLeader"`
-	SelfID            string                   `json:"selfId,omitempty"`
-	BindAddr          string                   `json:"bindAddr,omitempty"`
-	LeaderHTTP        string                   `json:"leaderHttp,omitempty"`
-	RoutingEpoch      uint64                   `json:"routingEpoch,omitempty"`
-	PlacementVersion  uint64                   `json:"placementVersion,omitempty"`
-	ShardCount        int                      `json:"shardCount,omitempty"`
-	PlacementStrategy string                   `json:"placementStrategy,omitempty"`
-	Shards            []cluster.ShardPlacement `json:"shards,omitempty"`
-	Nodes             []cluster.NodeDescriptor `json:"nodes,omitempty"`
-	HotRanges         any                      `json:"hotRanges,omitempty"`
-	BackupScheduler   any                      `json:"backupScheduler,omitempty"`
+	Mode              string                     `json:"mode"` // "single-node" or "raft"
+	IsLeader          bool                       `json:"isLeader"`
+	SelfID            string                     `json:"selfId,omitempty"`
+	BindAddr          string                     `json:"bindAddr,omitempty"`
+	LeaderHTTP        string                     `json:"leaderHttp,omitempty"`
+	RoutingEpoch      uint64                     `json:"routingEpoch,omitempty"`
+	PlacementVersion  uint64                     `json:"placementVersion,omitempty"`
+	ShardCount        int                        `json:"shardCount,omitempty"`
+	PlacementStrategy string                     `json:"placementStrategy,omitempty"`
+	Shards            []placement.ShardPlacement `json:"shards,omitempty"`
+	Nodes             []placement.NodeDescriptor `json:"nodes,omitempty"`
+	HotRanges         any                        `json:"hotRanges,omitempty"`
+	BackupScheduler   any                        `json:"backupScheduler,omitempty"`
 }
 
 // HandleStatus serves /v1/cluster/status: a snapshot of mode, leader,
@@ -90,13 +91,13 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.manager != nil {
 		_ = h.manager.RefreshPlacement()
-		placement := h.manager.Placement()
-		resp.RoutingEpoch = placement.Epoch
-		resp.PlacementVersion = placement.Version
-		resp.ShardCount = len(placement.Shards)
-		resp.PlacementStrategy = placement.Strategy
-		resp.Shards = append([]cluster.ShardPlacement(nil), placement.Shards...)
-		resp.Nodes = sortedPlacementNodes(placement)
+		cat := h.manager.Placement()
+		resp.RoutingEpoch = cat.Epoch
+		resp.PlacementVersion = cat.Version
+		resp.ShardCount = len(cat.Shards)
+		resp.PlacementStrategy = cat.Strategy
+		resp.Shards = append([]placement.ShardPlacement(nil), cat.Shards...)
+		resp.Nodes = sortedPlacementNodes(cat)
 	}
 	if h.extraStatus != nil {
 		extra := h.extraStatus()
@@ -110,9 +111,9 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDescriptor {
-	out := make([]cluster.NodeDescriptor, 0, len(placement.Nodes))
-	for _, node := range placement.Nodes {
+func sortedPlacementNodes(cat placement.PlacementCatalog) []placement.NodeDescriptor {
+	out := make([]placement.NodeDescriptor, 0, len(cat.Nodes))
+	for _, node := range cat.Nodes {
 		node.Capacity.Tags = append([]string(nil), node.Capacity.Tags...)
 		out = append(out, node)
 	}
@@ -246,7 +247,7 @@ func (h *Handlers) HandlePlacementPlan(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
 		return
 	}
-	var req cluster.PlacementPlanRequest
+	var req placement.PlacementPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
@@ -274,7 +275,7 @@ func (h *Handlers) HandlePlacementApply(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
 		return
 	}
-	var req cluster.PlacementApplyRequest
+	var req placement.PlacementApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
@@ -302,7 +303,7 @@ func (h *Handlers) HandlePlacementAudit(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
 		return
 	}
-	req := cluster.PlacementAuditRequest{IncludeRepairPlan: true}
+	req := placement.PlacementAuditRequest{IncludeRepairPlan: true}
 	if r.Method == http.MethodPost {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpx.WriteErr(w, http.StatusBadRequest, err)

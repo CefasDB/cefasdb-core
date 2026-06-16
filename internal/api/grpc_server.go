@@ -13,6 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
@@ -1377,7 +1378,7 @@ func scheduledBackupStatusToPB(status storage.ScheduledBackupStatus) *cefaspb.Sc
 	}
 }
 
-func pbShardPlacements(in []cluster.ShardPlacement) []*cefaspb.ShardPlacement {
+func pbShardPlacements(in []placement.ShardPlacement) []*cefaspb.ShardPlacement {
 	out := make([]*cefaspb.ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, &cefaspb.ShardPlacement{
@@ -1393,7 +1394,7 @@ func pbShardPlacements(in []cluster.ShardPlacement) []*cefaspb.ShardPlacement {
 	return out
 }
 
-func pbTokenRanges(in []cluster.TokenRange) []*cefaspb.TokenRange {
+func pbTokenRanges(in []placement.TokenRange) []*cefaspb.TokenRange {
 	out := make([]*cefaspb.TokenRange, 0, len(in))
 	for _, r := range in {
 		out = append(out, pbTokenRange(r))
@@ -1401,7 +1402,7 @@ func pbTokenRanges(in []cluster.TokenRange) []*cefaspb.TokenRange {
 	return out
 }
 
-func pbTokenRange(r cluster.TokenRange) *cefaspb.TokenRange {
+func pbTokenRange(r placement.TokenRange) *cefaspb.TokenRange {
 	return &cefaspb.TokenRange{Start: r.Start, End: r.End}
 }
 
@@ -1431,7 +1432,7 @@ func pbRangeHotspotSummaries(in []metrics.RangeHotspotSummary) []*cefaspb.RangeH
 	return out
 }
 
-func pbNodeDescriptors(in []cluster.NodeDescriptor) []*cefaspb.NodeDescriptor {
+func pbNodeDescriptors(in []placement.NodeDescriptor) []*cefaspb.NodeDescriptor {
 	out := make([]*cefaspb.NodeDescriptor, 0, len(in))
 	for _, node := range in {
 		out = append(out, &cefaspb.NodeDescriptor{
@@ -1540,7 +1541,7 @@ func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlace
 	if s.manager == nil {
 		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
 	}
-	result, err := s.manager.ApplyPlacement(ctx, cluster.PlacementApplyRequest{
+	result, err := s.manager.ApplyPlacement(ctx, placement.PlacementApplyRequest{
 		Plan:          placementPlanFromPB(req.GetPlan()),
 		ExpectedEpoch: req.GetExpectedEpoch(),
 		TimeoutMS:     int(req.GetTimeoutMs()),
@@ -1594,9 +1595,9 @@ func (s *GRPCServer) FinalizeRangeMove(ctx context.Context, req *cefaspb.Finaliz
 	return &cefaspb.FinalizeRangeMoveResponse{Result: pbRangeMoveFinalizeResult(result)}, nil
 }
 
-func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.PlacementPlanRequest {
-	out := cluster.PlacementPlanRequest{
-		Operation:    cluster.PlacementOperation(req.GetOperation()),
+func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) placement.PlacementPlanRequest {
+	out := placement.PlacementPlanRequest{
+		Operation:    placement.PlacementOperation(req.GetOperation()),
 		ShardID:      req.GetShardId(),
 		SourceNode:   req.GetSourceNode(),
 		TargetNode:   req.GetTargetNode(),
@@ -1628,7 +1629,7 @@ func placementPlanRequestFromPB(req *cefaspb.PlanPlacementRequest) cluster.Place
 	return out
 }
 
-func pbPlacementPlan(plan cluster.PlacementPlan) *cefaspb.PlacementPlan {
+func pbPlacementPlan(plan placement.PlacementPlan) *cefaspb.PlacementPlan {
 	return &cefaspb.PlacementPlan{
 		Operation:        string(plan.Operation),
 		BeforeEpoch:      plan.BeforeEpoch,
@@ -1643,7 +1644,7 @@ func pbPlacementPlan(plan cluster.PlacementPlan) *cefaspb.PlacementPlan {
 	}
 }
 
-func pbPlacementCatalog(cat cluster.PlacementCatalog) *cefaspb.PlacementCatalog {
+func pbPlacementCatalog(cat placement.PlacementCatalog) *cefaspb.PlacementCatalog {
 	return &cefaspb.PlacementCatalog{
 		Version:       cat.Version,
 		Epoch:         cat.Epoch,
@@ -1654,7 +1655,7 @@ func pbPlacementCatalog(cat cluster.PlacementCatalog) *cefaspb.PlacementCatalog 
 	}
 }
 
-func pbPlacementPlanSteps(in []cluster.PlacementPlanStep) []*cefaspb.PlacementPlanStep {
+func pbPlacementPlanSteps(in []placement.PlacementPlanStep) []*cefaspb.PlacementPlanStep {
 	out := make([]*cefaspb.PlacementPlanStep, 0, len(in))
 	for _, step := range in {
 		out = append(out, &cefaspb.PlacementPlanStep{
@@ -1668,12 +1669,12 @@ func pbPlacementPlanSteps(in []cluster.PlacementPlanStep) []*cefaspb.PlacementPl
 	return out
 }
 
-func placementPlanFromPB(in *cefaspb.PlacementPlan) cluster.PlacementPlan {
+func placementPlanFromPB(in *cefaspb.PlacementPlan) placement.PlacementPlan {
 	if in == nil {
-		return cluster.PlacementPlan{}
+		return placement.PlacementPlan{}
 	}
-	return cluster.PlacementPlan{
-		Operation:        cluster.PlacementOperation(in.GetOperation()),
+	return placement.PlacementPlan{
+		Operation:        placement.PlacementOperation(in.GetOperation()),
 		BeforeEpoch:      in.GetBeforeEpoch(),
 		AfterEpoch:       in.GetAfterEpoch(),
 		Before:           placementCatalogFromPB(in.GetBefore()),
@@ -1686,21 +1687,21 @@ func placementPlanFromPB(in *cefaspb.PlacementPlan) cluster.PlacementPlan {
 	}
 }
 
-func placementCatalogFromPB(in *cefaspb.PlacementCatalog) cluster.PlacementCatalog {
+func placementCatalogFromPB(in *cefaspb.PlacementCatalog) placement.PlacementCatalog {
 	if in == nil {
-		return cluster.PlacementCatalog{}
+		return placement.PlacementCatalog{}
 	}
-	nodes := make(map[string]cluster.NodeDescriptor, len(in.GetNodes()))
+	nodes := make(map[string]placement.NodeDescriptor, len(in.GetNodes()))
 	for _, node := range in.GetNodes() {
-		desc := cluster.NodeDescriptor{
+		desc := placement.NodeDescriptor{
 			ID:           node.GetId(),
 			RaftAddr:     node.GetRaftAddr(),
 			HTTPAddr:     node.GetHttpAddr(),
-			State:        cluster.NodeState(node.GetState()),
+			State:        placement.NodeState(node.GetState()),
 			LastSeenUnix: node.GetLastSeenUnix(),
 		}
 		if c := node.GetCapacity(); c != nil {
-			desc.Capacity = cluster.NodeCapacity{
+			desc.Capacity = placement.NodeCapacity{
 				Weight:      int(c.GetWeight()),
 				CPU:         int(c.GetCpu()),
 				MemoryBytes: c.GetMemoryBytes(),
@@ -1711,7 +1712,7 @@ func placementCatalogFromPB(in *cefaspb.PlacementCatalog) cluster.PlacementCatal
 		}
 		nodes[desc.ID] = desc
 	}
-	return cluster.PlacementCatalog{
+	return placement.PlacementCatalog{
 		Version:       in.GetVersion(),
 		Epoch:         in.GetEpoch(),
 		Strategy:      in.GetStrategy(),
@@ -1721,13 +1722,13 @@ func placementCatalogFromPB(in *cefaspb.PlacementCatalog) cluster.PlacementCatal
 	}
 }
 
-func placementShardsFromPB(in []*cefaspb.ShardPlacement) []cluster.ShardPlacement {
-	out := make([]cluster.ShardPlacement, 0, len(in))
+func placementShardsFromPB(in []*cefaspb.ShardPlacement) []placement.ShardPlacement {
+	out := make([]placement.ShardPlacement, 0, len(in))
 	for _, sh := range in {
-		out = append(out, cluster.ShardPlacement{
+		out = append(out, placement.ShardPlacement{
 			ID:         sh.GetId(),
 			Ranges:     placementTokenRangesFromPB(sh.GetRanges()),
-			State:      cluster.ShardState(sh.GetState()),
+			State:      placement.ShardState(sh.GetState()),
 			Epoch:      sh.GetEpoch(),
 			Voters:     append([]string(nil), sh.GetVoters()...),
 			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
@@ -1737,23 +1738,23 @@ func placementShardsFromPB(in []*cefaspb.ShardPlacement) []cluster.ShardPlacemen
 	return out
 }
 
-func placementTokenRangesFromPB(in []*cefaspb.TokenRange) []cluster.TokenRange {
-	out := make([]cluster.TokenRange, 0, len(in))
+func placementTokenRangesFromPB(in []*cefaspb.TokenRange) []placement.TokenRange {
+	out := make([]placement.TokenRange, 0, len(in))
 	for _, r := range in {
-		out = append(out, cluster.TokenRange{Start: r.GetStart(), End: r.GetEnd()})
+		out = append(out, placement.TokenRange{Start: r.GetStart(), End: r.GetEnd()})
 	}
 	return out
 }
 
-func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []cluster.PlacementPlanStep {
-	out := make([]cluster.PlacementPlanStep, 0, len(in))
+func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []placement.PlacementPlanStep {
+	out := make([]placement.PlacementPlanStep, 0, len(in))
 	for _, step := range in {
 		var shardID *uint32
 		if step.ShardId != nil {
 			v := step.GetShardId()
 			shardID = &v
 		}
-		out = append(out, cluster.PlacementPlanStep{
+		out = append(out, placement.PlacementPlanStep{
 			Action:  step.GetAction(),
 			ShardID: shardID,
 			NodeID:  step.GetNodeId(),
@@ -1764,7 +1765,7 @@ func placementPlanStepsFromPB(in []*cefaspb.PlacementPlanStep) []cluster.Placeme
 	return out
 }
 
-func pbPlacementApplyResult(result cluster.PlacementApplyResult) *cefaspb.PlacementApplyResult {
+func pbPlacementApplyResult(result placement.PlacementApplyResult) *cefaspb.PlacementApplyResult {
 	return &cefaspb.PlacementApplyResult{
 		Operation:   string(result.Operation),
 		BeforeEpoch: result.BeforeEpoch,
@@ -1807,7 +1808,7 @@ func pbRangeMoveFinalizeResult(result cluster.RangeMoveFinalizeResult) *cefaspb.
 	}
 }
 
-func pbPlacementApplySteps(in []cluster.PlacementApplyStep) []*cefaspb.PlacementApplyStep {
+func pbPlacementApplySteps(in []placement.PlacementApplyStep) []*cefaspb.PlacementApplyStep {
 	out := make([]*cefaspb.PlacementApplyStep, 0, len(in))
 	for _, step := range in {
 		out = append(out, &cefaspb.PlacementApplyStep{
@@ -1864,7 +1865,7 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrInvalidBackupRetention):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, cluster.ErrInvalidPlacementPlan):
+	case errors.Is(err, placement.ErrInvalidPlacementPlan):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, cluster.ErrStaleRoute):
 		return status.Error(codes.FailedPrecondition, err.Error())

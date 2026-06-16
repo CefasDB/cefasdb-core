@@ -7,18 +7,19 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func TestAuditPlacementCatalogReportsGapsAndOverlaps(t *testing.T) {
-	gapped := DefaultPlacement(2, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
-	gapped.Shards[0].Ranges = []TokenRange{{Start: 0, End: 100}}
-	gapped.Shards[1].Ranges = []TokenRange{{Start: 200, End: 0}}
+	gapped := placement.DefaultPlacement(2, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	gapped.Shards[0].Ranges = []placement.TokenRange{{Start: 0, End: 100}}
+	gapped.Shards[1].Ranges = []placement.TokenRange{{Start: 200, End: 0}}
 
-	gapReport := AuditPlacementCatalog(gapped, PlacementAuditRequest{IncludeRepairPlan: true})
-	if !gapReport.HasIssueKind(PlacementAuditKindGap) {
-		t.Fatalf("gap report kinds = %s, want %s", PlacementAuditSummary(gapReport.Issues), PlacementAuditKindGap)
+	gapReport := placement.AuditPlacementCatalog(gapped, placement.PlacementAuditRequest{IncludeRepairPlan: true})
+	if !gapReport.HasIssueKind(placement.PlacementAuditKindGap) {
+		t.Fatalf("gap report kinds = %s, want %s", placement.PlacementAuditSummary(gapReport.Issues), placement.PlacementAuditKindGap)
 	}
 	if gapReport.ConsistencyVerdict != "fail" {
 		t.Fatalf("gap verdict = %s, want fail", gapReport.ConsistencyVerdict)
@@ -27,13 +28,13 @@ func TestAuditPlacementCatalogReportsGapsAndOverlaps(t *testing.T) {
 		t.Fatalf("gap repair plan = %+v, want review-only actions", gapReport.RepairPlan)
 	}
 
-	overlapping := DefaultPlacement(2, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
-	overlapping.Shards[0].Ranges = []TokenRange{{Start: 0, End: 100}}
-	overlapping.Shards[1].Ranges = []TokenRange{{Start: 50, End: 0}}
+	overlapping := placement.DefaultPlacement(2, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	overlapping.Shards[0].Ranges = []placement.TokenRange{{Start: 0, End: 100}}
+	overlapping.Shards[1].Ranges = []placement.TokenRange{{Start: 50, End: 0}}
 
-	overlapReport := AuditPlacementCatalog(overlapping, PlacementAuditRequest{IncludeRepairPlan: true})
-	if !overlapReport.HasIssueKind(PlacementAuditKindOverlap) {
-		t.Fatalf("overlap report kinds = %s, want %s", PlacementAuditSummary(overlapReport.Issues), PlacementAuditKindOverlap)
+	overlapReport := placement.AuditPlacementCatalog(overlapping, placement.PlacementAuditRequest{IncludeRepairPlan: true})
+	if !overlapReport.HasIssueKind(placement.PlacementAuditKindOverlap) {
+		t.Fatalf("overlap report kinds = %s, want %s", placement.PlacementAuditSummary(overlapReport.Issues), placement.PlacementAuditKindOverlap)
 	}
 	if overlapReport.RepairPlan == nil || len(overlapReport.RepairPlan.Actions) == 0 {
 		t.Fatalf("overlap repair plan missing: %+v", overlapReport.RepairPlan)
@@ -59,16 +60,16 @@ func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 		t.Fatalf("put orphan: %v", err)
 	}
 
-	report, err := mgr.AuditPlacement(context.Background(), PlacementAuditRequest{IncludeRepairPlan: true})
+	report, err := mgr.AuditPlacement(context.Background(), placement.PlacementAuditRequest{IncludeRepairPlan: true})
 	if err != nil {
 		t.Fatalf("audit placement: %v", err)
 	}
-	if !report.HasIssueKind(PlacementAuditKindOrphanedPrimaryKey) {
-		t.Fatalf("issue kinds = %s, want %s", PlacementAuditSummary(report.Issues), PlacementAuditKindOrphanedPrimaryKey)
+	if !report.HasIssueKind(placement.PlacementAuditKindOrphanedPrimaryKey) {
+		t.Fatalf("issue kinds = %s, want %s", placement.PlacementAuditSummary(report.Issues), placement.PlacementAuditKindOrphanedPrimaryKey)
 	}
 	var found bool
 	for _, issue := range report.Issues {
-		if issue.Kind == PlacementAuditKindOrphanedPrimaryKey && issue.ExpectedShardID != nil && *issue.ExpectedShardID == 0 {
+		if issue.Kind == placement.PlacementAuditKindOrphanedPrimaryKey && issue.ExpectedShardID != nil && *issue.ExpectedShardID == 0 {
 			found = true
 		}
 	}
@@ -96,15 +97,15 @@ func TestAuditPlacementDetectsMissingCatalogDescriptors(t *testing.T) {
 		t.Fatalf("put row without descriptor: %v", err)
 	}
 
-	report, err := mgr.AuditPlacement(context.Background(), PlacementAuditRequest{
+	report, err := mgr.AuditPlacement(context.Background(), placement.PlacementAuditRequest{
 		MaxPrimaryKeysPerShard: 1,
 		IncludeRepairPlan:      true,
 	})
 	if err != nil {
 		t.Fatalf("audit placement: %v", err)
 	}
-	if !report.HasIssueKind(PlacementAuditKindMissingCatalogDescriptor) {
-		t.Fatalf("issue kinds = %s, want %s", PlacementAuditSummary(report.Issues), PlacementAuditKindMissingCatalogDescriptor)
+	if !report.HasIssueKind(placement.PlacementAuditKindMissingCatalogDescriptor) {
+		t.Fatalf("issue kinds = %s, want %s", placement.PlacementAuditSummary(report.Issues), placement.PlacementAuditKindMissingCatalogDescriptor)
 	}
 	if report.ScannedPrimaryKeys != 1 {
 		t.Fatalf("scanned primary keys = %d, want 1", report.ScannedPrimaryKeys)
@@ -170,7 +171,7 @@ func sAttrAudit(s string) types.AttributeValue {
 	return types.AttributeValue{T: types.AttrS, S: s}
 }
 
-func repairPlanHasAction(plan PlacementRepairPlan, action string) bool {
+func repairPlanHasAction(plan placement.PlacementRepairPlan, action string) bool {
 	for _, got := range plan.Actions {
 		if got.Action == action {
 			return true

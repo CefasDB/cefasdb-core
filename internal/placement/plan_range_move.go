@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"fmt"
@@ -23,7 +23,7 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 		return PlacementPlan{}, err
 	}
 	if len(voters) == 0 {
-		return PlacementPlan{}, invalidPlan("range move target shard %d needs at least one voter", targetShardID)
+		return PlacementPlan{}, InvalidPlan("range move target shard %d needs at least one voter", targetShardID)
 	}
 	after, err := applyRangeMoveTransition(cat, sourceIdx, targetShardID, moveRange, voters)
 	if err != nil {
@@ -38,17 +38,17 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 // fact owned by the source.
 func validateRangeMoveInputs(cat PlacementCatalog, req PlacementPlanRequest) (int, ShardPlacement, TokenRange, error) {
 	if cat.Strategy != PlacementStrategyTokenRange {
-		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("range move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+		return 0, ShardPlacement{}, TokenRange{}, InvalidPlan("range move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
 	}
 	if req.RangeStart == nil || req.RangeEnd == nil {
-		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("range move requires rangeStart and rangeEnd")
+		return 0, ShardPlacement{}, TokenRange{}, InvalidPlan("range move requires rangeStart and rangeEnd")
 	}
-	sourceIdx, source, err := findShard(cat, req.ShardID)
+	sourceIdx, source, err := FindShard(cat, req.ShardID)
 	if err != nil {
 		return 0, ShardPlacement{}, TokenRange{}, err
 	}
 	if source.State != ShardStateActive {
-		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateActive, source.State)
+		return 0, ShardPlacement{}, TokenRange{}, InvalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateActive, source.State)
 	}
 	moveRange := TokenRange{Start: *req.RangeStart, End: *req.RangeEnd}
 	if err := validateRangeOwnedBySource(source, moveRange); err != nil {
@@ -62,7 +62,7 @@ func validateRangeMoveInputs(cat PlacementCatalog, req PlacementPlanRequest) (in
 // pending range and voter set. Returns the validated next-epoch
 // catalog.
 func applyRangeMoveTransition(cat PlacementCatalog, sourceIdx int, targetShardID uint32, moveRange TokenRange, voters []string) (PlacementCatalog, error) {
-	after := nextCatalog(cat)
+	after := NextCatalog(cat)
 	after.Shards[sourceIdx].State = ShardStateMoving
 	after.Shards[sourceIdx].Epoch = after.Epoch
 	after.Shards = append(after.Shards, ShardPlacement{
@@ -72,7 +72,7 @@ func applyRangeMoveTransition(cat PlacementCatalog, sourceIdx int, targetShardID
 		Epoch:  after.Epoch,
 		Voters: voters,
 	})
-	after.normalize()
+	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementCatalog{}, err
 	}
@@ -101,12 +101,12 @@ func buildRangeMovePlan(cat, after PlacementCatalog, sourceID, targetID uint32, 
 }
 
 func validateRangeOwnedBySource(source ShardPlacement, moveRange TokenRange) error {
-	sourceRangesAfter, err := subtractTokenRanges(source.Ranges, moveRange)
+	sourceRangesAfter, err := SubtractTokenRanges(source.Ranges, moveRange)
 	if err != nil {
 		return fmt.Errorf("%w: range move source shard %d: %v", ErrInvalidPlacementPlan, source.ID, err)
 	}
 	if len(sourceRangesAfter) == len(source.Ranges) && sameTokenRanges(sourceRangesAfter, source.Ranges) {
-		return invalidPlan("range [%d,%d) is not owned by source shard %d", moveRange.Start, moveRange.End, source.ID)
+		return InvalidPlan("range [%d,%d) is not owned by source shard %d", moveRange.Start, moveRange.End, source.ID)
 	}
 	return nil
 }
@@ -117,7 +117,7 @@ func rangeMoveTargetID(cat PlacementCatalog, req PlacementPlanRequest) (uint32, 
 		targetShardID = *req.TargetShardID
 	}
 	if int(targetShardID) != len(cat.Shards) {
-		return 0, invalidPlan("range move target shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
+		return 0, InvalidPlan("range move target shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
 	}
 	return targetShardID, nil
 }

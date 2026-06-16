@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
@@ -231,7 +232,7 @@ func scatterReadableShard(sh *cluster.Shard) bool {
 		return false
 	}
 	switch sh.State {
-	case "", cluster.ShardStateActive, cluster.ShardStateSplitting, cluster.ShardStateMoving, cluster.ShardStateReadOnly:
+	case "", placement.ShardStateActive, placement.ShardStateSplitting, placement.ShardStateMoving, placement.ShardStateReadOnly:
 		return true
 	default:
 		return false

@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"strings"
@@ -30,21 +30,21 @@ func planDecommission(cat PlacementCatalog, req PlacementPlanRequest) (Placement
 func validateDecommissionInputs(cat PlacementCatalog, req PlacementPlanRequest) (model.NodeID, error) {
 	nodeID, err := model.NewNodeID(req.NodeID)
 	if err != nil {
-		return model.NodeID{}, invalidPlan("decommission requires nodeId")
+		return model.NodeID{}, InvalidPlan("decommission requires nodeId")
 	}
 	key := nodeID.String()
 	node, ok := cat.Nodes[key]
 	if !ok {
-		return model.NodeID{}, invalidPlan("node %q does not exist in placement", key)
+		return model.NodeID{}, InvalidPlan("node %q does not exist in placement", key)
 	}
 	if node.State == NodeStateDecommissioned {
-		return model.NodeID{}, invalidPlan("node %q is already decommissioned", key)
+		return model.NodeID{}, InvalidPlan("node %q is already decommissioned", key)
 	}
 	if node.State != NodeStateDraining {
-		return model.NodeID{}, invalidPlan("node %q must be draining before decommission; current state=%s", key, node.State)
+		return model.NodeID{}, InvalidPlan("node %q must be draining before decommission; current state=%s", key, node.State)
 	}
-	if blockers := placementNodeActiveReferences(cat, nodeID); len(blockers) > 0 {
-		return model.NodeID{}, invalidPlan("node %q still has active placement references: %s", key, strings.Join(blockers, "; "))
+	if blockers := PlacementNodeActiveReferences(cat, nodeID); len(blockers) > 0 {
+		return model.NodeID{}, InvalidPlan("node %q still has active placement references: %s", key, strings.Join(blockers, "; "))
 	}
 	return nodeID, nil
 }
@@ -52,12 +52,12 @@ func validateDecommissionInputs(cat PlacementCatalog, req PlacementPlanRequest) 
 // applyDecommissionTransition mutates the node state to
 // NodeStateDecommissioned on a fresh next-epoch catalog.
 func applyDecommissionTransition(cat PlacementCatalog, nodeID model.NodeID) (PlacementCatalog, error) {
-	after := nextCatalog(cat)
+	after := NextCatalog(cat)
 	key := nodeID.String()
 	node := after.Nodes[key]
 	node.State = NodeStateDecommissioned
 	after.Nodes[key] = node
-	after.normalize()
+	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementCatalog{}, err
 	}

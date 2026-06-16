@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
@@ -91,7 +92,7 @@ func TestDistributedRecommendFiltersAndDiversifiesAfterGlobalMerge(t *testing.T)
 	}
 }
 
-func startFinalizedSplitRetrievalFixture(t *testing.T, table string) (cefaspb.CefasClient, *cluster.Manager, cluster.PlacementPlan, string, string, func()) {
+func startFinalizedSplitRetrievalFixture(t *testing.T, table string) (cefaspb.CefasClient, *cluster.Manager, placement.PlacementPlan, string, string, func()) {
 	t.Helper()
 	stub, mgr, plan, cleanup := startSplitGRPCFixture(t)
 	ctx := context.Background()
@@ -120,7 +121,7 @@ func startFinalizedSplitRetrievalFixture(t *testing.T, table string) (cefaspb.Ce
 	return stub, mgr, plan, childKey, parentKey, cleanup
 }
 
-func keyInTokenRange(t *testing.T, mgr *cluster.Manager, rng cluster.TokenRange, prefix string) string {
+func keyInTokenRange(t *testing.T, mgr *cluster.Manager, rng placement.TokenRange, prefix string) string {
 	t.Helper()
 	for i := 0; i < 200_000; i++ {
 		key := fmt.Sprintf("%s-%d", prefix, i)

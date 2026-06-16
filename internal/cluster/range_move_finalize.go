@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
@@ -36,9 +37,9 @@ type RangeMoveFinalizeState struct {
 	TargetShardID      uint32                 `json:"targetShardId"`
 	BeforeEpoch        uint64                 `json:"beforeEpoch"`
 	AfterEpoch         uint64                 `json:"afterEpoch,omitempty"`
-	SourceRangesBefore []TokenRange           `json:"sourceRangesBefore,omitempty"`
-	SourceRangesAfter  []TokenRange           `json:"sourceRangesAfter,omitempty"`
-	MovedRange         TokenRange             `json:"movedRange"`
+	SourceRangesBefore []placement.TokenRange `json:"sourceRangesBefore,omitempty"`
+	SourceRangesAfter  []placement.TokenRange `json:"sourceRangesAfter,omitempty"`
+	MovedRange         placement.TokenRange   `json:"movedRange"`
 	Phase              RangeMoveFinalizePhase `json:"phase"`
 	CopiedKeys         int64                  `json:"copiedKeys,omitempty"`
 	CopiedCatalogKeys  int64                  `json:"copiedCatalogKeys,omitempty"`
@@ -49,19 +50,19 @@ type RangeMoveFinalizeState struct {
 }
 
 type RangeMoveFinalizeResult struct {
-	SourceShardID      uint32            `json:"sourceShardId"`
-	TargetShardID      uint32            `json:"targetShardId"`
-	BeforeEpoch        uint64            `json:"beforeEpoch"`
-	AfterEpoch         uint64            `json:"afterEpoch"`
-	SourceRangesBefore []TokenRange      `json:"sourceRangesBefore,omitempty"`
-	SourceRangesAfter  []TokenRange      `json:"sourceRangesAfter,omitempty"`
-	MovedRange         TokenRange        `json:"movedRange"`
-	CopiedKeys         int64             `json:"copiedKeys"`
-	CopiedCatalogKeys  int64             `json:"copiedCatalogKeys"`
-	DeletedKeys        int64             `json:"deletedKeys"`
-	Phase              string            `json:"phase,omitempty"`
-	Verification       SplitVerification `json:"verification,omitempty"`
-	Placement          PlacementCatalog  `json:"placement"`
+	SourceShardID      uint32                     `json:"sourceShardId"`
+	TargetShardID      uint32                     `json:"targetShardId"`
+	BeforeEpoch        uint64                     `json:"beforeEpoch"`
+	AfterEpoch         uint64                     `json:"afterEpoch"`
+	SourceRangesBefore []placement.TokenRange     `json:"sourceRangesBefore,omitempty"`
+	SourceRangesAfter  []placement.TokenRange     `json:"sourceRangesAfter,omitempty"`
+	MovedRange         placement.TokenRange       `json:"movedRange"`
+	CopiedKeys         int64                      `json:"copiedKeys"`
+	CopiedCatalogKeys  int64                      `json:"copiedCatalogKeys"`
+	DeletedKeys        int64                      `json:"deletedKeys"`
+	Phase              string                     `json:"phase,omitempty"`
+	Verification       SplitVerification          `json:"verification,omitempty"`
+	Placement          placement.PlacementCatalog `json:"placement"`
 }
 
 var rangeMoveFinalizeTestHook func(phase RangeMoveFinalizePhase, state RangeMoveFinalizeState) error
@@ -83,11 +84,11 @@ func (m *Manager) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRe
 	}
 	sourceShard, ok := m.Shard(req.SourceShardID)
 	if !ok || sourceShard == nil || sourceShard.Storage == nil {
-		return RangeMoveFinalizeResult{}, invalidPlan("source shard %d is not open locally", req.SourceShardID)
+		return RangeMoveFinalizeResult{}, placement.InvalidPlan("source shard %d is not open locally", req.SourceShardID)
 	}
 	targetShard, ok := m.Shard(req.TargetShardID)
 	if !ok || targetShard == nil || targetShard.Storage == nil {
-		return RangeMoveFinalizeResult{}, invalidPlan("target shard %d is not open locally", req.TargetShardID)
+		return RangeMoveFinalizeResult{}, placement.InvalidPlan("target shard %d is not open locally", req.TargetShardID)
 	}
 	if err := m.requireRangeMoveFinalizeLeaders(sourceShard, targetShard); err != nil {
 		return RangeMoveFinalizeResult{}, err
@@ -101,8 +102,8 @@ func (m *Manager) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRe
 		SourceShardID:      req.SourceShardID,
 		TargetShardID:      req.TargetShardID,
 		BeforeEpoch:        current.Epoch,
-		SourceRangesBefore: append([]TokenRange(nil), source.Ranges...),
-		SourceRangesAfter:  append([]TokenRange(nil), sourceRangesAfter...),
+		SourceRangesBefore: append([]placement.TokenRange(nil), source.Ranges...),
+		SourceRangesAfter:  append([]placement.TokenRange(nil), sourceRangesAfter...),
 		MovedRange:         target.Ranges[0],
 		Phase:              RangeMoveFinalizePhaseCopying,
 	}
@@ -147,18 +148,18 @@ func (m *Manager) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRe
 		return RangeMoveFinalizeResult{}, err
 	}
 
-	after := nextCatalog(current)
-	after.Shards[sourceIdx].Ranges = append([]TokenRange(nil), sourceRangesAfter...)
+	after := placement.NextCatalog(current)
+	after.Shards[sourceIdx].Ranges = append([]placement.TokenRange(nil), sourceRangesAfter...)
 	if len(sourceRangesAfter) == 0 {
-		after.Shards[sourceIdx].State = ShardStateDecommissioned
+		after.Shards[sourceIdx].State = placement.ShardStateDecommissioned
 	} else {
-		after.Shards[sourceIdx].State = ShardStateActive
+		after.Shards[sourceIdx].State = placement.ShardStateActive
 	}
 	after.Shards[sourceIdx].Epoch = after.Epoch
-	after.Shards[targetIdx].State = ShardStateActive
+	after.Shards[targetIdx].State = placement.ShardStateActive
 	after.Shards[targetIdx].Epoch = after.Epoch
-	after.normalize()
-	if err := ValidatePlacement(after); err != nil {
+	after.Normalize()
+	if err := placement.ValidatePlacement(after); err != nil {
 		return RangeMoveFinalizeResult{}, err
 	}
 	state.AfterEpoch = after.Epoch
@@ -202,8 +203,8 @@ func (m *Manager) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRe
 		TargetShardID:      req.TargetShardID,
 		BeforeEpoch:        current.Epoch,
 		AfterEpoch:         after.Epoch,
-		SourceRangesBefore: append([]TokenRange(nil), source.Ranges...),
-		SourceRangesAfter:  append([]TokenRange(nil), sourceRangesAfter...),
+		SourceRangesBefore: append([]placement.TokenRange(nil), source.Ranges...),
+		SourceRangesAfter:  append([]placement.TokenRange(nil), sourceRangesAfter...),
 		MovedRange:         target.Ranges[0],
 		CopiedKeys:         copied,
 		CopiedCatalogKeys:  catalogKeys,
@@ -214,7 +215,7 @@ func (m *Manager) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRe
 	}, nil
 }
 
-func (m *Manager) resumePublishedRangeMove(ctx context.Context, current PlacementCatalog, req RangeMoveFinalizeRequest) (RangeMoveFinalizeResult, bool, error) {
+func (m *Manager) resumePublishedRangeMove(ctx context.Context, current placement.PlacementCatalog, req RangeMoveFinalizeRequest) (RangeMoveFinalizeResult, bool, error) {
 	state, ok, err := m.loadRangeMoveFinalizeState(req.SourceShardID, req.TargetShardID)
 	if err != nil || !ok {
 		return RangeMoveFinalizeResult{}, false, err
@@ -227,11 +228,11 @@ func (m *Manager) resumePublishedRangeMove(ctx context.Context, current Placemen
 	}
 	sourceShard, ok := m.Shard(req.SourceShardID)
 	if !ok || sourceShard == nil || sourceShard.Storage == nil {
-		return RangeMoveFinalizeResult{}, true, invalidPlan("source shard %d is not open locally", req.SourceShardID)
+		return RangeMoveFinalizeResult{}, true, placement.InvalidPlan("source shard %d is not open locally", req.SourceShardID)
 	}
 	targetShard, ok := m.Shard(req.TargetShardID)
 	if !ok || targetShard == nil || targetShard.Storage == nil {
-		return RangeMoveFinalizeResult{}, true, invalidPlan("target shard %d is not open locally", req.TargetShardID)
+		return RangeMoveFinalizeResult{}, true, placement.InvalidPlan("target shard %d is not open locally", req.TargetShardID)
 	}
 	if err := m.requireRangeMoveFinalizeLeaders(sourceShard, targetShard); err != nil {
 		return RangeMoveFinalizeResult{}, true, err
@@ -262,82 +263,82 @@ func (m *Manager) resumePublishedRangeMove(ctx context.Context, current Placemen
 	return rangeMoveFinalizeResultFromState(state, current), true, nil
 }
 
-func validateFinalizeRangeMove(cat PlacementCatalog, req RangeMoveFinalizeRequest) (int, int, ShardPlacement, ShardPlacement, []TokenRange, error) {
-	if cat.Strategy != PlacementStrategyTokenRange {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, invalidPlan("finalize range_move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+func validateFinalizeRangeMove(cat placement.PlacementCatalog, req RangeMoveFinalizeRequest) (int, int, placement.ShardPlacement, placement.ShardPlacement, []placement.TokenRange, error) {
+	if cat.Strategy != placement.PlacementStrategyTokenRange {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, placement.InvalidPlan("finalize range_move requires %s placement, got %s", placement.PlacementStrategyTokenRange, cat.Strategy)
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != cat.Epoch {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: cat.Epoch}
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: cat.Epoch}
 	}
-	sourceIdx, source, err := findShard(cat, req.SourceShardID)
+	sourceIdx, source, err := placement.FindShard(cat, req.SourceShardID)
 	if err != nil {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, err
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, err
 	}
-	targetIdx, target, err := findShard(cat, req.TargetShardID)
+	targetIdx, target, err := placement.FindShard(cat, req.TargetShardID)
 	if err != nil {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, err
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, err
 	}
 	if source.ID == target.ID {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, invalidPlan("range_move source and target shards must differ")
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, placement.InvalidPlan("range_move source and target shards must differ")
 	}
-	if source.State != ShardStateMoving {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, invalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateMoving, source.State)
+	if source.State != placement.ShardStateMoving {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, placement.InvalidPlan("source shard %d must be %s, got %s", source.ID, placement.ShardStateMoving, source.State)
 	}
-	if target.State != ShardStateCreating {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, invalidPlan("target shard %d must be %s, got %s", target.ID, ShardStateCreating, target.State)
+	if target.State != placement.ShardStateCreating {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, placement.InvalidPlan("target shard %d must be %s, got %s", target.ID, placement.ShardStateCreating, target.State)
 	}
 	if len(target.Ranges) != 1 {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, invalidPlan("finalize range_move requires exactly one target range")
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, placement.InvalidPlan("finalize range_move requires exactly one target range")
 	}
-	sourceRangesAfter, err := subtractTokenRanges(source.Ranges, target.Ranges[0])
+	sourceRangesAfter, err := placement.SubtractTokenRanges(source.Ranges, target.Ranges[0])
 	if err != nil {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, nil, fmt.Errorf("%w: range_move target range [%d,%d) is not owned by source shard %d", ErrInvalidPlacementPlan, target.Ranges[0].Start, target.Ranges[0].End, source.ID)
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, nil, fmt.Errorf("%w: range_move target range [%d,%d) is not owned by source shard %d", placement.ErrInvalidPlacementPlan, target.Ranges[0].Start, target.Ranges[0].End, source.ID)
 	}
 	return sourceIdx, targetIdx, source, target, sourceRangesAfter, nil
 }
 
-func validatePublishedRangeMovePlacement(cat PlacementCatalog, state RangeMoveFinalizeState) error {
-	if cat.Strategy != PlacementStrategyTokenRange {
-		return invalidPlan("resume range_move cleanup requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+func validatePublishedRangeMovePlacement(cat placement.PlacementCatalog, state RangeMoveFinalizeState) error {
+	if cat.Strategy != placement.PlacementStrategyTokenRange {
+		return placement.InvalidPlan("resume range_move cleanup requires %s placement, got %s", placement.PlacementStrategyTokenRange, cat.Strategy)
 	}
-	_, source, err := findShard(cat, state.SourceShardID)
+	_, source, err := placement.FindShard(cat, state.SourceShardID)
 	if err != nil {
 		return err
 	}
-	_, target, err := findShard(cat, state.TargetShardID)
+	_, target, err := placement.FindShard(cat, state.TargetShardID)
 	if err != nil {
 		return err
 	}
-	if source.State != ShardStateActive && source.State != ShardStateDecommissioned {
-		return invalidPlan("resume range_move cleanup requires active or decommissioned source, got %s", source.State)
+	if source.State != placement.ShardStateActive && source.State != placement.ShardStateDecommissioned {
+		return placement.InvalidPlan("resume range_move cleanup requires active or decommissioned source, got %s", source.State)
 	}
-	if target.State != ShardStateActive {
-		return invalidPlan("resume range_move cleanup requires active target, got %s", target.State)
+	if target.State != placement.ShardStateActive {
+		return placement.InvalidPlan("resume range_move cleanup requires active target, got %s", target.State)
 	}
 	if !sameTokenRanges(source.Ranges, state.SourceRangesAfter) {
-		return invalidPlan("resume range_move cleanup source ranges mismatch")
+		return placement.InvalidPlan("resume range_move cleanup source ranges mismatch")
 	}
 	if len(target.Ranges) != 1 || target.Ranges[0] != state.MovedRange {
-		return invalidPlan("resume range_move cleanup target range mismatch")
+		return placement.InvalidPlan("resume range_move cleanup target range mismatch")
 	}
 	return nil
 }
 
-func rangeMoveFinalizeResultFromState(state RangeMoveFinalizeState, placement PlacementCatalog) RangeMoveFinalizeResult {
+func rangeMoveFinalizeResultFromState(state RangeMoveFinalizeState, cat placement.PlacementCatalog) RangeMoveFinalizeResult {
 	return RangeMoveFinalizeResult{
 		SourceShardID:      state.SourceShardID,
 		TargetShardID:      state.TargetShardID,
 		BeforeEpoch:        state.BeforeEpoch,
 		AfterEpoch:         state.AfterEpoch,
-		SourceRangesBefore: append([]TokenRange(nil), state.SourceRangesBefore...),
-		SourceRangesAfter:  append([]TokenRange(nil), state.SourceRangesAfter...),
+		SourceRangesBefore: append([]placement.TokenRange(nil), state.SourceRangesBefore...),
+		SourceRangesAfter:  append([]placement.TokenRange(nil), state.SourceRangesAfter...),
 		MovedRange:         state.MovedRange,
 		CopiedKeys:         state.CopiedKeys,
 		CopiedCatalogKeys:  state.CopiedCatalogKeys,
 		DeletedKeys:        state.DeletedKeys,
 		Phase:              string(state.Phase),
 		Verification:       state.Verification,
-		Placement:          placement.Clone(),
+		Placement:          cat.Clone(),
 	}
 }
 

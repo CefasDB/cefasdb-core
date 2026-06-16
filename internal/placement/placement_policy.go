@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import (
 	"fmt"
@@ -41,7 +41,7 @@ func selectPlacementVoters(cat PlacementCatalog, count int, required []string) (
 
 	candidates, ignored := placementCandidates(cat)
 	if len(candidates) < count {
-		return nil, nil, invalidPlan("placement policy found %d active nodes; need %d voters", len(candidates), count)
+		return nil, nil, InvalidPlan("placement policy found %d active nodes; need %d voters", len(candidates), count)
 	}
 
 	candidateByID := make(map[string]placementCandidate, len(candidates))
@@ -61,7 +61,7 @@ func selectPlacementVoters(cat PlacementCatalog, count int, required []string) (
 	for _, id := range required {
 		candidate, ok := candidateByID[id]
 		if !ok {
-			return nil, nil, invalidPlan("placement policy requires node %q, but it is not active", id)
+			return nil, nil, InvalidPlan("placement policy requires node %q, but it is not active", id)
 		}
 		addCandidate(candidate)
 	}

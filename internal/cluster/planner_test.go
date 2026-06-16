@@ -14,14 +14,16 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func plannerCatalog(shards int) cluster.PlacementCatalog {
-	cat := cluster.DefaultPlacement(
+func plannerCatalog(shards int) placement.PlacementCatalog {
+	cat := placement.DefaultPlacement(
 		shards,
 		"n1",
 		map[string]string{
@@ -34,17 +36,17 @@ func plannerCatalog(shards int) cluster.PlacementCatalog {
 			"n2": "http://127.0.0.1:8082",
 			"n3": "http://127.0.0.1:8083",
 		},
-		cluster.NodeCapacity{},
-		cluster.PlacementStrategyTokenRange,
+		placement.NodeCapacity{},
+		placement.PlacementStrategyTokenRange,
 	)
-	cat.Nodes["n4"] = cluster.NodeDescriptor{ID: "n4", RaftAddr: "127.0.0.1:9104", HTTPAddr: "http://127.0.0.1:8084", State: cluster.NodeStateActive}
+	cat.Nodes["n4"] = placement.NodeDescriptor{ID: "n4", RaftAddr: "127.0.0.1:9104", HTTPAddr: "http://127.0.0.1:8084", State: placement.NodeStateActive}
 	return cat
 }
 
 func TestPlanSplitCreatesSafeTransition(t *testing.T) {
 	cat := plannerCatalog(1)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
@@ -59,24 +61,24 @@ func TestPlanSplitCreatesSafeTransition(t *testing.T) {
 	if len(plan.After.Shards) != 2 {
 		t.Fatalf("after shard count = %d, want 2", len(plan.After.Shards))
 	}
-	if plan.After.Shards[0].State != cluster.ShardStateSplitting {
+	if plan.After.Shards[0].State != placement.ShardStateSplitting {
 		t.Fatalf("parent state = %s", plan.After.Shards[0].State)
 	}
-	if plan.After.Shards[1].State != cluster.ShardStateCreating {
+	if plan.After.Shards[1].State != placement.ShardStateCreating {
 		t.Fatalf("child state = %s", plan.After.Shards[1].State)
 	}
 	if len(plan.After.Shards[0].Ranges) != 1 || plan.After.Shards[0].Ranges[0] != cat.Shards[0].Ranges[0] {
 		t.Fatalf("parent range changed before activation: %+v", plan.After.Shards[0].Ranges)
 	}
-	if err := cluster.ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		t.Fatalf("planned placement invalid: %v", err)
 	}
 }
 
 func TestPlanMoveReplacesVoter(t *testing.T) {
 	cat := plannerCatalog(2)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationMove,
 		ShardID:    0,
 		SourceNode: "n1",
 		TargetNode: "n4",
@@ -89,7 +91,7 @@ func TestPlanMoveReplacesVoter(t *testing.T) {
 	if contains(got, "n1") || !contains(got, "n4") || len(got) != 3 {
 		t.Fatalf("voters = %v, want n1 replaced by n4", got)
 	}
-	if plan.After.Shards[0].State != cluster.ShardStateActive {
+	if plan.After.Shards[0].State != placement.ShardStateActive {
 		t.Fatalf("state = %s", plan.After.Shards[0].State)
 	}
 	if plan.RequiresDataCopy || plan.RequiresRestart || !plan.ApplySupported || len(plan.Steps) != 3 {
@@ -101,8 +103,8 @@ func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
 	cat := plannerCatalog(1)
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationRangeMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -116,22 +118,22 @@ func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
 	if len(plan.After.Shards) != 2 {
 		t.Fatalf("after shard count = %d, want 2", len(plan.After.Shards))
 	}
-	if plan.After.Shards[0].State != cluster.ShardStateMoving {
+	if plan.After.Shards[0].State != placement.ShardStateMoving {
 		t.Fatalf("source state = %s", plan.After.Shards[0].State)
 	}
-	if plan.After.Shards[1].State != cluster.ShardStateCreating {
+	if plan.After.Shards[1].State != placement.ShardStateCreating {
 		t.Fatalf("target state = %s", plan.After.Shards[1].State)
 	}
-	if len(plan.After.Shards[1].Ranges) != 1 || plan.After.Shards[1].Ranges[0] != (cluster.TokenRange{Start: start, End: end}) {
+	if len(plan.After.Shards[1].Ranges) != 1 || plan.After.Shards[1].Ranges[0] != (placement.TokenRange{Start: start, End: end}) {
 		t.Fatalf("target range = %+v", plan.After.Shards[1].Ranges)
 	}
 	if len(plan.Steps) != 6 || plan.Steps[0].Action != "create_shard" || plan.Steps[1].Action != "target_membership" || plan.Steps[2].Action != "copy_range" || plan.Steps[4].Action != "publish_cutover" {
 		t.Fatalf("unexpected range move steps: %+v", plan.Steps)
 	}
-	if err := cluster.ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		t.Fatalf("planned placement invalid: %v", err)
 	}
-	router, err := cluster.NewRouterFromCatalog(plan.After)
+	router, err := routing.NewRouterFromCatalog(plan.After)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,21 +150,21 @@ func TestPlanRangeMoveCreatesSafeTransition(t *testing.T) {
 func TestPlanSplitPolicyAvoidsDrainingAndSpreadsZones(t *testing.T) {
 	cat := plannerCatalog(1)
 	n1 := cat.Nodes["n1"]
-	n1.State = cluster.NodeStateDraining
-	n1.Capacity = cluster.NodeCapacity{Weight: 10, Zone: "az-draining"}
+	n1.State = placement.NodeStateDraining
+	n1.Capacity = placement.NodeCapacity{Weight: 10, Zone: "az-draining"}
 	cat.Nodes["n1"] = n1
 	n2 := cat.Nodes["n2"]
-	n2.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-a"}
+	n2.Capacity = placement.NodeCapacity{Weight: 1, Zone: "az-a"}
 	cat.Nodes["n2"] = n2
 	n3 := cat.Nodes["n3"]
-	n3.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-b"}
+	n3.Capacity = placement.NodeCapacity{Weight: 1, Zone: "az-b"}
 	cat.Nodes["n3"] = n3
 	n4 := cat.Nodes["n4"]
-	n4.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-c"}
+	n4.Capacity = placement.NodeCapacity{Weight: 1, Zone: "az-c"}
 	cat.Nodes["n4"] = n4
 
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
@@ -189,10 +191,10 @@ func TestPlanRangeMovePolicyPrefersCapacitySkew(t *testing.T) {
 	cat := plannerCatalog(1)
 	cat.Shards[0].Voters = []string{"n1"}
 	n1 := cat.Nodes["n1"]
-	n1.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-a"}
+	n1.Capacity = placement.NodeCapacity{Weight: 1, Zone: "az-a"}
 	cat.Nodes["n1"] = n1
 	n2 := cat.Nodes["n2"]
-	n2.Capacity = cluster.NodeCapacity{
+	n2.Capacity = placement.NodeCapacity{
 		Weight:      5,
 		CPU:         32,
 		MemoryBytes: 64 << 30,
@@ -202,13 +204,13 @@ func TestPlanRangeMovePolicyPrefersCapacitySkew(t *testing.T) {
 	}
 	cat.Nodes["n2"] = n2
 	n3 := cat.Nodes["n3"]
-	n3.Capacity = cluster.NodeCapacity{Weight: 1, Zone: "az-c"}
+	n3.Capacity = placement.NodeCapacity{Weight: 1, Zone: "az-c"}
 	cat.Nodes["n3"] = n3
 
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationRangeMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -229,19 +231,19 @@ func TestPlanSplitPolicyMissingCapacityIsDeterministic(t *testing.T) {
 	cat := plannerCatalog(1)
 	cat.Shards[0].Voters = []string{"n1", "n2"}
 	for id, node := range cat.Nodes {
-		node.Capacity = cluster.NodeCapacity{}
+		node.Capacity = placement.NodeCapacity{}
 		cat.Nodes[id] = node
 	}
 
-	plan1, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan1, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan2, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan2, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
@@ -264,20 +266,20 @@ func TestPlanSplitPolicyRejectsInsufficientActiveNodes(t *testing.T) {
 	cat := plannerCatalog(1)
 	cat.Shards[0].Voters = []string{"n1", "n2"}
 	n2 := cat.Nodes["n2"]
-	n2.State = cluster.NodeStateDraining
+	n2.State = placement.NodeStateDraining
 	cat.Nodes["n2"] = n2
 	n3 := cat.Nodes["n3"]
-	n3.State = cluster.NodeStateDecommissioned
+	n3.State = placement.NodeStateDecommissioned
 	cat.Nodes["n3"] = n3
 	n4 := cat.Nodes["n4"]
-	n4.State = cluster.NodeStateDecommissioned
+	n4.State = placement.NodeStateDecommissioned
 	cat.Nodes["n4"] = n4
 
-	_, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	_, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+	if !errors.Is(err, placement.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
 	if !strings.Contains(err.Error(), "placement policy found 1 active nodes; need 2 voters") {
@@ -287,8 +289,8 @@ func TestPlanSplitPolicyRejectsInsufficientActiveNodes(t *testing.T) {
 
 func TestPlanDrainUsesPlacementPolicyWithoutTargets(t *testing.T) {
 	cat := plannerCatalog(1)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationDrain,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationDrain,
 		NodeID:    "n1",
 	})
 	if err != nil {
@@ -311,8 +313,8 @@ func TestPlanDrainUsesPlacementPolicyWithoutTargets(t *testing.T) {
 
 func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 	cat := plannerCatalog(3)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:   cluster.PlacementOperationDrain,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:   placement.PlacementOperationDrain,
 		NodeID:      "n1",
 		TargetNodes: []string{"n4"},
 		MinVoters:   3,
@@ -320,7 +322,7 @@ func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.After.Nodes["n1"].State != cluster.NodeStateDraining {
+	if plan.After.Nodes["n1"].State != placement.NodeStateDraining {
 		t.Fatalf("node state = %s", plan.After.Nodes["n1"].State)
 	}
 	for _, sh := range plan.After.Shards {
@@ -330,7 +332,7 @@ func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 		if !contains(sh.Voters, "n4") {
 			t.Fatalf("shard %d missing replacement n4: %v", sh.ID, sh.Voters)
 		}
-		if sh.State != cluster.ShardStateActive {
+		if sh.State != placement.ShardStateActive {
 			t.Fatalf("shard %d state = %s", sh.ID, sh.State)
 		}
 	}
@@ -342,8 +344,8 @@ func TestPlanDrainRemovesNodeFromEveryShard(t *testing.T) {
 func TestPlanDrainClearsLeaderHintBlocker(t *testing.T) {
 	cat := plannerCatalog(1)
 	cat.Shards[0].LeaderHint = "n1"
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:   cluster.PlacementOperationDrain,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:   placement.PlacementOperationDrain,
 		NodeID:      "n1",
 		TargetNodes: []string{"n4"},
 		MinVoters:   3,
@@ -359,14 +361,14 @@ func TestPlanDrainClearsLeaderHintBlocker(t *testing.T) {
 func TestPlanDecommissionRejectsActiveReferences(t *testing.T) {
 	cat := plannerCatalog(1)
 	n1 := cat.Nodes["n1"]
-	n1.State = cluster.NodeStateDraining
+	n1.State = placement.NodeStateDraining
 	cat.Nodes["n1"] = n1
 
-	_, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationDecommission,
+	_, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationDecommission,
 		NodeID:    "n1",
 	})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+	if !errors.Is(err, placement.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
 	if !strings.Contains(err.Error(), "still has active placement references") || !strings.Contains(err.Error(), "shard 0 voter") {
@@ -376,8 +378,8 @@ func TestPlanDecommissionRejectsActiveReferences(t *testing.T) {
 
 func TestPlanDecommissionAfterDrainMarksNode(t *testing.T) {
 	cat := plannerCatalog(2)
-	drain, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:   cluster.PlacementOperationDrain,
+	drain, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:   placement.PlacementOperationDrain,
 		NodeID:      "n1",
 		TargetNodes: []string{"n4"},
 		MinVoters:   3,
@@ -385,14 +387,14 @@ func TestPlanDecommissionAfterDrainMarksNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := cluster.BuildPlacementPlan(drain.After, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationDecommission,
+	plan, err := placement.BuildPlacementPlan(drain.After, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationDecommission,
 		NodeID:    "n1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.After.Nodes["n1"].State != cluster.NodeStateDecommissioned {
+	if plan.After.Nodes["n1"].State != placement.NodeStateDecommissioned {
 		t.Fatalf("node state = %s", plan.After.Nodes["n1"].State)
 	}
 	if len(plan.Steps) != 4 || plan.Steps[0].Action != "verify_no_active_references" || plan.Steps[3].Action != "decommission_node" {
@@ -410,10 +412,10 @@ func TestApplyPlacementDecommissionsDrainedNode(t *testing.T) {
 	root := t.TempDir()
 	cat := plannerCatalog(1)
 	n1 := cat.Nodes["n1"]
-	n1.State = cluster.NodeStateDraining
+	n1.State = placement.NodeStateDraining
 	cat.Nodes["n1"] = n1
 	cat.Shards[0].Voters = []string{"n2", "n3", "n4"}
-	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -427,21 +429,21 @@ func TestApplyPlacementDecommissionsDrainedNode(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationDecommission,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationDecommission,
 		NodeID:    "n1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	result, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Placement.Nodes["n1"].State != cluster.NodeStateDecommissioned || mgr.Placement().Nodes["n1"].State != cluster.NodeStateDecommissioned {
+	if result.Placement.Nodes["n1"].State != placement.NodeStateDecommissioned || mgr.Placement().Nodes["n1"].State != placement.NodeStateDecommissioned {
 		t.Fatalf("node not decommissioned: result=%s manager=%s", result.Placement.Nodes["n1"].State, mgr.Placement().Nodes["n1"].State)
 	}
 	if len(result.Steps) != 4 || result.Steps[1].Action != "cleanup_unowned_data" || result.Steps[1].Status != "ok" {
@@ -452,13 +454,13 @@ func TestApplyPlacementDecommissionsDrainedNode(t *testing.T) {
 func TestDecommissionedNodeExcludedFromFuturePlacement(t *testing.T) {
 	cat := plannerCatalog(1)
 	n1 := cat.Nodes["n1"]
-	n1.State = cluster.NodeStateDecommissioned
-	n1.Capacity = cluster.NodeCapacity{Weight: 100, Zone: "az-a"}
+	n1.State = placement.NodeStateDecommissioned
+	n1.Capacity = placement.NodeCapacity{Weight: 100, Zone: "az-a"}
 	cat.Nodes["n1"] = n1
 	cat.Shards[0].Voters = []string{"n2", "n3", "n4"}
 
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 		MinVoters: 3,
 	})
@@ -474,12 +476,12 @@ func TestDecommissionedNodeExcludedFromFuturePlacement(t *testing.T) {
 }
 
 func TestPlanSplitRejectsLegacyModuloPlacement(t *testing.T) {
-	cat := cluster.DefaultPlacement(2, "n1", map[string]string{"n1": "127.0.0.1:9101"}, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyLegacyModulo)
-	_, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	cat := placement.DefaultPlacement(2, "n1", map[string]string{"n1": "127.0.0.1:9101"}, nil, placement.NodeCapacity{}, placement.PlacementStrategyLegacyModulo)
+	_, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+	if !errors.Is(err, placement.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
 }
@@ -496,8 +498,8 @@ func TestApplyPlacementPublishesNoopMove(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation:    cluster.PlacementOperationMove,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation:    placement.PlacementOperationMove,
 		ShardID:      0,
 		TargetVoters: []string{"n1"},
 		MinVoters:    1,
@@ -508,7 +510,7 @@ func TestApplyPlacementPublishesNoopMove(t *testing.T) {
 	if len(plan.Steps) != 0 {
 		t.Fatalf("expected no membership steps, got %+v", plan.Steps)
 	}
-	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	result, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	})
@@ -533,14 +535,14 @@ func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	result, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	})
@@ -554,7 +556,7 @@ func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
 		t.Fatalf("open shards = %d, want 2", len(mgr.Shards()))
 	}
 	child, ok := mgr.Shard(1)
-	if !ok || child.State != cluster.ShardStateCreating {
+	if !ok || child.State != placement.ShardStateCreating {
 		t.Fatalf("child shard not creating: %#v", child)
 	}
 	if _, err := os.Stat(filepath.Join(root, "shards", "1", "state")); err != nil {
@@ -569,7 +571,7 @@ func TestApplyPlacementPreparesSplitOnline(t *testing.T) {
 		t.Fatalf("transition route = %d, want parent shard 0", got)
 	}
 
-	retry, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	retry, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	})
@@ -596,8 +598,8 @@ func TestApplyPlacementPreparesRangeMoveOnline(t *testing.T) {
 
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationRangeMove,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -605,7 +607,7 @@ func TestApplyPlacementPreparesRangeMoveOnline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	result, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	})
@@ -619,7 +621,7 @@ func TestApplyPlacementPreparesRangeMoveOnline(t *testing.T) {
 		t.Fatalf("open shards = %d, want 2", len(mgr.Shards()))
 	}
 	target, ok := mgr.Shard(1)
-	if !ok || target.State != cluster.ShardStateCreating {
+	if !ok || target.State != placement.ShardStateCreating {
 		t.Fatalf("target shard not creating: %#v", target)
 	}
 	if len(result.Steps) != 6 || result.Steps[0].Status != "ok" || result.Steps[1].Status != "ok" || result.Steps[2].Status != "pending_finalize" {
@@ -662,21 +664,21 @@ func TestApplyPlacementPreparesSplitWithRaft(t *testing.T) {
 	defer mgr.Close()
 	waitShardLeader(t, mgr, 0)
 
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{
+	if _, err := mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	child, ok := mgr.Shard(1)
-	if !ok || child.Raft == nil || child.RaftStorage == nil || child.State != cluster.ShardStateCreating {
+	if !ok || child.Raft == nil || child.RaftStorage == nil || child.State != placement.ShardStateCreating {
 		t.Fatalf("child raft shard not open: %#v", child)
 	}
 	waitShardLeader(t, mgr, 1)
@@ -701,8 +703,8 @@ func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mgr.Close()
-	plan, err := mgr.PlanPlacement(cluster.PlacementPlanRequest{
-		Operation:    cluster.PlacementOperationMove,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation:    placement.PlacementOperationMove,
 		ShardID:      0,
 		TargetVoters: []string{"n1"},
 		MinVoters:    1,
@@ -711,8 +713,8 @@ func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan.Before.UpdatedAtUnix++
-	_, err = mgr.ApplyPlacement(context.Background(), cluster.PlacementApplyRequest{Plan: plan})
-	if !errors.Is(err, cluster.ErrInvalidPlacementPlan) {
+	_, err = mgr.ApplyPlacement(context.Background(), placement.PlacementApplyRequest{Plan: plan})
+	if !errors.Is(err, placement.ErrInvalidPlacementPlan) {
 		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
 	}
 }
@@ -754,7 +756,7 @@ func TestFinalizeSplitCopiesRangeAndActivatesChild(t *testing.T) {
 	if result.CopiedKeys != 1 || result.DeletedKeys != 1 || result.CopiedCatalogKeys != 1 {
 		t.Fatalf("unexpected copy/delete counts: %+v", result)
 	}
-	if result.Placement.Shards[0].State != cluster.ShardStateActive || result.Placement.Shards[1].State != cluster.ShardStateActive {
+	if result.Placement.Shards[0].State != placement.ShardStateActive || result.Placement.Shards[1].State != placement.ShardStateActive {
 		t.Fatalf("unexpected shard states: %+v", result.Placement.Shards)
 	}
 	routed, err := mgr.Router().ShardForPK([]byte(key))
@@ -941,7 +943,7 @@ func TestFinalizeRangeMoveCopiesRangeAndActivatesTarget(t *testing.T) {
 	}
 
 	moveRange := plan.After.Shards[1].Ranges[0]
-	stayRange := cluster.TokenRange{Start: moveRange.End, End: 0}
+	stayRange := placement.TokenRange{Start: moveRange.End, End: 0}
 	movedKey := keyInRange(t, moveRange)
 	stayKey := keyInRange(t, stayRange)
 	if err := source.Storage.PutItem(td.Name, td.KeySchema, types.Item{
@@ -968,7 +970,7 @@ func TestFinalizeRangeMoveCopiesRangeAndActivatesTarget(t *testing.T) {
 	if result.CopiedKeys != 1 || result.DeletedKeys != 1 || result.CopiedCatalogKeys != 1 {
 		t.Fatalf("unexpected copy/delete counts: %+v", result)
 	}
-	if result.Placement.Shards[0].State != cluster.ShardStateActive || result.Placement.Shards[1].State != cluster.ShardStateActive {
+	if result.Placement.Shards[0].State != placement.ShardStateActive || result.Placement.Shards[1].State != placement.ShardStateActive {
 		t.Fatalf("unexpected shard states: %+v", result.Placement.Shards)
 	}
 	if len(result.SourceRangesAfter) != 1 || result.SourceRangesAfter[0] != stayRange {
@@ -1007,18 +1009,18 @@ func TestFinalizeRangeMoveCopiesRangeAndActivatesTarget(t *testing.T) {
 	}
 }
 
-func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
+func openTransitionSplitManager(t *testing.T) (*cluster.Manager, placement.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
-	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation: cluster.PlacementOperationSplit,
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -1033,14 +1035,14 @@ func openTransitionSplitManager(t *testing.T) (*cluster.Manager, cluster.Placeme
 	return mgr, plan
 }
 
-func openTransitionRangeMoveManager(t *testing.T) (*cluster.Manager, cluster.PlacementPlan) {
+func openTransitionRangeMoveManager(t *testing.T) (*cluster.Manager, placement.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
-	cat := cluster.DefaultPlacement(1, "n1", nil, nil, cluster.NodeCapacity{}, cluster.PlacementStrategyTokenRange)
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := cluster.BuildPlacementPlan(cat, cluster.PlacementPlanRequest{
-		Operation:  cluster.PlacementOperationRangeMove,
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -1048,7 +1050,7 @@ func openTransitionRangeMoveManager(t *testing.T) (*cluster.Manager, cluster.Pla
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cluster.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := cluster.Open(context.Background(), cluster.Config{
@@ -1063,15 +1065,15 @@ func openTransitionRangeMoveManager(t *testing.T) (*cluster.Manager, cluster.Pla
 	return mgr, plan
 }
 
-func keyInRange(t *testing.T, rng cluster.TokenRange) string {
+func keyInRange(t *testing.T, rng placement.TokenRange) string {
 	t.Helper()
 	keys := keysInRange(t, rng, 1)
 	return keys[0]
 }
 
-func keysInRange(t *testing.T, rng cluster.TokenRange, n int) []string {
+func keysInRange(t *testing.T, rng placement.TokenRange, n int) []string {
 	t.Helper()
-	router := cluster.NewRouter(1)
+	router := routing.NewRouter(1)
 	keys := make([]string, 0, n)
 	for i := 0; i < 100_000; i++ {
 		key := fmt.Sprintf("split-key-%d", i)

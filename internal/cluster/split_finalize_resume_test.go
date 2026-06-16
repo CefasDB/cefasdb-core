@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
+	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -32,8 +34,8 @@ func TestFinalizeSplitVerificationFailsOnMismatch(t *testing.T) {
 		ChildShardID:  1,
 		ExpectedEpoch: plan.AfterEpoch,
 	})
-	if !errors.Is(err, ErrInvalidPlacementPlan) {
-		t.Fatalf("error = %v, want ErrInvalidPlacementPlan", err)
+	if !errors.Is(err, placement.ErrInvalidPlacementPlan) {
+		t.Fatalf("error = %v, want placement.ErrInvalidPlacementPlan", err)
 	}
 	state, ok, err := mgr.SplitFinalizeState(0, 1)
 	if err != nil || !ok {
@@ -115,8 +117,8 @@ func TestFinalizeSplitRetriesCleanupAfterPublishFailure(t *testing.T) {
 		ParentShardID: 0,
 		ChildShardID:  1,
 		ExpectedEpoch: plan.AfterEpoch,
-	}); !errors.Is(err, ErrInvalidPlacementPlan) {
-		t.Fatalf("rollback after publish error = %v, want ErrInvalidPlacementPlan", err)
+	}); !errors.Is(err, placement.ErrInvalidPlacementPlan) {
+		t.Fatalf("rollback after publish error = %v, want placement.ErrInvalidPlacementPlan", err)
 	}
 	splitFinalizeTestHook = nil
 	result, err := mgr.FinalizeSplit(context.Background(), SplitFinalizeRequest{
@@ -161,9 +163,9 @@ func TestRollbackSplitBeforePublishRestoresRoutingAndData(t *testing.T) {
 	if result.Phase != string(SplitFinalizePhaseRolledBack) {
 		t.Fatalf("phase = %q, want rolled_back", result.Phase)
 	}
-	placement := mgr.Placement()
-	if placement.Shards[0].State != ShardStateActive || placement.Shards[1].State != ShardStateDecommissioned {
-		t.Fatalf("unexpected placement after rollback: %+v", placement.Shards)
+	cat := mgr.Placement()
+	if cat.Shards[0].State != placement.ShardStateActive || cat.Shards[1].State != placement.ShardStateDecommissioned {
+		t.Fatalf("unexpected placement after rollback: %+v", cat.Shards)
 	}
 	got, err := mgr.Router().ShardForPK([]byte(key))
 	if err != nil {
@@ -183,18 +185,18 @@ func TestRollbackSplitBeforePublishRestoresRoutingAndData(t *testing.T) {
 	}
 }
 
-func openTransitionSplitManagerForResume(t *testing.T) (*Manager, PlacementPlan) {
+func openTransitionSplitManagerForResume(t *testing.T) (*Manager, placement.PlacementPlan) {
 	t.Helper()
 	root := t.TempDir()
-	cat := DefaultPlacement(1, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
-	plan, err := BuildPlacementPlan(cat, PlacementPlanRequest{
-		Operation: PlacementOperationSplit,
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	plan, err := placement.BuildPlacementPlan(cat, placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), plan.After); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := Open(context.Background(), Config{
@@ -209,7 +211,7 @@ func openTransitionSplitManagerForResume(t *testing.T) (*Manager, PlacementPlan)
 	return mgr, plan
 }
 
-func seedSplitRow(t *testing.T, mgr *Manager, plan PlacementPlan, value string) (*Shard, *Shard, types.TableDescriptor, string) {
+func seedSplitRow(t *testing.T, mgr *Manager, plan placement.PlacementPlan, value string) (*Shard, *Shard, types.TableDescriptor, string) {
 	t.Helper()
 	parent, ok := mgr.Shard(0)
 	if !ok {
@@ -234,9 +236,9 @@ func seedSplitRow(t *testing.T, mgr *Manager, plan PlacementPlan, value string) 
 	return parent, child, td, key
 }
 
-func keyInRangeForResume(t *testing.T, rng TokenRange) string {
+func keyInRangeForResume(t *testing.T, rng placement.TokenRange) string {
 	t.Helper()
-	router := NewRouter(1)
+	router := routing.NewRouter(1)
 	for i := 0; i < 100_000; i++ {
 		key := fmt.Sprintf("resume-key-%d", i)
 		if rng.Contains(router.TokenForPK([]byte(key))) {
