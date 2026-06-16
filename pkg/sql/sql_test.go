@@ -1,6 +1,7 @@
 package sql_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,6 +61,43 @@ func TestParserSelectAllowScan(t *testing.T) {
 	}
 	if !sel.AllowScan || sel.Table != "t" || sel.Limit != 10 {
 		t.Fatalf("unexpected select: %+v", sel)
+	}
+}
+
+func TestParserSelectGroupByCount(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T, want *SelectStmt", stmt)
+	}
+	if len(sel.Columns) != 1 || sel.Columns[0] != "status" {
+		t.Fatalf("unexpected columns: %+v", sel.Columns)
+	}
+	if len(sel.GroupBy) != 1 || sel.GroupBy[0] != "status" {
+		t.Fatalf("unexpected group by: %+v", sel.GroupBy)
+	}
+	if len(sel.Aggs) != 1 || sel.Aggs[0].Func != "COUNT" || sel.Aggs[0].Column != "*" || sel.Aggs[0].OutputName != "count" {
+		t.Fatalf("unexpected aggregates: %+v", sel.Aggs)
+	}
+}
+
+func TestParserSelectInnerJoin(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T, want *SelectStmt", stmt)
+	}
+	if sel.Table != "users" || sel.TableAlias != "u" || len(sel.Columns) != 2 || sel.Columns[0] != "u.id" || sel.Columns[1] != "o.order_id" {
+		t.Fatalf("unexpected select shape: %+v", sel)
+	}
+	if sel.Join == nil || sel.Join.RightTable != "orders" || sel.Join.RightAlias != "o" || sel.Join.LeftRef.Name != "u.id" || sel.Join.RightRef.Name != "o.user_id" || sel.Join.Op != cefassql.BinEq {
+		t.Fatalf("unexpected join: %+v", sel.Join)
 	}
 }
 
@@ -299,6 +337,301 @@ func stringSet(rows []types.Item, col string) map[string]bool {
 	for _, row := range rows {
 		if av, ok := row[col]; ok && av.T == types.AttrS {
 			out[av.S] = true
+		}
+	}
+	return out
+}
+
+func TestAllowScanScalarOrderBy(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('a', 'bravo', 10)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('b', 'alpha', 30)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name, score) VALUES ('c', 'charlie', 20)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, name) VALUES ('d', 'delta')")
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY score DESC LIMIT 2")
+	assertColumnOrder(t, res.Rows, "id", []string{"b", "c"})
+	for _, row := range res.Rows {
+		if _, ok := row["score"]; ok {
+			t.Fatalf("projection leaked order column: %+v", row)
+		}
+	}
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY name ASC LIMIT 4")
+	assertColumnOrder(t, res.Rows, "id", []string{"b", "a", "c", "d"})
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY score ASC LIMIT 4")
+	assertColumnOrder(t, res.Rows, "id", []string{"a", "c", "b", "d"})
+}
+
+func TestScalarOrderByKeyQuerySortsBeforeLimit(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE events (PRIMARY KEY (user_id, ts))")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '001', 10)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '002', 30)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '003', 20)")
+	mustExec(t, ex, cat, "INSERT INTO events (user_id, ts, score) VALUES ('alice', '004', 40)")
+
+	res := mustExec(t, ex, cat, "SELECT ts FROM events WHERE user_id = 'alice' ORDER BY score DESC LIMIT 2")
+	assertColumnOrder(t, res.Rows, "ts", []string{"004", "002"})
+}
+
+func TestScalarOrderByMixedTypesIsDeterministic(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, rank) VALUES ('string', '5')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, rank) VALUES ('number', 5)")
+	mustExec(t, ex, cat, "INSERT INTO t (id) VALUES ('missing')")
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY rank ASC LIMIT 3")
+	assertColumnOrder(t, res.Rows, "id", []string{"string", "number", "missing"})
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN ORDER BY rank DESC LIMIT 3")
+	assertColumnOrder(t, res.Rows, "id", []string{"number", "string", "missing"})
+}
+
+func assertColumnOrder(t *testing.T, rows []types.Item, col string, want []string) {
+	t.Helper()
+	if len(rows) != len(want) {
+		t.Fatalf("len(%s) = %d, want %d: %+v", col, len(rows), len(want), rows)
+	}
+	for i, row := range rows {
+		av, ok := row[col]
+		if !ok || av.T != types.AttrS {
+			t.Fatalf("row %d missing string %q: %+v", i, col, row)
+		}
+		if av.S != want[i] {
+			t.Fatalf("%s order = %v, want %v", col, columnStrings(rows, col), want)
+		}
+	}
+}
+
+func columnStrings(rows []types.Item, col string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if av, ok := row[col]; ok && av.T == types.AttrS {
+			out = append(out, av.S)
+		}
+	}
+	return out
+}
+
+func TestAllowScanGroupByCount(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('a', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('b', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('c', 'inactive')")
+	mustExec(t, ex, cat, "INSERT INTO t (id) VALUES ('d')")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 3 {
+		t.Fatalf("group count rows = %d, want 3: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupCount(t, res.Rows, "status", "active", "count", 2)
+	assertGroupCount(t, res.Rows, "status", "inactive", "count", 1)
+	assertGroupCount(t, res.Rows, "status", "<null>", "count", 1)
+}
+
+func TestAllowScanGroupByCountColumn(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, email) VALUES ('a', 'active', 'a@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('b', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, email) VALUES ('c', 'inactive', 'c@example.test')")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(email) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 2 {
+		t.Fatalf("group count rows = %d, want 2: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupCount(t, res.Rows, "status", "active", "count_email", 1)
+	assertGroupCount(t, res.Rows, "status", "inactive", "count_email", 1)
+}
+
+func TestAllowScanGroupByMultipleColumns(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('a', 'active', 'sp')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('b', 'active', 'sp')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('c', 'active', 'rj')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('d', 'inactive', 'rj')")
+
+	res := mustExec(t, ex, cat, "SELECT status, region, COUNT(*) FROM t ALLOW SCAN GROUP BY status, region")
+	if len(res.Rows) != 3 {
+		t.Fatalf("group count rows = %d, want 3: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupPairCount(t, res.Rows, "active", "sp", 2)
+	assertGroupPairCount(t, res.Rows, "active", "rj", 1)
+	assertGroupPairCount(t, res.Rows, "inactive", "rj", 1)
+}
+
+func TestAllowScanGroupByEmptyInput(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 0 {
+		t.Fatalf("empty group by returned rows: %+v", res.Rows)
+	}
+}
+
+func TestAggregateWithoutGroupByRejectsCountColumn(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "t", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT COUNT(email) FROM t ALLOW SCAN", cat)
+	if err == nil || !strings.Contains(err.Error(), "COUNT(*)") {
+		t.Fatalf("expected COUNT(col) rejection, got %v", err)
+	}
+}
+
+func assertGroupCount(t *testing.T, rows []types.Item, groupCol, groupValue, countCol string, want int) {
+	t.Helper()
+	for _, row := range rows {
+		if groupValueMatches(row[groupCol], groupValue) {
+			assertCountValue(t, row, countCol, want)
+			return
+		}
+	}
+	t.Fatalf("group %s=%s not found in %+v", groupCol, groupValue, rows)
+}
+
+func assertGroupPairCount(t *testing.T, rows []types.Item, status, region string, want int) {
+	t.Helper()
+	for _, row := range rows {
+		if groupValueMatches(row["status"], status) && groupValueMatches(row["region"], region) {
+			assertCountValue(t, row, "count", want)
+			return
+		}
+	}
+	t.Fatalf("group status=%s region=%s not found in %+v", status, region, rows)
+}
+
+func groupValueMatches(av types.AttributeValue, want string) bool {
+	if want == "<null>" {
+		return av.T == types.AttrNull
+	}
+	return av.T == types.AttrS && av.S == want
+}
+
+func assertCountValue(t *testing.T, row types.Item, col string, want int) {
+	t.Helper()
+	av, ok := row[col]
+	if !ok || av.T != types.AttrN {
+		t.Fatalf("missing numeric %q in %+v", col, row)
+	}
+	if av.N != strconv.Itoa(want) {
+		t.Fatalf("%s = %s, want %d in %+v", col, av.N, want, row)
+	}
+}
+
+func TestInnerJoinOneToOne(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	createJoinTables(t, ex, cat)
+	mustExec(t, ex, cat, "INSERT INTO users (id, email) VALUES ('u1', 'a@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO users (id, email) VALUES ('u2', 'b@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, user_id, status) VALUES ('o1', 'u1', 'paid')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if len(res.Rows) != 1 {
+		t.Fatalf("join rows = %d, want 1: %+v", len(res.Rows), res.Rows)
+	}
+	if got := res.Rows[0]["u.id"].S + "/" + res.Rows[0]["o.order_id"].S; got != "u1/o1" {
+		t.Fatalf("unexpected join row %s: %+v", got, res.Rows[0])
+	}
+}
+
+func TestInnerJoinNoMatches(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	createJoinTables(t, ex, cat)
+	mustExec(t, ex, cat, "INSERT INTO users (id) VALUES ('u1')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, user_id) VALUES ('o1', 'missing')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if len(res.Rows) != 0 {
+		t.Fatalf("join should have no matches: %+v", res.Rows)
+	}
+}
+
+func TestInnerJoinOneToManyAndDuplicatedKeys(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE users (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "CREATE TABLE orders (PRIMARY KEY (order_id))")
+	mustExec(t, ex, cat, "INSERT INTO users (id, account_key) VALUES ('u1', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO users (id, account_key) VALUES ('u2', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, account_key) VALUES ('o1', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, account_key) VALUES ('o2', 'acct')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.account_key = o.account_key ALLOW SCAN LIMIT 10")
+	got := joinPairSet(res.Rows, "u.id", "o.order_id")
+	want := map[string]bool{"u1/o1": true, "u1/o2": true, "u2/o1": true, "u2/o2": true}
+	if len(got) != len(want) {
+		t.Fatalf("join pair count = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for pair := range want {
+		if !got[pair] {
+			t.Fatalf("missing join pair %s in %+v", pair, got)
+		}
+	}
+}
+
+func TestInnerJoinRequiresQualifiedProjection(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous JOIN column") {
+		t.Fatalf("expected ambiguous projection error, got %v", err)
+	}
+}
+
+func TestInnerJoinRequiresAllowScan(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT u.id FROM users u INNER JOIN orders o ON u.id = o.user_id LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "ALLOW SCAN") {
+		t.Fatalf("expected ALLOW SCAN error, got %v", err)
+	}
+}
+
+func TestInnerJoinRejectsNonEquality(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT u.id FROM users u INNER JOIN orders o ON u.id > o.user_id ALLOW SCAN LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "only equality") {
+		t.Fatalf("expected non-equality rejection, got %v", err)
+	}
+}
+
+func createJoinTables(t *testing.T, ex *cefassql.Executor, cat *catalog.Catalog) {
+	t.Helper()
+	mustExec(t, ex, cat, "CREATE TABLE users (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "CREATE TABLE orders (PRIMARY KEY (order_id))")
+}
+
+func joinPairSet(rows []types.Item, leftCol, rightCol string) map[string]bool {
+	out := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		left, leftOK := row[leftCol]
+		right, rightOK := row[rightCol]
+		if leftOK && rightOK && left.T == types.AttrS && right.T == types.AttrS {
+			out[left.S+"/"+right.S] = true
 		}
 	}
 	return out

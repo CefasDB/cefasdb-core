@@ -138,6 +138,15 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSelectAggregates(s); err != nil {
+		return nil, err
+	}
+	if len(s.GroupBy) > 0 && s.OrderBy != "" {
+		return nil, fmt.Errorf("GROUP BY with ORDER BY is not supported yet")
+	}
+	if s.Join != nil {
+		return planJoin(s, cat, td)
+	}
 	if s.OrderANN {
 		if s.Limit <= 0 {
 			return nil, fmt.Errorf("ANN ORDER BY requires LIMIT")
@@ -179,10 +188,7 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		if s.IndexName != "" {
 			return nil, fmt.Errorf("ALLOW SCAN cannot be combined with USE INDEX")
 		}
-		if s.OrderBy != "" {
-			return nil, fmt.Errorf("scalar ORDER BY with ALLOW SCAN is not supported yet")
-		}
-		if !s.Count && s.Limit <= 0 {
+		if !s.Count && len(s.GroupBy) == 0 && s.Limit <= 0 {
 			return nil, fmt.Errorf("ALLOW SCAN requires LIMIT for row-returning SELECT")
 		}
 		return &PlanScan{
@@ -190,6 +196,10 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 			Limit:      s.Limit,
 			Project:    s.Columns,
 			Predicate:  s.Where,
+			OrderBy:    s.OrderBy,
+			OrderDesc:  s.OrderDesc,
+			GroupBy:    s.GroupBy,
+			Aggs:       s.Aggs,
 			Descriptor: td,
 			Count:      s.Count,
 		}, nil
@@ -246,11 +256,183 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		SKHigh:     skHigh,
 		Limit:      limit,
 		Project:    s.Columns,
+		OrderBy:    s.OrderBy,
+		GroupBy:    s.GroupBy,
+		Aggs:       s.Aggs,
 		OrderDesc:  s.OrderDesc,
 		Descriptor: td,
 		PostFilter: postFilter,
 		Count:      s.Count,
 	}, nil
+}
+
+func validateSelectAggregates(s *SelectStmt) error {
+	if len(s.Aggs) == 0 {
+		if len(s.GroupBy) > 0 {
+			return fmt.Errorf("GROUP BY requires an aggregate")
+		}
+		return nil
+	}
+	for _, agg := range s.Aggs {
+		if !strings.EqualFold(agg.Func, "COUNT") {
+			return fmt.Errorf("unsupported aggregate %q", agg.Func)
+		}
+	}
+	if len(s.GroupBy) == 0 {
+		if s.Count {
+			return nil
+		}
+		return fmt.Errorf("aggregate SELECT without GROUP BY only supports COUNT(*)")
+	}
+	groupCols := make(map[string]struct{}, len(s.GroupBy))
+	for _, col := range s.GroupBy {
+		groupCols[col] = struct{}{}
+	}
+	for _, col := range s.Columns {
+		if _, ok := groupCols[col]; !ok {
+			return fmt.Errorf("SELECT column %q must appear in GROUP BY", col)
+		}
+	}
+	return nil
+}
+
+func planJoin(s *SelectStmt, cat Catalog, leftTD types.TableDescriptor) (*PlanJoin, error) {
+	if !s.AllowScan {
+		return nil, fmt.Errorf("INNER JOIN requires ALLOW SCAN")
+	}
+	if s.IndexName != "" {
+		return nil, fmt.Errorf("INNER JOIN cannot be combined with USE INDEX")
+	}
+	if s.Count {
+		return nil, fmt.Errorf("COUNT over INNER JOIN is not supported yet")
+	}
+	if len(s.GroupBy) > 0 || len(s.Aggs) > 0 {
+		return nil, fmt.Errorf("GROUP BY over INNER JOIN is not supported yet")
+	}
+	if s.OrderBy != "" || s.OrderANN {
+		return nil, fmt.Errorf("ORDER BY over INNER JOIN is not supported yet")
+	}
+	if s.Diversify != nil {
+		return nil, fmt.Errorf("DIVERSIFY over INNER JOIN is not supported yet")
+	}
+	if s.Join.Op != BinEq {
+		return nil, fmt.Errorf("only equality INNER JOIN is supported")
+	}
+
+	rightTD, err := cat.Describe(s.Join.RightTable)
+	if err != nil {
+		return nil, err
+	}
+	leftAlias := s.TableAlias
+	if leftAlias == "" {
+		leftAlias = s.Table
+	}
+	rightAlias := s.Join.RightAlias
+	if rightAlias == "" {
+		rightAlias = s.Join.RightTable
+	}
+	if leftAlias == rightAlias {
+		return nil, fmt.Errorf("INNER JOIN aliases must be distinct")
+	}
+
+	leftCol, rightCol, err := resolveJoinColumns(s.Join.LeftRef.Name, s.Join.RightRef.Name, leftAlias, rightAlias)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateJoinProjection(s.Columns, leftAlias, rightAlias); err != nil {
+		return nil, err
+	}
+	if err := validateJoinPredicate(s.Where, leftAlias, rightAlias); err != nil {
+		return nil, err
+	}
+
+	return &PlanJoin{
+		LeftTable:       s.Table,
+		LeftAlias:       leftAlias,
+		RightTable:      s.Join.RightTable,
+		RightAlias:      rightAlias,
+		LeftColumn:      leftCol,
+		RightColumn:     rightCol,
+		Project:         s.Columns,
+		Predicate:       s.Where,
+		Limit:           s.Limit,
+		LeftDescriptor:  leftTD,
+		RightDescriptor: rightTD,
+	}, nil
+}
+
+func resolveJoinColumns(a, b, leftAlias, rightAlias string) (string, string, error) {
+	aq, ac, okA := splitQualifiedName(a)
+	bq, bc, okB := splitQualifiedName(b)
+	if !okA || !okB {
+		return "", "", fmt.Errorf("INNER JOIN ON columns must be qualified")
+	}
+	switch {
+	case aq == leftAlias && bq == rightAlias:
+		return ac, bc, nil
+	case aq == rightAlias && bq == leftAlias:
+		return bc, ac, nil
+	default:
+		return "", "", fmt.Errorf("INNER JOIN ON must reference %q and %q", leftAlias, rightAlias)
+	}
+}
+
+func validateJoinProjection(cols []string, leftAlias, rightAlias string) error {
+	for _, col := range cols {
+		q, _, ok := splitQualifiedName(col)
+		if !ok {
+			return fmt.Errorf("ambiguous JOIN column %q; qualify as %s.%s or %s.%s", col, leftAlias, col, rightAlias, col)
+		}
+		if q != leftAlias && q != rightAlias {
+			return fmt.Errorf("unknown JOIN qualifier %q", q)
+		}
+	}
+	return nil
+}
+
+func validateJoinPredicate(e Expr, leftAlias, rightAlias string) error {
+	switch n := e.(type) {
+	case nil:
+		return nil
+	case *ColumnRef:
+		q, _, ok := splitQualifiedName(n.Name)
+		if !ok {
+			return fmt.Errorf("ambiguous JOIN predicate column %q; qualify it", n.Name)
+		}
+		if q != leftAlias && q != rightAlias {
+			return fmt.Errorf("unknown JOIN qualifier %q", q)
+		}
+	case *BinaryExpr:
+		if err := validateJoinPredicate(n.Left, leftAlias, rightAlias); err != nil {
+			return err
+		}
+		return validateJoinPredicate(n.Right, leftAlias, rightAlias)
+	case *NotExpr:
+		return validateJoinPredicate(n.Inner, leftAlias, rightAlias)
+	case *BetweenExpr:
+		if err := validateJoinPredicate(n.Value, leftAlias, rightAlias); err != nil {
+			return err
+		}
+		if err := validateJoinPredicate(n.Lo, leftAlias, rightAlias); err != nil {
+			return err
+		}
+		return validateJoinPredicate(n.Hi, leftAlias, rightAlias)
+	case *FuncCall:
+		for _, arg := range n.Args {
+			if err := validateJoinPredicate(arg, leftAlias, rightAlias); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func splitQualifiedName(name string) (string, string, bool) {
+	parts := strings.Split(name, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // chooseANNFilterPlan inspects the WHERE clause of an ANN query and

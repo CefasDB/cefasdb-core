@@ -40,6 +40,14 @@ func (p *parser) peek() Token {
 	return p.toks[p.pos]
 }
 
+func (p *parser) peekN(n int) Token {
+	pos := p.pos + n
+	if pos >= len(p.toks) {
+		return Token{Kind: tEOF}
+	}
+	return p.toks[pos]
+}
+
 func (p *parser) consume() Token {
 	t := p.peek()
 	p.pos++
@@ -93,28 +101,22 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 	switch p.peek().Kind {
 	case tStar:
 		p.consume()
-	case tCount:
-		p.consume()
-		if _, err := p.expect(tLParen, "("); err != nil {
-			return nil, err
-		}
-		switch p.peek().Kind {
-		case tStar, tIdent:
-			p.consume()
-		default:
-			return nil, fmt.Errorf("expected * or column inside COUNT()")
-		}
-		if _, err := p.expect(tRParen, ")"); err != nil {
-			return nil, err
-		}
-		stmt.Count = true
 	default:
 		for {
-			id, err := p.expect(tIdent, "column name")
-			if err != nil {
-				return nil, err
+			switch p.peek().Kind {
+			case tCount:
+				agg, err := p.parseCountAggregate()
+				if err != nil {
+					return nil, err
+				}
+				stmt.Aggs = append(stmt.Aggs, agg)
+			default:
+				col, err := p.parseColumnName()
+				if err != nil {
+					return nil, err
+				}
+				stmt.Columns = append(stmt.Columns, col)
 			}
-			stmt.Columns = append(stmt.Columns, id.Lit)
 			if p.peek().Kind == tComma {
 				p.consume()
 				continue
@@ -130,6 +132,15 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		return nil, err
 	}
 	stmt.Table = tn.Lit
+	stmt.TableAlias = p.parseOptionalAlias()
+
+	if p.peek().Kind == tInner || p.peek().Kind == tJoin {
+		join, err := p.parseJoinClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Join = join
+	}
 
 	// Optional USE INDEX (<idx>).
 	if p.peek().Kind == tUse {
@@ -167,16 +178,35 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		stmt.Where = w
 	}
 
+	if p.peek().Kind == tGroup {
+		p.consume()
+		if _, err := p.expect(tBy, "BY"); err != nil {
+			return nil, err
+		}
+		for {
+			id, err := p.expect(tIdent, "group column name")
+			if err != nil {
+				return nil, err
+			}
+			stmt.GroupBy = append(stmt.GroupBy, id.Lit)
+			if p.peek().Kind == tComma {
+				p.consume()
+				continue
+			}
+			break
+		}
+	}
+
 	if p.peek().Kind == tOrder {
 		p.consume()
 		if _, err := p.expect(tBy, "BY"); err != nil {
 			return nil, err
 		}
-		id, err := p.expect(tIdent, "column name")
+		col, err := p.parseColumnName()
 		if err != nil {
 			return nil, err
 		}
-		stmt.OrderBy = id.Lit
+		stmt.OrderBy = col
 		if p.peek().Kind == tAnn {
 			p.consume()
 			if _, err := p.expect(tOf, "OF"); err != nil {
@@ -219,7 +249,111 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		}
 		stmt.Diversify = div
 	}
+	if len(stmt.GroupBy) == 0 && len(stmt.Columns) == 0 && len(stmt.Aggs) == 1 && strings.EqualFold(stmt.Aggs[0].Func, "COUNT") && stmt.Aggs[0].Column == "*" {
+		stmt.Count = true
+	}
 	return stmt, nil
+}
+
+func (p *parser) parseCountAggregate() (AggregateExpr, error) {
+	if _, err := p.expect(tCount, "COUNT"); err != nil {
+		return AggregateExpr{}, err
+	}
+	if _, err := p.expect(tLParen, "("); err != nil {
+		return AggregateExpr{}, err
+	}
+	col := "*"
+	switch p.peek().Kind {
+	case tStar:
+		p.consume()
+	case tIdent:
+		tok := p.consume()
+		col = tok.Lit
+	default:
+		return AggregateExpr{}, fmt.Errorf("expected * or column inside COUNT()")
+	}
+	if _, err := p.expect(tRParen, ")"); err != nil {
+		return AggregateExpr{}, err
+	}
+	out := "count"
+	if col != "*" {
+		out = "count_" + col
+	}
+	return AggregateExpr{Func: "COUNT", Column: col, OutputName: out}, nil
+}
+
+func (p *parser) parseOptionalAlias() string {
+	if p.peek().Kind == tAs {
+		p.consume()
+		if p.peek().Kind == tIdent {
+			return p.consume().Lit
+		}
+		return ""
+	}
+	if p.peek().Kind == tIdent {
+		return p.consume().Lit
+	}
+	return ""
+}
+
+func (p *parser) parseJoinClause() (*JoinClause, error) {
+	if p.peek().Kind == tInner {
+		p.consume()
+	}
+	if _, err := p.expect(tJoin, "JOIN"); err != nil {
+		return nil, err
+	}
+	rt, err := p.expect(tIdent, "joined table name")
+	if err != nil {
+		return nil, err
+	}
+	join := &JoinClause{RightTable: rt.Lit}
+	join.RightAlias = p.parseOptionalAlias()
+	if _, err := p.expect(tOn, "ON"); err != nil {
+		return nil, err
+	}
+	left, err := p.parseColumnRef()
+	if err != nil {
+		return nil, err
+	}
+	switch p.peek().Kind {
+	case tEq, tNeq, tLt, tLte, tGt, tGte:
+		join.Op = binOpFromKind(p.consume().Kind)
+	default:
+		return nil, fmt.Errorf("expected join comparison operator")
+	}
+	right, err := p.parseColumnRef()
+	if err != nil {
+		return nil, err
+	}
+	join.LeftRef = left
+	join.RightRef = right
+	return join, nil
+}
+
+func (p *parser) parseColumnName() (string, error) {
+	ref, err := p.parseColumnRef()
+	if err != nil {
+		return "", err
+	}
+	return ref.Name, nil
+}
+
+func (p *parser) parseColumnRef() (ColumnRef, error) {
+	id, err := p.expect(tIdent, "column name")
+	if err != nil {
+		return ColumnRef{}, err
+	}
+	name := id.Lit
+	if p.peek().Kind == tDot {
+		p.consume()
+		part, err := p.expect(tIdent, "qualified column name")
+		if err != nil {
+			return ColumnRef{}, err
+		}
+		name += "." + part.Lit
+	}
+	return ColumnRef{Name: name}, nil
 }
 
 func (p *parser) parseDiversifyTail() (*DiversifyClause, error) {
@@ -802,11 +936,15 @@ func (p *parser) parseOperand() (Expr, error) {
 	t := p.peek()
 	switch t.Kind {
 	case tIdent:
-		p.consume()
-		if p.peek().Kind == tLParen {
+		if p.peekN(1).Kind != tDot && p.peekN(1).Kind == tLParen {
+			p.consume()
 			return p.parseFuncCallTail(t.Lit)
 		}
-		return &ColumnRef{Name: t.Lit}, nil
+		ref, err := p.parseColumnRef()
+		if err != nil {
+			return nil, err
+		}
+		return &ref, nil
 	}
 	return p.parseValue()
 }

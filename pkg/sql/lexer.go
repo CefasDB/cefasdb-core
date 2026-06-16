@@ -2,8 +2,9 @@
 //
 // Supported statements:
 //
-//	SELECT * | col,...  FROM <table> [USE INDEX (<idx>)]
-//	  [ALLOW SCAN] [WHERE <pred>] [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
+//	SELECT * | col,... | COUNT(*)  FROM <table> [USE INDEX (<idx>)]
+//	  [ALLOW SCAN] [WHERE <pred>] [GROUP BY col,...]
+//	  [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
 //
 //	INSERT INTO <table> (col,...) VALUES (v,...)
 //
@@ -39,6 +40,7 @@ const (
 	tLBracket
 	tRBracket
 	tComma
+	tDot
 	tStar
 	tSemicolon
 
@@ -73,7 +75,12 @@ const (
 	tKey
 	tDrop
 	tOrder
+	tGroup
 	tBy
+	tInner
+	tJoin
+	tOn
+	tAs
 	tAsc
 	tDesc
 	tLimit
@@ -130,7 +137,12 @@ var keywords = map[string]TokenKind{
 	"KEY":       tKey,
 	"DROP":      tDrop,
 	"ORDER":     tOrder,
+	"GROUP":     tGroup,
 	"BY":        tBy,
+	"INNER":     tInner,
+	"JOIN":      tJoin,
+	"ON":        tOn,
+	"AS":        tAs,
 	"ASC":       tAsc,
 	"DESC":      tDesc,
 	"LIMIT":     tLimit,
@@ -297,6 +309,9 @@ func Tokenize(src string) ([]Token, error) {
 				}
 			}
 			out = append(out, Token{Kind: tNumber, Lit: string(r[start:i]), Pos: start})
+		case c == '.':
+			out = append(out, Token{Kind: tDot, Lit: ".", Pos: i})
+			i++
 		case unicode.IsLetter(c) || c == '_':
 			start := i
 			for i < len(r) && (unicode.IsLetter(r[i]) || unicode.IsDigit(r[i]) || r[i] == '_') {
