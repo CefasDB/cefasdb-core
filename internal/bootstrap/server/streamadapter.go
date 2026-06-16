@@ -8,7 +8,7 @@ import (
 	"context"
 
 	"github.com/osvaldoandrade/cefas/internal/api"
-	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	craft "github.com/osvaldoandrade/cefas/internal/replication"
 )
 
 // raftSource is the minimal raft surface StreamAdapter needs. It lets

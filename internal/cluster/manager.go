@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
