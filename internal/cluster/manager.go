@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
+	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
@@ -43,9 +45,9 @@ type ShardConfig struct {
 // (with raft attached) per shard.
 type Shard struct {
 	ID          uint32
-	State       ShardState
+	State       placement.ShardState
 	Epoch       uint64
-	Ranges      []TokenRange
+	Ranges      []placement.TokenRange
 	Voters      []string
 	NonVoters   []string
 	Storage     *storage.DB
@@ -89,7 +91,7 @@ type Config struct {
 
 	// NodeCapacity is advisory metadata recorded in the placement
 	// catalog for this node. Zero values default to weight=1.
-	NodeCapacity NodeCapacity
+	NodeCapacity placement.NodeCapacity
 
 	// Bootstrap is true for the first node started in a fresh
 	// cluster. The manager only honours bootstrap for shards whose
@@ -119,8 +121,8 @@ type Manager struct {
 	mu            sync.RWMutex
 	splitMu       sync.RWMutex
 	cfg           Config
-	router        *Router
-	placement     PlacementCatalog
+	router        *routing.Router
+	cat           placement.PlacementCatalog
 	placementPath string
 	mux           *craft.MuxAcceptor
 	shards        []*Shard
@@ -164,12 +166,12 @@ func Open(ctx context.Context, cfg Config) (*Manager, error) {
 		cfg.LogOutput = io.Discard
 	}
 
-	placementPath := PlacementFilePath(cfg.Root, cfg.PlacementPath)
-	placement, err := loadOrCreatePlacement(cfg, placementPath)
+	placementPath := placement.PlacementFilePath(cfg.Root, cfg.PlacementPath)
+	cat, err := loadOrCreatePlacement(cfg, placementPath)
 	if err != nil {
 		return nil, err
 	}
-	router, err := NewRouterFromCatalog(placement)
+	router, err := routing.NewRouterFromCatalog(cat)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +180,7 @@ func Open(ctx context.Context, cfg Config) (*Manager, error) {
 	mgr := &Manager{
 		cfg:           cfg,
 		router:        router,
-		placement:     placement,
+		cat:           cat,
 		placementPath: placementPath,
 	}
 
@@ -205,21 +207,21 @@ func Open(ctx context.Context, cfg Config) (*Manager, error) {
 	return mgr, nil
 }
 
-func loadOrCreatePlacement(cfg Config, path string) (PlacementCatalog, error) {
-	cat, err := LoadPlacementFile(path)
+func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog, error) {
+	cat, err := placement.LoadPlacementFile(path)
 	if err == nil {
 		return cat, nil
 	}
 	if !os.IsNotExist(err) {
-		return PlacementCatalog{}, err
+		return placement.PlacementCatalog{}, err
 	}
-	strategy := PlacementStrategyTokenRange
+	strategy := placement.PlacementStrategyTokenRange
 	if hasExistingShardState(cfg.Root) {
-		strategy = PlacementStrategyLegacyModulo
+		strategy = placement.PlacementStrategyLegacyModulo
 	}
-	cat = DefaultPlacement(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy)
-	if err := SavePlacementFile(path, cat); err != nil {
-		return PlacementCatalog{}, err
+	cat = placement.DefaultPlacement(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy)
+	if err := placement.SavePlacementFile(path, cat); err != nil {
+		return placement.PlacementCatalog{}, err
 	}
 	return cat, nil
 }
@@ -247,7 +249,7 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 	return m.openShardWithPlacement(ctx, shardID, meta)
 }
 
-func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, meta ShardPlacement) (*Shard, error) {
+func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, meta placement.ShardPlacement) (*Shard, error) {
 	shardDir := filepath.Join(m.cfg.Root, "shards", fmt.Sprintf("%d", shardID))
 	stateDir := filepath.Join(shardDir, "state")
 	raftDir := filepath.Join(shardDir, "raft")
@@ -277,7 +279,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 			ID:        shardID,
 			State:     meta.State,
 			Epoch:     meta.Epoch,
-			Ranges:    append([]TokenRange(nil), meta.Ranges...),
+			Ranges:    append([]placement.TokenRange(nil), meta.Ranges...),
 			Voters:    append([]string(nil), meta.Voters...),
 			NonVoters: append([]string(nil), meta.NonVoters...),
 			Storage:   st,
@@ -341,7 +343,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		ID:          shardID,
 		State:       meta.State,
 		Epoch:       meta.Epoch,
-		Ranges:      append([]TokenRange(nil), meta.Ranges...),
+		Ranges:      append([]placement.TokenRange(nil), meta.Ranges...),
 		Voters:      append([]string(nil), meta.Voters...),
 		NonVoters:   append([]string(nil), meta.NonVoters...),
 		Storage:     st,
@@ -350,18 +352,18 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	}, nil
 }
 
-func (m *Manager) shardPlacement(shardID uint32) (ShardPlacement, bool) {
-	for _, sh := range m.placement.Shards {
+func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool) {
+	for _, sh := range m.cat.Shards {
 		if sh.ID == shardID {
 			return sh, true
 		}
 	}
-	return ShardPlacement{ID: shardID, State: ShardStateActive, Epoch: m.placement.Epoch}, false
+	return placement.ShardPlacement{ID: shardID, State: placement.ShardStateActive, Epoch: m.cat.Epoch}, false
 }
 
-func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat PlacementCatalog) error {
-	cat.normalize()
-	if err := ValidatePlacement(cat); err != nil {
+func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat placement.PlacementCatalog) error {
+	cat.Normalize()
+	if err := placement.ValidatePlacement(cat); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -387,41 +389,41 @@ func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat Placeme
 
 // Router exposes the partition router so the API layer can look up a
 // shard for a request's partition key.
-func (m *Manager) Router() *Router {
+func (m *Manager) Router() *routing.Router {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.router
 }
 
-func (m *Manager) Placement() PlacementCatalog {
+func (m *Manager) Placement() placement.PlacementCatalog {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.placement.Clone()
+	return m.cat.Clone()
 }
 
 func (m *Manager) RoutingEpoch() uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.placement.Epoch
+	return m.cat.Epoch
 }
 
 func (m *Manager) PlacementVersion() uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.placement.Version
+	return m.cat.Version
 }
 
 func (m *Manager) PlacementStrategy() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.placement.Strategy
+	return m.cat.Strategy
 }
 
-func (m *Manager) Nodes() []NodeDescriptor {
+func (m *Manager) Nodes() []placement.NodeDescriptor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]NodeDescriptor, 0, len(m.placement.Nodes))
-	for _, node := range m.placement.Nodes {
+	out := make([]placement.NodeDescriptor, 0, len(m.cat.Nodes))
+	for _, node := range m.cat.Nodes {
 		node.Capacity.Tags = append([]string(nil), node.Capacity.Tags...)
 		out = append(out, node)
 	}
@@ -459,7 +461,7 @@ func (m *Manager) ShardForPK(pkBytes []byte) *Shard {
 func (m *Manager) RouteForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if err := checkRoutingEpoch(epoch, m.placement.Epoch); err != nil {
+	if err := checkRoutingEpoch(epoch, m.cat.Epoch); err != nil {
 		return nil, err
 	}
 	id, err := m.router.ShardForPK(pkBytes)
@@ -473,7 +475,7 @@ func (m *Manager) RouteForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
 	if sh == nil {
 		return nil, fmt.Errorf("cluster: routed to missing shard %d", id)
 	}
-	if !sh.State.routable() {
+	if !sh.State.Routable() {
 		return nil, fmt.Errorf("cluster: routed to non-routable shard %d state=%s", id, sh.State)
 	}
 	return sh, nil
@@ -496,7 +498,7 @@ func (m *Manager) WriteTargetsForPK(pkBytes []byte, epoch uint64) (WriteTargets,
 func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTargets, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if err := checkRoutingEpoch(epoch, m.placement.Epoch); err != nil {
+	if err := checkRoutingEpoch(epoch, m.cat.Epoch); err != nil {
 		return WriteTargets{}, err
 	}
 	token := m.router.TokenForPK(pkBytes)
@@ -511,17 +513,17 @@ func (m *Manager) writeTargetsForPKLocked(pkBytes []byte, epoch uint64) (WriteTa
 	if primary == nil {
 		return WriteTargets{}, fmt.Errorf("cluster: routed to missing shard %d", id)
 	}
-	if !primary.State.routable() {
+	if !primary.State.Routable() {
 		return WriteTargets{}, fmt.Errorf("cluster: routed to non-routable shard %d state=%s", id, primary.State)
 	}
 
 	out := WriteTargets{Primary: primary}
-	if (primary.State != ShardStateSplitting && primary.State != ShardStateMoving) || m.placement.Strategy != PlacementStrategyTokenRange {
+	if (primary.State != placement.ShardStateSplitting && primary.State != placement.ShardStateMoving) || m.cat.Strategy != placement.PlacementStrategyTokenRange {
 		return out, nil
 	}
 	seen := map[uint32]struct{}{primary.ID: {}}
-	for _, meta := range m.placement.Shards {
-		if meta.State != ShardStateCreating {
+	for _, meta := range m.cat.Shards {
+		if meta.State != placement.ShardStateCreating {
 			continue
 		}
 		for _, rng := range meta.Ranges {
@@ -576,12 +578,12 @@ func (m *Manager) RefreshPlacement() error {
 	if err != nil {
 		return err
 	}
-	cat, err := parsePlacement(raw)
+	cat, err := placement.ParsePlacement(raw)
 	if err != nil {
 		return err
 	}
 	m.mu.RLock()
-	currentEpoch := m.placement.Epoch
+	currentEpoch := m.cat.Epoch
 	m.mu.RUnlock()
 	if cat.Epoch <= currentEpoch {
 		return nil
@@ -597,9 +599,9 @@ func (m *Manager) RefreshPlacement() error {
 // the same system key.
 func (m *Manager) PublishPlacement() error {
 	m.mu.RLock()
-	cat := m.placement.Clone()
+	cat := m.cat.Clone()
 	m.mu.RUnlock()
-	raw, err := encodePlacement(cat)
+	raw, err := placement.EncodePlacement(cat)
 	if err != nil {
 		return err
 	}
@@ -610,7 +612,7 @@ func (m *Manager) PublishPlacement() error {
 	return shard0.Storage.Set(placementSystemKey, raw)
 }
 
-func (m *Manager) applyPlacement(cat PlacementCatalog, save bool) error {
+func (m *Manager) applyPlacement(cat placement.PlacementCatalog, save bool) error {
 	m.mu.RLock()
 	openShards := len(m.shards)
 	m.mu.RUnlock()
@@ -625,29 +627,29 @@ func (m *Manager) applyPlacement(cat PlacementCatalog, save bool) error {
 	if len(cat.Shards) != openShards {
 		return fmt.Errorf("cluster: placement shard count %d does not match open shards %d", len(cat.Shards), openShards)
 	}
-	router, err := NewRouterFromCatalog(cat)
+	router, err := routing.NewRouterFromCatalog(cat)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
-	m.placement = cat.Clone()
+	m.cat = cat.Clone()
 	m.router = router
-	for _, meta := range m.placement.Shards {
+	for _, meta := range m.cat.Shards {
 		if int(meta.ID) >= len(m.shards) || m.shards[meta.ID] == nil {
 			continue
 		}
 		sh := m.shards[meta.ID]
 		sh.State = meta.State
 		sh.Epoch = meta.Epoch
-		sh.Ranges = append([]TokenRange(nil), meta.Ranges...)
+		sh.Ranges = append([]placement.TokenRange(nil), meta.Ranges...)
 		sh.Voters = append([]string(nil), meta.Voters...)
 		sh.NonVoters = append([]string(nil), meta.NonVoters...)
 	}
 	path := m.placementPath
-	snapshot := m.placement.Clone()
+	snapshot := m.cat.Clone()
 	m.mu.Unlock()
 	if save {
-		return SavePlacementFile(path, snapshot)
+		return placement.SavePlacementFile(path, snapshot)
 	}
 	return nil
 }
@@ -700,32 +702,32 @@ func (m *Manager) RemoveServerAllShards(id string, timeout time.Duration) error 
 
 func (m *Manager) recordShardVoter(shardID uint32, id string, add bool) error {
 	m.mu.Lock()
-	for i := range m.placement.Shards {
-		if m.placement.Shards[i].ID != shardID {
+	for i := range m.cat.Shards {
+		if m.cat.Shards[i].ID != shardID {
 			continue
 		}
 		if add {
-			m.placement.Shards[i].Voters = appendUnique(m.placement.Shards[i].Voters, id)
+			m.cat.Shards[i].Voters = appendUnique(m.cat.Shards[i].Voters, id)
 		} else {
-			m.placement.Shards[i].Voters = removeString(m.placement.Shards[i].Voters, id)
-			m.placement.Shards[i].NonVoters = removeString(m.placement.Shards[i].NonVoters, id)
+			m.cat.Shards[i].Voters = placement.RemoveString(m.cat.Shards[i].Voters, id)
+			m.cat.Shards[i].NonVoters = placement.RemoveString(m.cat.Shards[i].NonVoters, id)
 		}
-		m.placement.Shards[i].Epoch = m.placement.Epoch + 1
-		m.placement.Epoch++
-		m.placement.UpdatedAtUnix = time.Now().Unix()
-		router, err := NewRouterFromCatalog(m.placement)
+		m.cat.Shards[i].Epoch = m.cat.Epoch + 1
+		m.cat.Epoch++
+		m.cat.UpdatedAtUnix = time.Now().Unix()
+		router, err := routing.NewRouterFromCatalog(m.cat)
 		if err != nil {
 			m.mu.Unlock()
 			return err
 		}
 		m.router = router
 		if int(shardID) < len(m.shards) && m.shards[shardID] != nil {
-			m.shards[shardID].Voters = append([]string(nil), m.placement.Shards[i].Voters...)
-			m.shards[shardID].NonVoters = append([]string(nil), m.placement.Shards[i].NonVoters...)
-			m.shards[shardID].Epoch = m.placement.Shards[i].Epoch
+			m.shards[shardID].Voters = append([]string(nil), m.cat.Shards[i].Voters...)
+			m.shards[shardID].NonVoters = append([]string(nil), m.cat.Shards[i].NonVoters...)
+			m.shards[shardID].Epoch = m.cat.Shards[i].Epoch
 		}
 		path := m.placementPath
-		snapshot := m.placement.Clone()
+		snapshot := m.cat.Clone()
 		m.mu.Unlock()
 		return m.persistPlacementSnapshot(path, snapshot)
 	}
@@ -733,11 +735,11 @@ func (m *Manager) recordShardVoter(shardID uint32, id string, add bool) error {
 	return fmt.Errorf("cluster: shard %d not in placement", shardID)
 }
 
-func (m *Manager) persistPlacementSnapshot(path string, snapshot PlacementCatalog) error {
-	if err := SavePlacementFile(path, snapshot); err != nil {
+func (m *Manager) persistPlacementSnapshot(path string, snapshot placement.PlacementCatalog) error {
+	if err := placement.SavePlacementFile(path, snapshot); err != nil {
 		return err
 	}
-	raw, err := encodePlacement(snapshot)
+	raw, err := placement.EncodePlacement(snapshot)
 	if err != nil {
 		return err
 	}
@@ -751,8 +753,8 @@ func (m *Manager) persistPlacementSnapshot(path string, snapshot PlacementCatalo
 	return nil
 }
 
-func (m *Manager) persistPlacementSnapshotStrict(path string, snapshot PlacementCatalog) error {
-	raw, err := encodePlacement(snapshot)
+func (m *Manager) persistPlacementSnapshotStrict(path string, snapshot placement.PlacementCatalog) error {
+	raw, err := placement.EncodePlacement(snapshot)
 	if err != nil {
 		return err
 	}
@@ -763,7 +765,7 @@ func (m *Manager) persistPlacementSnapshotStrict(path string, snapshot Placement
 	if err := shard0.Storage.Set(placementSystemKey, raw); err != nil {
 		return err
 	}
-	return SavePlacementFile(path, snapshot)
+	return placement.SavePlacementFile(path, snapshot)
 }
 
 func appendUnique(in []string, v string) []string {
@@ -773,16 +775,6 @@ func appendUnique(in []string, v string) []string {
 		}
 	}
 	return append(in, v)
-}
-
-func removeString(in []string, v string) []string {
-	out := in[:0]
-	for _, existing := range in {
-		if existing != v {
-			out = append(out, existing)
-		}
-	}
-	return out
 }
 
 // Close tears every shard down. Errors from individual shards are

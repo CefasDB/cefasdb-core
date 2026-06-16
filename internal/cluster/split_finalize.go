@@ -9,6 +9,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -58,9 +59,9 @@ type SplitFinalizeState struct {
 	ChildShardID      uint32             `json:"childShardId"`
 	BeforeEpoch       uint64             `json:"beforeEpoch"`
 	AfterEpoch        uint64             `json:"afterEpoch,omitempty"`
-	ParentRangeBefore TokenRange         `json:"parentRangeBefore"`
-	ParentRangeAfter  TokenRange         `json:"parentRangeAfter"`
-	ChildRange        TokenRange         `json:"childRange"`
+	ParentRangeBefore placement.TokenRange         `json:"parentRangeBefore"`
+	ParentRangeAfter  placement.TokenRange         `json:"parentRangeAfter"`
+	ChildRange        placement.TokenRange         `json:"childRange"`
 	Phase             SplitFinalizePhase `json:"phase"`
 	CopiedKeys        int64              `json:"copiedKeys,omitempty"`
 	CopiedCatalogKeys int64              `json:"copiedCatalogKeys,omitempty"`
@@ -75,15 +76,15 @@ type SplitFinalizeResult struct {
 	ChildShardID      uint32            `json:"childShardId"`
 	BeforeEpoch       uint64            `json:"beforeEpoch"`
 	AfterEpoch        uint64            `json:"afterEpoch"`
-	ParentRangeBefore TokenRange        `json:"parentRangeBefore"`
-	ParentRangeAfter  TokenRange        `json:"parentRangeAfter"`
-	ChildRange        TokenRange        `json:"childRange"`
+	ParentRangeBefore placement.TokenRange        `json:"parentRangeBefore"`
+	ParentRangeAfter  placement.TokenRange        `json:"parentRangeAfter"`
+	ChildRange        placement.TokenRange        `json:"childRange"`
 	CopiedKeys        int64             `json:"copiedKeys"`
 	CopiedCatalogKeys int64             `json:"copiedCatalogKeys"`
 	DeletedKeys       int64             `json:"deletedKeys"`
 	Phase             string            `json:"phase,omitempty"`
 	Verification      SplitVerification `json:"verification,omitempty"`
-	Placement         PlacementCatalog  `json:"placement"`
+	Placement         placement.PlacementCatalog  `json:"placement"`
 }
 
 type SplitRollbackResult struct {
@@ -91,11 +92,11 @@ type SplitRollbackResult struct {
 	ChildShardID       uint32           `json:"childShardId"`
 	BeforeEpoch        uint64           `json:"beforeEpoch"`
 	AfterEpoch         uint64           `json:"afterEpoch"`
-	ChildRange         TokenRange       `json:"childRange"`
+	ChildRange         placement.TokenRange       `json:"childRange"`
 	DeletedChildKeys   int64            `json:"deletedChildKeys"`
 	DeletedCatalogKeys int64            `json:"deletedCatalogKeys"`
 	Phase              string           `json:"phase"`
-	Placement          PlacementCatalog `json:"placement"`
+	Placement          placement.PlacementCatalog `json:"placement"`
 }
 
 var splitFinalizeTestHook func(phase SplitFinalizePhase, state SplitFinalizeState) error
@@ -117,11 +118,11 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 	}
 	parentShard, ok := m.Shard(req.ParentShardID)
 	if !ok || parentShard == nil || parentShard.Storage == nil {
-		return SplitFinalizeResult{}, invalidPlan("parent shard %d is not open locally", req.ParentShardID)
+		return SplitFinalizeResult{}, placement.InvalidPlan("parent shard %d is not open locally", req.ParentShardID)
 	}
 	childShard, ok := m.Shard(req.ChildShardID)
 	if !ok || childShard == nil || childShard.Storage == nil {
-		return SplitFinalizeResult{}, invalidPlan("child shard %d is not open locally", req.ChildShardID)
+		return SplitFinalizeResult{}, placement.InvalidPlan("child shard %d is not open locally", req.ChildShardID)
 	}
 	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
 		return SplitFinalizeResult{}, err
@@ -181,14 +182,14 @@ func (m *Manager) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (
 		return SplitFinalizeResult{}, err
 	}
 
-	after := nextCatalog(current)
-	after.Shards[parentIdx].Ranges = []TokenRange{parentRangeAfter}
-	after.Shards[parentIdx].State = ShardStateActive
+	after := placement.NextCatalog(current)
+	after.Shards[parentIdx].Ranges = []placement.TokenRange{parentRangeAfter}
+	after.Shards[parentIdx].State = placement.ShardStateActive
 	after.Shards[parentIdx].Epoch = after.Epoch
-	after.Shards[childIdx].State = ShardStateActive
+	after.Shards[childIdx].State = placement.ShardStateActive
 	after.Shards[childIdx].Epoch = after.Epoch
-	after.normalize()
-	if err := ValidatePlacement(after); err != nil {
+	after.Normalize()
+	if err := placement.ValidatePlacement(after); err != nil {
 		return SplitFinalizeResult{}, err
 	}
 	state.AfterEpoch = after.Epoch
@@ -257,7 +258,7 @@ func (m *Manager) RollbackSplit(ctx context.Context, req SplitRollbackRequest) (
 		return SplitRollbackResult{}, err
 	}
 	if ok && splitPhasePublishedOrDone(state.Phase) {
-		return SplitRollbackResult{}, invalidPlan("cannot roll back split after final routing epoch was published; phase=%s", state.Phase)
+		return SplitRollbackResult{}, placement.InvalidPlan("cannot roll back split after final routing epoch was published; phase=%s", state.Phase)
 	}
 	parentIdx, childIdx, parent, child, _, err := validateFinalizeSplit(current, SplitFinalizeRequest{
 		ParentShardID: req.ParentShardID,
@@ -269,11 +270,11 @@ func (m *Manager) RollbackSplit(ctx context.Context, req SplitRollbackRequest) (
 	}
 	parentShard, ok := m.Shard(req.ParentShardID)
 	if !ok || parentShard == nil || parentShard.Storage == nil {
-		return SplitRollbackResult{}, invalidPlan("parent shard %d is not open locally", req.ParentShardID)
+		return SplitRollbackResult{}, placement.InvalidPlan("parent shard %d is not open locally", req.ParentShardID)
 	}
 	childShard, ok := m.Shard(req.ChildShardID)
 	if !ok || childShard == nil || childShard.Storage == nil {
-		return SplitRollbackResult{}, invalidPlan("child shard %d is not open locally", req.ChildShardID)
+		return SplitRollbackResult{}, placement.InvalidPlan("child shard %d is not open locally", req.ChildShardID)
 	}
 	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
 		return SplitRollbackResult{}, err
@@ -288,15 +289,15 @@ func (m *Manager) RollbackSplit(ctx context.Context, req SplitRollbackRequest) (
 		return SplitRollbackResult{}, fmt.Errorf("delete child catalog: %w", err)
 	}
 
-	after := nextCatalog(current)
-	after.Shards[parentIdx].State = ShardStateActive
-	after.Shards[parentIdx].Ranges = append([]TokenRange(nil), parent.Ranges...)
+	after := placement.NextCatalog(current)
+	after.Shards[parentIdx].State = placement.ShardStateActive
+	after.Shards[parentIdx].Ranges = append([]placement.TokenRange(nil), parent.Ranges...)
 	after.Shards[parentIdx].Epoch = after.Epoch
-	after.Shards[childIdx].State = ShardStateDecommissioned
+	after.Shards[childIdx].State = placement.ShardStateDecommissioned
 	after.Shards[childIdx].Ranges = nil
 	after.Shards[childIdx].Epoch = after.Epoch
-	after.normalize()
-	if err := ValidatePlacement(after); err != nil {
+	after.Normalize()
+	if err := placement.ValidatePlacement(after); err != nil {
 		return SplitRollbackResult{}, err
 	}
 	if err := m.persistPlacementSnapshotStrict(m.placementPath, after); err != nil {
@@ -354,7 +355,7 @@ func (m *Manager) requireSplitFinalizeLeaders(parent, child *Shard) error {
 	return nil
 }
 
-func (m *Manager) resumePublishedSplit(ctx context.Context, current PlacementCatalog, req SplitFinalizeRequest) (SplitFinalizeResult, bool, error) {
+func (m *Manager) resumePublishedSplit(ctx context.Context, current placement.PlacementCatalog, req SplitFinalizeRequest) (SplitFinalizeResult, bool, error) {
 	state, ok, err := m.loadSplitFinalizeState(req.ParentShardID, req.ChildShardID)
 	if err != nil || !ok {
 		return SplitFinalizeResult{}, false, err
@@ -367,11 +368,11 @@ func (m *Manager) resumePublishedSplit(ctx context.Context, current PlacementCat
 	}
 	parentShard, ok := m.Shard(req.ParentShardID)
 	if !ok || parentShard == nil || parentShard.Storage == nil {
-		return SplitFinalizeResult{}, true, invalidPlan("parent shard %d is not open locally", req.ParentShardID)
+		return SplitFinalizeResult{}, true, placement.InvalidPlan("parent shard %d is not open locally", req.ParentShardID)
 	}
 	childShard, ok := m.Shard(req.ChildShardID)
 	if !ok || childShard == nil || childShard.Storage == nil {
-		return SplitFinalizeResult{}, true, invalidPlan("child shard %d is not open locally", req.ChildShardID)
+		return SplitFinalizeResult{}, true, placement.InvalidPlan("child shard %d is not open locally", req.ChildShardID)
 	}
 	if err := m.requireSplitFinalizeLeaders(parentShard, childShard); err != nil {
 		return SplitFinalizeResult{}, true, err
@@ -402,7 +403,7 @@ func (m *Manager) resumePublishedSplit(ctx context.Context, current PlacementCat
 	return splitFinalizeResultFromState(state, current), true, nil
 }
 
-func splitFinalizeResultFromState(state SplitFinalizeState, placement PlacementCatalog) SplitFinalizeResult {
+func splitFinalizeResultFromState(state SplitFinalizeState, placement placement.PlacementCatalog) SplitFinalizeResult {
 	return SplitFinalizeResult{
 		ParentShardID:     state.ParentShardID,
 		ChildShardID:      state.ChildShardID,
@@ -420,26 +421,26 @@ func splitFinalizeResultFromState(state SplitFinalizeState, placement PlacementC
 	}
 }
 
-func validatePublishedSplitPlacement(cat PlacementCatalog, state SplitFinalizeState) error {
-	if cat.Strategy != PlacementStrategyTokenRange {
-		return invalidPlan("resume split cleanup requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+func validatePublishedSplitPlacement(cat placement.PlacementCatalog, state SplitFinalizeState) error {
+	if cat.Strategy != placement.PlacementStrategyTokenRange {
+		return placement.InvalidPlan("resume split cleanup requires %s placement, got %s", placement.PlacementStrategyTokenRange, cat.Strategy)
 	}
-	_, parent, err := findShard(cat, state.ParentShardID)
+	_, parent, err := placement.FindShard(cat, state.ParentShardID)
 	if err != nil {
 		return err
 	}
-	_, child, err := findShard(cat, state.ChildShardID)
+	_, child, err := placement.FindShard(cat, state.ChildShardID)
 	if err != nil {
 		return err
 	}
-	if parent.State != ShardStateActive || child.State != ShardStateActive {
-		return invalidPlan("resume split cleanup requires active parent and child, got parent=%s child=%s", parent.State, child.State)
+	if parent.State != placement.ShardStateActive || child.State != placement.ShardStateActive {
+		return placement.InvalidPlan("resume split cleanup requires active parent and child, got parent=%s child=%s", parent.State, child.State)
 	}
 	if len(parent.Ranges) != 1 || parent.Ranges[0] != state.ParentRangeAfter {
-		return invalidPlan("resume split cleanup parent range mismatch")
+		return placement.InvalidPlan("resume split cleanup parent range mismatch")
 	}
 	if len(child.Ranges) != 1 || child.Ranges[0] != state.ChildRange {
-		return invalidPlan("resume split cleanup child range mismatch")
+		return placement.InvalidPlan("resume split cleanup child range mismatch")
 	}
 	return nil
 }
@@ -453,41 +454,41 @@ func splitPhasePublishedOrDone(phase SplitFinalizePhase) bool {
 	}
 }
 
-func validateFinalizeSplit(cat PlacementCatalog, req SplitFinalizeRequest) (int, int, ShardPlacement, ShardPlacement, TokenRange, error) {
-	if cat.Strategy != PlacementStrategyTokenRange {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("finalize split requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+func validateFinalizeSplit(cat placement.PlacementCatalog, req SplitFinalizeRequest) (int, int, placement.ShardPlacement, placement.ShardPlacement, placement.TokenRange, error) {
+	if cat.Strategy != placement.PlacementStrategyTokenRange {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("finalize split requires %s placement, got %s", placement.PlacementStrategyTokenRange, cat.Strategy)
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != cat.Epoch {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: cat.Epoch}
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: cat.Epoch}
 	}
-	parentIdx, parent, err := findShard(cat, req.ParentShardID)
+	parentIdx, parent, err := placement.FindShard(cat, req.ParentShardID)
 	if err != nil {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, err
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, err
 	}
-	childIdx, child, err := findShard(cat, req.ChildShardID)
+	childIdx, child, err := placement.FindShard(cat, req.ChildShardID)
 	if err != nil {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, err
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, err
 	}
-	if parent.State != ShardStateSplitting {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("parent shard %d must be %s, got %s", parent.ID, ShardStateSplitting, parent.State)
+	if parent.State != placement.ShardStateSplitting {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("parent shard %d must be %s, got %s", parent.ID, placement.ShardStateSplitting, parent.State)
 	}
-	if child.State != ShardStateCreating {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("child shard %d must be %s, got %s", child.ID, ShardStateCreating, child.State)
+	if child.State != placement.ShardStateCreating {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("child shard %d must be %s, got %s", child.ID, placement.ShardStateCreating, child.State)
 	}
 	if len(parent.Ranges) != 1 || len(child.Ranges) != 1 {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("finalize split requires exactly one parent range and one child range")
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("finalize split requires exactly one parent range and one child range")
 	}
 	parentRange := parent.Ranges[0]
 	childRange := child.Ranges[0]
 	if childRange.End != parentRange.End {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("child range [%d,%d) must end at parent range end %d", childRange.Start, childRange.End, parentRange.End)
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("child range [%d,%d) must end at parent range end %d", childRange.Start, childRange.End, parentRange.End)
 	}
-	if !tokenStrictlyInside(parentRange, childRange.Start) {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("child range start %d is outside parent range [%d,%d)", childRange.Start, parentRange.Start, parentRange.End)
+	if !placement.TokenStrictlyInside(parentRange, childRange.Start) {
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("child range start %d is outside parent range [%d,%d)", childRange.Start, parentRange.Start, parentRange.End)
 	}
-	parentRangeAfter, expectedChild := splitRange(parentRange, childRange.Start)
+	parentRangeAfter, expectedChild := placement.SplitRange(parentRange, childRange.Start)
 	if expectedChild != childRange {
-		return 0, 0, ShardPlacement{}, ShardPlacement{}, TokenRange{}, invalidPlan("child range [%d,%d) does not match parent suffix [%d,%d)", childRange.Start, childRange.End, expectedChild.Start, expectedChild.End)
+		return 0, 0, placement.ShardPlacement{}, placement.ShardPlacement{}, placement.TokenRange{}, placement.InvalidPlan("child range [%d,%d) does not match parent suffix [%d,%d)", childRange.Start, childRange.End, expectedChild.Start, expectedChild.End)
 	}
 	return parentIdx, childIdx, parent, child, parentRangeAfter, nil
 }
@@ -552,7 +553,7 @@ func copyCatalogKeys(ctx context.Context, src, dst *storage.DB) (int64, error) {
 	return copyKeys(ctx, src, dst, lower, upper, nil)
 }
 
-func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng TokenRange) (int64, error) {
+func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng placement.TokenRange) (int64, error) {
 	lower, upper := storage.PrefixTables()
 	return copyKeys(ctx, src, dst, lower, upper, func(key []byte) bool {
 		token, ok := storage.PrimaryTokenFromKey(key)
@@ -560,7 +561,7 @@ func copyPrimaryTokenRange(ctx context.Context, src, dst *storage.DB, rng TokenR
 	})
 }
 
-func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, src, dst *storage.DB, rng TokenRange) (int64, error) {
+func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, src, dst *storage.DB, rng placement.TokenRange) (int64, error) {
 	if src == nil || dst == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}
@@ -603,7 +604,7 @@ func copyPrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableD
 	return copied, nil
 }
 
-func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, parent, child *storage.DB, rng TokenRange) (SplitVerification, error) {
+func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, parent, child *storage.DB, rng placement.TokenRange) (SplitVerification, error) {
 	parentDigest, err := digestPrimaryTokenRange(ctx, tables, parent, rng)
 	if err != nil {
 		return SplitVerification{}, fmt.Errorf("digest parent range: %w", err)
@@ -620,7 +621,7 @@ func verifySplitRange(ctx context.Context, tables []types.TableDescriptor, paren
 		Verified:       parentDigest == childDigest,
 	}
 	if !out.Verified {
-		return out, invalidPlan("split verification failed: parent count/checksum %d/%d child %d/%d", out.ParentCount, out.ParentChecksum, out.ChildCount, out.ChildChecksum)
+		return out, placement.InvalidPlan("split verification failed: parent count/checksum %d/%d child %d/%d", out.ParentCount, out.ParentChecksum, out.ChildCount, out.ChildChecksum)
 	}
 	return out, nil
 }
@@ -630,7 +631,7 @@ type splitDigest struct {
 	checksum uint64
 }
 
-func digestPrimaryTokenRange(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng TokenRange) (splitDigest, error) {
+func digestPrimaryTokenRange(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng placement.TokenRange) (splitDigest, error) {
 	var out splitDigest
 	for _, td := range tables {
 		lower, upper := storage.PrefixPrimaryAll(td.Name)
@@ -669,7 +670,7 @@ func checksumKV(key, value []byte) uint64 {
 	return h.Sum64()
 }
 
-func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng TokenRange) (int64, error) {
+func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng placement.TokenRange) (int64, error) {
 	lower, upper := storage.PrefixTables()
 	return deleteKeys(ctx, db, lower, upper, func(key []byte) bool {
 		token, ok := storage.PrimaryTokenFromKey(key)
@@ -677,7 +678,7 @@ func deletePrimaryTokenRange(ctx context.Context, db *storage.DB, rng TokenRange
 	})
 }
 
-func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng TokenRange) (int64, error) {
+func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.TableDescriptor, db *storage.DB, rng placement.TokenRange) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("storage is not open")
 	}
@@ -700,7 +701,7 @@ func deletePrimaryTokenRangeWithIndexes(ctx context.Context, tables []types.Tabl
 	return deleted, nil
 }
 
-func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDescriptor, rng TokenRange) ([]types.Item, error) {
+func primaryItemsInRange(ctx context.Context, db *storage.DB, td types.TableDescriptor, rng placement.TokenRange) ([]types.Item, error) {
 	lower, upper := storage.PrefixPrimaryAll(td.Name)
 	iter, err := db.Iter(lower, upper)
 	if err != nil {

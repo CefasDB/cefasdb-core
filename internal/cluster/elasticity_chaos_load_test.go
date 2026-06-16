@@ -19,6 +19,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -76,13 +77,13 @@ func TestElasticityChaosLoadSuite(t *testing.T) {
 
 	scenarios := []struct {
 		name      string
-		operation PlacementOperation
+		operation placement.PlacementOperation
 		phase     string
 		run       func(*testing.T, string) elasticityScenarioReport
 	}{
 		{
 			name:      "split-copy-crash",
-			operation: PlacementOperationSplit,
+			operation: placement.PlacementOperationSplit,
 			phase:     "copy",
 			run: func(t *testing.T, bucket string) elasticityScenarioReport {
 				return runSplitChaosScenario(t, bucket, "copy", SplitFinalizePhaseCopied)
@@ -90,7 +91,7 @@ func TestElasticityChaosLoadSuite(t *testing.T) {
 		},
 		{
 			name:      "split-catalog-publish-crash",
-			operation: PlacementOperationSplit,
+			operation: placement.PlacementOperationSplit,
 			phase:     "catalog_publish",
 			run: func(t *testing.T, bucket string) elasticityScenarioReport {
 				return runSplitChaosScenario(t, bucket, "catalog_publish", SplitFinalizePhasePublishing)
@@ -98,7 +99,7 @@ func TestElasticityChaosLoadSuite(t *testing.T) {
 		},
 		{
 			name:      "range-move-catchup-crash",
-			operation: PlacementOperationRangeMove,
+			operation: placement.PlacementOperationRangeMove,
 			phase:     "catch_up",
 			run: func(t *testing.T, bucket string) elasticityScenarioReport {
 				return runRangeMoveChaosScenario(t, bucket, "catch_up", RangeMoveFinalizePhaseVerified)
@@ -106,7 +107,7 @@ func TestElasticityChaosLoadSuite(t *testing.T) {
 		},
 		{
 			name:      "range-move-cleanup-crash",
-			operation: PlacementOperationRangeMove,
+			operation: placement.PlacementOperationRangeMove,
 			phase:     "cleanup",
 			run: func(t *testing.T, bucket string) elasticityScenarioReport {
 				return runRangeMoveChaosScenario(t, bucket, "cleanup", RangeMoveFinalizePhasePublished)
@@ -114,7 +115,7 @@ func TestElasticityChaosLoadSuite(t *testing.T) {
 		},
 		{
 			name:      "drain-live-load",
-			operation: PlacementOperationDrain,
+			operation: placement.PlacementOperationDrain,
 			run: func(t *testing.T, bucket string) elasticityScenarioReport {
 				return runDrainLoadScenario(t, bucket)
 			},
@@ -152,14 +153,14 @@ func runSplitChaosScenario(t *testing.T, bucket, phaseName string, crashPhase Sp
 	mgr := openElasticityManager(t, root, 1)
 	createElasticityTable(t, mgr, td)
 
-	plan, err := mgr.PlanPlacement(PlacementPlanRequest{
-		Operation: PlacementOperationSplit,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation: placement.PlacementOperationSplit,
 		ShardID:   0,
 	})
 	if err != nil {
 		t.Fatalf("plan split: %v", err)
 	}
-	if _, err := mgr.ApplyPlacement(ctx, PlacementApplyRequest{
+	if _, err := mgr.ApplyPlacement(ctx, placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	}); err != nil {
@@ -225,8 +226,8 @@ func runRangeMoveChaosScenario(t *testing.T, bucket, phaseName string, crashPhas
 
 	start := uint64(0)
 	end := uint64(1) << 63
-	plan, err := mgr.PlanPlacement(PlacementPlanRequest{
-		Operation:  PlacementOperationRangeMove,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation:  placement.PlacementOperationRangeMove,
 		ShardID:    0,
 		RangeStart: &start,
 		RangeEnd:   &end,
@@ -234,7 +235,7 @@ func runRangeMoveChaosScenario(t *testing.T, bucket, phaseName string, crashPhas
 	if err != nil {
 		t.Fatalf("plan range move: %v", err)
 	}
-	if _, err := mgr.ApplyPlacement(ctx, PlacementApplyRequest{
+	if _, err := mgr.ApplyPlacement(ctx, placement.PlacementApplyRequest{
 		Plan:          plan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	}); err != nil {
@@ -304,8 +305,8 @@ func runDrainLoadScenario(t *testing.T, bucket string) elasticityScenarioReport 
 	stop := startElasticityWriteLoad(t, mgr, td, nil, bucket, rec)
 	waitForElasticityWrites(t, rec, 32)
 
-	plan, err := mgr.PlanPlacement(PlacementPlanRequest{
-		Operation:   PlacementOperationDrain,
+	plan, err := mgr.PlanPlacement(placement.PlacementPlanRequest{
+		Operation:   placement.PlacementOperationDrain,
 		NodeID:      "n1",
 		TargetNodes: []string{"n2"},
 		MinVoters:   1,
@@ -316,7 +317,7 @@ func runDrainLoadScenario(t *testing.T, bucket string) elasticityScenarioReport 
 	}
 	localPlan := plan
 	localPlan.Steps = nil // local no-Raft harness applies the drain metadata without external peers.
-	if _, err := mgr.ApplyPlacement(ctx, PlacementApplyRequest{
+	if _, err := mgr.ApplyPlacement(ctx, placement.PlacementApplyRequest{
 		Plan:          localPlan,
 		ExpectedEpoch: plan.BeforeEpoch,
 	}); err != nil {
@@ -327,7 +328,7 @@ func runDrainLoadScenario(t *testing.T, bucket string) elasticityScenarioReport 
 	stop()
 
 	placement := mgr.Placement()
-	if placement.Nodes["n1"].State != NodeStateDraining {
+	if placement.Nodes["n1"].State != placement.NodeStateDraining {
 		t.Fatalf("n1 state = %s, want draining", placement.Nodes["n1"].State)
 	}
 	if containsString(placement.Shards[0].Voters, "n1") || !containsString(placement.Shards[0].Voters, "n2") {
@@ -383,16 +384,16 @@ func elasticityChaosTableDescriptor() types.TableDescriptor {
 
 func writeDrainPlacement(t *testing.T, root string) {
 	t.Helper()
-	cat := DefaultPlacement(1, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
-	cat.Nodes["n2"] = NodeDescriptor{ID: "n2", RaftAddr: "127.0.0.1:9202", State: NodeStateActive, Capacity: NodeCapacity{Weight: 1}}
-	cat.Nodes["n3"] = NodeDescriptor{ID: "n3", RaftAddr: "127.0.0.1:9203", State: NodeStateActive, Capacity: NodeCapacity{Weight: 1}}
-	cat.normalize()
-	if err := SavePlacementFile(filepath.Join(root, defaultPlacementFileName), cat); err != nil {
+	cat := placement.DefaultPlacement(1, "n1", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange)
+	cat.Nodes["n2"] = placement.NodeDescriptor{ID: "n2", RaftAddr: "127.0.0.1:9202", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1}}
+	cat.Nodes["n3"] = placement.NodeDescriptor{ID: "n3", RaftAddr: "127.0.0.1:9203", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1}}
+	cat.Normalize()
+	if err := placement.SavePlacementFile(filepath.Join(root, defaultPlacementFileName), cat); err != nil {
 		t.Fatalf("save drain placement: %v", err)
 	}
 }
 
-func startElasticityWriteLoad(t *testing.T, mgr *Manager, td types.TableDescriptor, rng *TokenRange, bucket string, rec *elasticityRecorder) func() {
+func startElasticityWriteLoad(t *testing.T, mgr *Manager, td types.TableDescriptor, rng *placement.TokenRange, bucket string, rec *elasticityRecorder) func() {
 	t.Helper()
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -470,7 +471,7 @@ func putElasticityItem(mgr *Manager, td types.TableDescriptor, item types.Item) 
 	return nil
 }
 
-func nextElasticityKey(router *Router, rng *TokenRange, bucket string, seq int64) (string, error) {
+func nextElasticityKey(router *Router, rng *placement.TokenRange, bucket string, seq int64) (string, error) {
 	for attempt := int64(0); attempt < 200_000; attempt++ {
 		key := fmt.Sprintf("%s-key-%06d-%06d", bucket, seq, attempt)
 		if rng == nil {
@@ -641,7 +642,7 @@ func verifyElasticityConsistency(t *testing.T, mgr *Manager, td types.TableDescr
 
 	occurrences := make(map[string]int, len(expected))
 	for _, shard := range mgr.Shards() {
-		if shard == nil || shard.Storage == nil || shard.State == ShardStateDecommissioned {
+		if shard == nil || shard.Storage == nil || shard.State == placement.ShardStateDecommissioned {
 			continue
 		}
 		items, err := shard.Storage.ScanTable(td.Name, 0)
@@ -663,7 +664,7 @@ func verifyElasticityConsistency(t *testing.T, mgr *Manager, td types.TableDescr
 
 	gsiOccurrences := make(map[string]int, len(expected))
 	for _, shard := range mgr.Shards() {
-		if shard == nil || shard.Storage == nil || shard.State == ShardStateDecommissioned {
+		if shard == nil || shard.Storage == nil || shard.State == placement.ShardStateDecommissioned {
 			continue
 		}
 		items, err := shard.Storage.QueryByGSI(td, elasticityChaosIndex, sAttrElasticity(bucket), storage.QueryOptions{})

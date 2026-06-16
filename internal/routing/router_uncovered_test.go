@@ -1,37 +1,31 @@
-package cluster
+package routing
 
 import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/osvaldoandrade/cefas/internal/placement"
 )
 
 // TestRouterReturnsErrorForUncoveredToken pins the post-panic
 // behaviour of Router.ShardForUint64: when the active catalog leaves a
 // token uncovered by every shard range, the call must return
 // ErrNoShardForToken instead of panicking in production.
-//
-// ValidatePlacement enforces full token coverage at construction time,
-// so the only way to reach the defensive branch in normal operation is
-// state corruption — to exercise it deterministically the test
-// bypasses NewRouterFromCatalog and assembles the Router fields
-// directly. This lives in package cluster (not cluster_test) precisely
-// so we can drive that internal path without weakening the public
-// constructor.
 func TestRouterReturnsErrorForUncoveredToken(t *testing.T) {
 	t.Parallel()
 
 	r := &Router{
-		catalog: PlacementCatalog{
-			Version:  PlacementVersion,
+		catalog: placement.PlacementCatalog{
+			Version:  placement.PlacementVersion,
 			Epoch:    42,
-			Strategy: PlacementStrategyTokenRange,
-			Shards: []ShardPlacement{
-				{ID: 0, State: ShardStateActive, Epoch: 42, Ranges: []TokenRange{{Start: 0, End: 100}}},
+			Strategy: placement.PlacementStrategyTokenRange,
+			Shards: []placement.ShardPlacement{
+				{ID: 0, State: placement.ShardStateActive, Epoch: 42, Ranges: []placement.TokenRange{{Start: 0, End: 100}}},
 			},
 		},
 		ranges: []routeRange{
-			{shardID: 0, rng: TokenRange{Start: 0, End: 100}},
+			{shardID: 0, rng: placement.TokenRange{Start: 0, End: 100}},
 		},
 	}
 
@@ -54,16 +48,16 @@ func TestRouterShardForPKPropagatesUncoveredError(t *testing.T) {
 	t.Parallel()
 
 	r := &Router{
-		catalog: PlacementCatalog{
-			Version:  PlacementVersion,
+		catalog: placement.PlacementCatalog{
+			Version:  placement.PlacementVersion,
 			Epoch:    7,
-			Strategy: PlacementStrategyTokenRange,
-			Shards: []ShardPlacement{
-				{ID: 0, State: ShardStateActive, Epoch: 7, Ranges: []TokenRange{{Start: 1, End: 2}}},
+			Strategy: placement.PlacementStrategyTokenRange,
+			Shards: []placement.ShardPlacement{
+				{ID: 0, State: placement.ShardStateActive, Epoch: 7, Ranges: []placement.TokenRange{{Start: 1, End: 2}}},
 			},
 		},
 		ranges: []routeRange{
-			{shardID: 0, rng: TokenRange{Start: 1, End: 2}},
+			{shardID: 0, rng: placement.TokenRange{Start: 1, End: 2}},
 		},
 	}
 
@@ -78,13 +72,13 @@ func TestRouterShardForPKPropagatesUncoveredError(t *testing.T) {
 func TestRouterLegacyModuloStillReturnsNoError(t *testing.T) {
 	t.Parallel()
 
-	r, err := NewRouterFromCatalog(PlacementCatalog{
-		Version:  PlacementVersion,
+	r, err := NewRouterFromCatalog(placement.PlacementCatalog{
+		Version:  placement.PlacementVersion,
 		Epoch:    1,
-		Strategy: PlacementStrategyLegacyModulo,
-		Shards: []ShardPlacement{
-			{ID: 0, State: ShardStateActive, Epoch: 1},
-			{ID: 1, State: ShardStateActive, Epoch: 1},
+		Strategy: placement.PlacementStrategyLegacyModulo,
+		Shards: []placement.ShardPlacement{
+			{ID: 0, State: placement.ShardStateActive, Epoch: 1},
+			{ID: 1, State: placement.ShardStateActive, Epoch: 1},
 		},
 	})
 	if err != nil {

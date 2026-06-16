@@ -4,7 +4,7 @@
 // plan strategies use to subtract/cover token ranges. None of this
 // touches Manager state — it is pure value-level computation kept in
 // its own file so the planner stays readable.
-package cluster
+package placement
 
 import (
 	"fmt"
@@ -26,18 +26,18 @@ func midpointToken(r TokenRange) uint64 {
 	return mid.Uint64()
 }
 
-func tokenStrictlyInside(r TokenRange, token uint64) bool {
+func TokenStrictlyInside(r TokenRange, token uint64) bool {
 	if token == r.Start || token == r.End {
 		return false
 	}
 	return r.Contains(token)
 }
 
-func splitRange(r TokenRange, token uint64) (TokenRange, TokenRange) {
+func SplitRange(r TokenRange, token uint64) (TokenRange, TokenRange) {
 	return TokenRange{Start: r.Start, End: token}, TokenRange{Start: token, End: r.End}
 }
 
-func subtractTokenRanges(ranges []TokenRange, remove TokenRange) ([]TokenRange, error) {
+func SubtractTokenRanges(ranges []TokenRange, remove TokenRange) ([]TokenRange, error) {
 	if len(ranges) == 0 {
 		return nil, fmt.Errorf("source has no ranges")
 	}

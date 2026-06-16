@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 )
 
@@ -37,9 +37,9 @@ type Config struct {
 
 type Planner interface {
 	RefreshPlacement() error
-	Placement() cluster.PlacementCatalog
-	PlanPlacement(cluster.PlacementPlanRequest) (cluster.PlacementPlan, error)
-	ApplyPlacement(context.Context, cluster.PlacementApplyRequest) (cluster.PlacementApplyResult, error)
+	Placement() placement.PlacementCatalog
+	PlanPlacement(placement.PlacementPlanRequest) (placement.PlacementPlan, error)
+	ApplyPlacement(context.Context, placement.PlacementApplyRequest) (placement.PlacementApplyResult, error)
 }
 
 type HotspotSource interface {
@@ -65,8 +65,8 @@ type Controller struct {
 }
 
 type Candidate struct {
-	Operation     cluster.PlacementOperation   `json:"operation"`
-	Request       cluster.PlacementPlanRequest `json:"request"`
+	Operation     placement.PlacementOperation   `json:"operation"`
+	Request       placement.PlacementPlanRequest `json:"request"`
 	SourceShardID uint32                       `json:"sourceShardId,omitempty"`
 	NodeID        string                       `json:"nodeId,omitempty"`
 	Reason        string                       `json:"reason"`
@@ -79,8 +79,8 @@ type Decision struct {
 	Status      string                       `json:"status"`
 	Reason      string                       `json:"reason,omitempty"`
 	Candidate   Candidate                    `json:"candidate,omitempty"`
-	Plan        cluster.PlacementPlan        `json:"plan,omitempty"`
-	ApplyResult cluster.PlacementApplyResult `json:"applyResult,omitempty"`
+	Plan        placement.PlacementPlan        `json:"plan,omitempty"`
+	ApplyResult placement.PlacementApplyResult `json:"applyResult,omitempty"`
 	WrittenPath string                       `json:"writtenPath,omitempty"`
 	Error       string                       `json:"error,omitempty"`
 	CreatedAt   time.Time                    `json:"createdAt"`
@@ -233,7 +233,7 @@ func (c *Controller) Tick(ctx context.Context) ([]Decision, error) {
 			decision.WrittenPath = path
 			c.markExecuted(candidate, now)
 		case ModeAuto:
-			result, err := c.planner.ApplyPlacement(ctx, cluster.PlacementApplyRequest{
+			result, err := c.planner.ApplyPlacement(ctx, placement.PlacementApplyRequest{
 				Plan:          plan,
 				ExpectedEpoch: plan.BeforeEpoch,
 				TimeoutMS:     cfg.ApplyTimeoutMS,
@@ -265,7 +265,7 @@ func (c *Controller) Tick(ctx context.Context) ([]Decision, error) {
 	return decisions, nil
 }
 
-func BuildCandidates(cat cluster.PlacementCatalog, hot []metrics.RangeHotspotSummary, cfg Config) []Candidate {
+func BuildCandidates(cat placement.PlacementCatalog, hot []metrics.RangeHotspotSummary, cfg Config) []Candidate {
 	cfg = NormalizeConfig(cfg)
 	var candidates []Candidate
 	candidates = append(candidates, drainCandidates(cat, cfg)...)
@@ -313,7 +313,7 @@ func (s FileSink) WritePlan(_ context.Context, d Decision) (string, error) {
 	return path, nil
 }
 
-func drainCandidates(cat cluster.PlacementCatalog, cfg Config) []Candidate {
+func drainCandidates(cat placement.PlacementCatalog, cfg Config) []Candidate {
 	nodeIDs := make([]string, 0, len(cat.Nodes))
 	for id := range cat.Nodes {
 		nodeIDs = append(nodeIDs, id)
@@ -322,16 +322,16 @@ func drainCandidates(cat cluster.PlacementCatalog, cfg Config) []Candidate {
 	out := make([]Candidate, 0)
 	for _, nodeID := range nodeIDs {
 		node := cat.Nodes[nodeID]
-		if node.State != cluster.NodeStateDraining {
+		if node.State != placement.NodeStateDraining {
 			continue
 		}
 		if !nodeHasActivePlacement(cat, nodeID) {
 			continue
 		}
 		out = append(out, Candidate{
-			Operation: cluster.PlacementOperationDrain,
-			Request: cluster.PlacementPlanRequest{
-				Operation: cluster.PlacementOperationDrain,
+			Operation: placement.PlacementOperationDrain,
+			Request: placement.PlacementPlanRequest{
+				Operation: placement.PlacementOperationDrain,
 				NodeID:    nodeID,
 				MinVoters: cfg.MinVoters,
 			},
@@ -343,8 +343,8 @@ func drainCandidates(cat cluster.PlacementCatalog, cfg Config) []Candidate {
 	return out
 }
 
-func hotspotCandidates(cat cluster.PlacementCatalog, hot []metrics.RangeHotspotSummary, cfg Config) []Candidate {
-	shards := make(map[uint32]cluster.ShardPlacement, len(cat.Shards))
+func hotspotCandidates(cat placement.PlacementCatalog, hot []metrics.RangeHotspotSummary, cfg Config) []Candidate {
+	shards := make(map[uint32]placement.ShardPlacement, len(cat.Shards))
 	for _, sh := range cat.Shards {
 		shards[sh.ID] = sh
 	}
@@ -375,7 +375,7 @@ func hotspotCandidates(cat cluster.PlacementCatalog, hot []metrics.RangeHotspotS
 			continue
 		}
 		shard, ok := shards[shardID]
-		if !ok || shard.State != cluster.ShardStateActive {
+		if !ok || shard.State != placement.ShardStateActive {
 			continue
 		}
 		candidate, ok := hotspotCandidateForShard(shard, hs, cfg)
@@ -388,16 +388,16 @@ func hotspotCandidates(cat cluster.PlacementCatalog, hot []metrics.RangeHotspotS
 	return out
 }
 
-func hotspotCandidateForShard(shard cluster.ShardPlacement, hs metrics.RangeHotspotSummary, cfg Config) (Candidate, bool) {
+func hotspotCandidateForShard(shard placement.ShardPlacement, hs metrics.RangeHotspotSummary, cfg Config) (Candidate, bool) {
 	reason := fmt.Sprintf("hot range shard=%s bucket=%d reads=%d writes=%d bytes=%d reasons=%s",
 		hs.ShardID, hs.Bucket, hs.Reads, hs.Writes, hs.Bytes, strings.Join(hs.Reasons, ","))
 	priority := hotspotPriority(hs)
 	if len(shard.Ranges) == 1 {
 		return Candidate{
-			Operation:     cluster.PlacementOperationSplit,
+			Operation:     placement.PlacementOperationSplit,
 			SourceShardID: shard.ID,
-			Request: cluster.PlacementPlanRequest{
-				Operation: cluster.PlacementOperationSplit,
+			Request: placement.PlacementPlanRequest{
+				Operation: placement.PlacementOperationSplit,
 				ShardID:   shard.ID,
 				MinVoters: cfg.MinVoters,
 			},
@@ -406,17 +406,17 @@ func hotspotCandidateForShard(shard cluster.ShardPlacement, hs metrics.RangeHots
 			Priority: priority,
 		}, true
 	}
-	bucketRange := cluster.TokenRange{Start: hs.TokenStart, End: hs.TokenEnd}
+	bucketRange := placement.TokenRange{Start: hs.TokenStart, End: hs.TokenEnd}
 	for _, rng := range shard.Ranges {
 		if !rangeContained(rng, bucketRange) {
 			continue
 		}
 		start, end := bucketRange.Start, bucketRange.End
 		return Candidate{
-			Operation:     cluster.PlacementOperationRangeMove,
+			Operation:     placement.PlacementOperationRangeMove,
 			SourceShardID: shard.ID,
-			Request: cluster.PlacementPlanRequest{
-				Operation:  cluster.PlacementOperationRangeMove,
+			Request: placement.PlacementPlanRequest{
+				Operation:  placement.PlacementOperationRangeMove,
 				ShardID:    shard.ID,
 				RangeStart: &start,
 				RangeEnd:   &end,
@@ -438,9 +438,9 @@ func hotspotPriority(hs metrics.RangeHotspotSummary) uint64 {
 	return ops*1_000_000_000 + bytesScore*1_000 + latencyScore + debtScore
 }
 
-func nodeHasActivePlacement(cat cluster.PlacementCatalog, nodeID string) bool {
+func nodeHasActivePlacement(cat placement.PlacementCatalog, nodeID string) bool {
 	for _, shard := range cat.Shards {
-		if shard.State == cluster.ShardStateDecommissioned {
+		if shard.State == placement.ShardStateDecommissioned {
 			continue
 		}
 		if containsString(shard.Voters, nodeID) || containsString(shard.NonVoters, nodeID) || shard.LeaderHint == nodeID {
@@ -450,7 +450,7 @@ func nodeHasActivePlacement(cat cluster.PlacementCatalog, nodeID string) bool {
 	return false
 }
 
-func rangeContained(owner, child cluster.TokenRange) bool {
+func rangeContained(owner, child placement.TokenRange) bool {
 	if child.Start == child.End {
 		return owner.Start == owner.End
 	}

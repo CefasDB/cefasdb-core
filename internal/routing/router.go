@@ -1,18 +1,17 @@
-// Package cluster contains the multi-Raft routing layer: a Router
-// that hashes a request's partition key onto a shard ID, and a
-// Manager that owns one storage.DB + raft.DB per shard.
-//
-// Multi-Raft motivation: every shard runs its own consensus group so
-// write throughput scales horizontally. All shards share a single
-// MuxAcceptor (one TCP port per node) and the same physical Pebble
-// directory tree (one subdir per shard).
-package cluster
+// Package routing maps a partition key to a shard ID using the
+// active placement catalog. The Router is purely read-only — it
+// consumes a placement.PlacementCatalog snapshot built by the
+// cluster Manager and serves ShardForPK / ShardForUint64 lookups
+// from a sorted token-range table.
+package routing
 
 import (
 	"errors"
 	"fmt"
 
 	"github.com/cespare/xxhash/v2"
+
+	"github.com/osvaldoandrade/cefas/internal/placement"
 )
 
 // ErrNoShardForToken is returned by Router.ShardForPK / ShardForUint64
@@ -20,19 +19,19 @@ import (
 // shard's range. This indicates the catalog is corrupted or out of
 // sync with the caller — ValidatePlacement is supposed to guarantee
 // full coverage at construction time.
-var ErrNoShardForToken = errors.New("cluster: no shard owns token under active placement")
+var ErrNoShardForToken = errors.New("routing: no shard owns token under active placement")
 
 // Router maps a partition key (canonical byte form, same input the
 // storage layer's pkHash8 consumes) onto a shard ID using the active
 // placement catalog.
 type Router struct {
-	catalog PlacementCatalog
+	catalog placement.PlacementCatalog
 	ranges  []routeRange
 }
 
 type routeRange struct {
 	shardID uint32
-	rng     TokenRange
+	rng     placement.TokenRange
 }
 
 // NewRouter returns a router that distributes keys over `n` shards.
@@ -43,22 +42,22 @@ type routeRange struct {
 // here means DefaultPlacement itself is broken — a programmer error
 // that should fail fast at boot, not be returned as a runtime error.
 func NewRouter(n int) *Router {
-	r, err := NewRouterFromCatalog(DefaultPlacement(n, "", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange))
+	r, err := NewRouterFromCatalog(placement.DefaultPlacement(n, "", nil, nil, placement.NodeCapacity{}, placement.PlacementStrategyTokenRange))
 	if err != nil {
-		panic(fmt.Errorf("cluster: DefaultPlacement produced an invalid catalog: %w", err))
+		panic(fmt.Errorf("routing: DefaultPlacement produced an invalid catalog: %w", err))
 	}
 	return r
 }
 
-func NewRouterFromCatalog(cat PlacementCatalog) (*Router, error) {
-	cat.normalize()
-	if err := ValidatePlacement(cat); err != nil {
+func NewRouterFromCatalog(cat placement.PlacementCatalog) (*Router, error) {
+	cat.Normalize()
+	if err := placement.ValidatePlacement(cat); err != nil {
 		return nil, err
 	}
 	r := &Router{catalog: cat.Clone()}
-	if cat.Strategy == PlacementStrategyTokenRange {
+	if cat.Strategy == placement.PlacementStrategyTokenRange {
 		for _, sh := range cat.Shards {
-			if !sh.State.routable() {
+			if !sh.State.Routable() {
 				continue
 			}
 			for _, rng := range sh.Ranges {
@@ -77,9 +76,9 @@ func (r *Router) Count() int {
 	return len(r.catalog.Shards)
 }
 
-func (r *Router) Catalog() PlacementCatalog {
+func (r *Router) Catalog() placement.PlacementCatalog {
 	if r == nil {
-		return PlacementCatalog{}
+		return placement.PlacementCatalog{}
 	}
 	return r.catalog.Clone()
 }
@@ -139,7 +138,7 @@ func (r *Router) ShardForUint64(h uint64) (uint32, error) {
 	if r == nil || len(r.catalog.Shards) == 0 {
 		return 0, nil
 	}
-	if r.catalog.Strategy == PlacementStrategyLegacyModulo {
+	if r.catalog.Strategy == placement.PlacementStrategyLegacyModulo {
 		if len(r.catalog.Shards) == 1 {
 			return 0, nil
 		}

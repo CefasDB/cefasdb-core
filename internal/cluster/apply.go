@@ -2,7 +2,7 @@
 //
 // Split off from planner.go to keep that file under the playbook
 // §1 ≤ 500 LOC cap. ApplyPlacement is the runtime path that executes
-// a previously-built PlacementPlan, including the four per-operation
+// a previously-built placement.PlacementPlan, including the four per-operation
 // validators (split, range-move, decommission, plus the generic
 // gate) and the small same*-comparison helpers they rely on.
 package cluster
@@ -15,35 +15,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
-func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) (PlacementApplyResult, error) {
+func (m *Manager) ApplyPlacement(ctx context.Context, req placement.PlacementApplyRequest) (placement.PlacementApplyResult, error) {
 	if err := m.RefreshPlacement(); err != nil {
-		return PlacementApplyResult{}, err
+		return placement.PlacementApplyResult{}, err
 	}
 	current := m.Placement()
 	if result, ok, err := m.applyAlreadyPreparedTransition(ctx, current, req); ok || err != nil {
 		return result, err
 	}
 	if err := validateApplyRequest(current, req); err != nil {
-		return PlacementApplyResult{}, err
+		return placement.PlacementApplyResult{}, err
 	}
 	timeout := applyTimeout(req.TimeoutMS)
-	applied := make([]PlacementApplyStep, 0, len(req.Plan.Steps))
-	if req.Plan.Operation == PlacementOperationSplit || req.Plan.Operation == PlacementOperationRangeMove {
+	applied := make([]placement.PlacementApplyStep, 0, len(req.Plan.Steps))
+	if req.Plan.Operation == placement.PlacementOperationSplit || req.Plan.Operation == placement.PlacementOperationRangeMove {
 		if err := m.openMissingShardsForPlacement(ctx, req.Plan.After); err != nil {
-			return PlacementApplyResult{}, err
+			return placement.PlacementApplyResult{}, err
 		}
 		for _, step := range req.Plan.Steps {
 			status := "ok"
-			if req.Plan.Operation == PlacementOperationRangeMove {
+			if req.Plan.Operation == placement.PlacementOperationRangeMove {
 				status = "pending_finalize"
 				if step.Action == "create_shard" || step.Action == "target_membership" {
 					status = "ok"
 				}
 			}
-			applied = append(applied, PlacementApplyStep{
+			applied = append(applied, placement.PlacementApplyStep{
 				Action:  step.Action,
 				ShardID: step.ShardID,
 				NodeID:  step.NodeID,
@@ -51,12 +52,12 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 				Detail:  step.Detail,
 			})
 		}
-	} else if req.Plan.Operation == PlacementOperationDecommission {
+	} else if req.Plan.Operation == placement.PlacementOperationDecommission {
 		for _, step := range req.Plan.Steps {
 			if err := ctx.Err(); err != nil {
-				return PlacementApplyResult{}, err
+				return placement.PlacementApplyResult{}, err
 			}
-			applied = append(applied, PlacementApplyStep{
+			applied = append(applied, placement.PlacementApplyStep{
 				Action:  step.Action,
 				ShardID: step.ShardID,
 				NodeID:  step.NodeID,
@@ -67,12 +68,12 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 	} else {
 		for _, step := range req.Plan.Steps {
 			if err := ctx.Err(); err != nil {
-				return PlacementApplyResult{}, err
+				return placement.PlacementApplyResult{}, err
 			}
 			if err := m.executePlacementStep(step, timeout); err != nil {
-				return PlacementApplyResult{}, err
+				return placement.PlacementApplyResult{}, err
 			}
-			applied = append(applied, PlacementApplyStep{
+			applied = append(applied, placement.PlacementApplyStep{
 				Action:  step.Action,
 				ShardID: step.ShardID,
 				NodeID:  step.NodeID,
@@ -82,12 +83,12 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 		}
 	}
 	if err := m.persistPlacementSnapshotStrict(m.placementPath, req.Plan.After); err != nil {
-		return PlacementApplyResult{}, err
+		return placement.PlacementApplyResult{}, err
 	}
 	if err := m.applyPlacement(req.Plan.After, false); err != nil {
-		return PlacementApplyResult{}, err
+		return placement.PlacementApplyResult{}, err
 	}
-	return PlacementApplyResult{
+	return placement.PlacementApplyResult{
 		Operation:   req.Plan.Operation,
 		BeforeEpoch: current.Epoch,
 		AfterEpoch:  req.Plan.After.Epoch,
@@ -96,19 +97,19 @@ func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest)
 	}, nil
 }
 
-func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) error {
+func validateApplyRequest(current placement.PlacementCatalog, req placement.PlacementApplyRequest) error {
 	plan := req.Plan
-	if plan.Operation != PlacementOperationMove && plan.Operation != PlacementOperationDrain && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove && plan.Operation != PlacementOperationDecommission {
-		return invalidPlan("apply supports split, move, range_move, drain and decommission plans only, got %q", plan.Operation)
+	if plan.Operation != placement.PlacementOperationMove && plan.Operation != placement.PlacementOperationDrain && plan.Operation != placement.PlacementOperationSplit && plan.Operation != placement.PlacementOperationRangeMove && plan.Operation != placement.PlacementOperationDecommission {
+		return placement.InvalidPlan("apply supports split, move, range_move, drain and decommission plans only, got %q", plan.Operation)
 	}
 	if plan.RequiresRestart {
-		return invalidPlan("plan requires restart and cannot be applied online")
+		return placement.InvalidPlan("plan requires restart and cannot be applied online")
 	}
-	if plan.RequiresDataCopy && plan.Operation != PlacementOperationSplit && plan.Operation != PlacementOperationRangeMove {
-		return invalidPlan("plan requires data copy and cannot be applied online")
+	if plan.RequiresDataCopy && plan.Operation != placement.PlacementOperationSplit && plan.Operation != placement.PlacementOperationRangeMove {
+		return placement.InvalidPlan("plan requires data copy and cannot be applied online")
 	}
 	if !plan.ApplySupported {
-		return invalidPlan("plan is not marked apply-supported")
+		return placement.InvalidPlan("plan is not marked apply-supported")
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != current.Epoch {
 		return &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: current.Epoch}
@@ -117,37 +118,37 @@ func validateApplyRequest(current PlacementCatalog, req PlacementApplyRequest) e
 		return &StaleRouteError{ClientEpoch: plan.BeforeEpoch, CurrentEpoch: current.Epoch}
 	}
 	if !samePlacement(current, plan.Before) {
-		return invalidPlan("plan before catalog does not match current placement")
+		return placement.InvalidPlan("plan before catalog does not match current placement")
 	}
 	if plan.After.Epoch <= current.Epoch {
-		return invalidPlan("after epoch %d must be greater than current epoch %d", plan.After.Epoch, current.Epoch)
+		return placement.InvalidPlan("after epoch %d must be greater than current epoch %d", plan.After.Epoch, current.Epoch)
 	}
-	if plan.Operation == PlacementOperationSplit {
+	if plan.Operation == placement.PlacementOperationSplit {
 		return validateSplitApplyRequest(current, plan)
 	}
-	if plan.Operation == PlacementOperationRangeMove {
+	if plan.Operation == placement.PlacementOperationRangeMove {
 		return validateRangeMoveApplyRequest(current, plan)
 	}
-	if plan.Operation == PlacementOperationDecommission {
+	if plan.Operation == placement.PlacementOperationDecommission {
 		return validateDecommissionApplyRequest(current, plan)
 	}
 	if len(plan.After.Shards) != len(current.Shards) {
-		return invalidPlan("apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+		return placement.InvalidPlan("apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
 	}
-	if err := ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateDecommissionApplyRequest(current PlacementCatalog, plan PlacementPlan) error {
+func validateDecommissionApplyRequest(current placement.PlacementCatalog, plan placement.PlacementPlan) error {
 	if plan.RequiresDataCopy {
-		return invalidPlan("decommission apply must not require data copy")
+		return placement.InvalidPlan("decommission apply must not require data copy")
 	}
 	if len(plan.After.Shards) != len(current.Shards) {
-		return invalidPlan("decommission apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+		return placement.InvalidPlan("decommission apply cannot change shard count: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
 	}
-	if err := ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		return err
 	}
 
@@ -155,60 +156,60 @@ func validateDecommissionApplyRequest(current PlacementCatalog, plan PlacementPl
 	for id, beforeNode := range current.Nodes {
 		afterNode, ok := plan.After.Nodes[id]
 		if !ok {
-			return invalidPlan("decommission apply cannot remove node %q from placement", id)
+			return placement.InvalidPlan("decommission apply cannot remove node %q from placement", id)
 		}
 		if beforeNode.State == afterNode.State {
 			continue
 		}
 		if target != "" {
-			return invalidPlan("decommission apply can change one node state only")
+			return placement.InvalidPlan("decommission apply can change one node state only")
 		}
-		if beforeNode.State != NodeStateDraining || afterNode.State != NodeStateDecommissioned {
-			return invalidPlan("decommission apply requires node %q to transition %s -> %s, got %s -> %s", id, NodeStateDraining, NodeStateDecommissioned, beforeNode.State, afterNode.State)
+		if beforeNode.State != placement.NodeStateDraining || afterNode.State != placement.NodeStateDecommissioned {
+			return placement.InvalidPlan("decommission apply requires node %q to transition %s -> %s, got %s -> %s", id, placement.NodeStateDraining, placement.NodeStateDecommissioned, beforeNode.State, afterNode.State)
 		}
 		target = id
 	}
 	for id := range plan.After.Nodes {
 		if _, ok := current.Nodes[id]; !ok {
-			return invalidPlan("decommission apply cannot add node %q", id)
+			return placement.InvalidPlan("decommission apply cannot add node %q", id)
 		}
 	}
 	if target == "" {
-		return invalidPlan("decommission apply found no node state transition")
+		return placement.InvalidPlan("decommission apply found no node state transition")
 	}
 	targetNodeID, err := model.NewNodeID(target)
 	if err != nil {
-		return invalidPlan("decommission apply target node %q is invalid: %v", target, err)
+		return placement.InvalidPlan("decommission apply target node %q is invalid: %v", target, err)
 	}
-	if blockers := placementNodeActiveReferences(current, targetNodeID); len(blockers) > 0 {
-		return invalidPlan("node %q still has active placement references: %s", target, strings.Join(blockers, "; "))
+	if blockers := placement.PlacementNodeActiveReferences(current, targetNodeID); len(blockers) > 0 {
+		return placement.InvalidPlan("node %q still has active placement references: %s", target, strings.Join(blockers, "; "))
 	}
 	for i, before := range current.Shards {
 		after := plan.After.Shards[i]
 		if before.ID != after.ID || before.State != after.State || before.Epoch != after.Epoch || before.LeaderHint != after.LeaderHint || !sameTokenRanges(before.Ranges, after.Ranges) || !sameStringSet(before.Voters, after.Voters) || !sameStringSet(before.NonVoters, after.NonVoters) {
-			return invalidPlan("decommission apply cannot change shard %d placement", before.ID)
+			return placement.InvalidPlan("decommission apply cannot change shard %d placement", before.ID)
 		}
 	}
 	return nil
 }
 
-func validateRangeMoveApplyRequest(current PlacementCatalog, plan PlacementPlan) error {
+func validateRangeMoveApplyRequest(current placement.PlacementCatalog, plan placement.PlacementPlan) error {
 	if !plan.RequiresDataCopy {
-		return invalidPlan("range_move apply expects a transition plan that still requires data copy")
+		return placement.InvalidPlan("range_move apply expects a transition plan that still requires data copy")
 	}
 	if len(plan.After.Shards) != len(current.Shards)+1 {
-		return invalidPlan("range_move apply expects exactly one target shard: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+		return placement.InvalidPlan("range_move apply expects exactly one target shard: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
 	}
 	sourceIdx := -1
-	var sourceBefore, sourceAfter ShardPlacement
+	var sourceBefore, sourceAfter placement.ShardPlacement
 	for i, before := range current.Shards {
 		after := plan.After.Shards[i]
 		if before.ID != after.ID {
-			return invalidPlan("range_move apply requires existing shard order to remain stable")
+			return placement.InvalidPlan("range_move apply requires existing shard order to remain stable")
 		}
-		if after.State == ShardStateMoving {
+		if after.State == placement.ShardStateMoving {
 			if sourceIdx >= 0 {
-				return invalidPlan("range_move apply found more than one moving source")
+				return placement.InvalidPlan("range_move apply found more than one moving source")
 			}
 			sourceIdx = i
 			sourceBefore = before
@@ -216,50 +217,50 @@ func validateRangeMoveApplyRequest(current PlacementCatalog, plan PlacementPlan)
 		}
 	}
 	if sourceIdx < 0 {
-		return invalidPlan("range_move apply requires one source shard in %s state", ShardStateMoving)
+		return placement.InvalidPlan("range_move apply requires one source shard in %s state", placement.ShardStateMoving)
 	}
 	target := plan.After.Shards[len(plan.After.Shards)-1]
 	if target.ID != uint32(len(current.Shards)) {
-		return invalidPlan("range_move target shard id must be %d, got %d", len(current.Shards), target.ID)
+		return placement.InvalidPlan("range_move target shard id must be %d, got %d", len(current.Shards), target.ID)
 	}
-	if sourceAfter.ID != sourceBefore.ID || sourceAfter.State != ShardStateMoving {
-		return invalidPlan("range_move source shard %d must transition to %s", sourceBefore.ID, ShardStateMoving)
+	if sourceAfter.ID != sourceBefore.ID || sourceAfter.State != placement.ShardStateMoving {
+		return placement.InvalidPlan("range_move source shard %d must transition to %s", sourceBefore.ID, placement.ShardStateMoving)
 	}
 	if !sameTokenRanges(sourceAfter.Ranges, sourceBefore.Ranges) {
-		return invalidPlan("range_move source ranges must not shrink before finalization")
+		return placement.InvalidPlan("range_move source ranges must not shrink before finalization")
 	}
-	if target.State != ShardStateCreating {
-		return invalidPlan("range_move target shard %d must be %s, got %s", target.ID, ShardStateCreating, target.State)
+	if target.State != placement.ShardStateCreating {
+		return placement.InvalidPlan("range_move target shard %d must be %s, got %s", target.ID, placement.ShardStateCreating, target.State)
 	}
 	if len(target.Ranges) != 1 {
-		return invalidPlan("range_move target shard %d requires exactly one pending range", target.ID)
+		return placement.InvalidPlan("range_move target shard %d requires exactly one pending range", target.ID)
 	}
-	if _, err := subtractTokenRanges(sourceBefore.Ranges, target.Ranges[0]); err != nil {
-		return fmt.Errorf("%w: range_move target range [%d,%d) is not owned by source shard %d", ErrInvalidPlacementPlan, target.Ranges[0].Start, target.Ranges[0].End, sourceBefore.ID)
+	if _, err := placement.SubtractTokenRanges(sourceBefore.Ranges, target.Ranges[0]); err != nil {
+		return fmt.Errorf("%w: range_move target range [%d,%d) is not owned by source shard %d", placement.ErrInvalidPlacementPlan, target.Ranges[0].Start, target.Ranges[0].End, sourceBefore.ID)
 	}
-	if err := ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateSplitApplyRequest(current PlacementCatalog, plan PlacementPlan) error {
+func validateSplitApplyRequest(current placement.PlacementCatalog, plan placement.PlacementPlan) error {
 	if !plan.RequiresDataCopy {
-		return invalidPlan("split apply expects a transition plan that still requires data copy")
+		return placement.InvalidPlan("split apply expects a transition plan that still requires data copy")
 	}
 	if len(plan.After.Shards) != len(current.Shards)+1 {
-		return invalidPlan("split apply expects exactly one new shard: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
+		return placement.InvalidPlan("split apply expects exactly one new shard: before=%d after=%d", len(current.Shards), len(plan.After.Shards))
 	}
 	parentIdx := -1
-	var parentBefore, parentAfter ShardPlacement
+	var parentBefore, parentAfter placement.ShardPlacement
 	for i, before := range current.Shards {
 		after := plan.After.Shards[i]
 		if before.ID != after.ID {
-			return invalidPlan("split apply requires existing shard order to remain stable")
+			return placement.InvalidPlan("split apply requires existing shard order to remain stable")
 		}
-		if after.State == ShardStateSplitting {
+		if after.State == placement.ShardStateSplitting {
 			if parentIdx >= 0 {
-				return invalidPlan("split apply found more than one splitting parent")
+				return placement.InvalidPlan("split apply found more than one splitting parent")
 			}
 			parentIdx = i
 			parentBefore = before
@@ -267,53 +268,53 @@ func validateSplitApplyRequest(current PlacementCatalog, plan PlacementPlan) err
 		}
 	}
 	if parentIdx < 0 {
-		return invalidPlan("split apply requires one parent shard in %s state", ShardStateSplitting)
+		return placement.InvalidPlan("split apply requires one parent shard in %s state", placement.ShardStateSplitting)
 	}
 	child := plan.After.Shards[len(plan.After.Shards)-1]
 	if child.ID != uint32(len(current.Shards)) {
-		return invalidPlan("split child shard id must be %d, got %d", len(current.Shards), child.ID)
+		return placement.InvalidPlan("split child shard id must be %d, got %d", len(current.Shards), child.ID)
 	}
-	if parentAfter.ID != parentBefore.ID || parentAfter.State != ShardStateSplitting {
-		return invalidPlan("split parent shard %d must transition to %s", parentBefore.ID, ShardStateSplitting)
+	if parentAfter.ID != parentBefore.ID || parentAfter.State != placement.ShardStateSplitting {
+		return placement.InvalidPlan("split parent shard %d must transition to %s", parentBefore.ID, placement.ShardStateSplitting)
 	}
-	if child.State != ShardStateCreating {
-		return invalidPlan("split child shard %d must be %s, got %s", child.ID, ShardStateCreating, child.State)
+	if child.State != placement.ShardStateCreating {
+		return placement.InvalidPlan("split child shard %d must be %s, got %s", child.ID, placement.ShardStateCreating, child.State)
 	}
 	if len(parentBefore.Ranges) != 1 || len(parentAfter.Ranges) != 1 || len(child.Ranges) != 1 {
-		return invalidPlan("split apply requires one parent range and one child range")
+		return placement.InvalidPlan("split apply requires one parent range and one child range")
 	}
 	if parentBefore.Ranges[0] != parentAfter.Ranges[0] {
-		return invalidPlan("split parent range must not shrink before finalization")
+		return placement.InvalidPlan("split parent range must not shrink before finalization")
 	}
-	if child.Ranges[0].End != parentBefore.Ranges[0].End || !tokenStrictlyInside(parentBefore.Ranges[0], child.Ranges[0].Start) {
-		return invalidPlan("split child range [%d,%d) must be a suffix of parent range [%d,%d)", child.Ranges[0].Start, child.Ranges[0].End, parentBefore.Ranges[0].Start, parentBefore.Ranges[0].End)
+	if child.Ranges[0].End != parentBefore.Ranges[0].End || !placement.TokenStrictlyInside(parentBefore.Ranges[0], child.Ranges[0].Start) {
+		return placement.InvalidPlan("split child range [%d,%d) must be a suffix of parent range [%d,%d)", child.Ranges[0].Start, child.Ranges[0].End, parentBefore.Ranges[0].Start, parentBefore.Ranges[0].End)
 	}
-	if err := ValidatePlacement(plan.After); err != nil {
+	if err := placement.ValidatePlacement(plan.After); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *Manager) applyAlreadyPreparedTransition(ctx context.Context, current PlacementCatalog, req PlacementApplyRequest) (PlacementApplyResult, bool, error) {
-	if (req.Plan.Operation != PlacementOperationSplit && req.Plan.Operation != PlacementOperationRangeMove) || !samePlacement(current, req.Plan.After) {
-		return PlacementApplyResult{}, false, nil
+func (m *Manager) applyAlreadyPreparedTransition(ctx context.Context, current placement.PlacementCatalog, req placement.PlacementApplyRequest) (placement.PlacementApplyResult, bool, error) {
+	if (req.Plan.Operation != placement.PlacementOperationSplit && req.Plan.Operation != placement.PlacementOperationRangeMove) || !samePlacement(current, req.Plan.After) {
+		return placement.PlacementApplyResult{}, false, nil
 	}
 	if req.ExpectedEpoch != 0 && req.ExpectedEpoch != current.Epoch && req.ExpectedEpoch != req.Plan.BeforeEpoch {
-		return PlacementApplyResult{}, true, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: current.Epoch}
+		return placement.PlacementApplyResult{}, true, &StaleRouteError{ClientEpoch: req.ExpectedEpoch, CurrentEpoch: current.Epoch}
 	}
 	if err := m.openMissingShardsForPlacement(ctx, current); err != nil {
-		return PlacementApplyResult{}, true, err
+		return placement.PlacementApplyResult{}, true, err
 	}
-	steps := make([]PlacementApplyStep, 0, len(req.Plan.Steps))
+	steps := make([]placement.PlacementApplyStep, 0, len(req.Plan.Steps))
 	for _, step := range req.Plan.Steps {
 		status := "already_applied"
-		if req.Plan.Operation == PlacementOperationRangeMove {
+		if req.Plan.Operation == placement.PlacementOperationRangeMove {
 			status = "pending_finalize"
 			if step.Action == "create_shard" || step.Action == "target_membership" {
 				status = "already_applied"
 			}
 		}
-		steps = append(steps, PlacementApplyStep{
+		steps = append(steps, placement.PlacementApplyStep{
 			Action:  step.Action,
 			ShardID: step.ShardID,
 			NodeID:  step.NodeID,
@@ -321,7 +322,7 @@ func (m *Manager) applyAlreadyPreparedTransition(ctx context.Context, current Pl
 			Detail:  step.Detail,
 		})
 	}
-	return PlacementApplyResult{
+	return placement.PlacementApplyResult{
 		Operation:   req.Plan.Operation,
 		BeforeEpoch: current.Epoch,
 		AfterEpoch:  current.Epoch,
@@ -330,16 +331,16 @@ func (m *Manager) applyAlreadyPreparedTransition(ctx context.Context, current Pl
 	}, true, nil
 }
 
-func samePlacement(a, b PlacementCatalog) bool {
-	encA, errA := encodePlacement(a)
-	encB, errB := encodePlacement(b)
+func samePlacement(a, b placement.PlacementCatalog) bool {
+	encA, errA := placement.EncodePlacement(a)
+	encB, errB := placement.EncodePlacement(b)
 	if errA != nil || errB != nil {
 		return false
 	}
 	return bytes.Equal(encA, encB)
 }
 
-func sameTokenRanges(a, b []TokenRange) bool {
+func sameTokenRanges(a, b []placement.TokenRange) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -374,14 +375,14 @@ func applyTimeout(timeoutMS int) time.Duration {
 	return time.Duration(timeoutMS) * time.Millisecond
 }
 
-func (m *Manager) executePlacementStep(step PlacementPlanStep, timeout time.Duration) error {
+func (m *Manager) executePlacementStep(step placement.PlacementPlanStep, timeout time.Duration) error {
 	switch step.Action {
 	case "add_voter", "remove_voter", "wait_catchup":
 	default:
-		return invalidPlan("unsupported apply step %q", step.Action)
+		return placement.InvalidPlan("unsupported apply step %q", step.Action)
 	}
 	if step.ShardID == nil {
-		return invalidPlan("step %q requires shardId", step.Action)
+		return placement.InvalidPlan("step %q requires shardId", step.Action)
 	}
 	shard, ok := m.Shard(*step.ShardID)
 	if !ok || shard == nil || shard.Raft == nil {
@@ -390,12 +391,12 @@ func (m *Manager) executePlacementStep(step PlacementPlanStep, timeout time.Dura
 	switch step.Action {
 	case "add_voter":
 		if step.NodeID == "" || step.Addr == "" {
-			return invalidPlan("add_voter requires nodeId and addr")
+			return placement.InvalidPlan("add_voter requires nodeId and addr")
 		}
 		return shard.Raft.AddVoter(step.NodeID, step.Addr, timeout)
 	case "remove_voter":
 		if step.NodeID == "" {
-			return invalidPlan("remove_voter requires nodeId")
+			return placement.InvalidPlan("remove_voter requires nodeId")
 		}
 		return shard.Raft.RemoveServer(step.NodeID, timeout)
 	case "wait_catchup":

@@ -13,6 +13,8 @@ import (
 
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -29,7 +31,7 @@ func pickPort(t testing.TB) string {
 }
 
 func TestRouterDistributesKeys(t *testing.T) {
-	r := cluster.NewRouter(4)
+	r := routing.NewRouter(4)
 	hits := make(map[uint32]int)
 	for i := 0; i < 10_000; i++ {
 		pk := []byte(fmt.Sprintf("user-%d", i))
@@ -53,7 +55,7 @@ func TestRouterDistributesKeys(t *testing.T) {
 }
 
 func TestRouterSingleShard(t *testing.T) {
-	r := cluster.NewRouter(1)
+	r := routing.NewRouter(1)
 	for i := 0; i < 100; i++ {
 		id, err := r.ShardForPK([]byte(fmt.Sprintf("k%d", i)))
 		if err != nil {
@@ -66,16 +68,16 @@ func TestRouterSingleShard(t *testing.T) {
 }
 
 func TestRouterUsesTokenRangePlacement(t *testing.T) {
-	cat := cluster.PlacementCatalog{
+	cat := placement.PlacementCatalog{
 		Version:  1,
 		Epoch:    7,
-		Strategy: cluster.PlacementStrategyTokenRange,
-		Shards: []cluster.ShardPlacement{
-			{ID: 0, State: cluster.ShardStateActive, Epoch: 7, Ranges: []cluster.TokenRange{{Start: 0, End: 100}}},
-			{ID: 1, State: cluster.ShardStateActive, Epoch: 7, Ranges: []cluster.TokenRange{{Start: 100, End: 0}}},
+		Strategy: placement.PlacementStrategyTokenRange,
+		Shards: []placement.ShardPlacement{
+			{ID: 0, State: placement.ShardStateActive, Epoch: 7, Ranges: []placement.TokenRange{{Start: 0, End: 100}}},
+			{ID: 1, State: placement.ShardStateActive, Epoch: 7, Ranges: []placement.TokenRange{{Start: 100, End: 0}}},
 		},
 	}
-	r, err := cluster.NewRouterFromCatalog(cat)
+	r, err := routing.NewRouterFromCatalog(cat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,22 +105,22 @@ func TestRouterUsesTokenRangePlacement(t *testing.T) {
 
 func TestPlacementFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "placement.json")
-	cat := cluster.DefaultPlacement(
+	cat := placement.DefaultPlacement(
 		3,
 		"n1",
 		map[string]string{"n1": "127.0.0.1:9101", "n2": "127.0.0.1:9102"},
 		map[string]string{"n1": "http://127.0.0.1:8081", "n2": "http://127.0.0.1:8082"},
-		cluster.NodeCapacity{Weight: 2, CPU: 10, Zone: "az-a", Tags: []string{"hot"}},
-		cluster.PlacementStrategyTokenRange,
+		placement.NodeCapacity{Weight: 2, CPU: 10, Zone: "az-a", Tags: []string{"hot"}},
+		placement.PlacementStrategyTokenRange,
 	)
-	if err := cluster.SavePlacementFile(path, cat); err != nil {
+	if err := placement.SavePlacementFile(path, cat); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := cluster.LoadPlacementFile(path)
+	loaded, err := placement.LoadPlacementFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Strategy != cluster.PlacementStrategyTokenRange || loaded.Epoch != 1 || len(loaded.Shards) != 3 {
+	if loaded.Strategy != placement.PlacementStrategyTokenRange || loaded.Epoch != 1 || len(loaded.Shards) != 3 {
 		t.Fatalf("unexpected placement: %+v", loaded)
 	}
 	if loaded.Nodes["n1"].Capacity.Weight != 2 || loaded.Nodes["n1"].Capacity.Zone != "az-a" {
@@ -139,12 +141,12 @@ func TestManagerCreatesTokenRangePlacementForFreshRoot(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	placement := mgr.Placement()
-	if placement.Strategy != cluster.PlacementStrategyTokenRange {
-		t.Fatalf("strategy = %q, want %q", placement.Strategy, cluster.PlacementStrategyTokenRange)
+	cat := mgr.Placement()
+	if cat.Strategy != placement.PlacementStrategyTokenRange {
+		t.Fatalf("strategy = %q, want %q", cat.Strategy, placement.PlacementStrategyTokenRange)
 	}
-	if len(placement.Shards) != 2 || len(placement.Shards[0].Ranges) == 0 {
-		t.Fatalf("missing token ranges: %+v", placement.Shards)
+	if len(cat.Shards) != 2 || len(cat.Shards[0].Ranges) == 0 {
+		t.Fatalf("missing token ranges: %+v", cat.Shards)
 	}
 	if _, err := os.Stat(filepath.Join(root, "placement.json")); err != nil {
 		t.Fatalf("placement file not created: %v", err)
@@ -175,8 +177,8 @@ func TestManagerPreservesLegacyModuloForExistingShardState(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	if got := mgr.Placement().Strategy; got != cluster.PlacementStrategyLegacyModulo {
-		t.Fatalf("strategy = %q, want %q", got, cluster.PlacementStrategyLegacyModulo)
+	if got := mgr.Placement().Strategy; got != placement.PlacementStrategyLegacyModulo {
+		t.Fatalf("strategy = %q, want %q", got, placement.PlacementStrategyLegacyModulo)
 	}
 }
 

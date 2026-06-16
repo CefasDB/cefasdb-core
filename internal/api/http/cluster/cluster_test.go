@@ -12,6 +12,7 @@ import (
 
 	clusterhttp "github.com/osvaldoandrade/cefas/internal/api/http/cluster"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 )
 
 // stubCluster is the minimal Cluster surface the package needs. It
@@ -293,11 +294,11 @@ func TestPlacementPlanSplit(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var plan cluster.PlacementPlan
+	var plan placement.PlacementPlan
 	if err := json.NewDecoder(rec.Body).Decode(&plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan.Operation != cluster.PlacementOperationSplit || len(plan.After.Shards) != 2 {
+	if plan.Operation != placement.PlacementOperationSplit || len(plan.After.Shards) != 2 {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 }
@@ -314,11 +315,11 @@ func TestPlacementApplyHappyPath(t *testing.T) {
 	if planRec.Code != http.StatusOK {
 		t.Fatalf("plan status = %d body=%s", planRec.Code, planRec.Body.String())
 	}
-	var plan cluster.PlacementPlan
+	var plan placement.PlacementPlan
 	if err := json.NewDecoder(planRec.Body).Decode(&plan); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(cluster.PlacementApplyRequest{Plan: plan, ExpectedEpoch: plan.BeforeEpoch})
+	raw, err := json.Marshal(placement.PlacementApplyRequest{Plan: plan, ExpectedEpoch: plan.BeforeEpoch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +329,7 @@ func TestPlacementApplyHappyPath(t *testing.T) {
 	if applyRec.Code != http.StatusOK {
 		t.Fatalf("apply status = %d body=%s", applyRec.Code, applyRec.Body.String())
 	}
-	var result cluster.PlacementApplyResult
+	var result placement.PlacementApplyResult
 	if err := json.NewDecoder(applyRec.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +350,7 @@ func TestPlacementAuditHappyPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var report cluster.PlacementAuditReport
+	var report placement.PlacementAuditReport
 	if err := json.NewDecoder(rec.Body).Decode(&report); err != nil {
 		t.Fatal(err)
 	}

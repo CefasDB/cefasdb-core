@@ -14,7 +14,9 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/rebalance"
+	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -90,8 +92,8 @@ func TestAutonomousRebalancerSkewReductionGate(t *testing.T) {
 
 	quarter := uint64(1) << 62
 	half := uint64(1) << 63
-	firstQuarter := cluster.TokenRange{Start: 0, End: quarter}
-	secondQuarter := cluster.TokenRange{Start: quarter, End: half}
+	firstQuarter := placement.TokenRange{Start: 0, End: quarter}
+	secondQuarter := placement.TokenRange{Start: quarter, End: half}
 
 	beforeRecords := append(
 		fixedRecordsInRange(t, mgr.Router(), firstQuarter, "before-a", 64),
@@ -124,7 +126,7 @@ func TestAutonomousRebalancerSkewReductionGate(t *testing.T) {
 		t.Fatalf("decisions len = %d, want 1: %+v", len(decisions), decisions)
 	}
 	decision := decisions[0]
-	if decision.Status != "applied" || decision.Plan.Operation != cluster.PlacementOperationSplit {
+	if decision.Status != "applied" || decision.Plan.Operation != placement.PlacementOperationSplit {
 		t.Fatalf("decision = %+v, want applied split", decision)
 	}
 
@@ -211,7 +213,7 @@ func createTableOnShard(t *testing.T, mgr *cluster.Manager, shardID uint32, td t
 	}
 }
 
-func fixedRecordsInRange(t *testing.T, router *cluster.Router, rng cluster.TokenRange, prefix string, count int) []fixedLoadRecord {
+func fixedRecordsInRange(t *testing.T, router *routing.Router, rng placement.TokenRange, prefix string, count int) []fixedLoadRecord {
 	t.Helper()
 	records := make([]fixedLoadRecord, 0, count)
 	for i := 0; len(records) < count && i < count*5000; i++ {
@@ -286,10 +288,10 @@ func writeFixedLoad(t *testing.T, mgr *cluster.Manager, td types.TableDescriptor
 	}
 }
 
-func activeShardDistribution(cat cluster.PlacementCatalog) map[string]int {
+func activeShardDistribution(cat placement.PlacementCatalog) map[string]int {
 	out := make(map[string]int)
 	for _, shard := range cat.Shards {
-		if shard.State == cluster.ShardStateActive {
+		if shard.State == placement.ShardStateActive {
 			out[fmt.Sprintf("%d", shard.ID)] = 0
 		}
 	}

@@ -1,7 +1,7 @@
 // Package cluster: membership / voter helpers used by both plan
 // strategies and apply validators. Split off from planner.go to keep
 // the planner focused on the dispatcher and Manager-side glue.
-package cluster
+package placement
 
 import "sort"
 
@@ -83,3 +83,25 @@ func removeAny(in, remove []string) []string {
 }
 
 func u32ptr(v uint32) *uint32 { return &v }
+
+func RemoveString(in []string, v string) []string {
+	out := in[:0]
+	for _, existing := range in {
+		if existing != v {
+			out = append(out, existing)
+		}
+	}
+	return out
+}
+
+func sameTokenRanges(a, b []TokenRange) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

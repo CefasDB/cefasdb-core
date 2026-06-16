@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -208,7 +209,7 @@ func TestGRPCRangeMoveWriteBurstDuringMovement(t *testing.T) {
 	}
 }
 
-func startSplitGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, cluster.PlacementPlan, func()) {
+func startSplitGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, placement.PlacementPlan, func()) {
 	t.Helper()
 	env := transitionPlacementTestEnv(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -243,7 +244,7 @@ func startSplitGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager,
 	return cefaspb.NewCefasClient(conn), env.Manager, env.Plan, cleanup
 }
 
-func startRangeMoveGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, cluster.PlacementPlan, func()) {
+func startRangeMoveGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Manager, placement.PlacementPlan, func()) {
 	t.Helper()
 	env := transitionRangeMovePlacementTestEnv(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -278,7 +279,7 @@ func startRangeMoveGRPCFixture(t *testing.T) (cefaspb.CefasClient, *cluster.Mana
 	return cefaspb.NewCefasClient(conn), env.Manager, env.Plan, cleanup
 }
 
-func childRangeKeys(t *testing.T, mgr *cluster.Manager, plan cluster.PlacementPlan, n int) []string {
+func childRangeKeys(t *testing.T, mgr *cluster.Manager, plan placement.PlacementPlan, n int) []string {
 	t.Helper()
 	if len(plan.After.Shards) < 2 || len(plan.After.Shards[1].Ranges) != 1 {
 		t.Fatalf("unexpected split plan: %+v", plan.After.Shards)

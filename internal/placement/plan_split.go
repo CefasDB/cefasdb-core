@@ -1,4 +1,4 @@
-package cluster
+package placement
 
 import "fmt"
 
@@ -37,17 +37,17 @@ func planSplit(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, e
 // range (multi-range splits are deliberately out of scope today).
 func validateSplitTarget(cat PlacementCatalog, req PlacementPlanRequest) (int, ShardPlacement, error) {
 	if cat.Strategy != PlacementStrategyTokenRange {
-		return 0, ShardPlacement{}, invalidPlan("split requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+		return 0, ShardPlacement{}, InvalidPlan("split requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
 	}
-	shardIdx, shard, err := findShard(cat, req.ShardID)
+	shardIdx, shard, err := FindShard(cat, req.ShardID)
 	if err != nil {
 		return 0, ShardPlacement{}, err
 	}
-	if !shard.State.routable() {
-		return 0, ShardPlacement{}, invalidPlan("shard %d is not routable: %s", shard.ID, shard.State)
+	if !shard.State.Routable() {
+		return 0, ShardPlacement{}, InvalidPlan("shard %d is not routable: %s", shard.ID, shard.State)
 	}
 	if len(shard.Ranges) != 1 {
-		return 0, ShardPlacement{}, invalidPlan("split currently requires exactly one range on shard %d", shard.ID)
+		return 0, ShardPlacement{}, InvalidPlan("split currently requires exactly one range on shard %d", shard.ID)
 	}
 	return shardIdx, shard, nil
 }
@@ -62,10 +62,10 @@ func splitChildRange(shard ShardPlacement, req PlacementPlanRequest) (TokenRange
 	if req.SplitToken != nil {
 		split = *req.SplitToken
 	}
-	if !tokenStrictlyInside(rng, split) {
-		return TokenRange{}, invalidPlan("split token %d is outside shard %d range [%d,%d)", split, shard.ID, rng.Start, rng.End)
+	if !TokenStrictlyInside(rng, split) {
+		return TokenRange{}, InvalidPlan("split token %d is outside shard %d range [%d,%d)", split, shard.ID, rng.Start, rng.End)
 	}
-	_, childRange := splitRange(rng, split)
+	_, childRange := SplitRange(rng, split)
 	return childRange, nil
 }
 
@@ -79,7 +79,7 @@ func splitNewShardID(cat PlacementCatalog, req PlacementPlanRequest) (uint32, er
 		newShardID = *req.NewShardID
 	}
 	if int(newShardID) != len(cat.Shards) {
-		return 0, invalidPlan("new shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
+		return 0, InvalidPlan("new shard id must be %d to keep placement IDs contiguous", len(cat.Shards))
 	}
 	return newShardID, nil
 }
@@ -104,7 +104,7 @@ func splitChildVoters(cat PlacementCatalog, parent ShardPlacement, req Placement
 // split: parent → Splitting, child → Creating with the new range
 // and voter set. Returns the validated next-epoch catalog.
 func applySplitTransition(cat PlacementCatalog, shardIdx int, newShardID uint32, childRange TokenRange, voters []string) (PlacementCatalog, error) {
-	after := nextCatalog(cat)
+	after := NextCatalog(cat)
 	after.Shards[shardIdx].State = ShardStateSplitting
 	after.Shards[shardIdx].Epoch = after.Epoch
 	after.Shards = append(after.Shards, ShardPlacement{
@@ -114,7 +114,7 @@ func applySplitTransition(cat PlacementCatalog, shardIdx int, newShardID uint32,
 		Epoch:  after.Epoch,
 		Voters: voters,
 	})
-	after.normalize()
+	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementCatalog{}, err
 	}

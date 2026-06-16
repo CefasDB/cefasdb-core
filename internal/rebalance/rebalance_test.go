@@ -8,28 +8,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 )
 
 type fakePlanner struct {
-	cat        cluster.PlacementCatalog
+	cat        placement.PlacementCatalog
 	planCalls  int
 	applyCalls int
 }
 
 func (f *fakePlanner) RefreshPlacement() error { return nil }
-func (f *fakePlanner) Placement() cluster.PlacementCatalog {
+func (f *fakePlanner) Placement() placement.PlacementCatalog {
 	return f.cat.Clone()
 }
-func (f *fakePlanner) PlanPlacement(req cluster.PlacementPlanRequest) (cluster.PlacementPlan, error) {
+func (f *fakePlanner) PlanPlacement(req placement.PlacementPlanRequest) (placement.PlacementPlan, error) {
 	f.planCalls++
-	return cluster.BuildPlacementPlan(f.cat, req)
+	return placement.BuildPlacementPlan(f.cat, req)
 }
-func (f *fakePlanner) ApplyPlacement(_ context.Context, req cluster.PlacementApplyRequest) (cluster.PlacementApplyResult, error) {
+func (f *fakePlanner) ApplyPlacement(_ context.Context, req placement.PlacementApplyRequest) (placement.PlacementApplyResult, error) {
 	f.applyCalls++
 	f.cat = req.Plan.After.Clone()
-	return cluster.PlacementApplyResult{
+	return placement.PlacementApplyResult{
 		Operation:   req.Plan.Operation,
 		BeforeEpoch: req.Plan.BeforeEpoch,
 		AfterEpoch:  req.Plan.AfterEpoch,
@@ -62,7 +62,7 @@ func TestTickProposesDeterministicSplitWithReason(t *testing.T) {
 		t.Fatalf("decisions len = %d, want 1: %+v", len(decisions), decisions)
 	}
 	d := decisions[0]
-	if d.Status != "planned" || d.Plan.Operation != cluster.PlacementOperationSplit {
+	if d.Status != "planned" || d.Plan.Operation != placement.PlacementOperationSplit {
 		t.Fatalf("decision = %+v, want planned split", d)
 	}
 	if !strings.Contains(d.Reason, "hot range shard=0 bucket=1") || !strings.Contains(d.Reason, "split owning shard") {
@@ -115,7 +115,7 @@ func TestTickManualWritesPlanWithoutApplying(t *testing.T) {
 	if err := json.Unmarshal(raw, &written); err != nil {
 		t.Fatal(err)
 	}
-	if written.Plan.Operation != cluster.PlacementOperationSplit || written.Status != "planned" {
+	if written.Plan.Operation != placement.PlacementOperationSplit || written.Status != "planned" {
 		t.Fatalf("written decision = %+v", written)
 	}
 }
@@ -144,22 +144,22 @@ func TestTickAutoRespectsBudgetExhaustion(t *testing.T) {
 func TestBuildCandidatesIncludesDrainAndRangeMove(t *testing.T) {
 	cat := testCatalog()
 	n1 := cat.Nodes["n1"]
-	n1.State = cluster.NodeStateDraining
+	n1.State = placement.NodeStateDraining
 	cat.Nodes["n1"] = n1
 	drain := BuildCandidates(cat, nil, Config{})
-	if len(drain) != 1 || drain[0].Operation != cluster.PlacementOperationDrain {
+	if len(drain) != 1 || drain[0].Operation != placement.PlacementOperationDrain {
 		t.Fatalf("drain candidates = %+v", drain)
 	}
 
 	multiRange := testCatalog()
-	multiRange.Shards[0].Ranges = []cluster.TokenRange{
+	multiRange.Shards[0].Ranges = []placement.TokenRange{
 		{Start: 0, End: 1 << 63},
 		{Start: 1 << 63, End: 0},
 	}
 	move := BuildCandidates(multiRange, []metrics.RangeHotspotSummary{
 		hotspot("0", 0, 0, 100, 1024),
 	}, Config{})
-	if len(move) != 1 || move[0].Operation != cluster.PlacementOperationRangeMove {
+	if len(move) != 1 || move[0].Operation != placement.PlacementOperationRangeMove {
 		t.Fatalf("range move candidates = %+v", move)
 	}
 }
@@ -184,23 +184,23 @@ func TestTickAutoAppliesOnePlan(t *testing.T) {
 	}
 }
 
-func testCatalog() cluster.PlacementCatalog {
-	return cluster.PlacementCatalog{
+func testCatalog() placement.PlacementCatalog {
+	return placement.PlacementCatalog{
 		Version:  1,
 		Epoch:    1,
-		Strategy: cluster.PlacementStrategyTokenRange,
-		Shards: []cluster.ShardPlacement{{
+		Strategy: placement.PlacementStrategyTokenRange,
+		Shards: []placement.ShardPlacement{{
 			ID:     0,
-			State:  cluster.ShardStateActive,
+			State:  placement.ShardStateActive,
 			Epoch:  1,
-			Ranges: []cluster.TokenRange{{Start: 0, End: 0}},
+			Ranges: []placement.TokenRange{{Start: 0, End: 0}},
 			Voters: []string{"n1", "n2", "n3"},
 		}},
-		Nodes: map[string]cluster.NodeDescriptor{
-			"n1": {ID: "n1", RaftAddr: "127.0.0.1:9101", State: cluster.NodeStateActive, Capacity: cluster.NodeCapacity{Weight: 1, Zone: "az-a"}},
-			"n2": {ID: "n2", RaftAddr: "127.0.0.1:9102", State: cluster.NodeStateActive, Capacity: cluster.NodeCapacity{Weight: 1, Zone: "az-b"}},
-			"n3": {ID: "n3", RaftAddr: "127.0.0.1:9103", State: cluster.NodeStateActive, Capacity: cluster.NodeCapacity{Weight: 1, Zone: "az-c"}},
-			"n4": {ID: "n4", RaftAddr: "127.0.0.1:9104", State: cluster.NodeStateActive, Capacity: cluster.NodeCapacity{Weight: 2, Zone: "az-d"}},
+		Nodes: map[string]placement.NodeDescriptor{
+			"n1": {ID: "n1", RaftAddr: "127.0.0.1:9101", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1, Zone: "az-a"}},
+			"n2": {ID: "n2", RaftAddr: "127.0.0.1:9102", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1, Zone: "az-b"}},
+			"n3": {ID: "n3", RaftAddr: "127.0.0.1:9103", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1, Zone: "az-c"}},
+			"n4": {ID: "n4", RaftAddr: "127.0.0.1:9104", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 2, Zone: "az-d"}},
 		},
 	}
 }
