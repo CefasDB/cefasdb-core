@@ -84,6 +84,23 @@ func TestParserSelectGroupByCount(t *testing.T) {
 	}
 }
 
+func TestParserSelectInnerJoin(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T, want *SelectStmt", stmt)
+	}
+	if sel.Table != "users" || sel.TableAlias != "u" || len(sel.Columns) != 2 || sel.Columns[0] != "u.id" || sel.Columns[1] != "o.order_id" {
+		t.Fatalf("unexpected select shape: %+v", sel)
+	}
+	if sel.Join == nil || sel.Join.RightTable != "orders" || sel.Join.RightAlias != "o" || sel.Join.LeftRef.Name != "u.id" || sel.Join.RightRef.Name != "o.user_id" || sel.Join.Op != cefassql.BinEq {
+		t.Fatalf("unexpected join: %+v", sel.Join)
+	}
+}
+
 func TestParserCreateTable(t *testing.T) {
 	stmt, err := cefassql.Parse("CREATE TABLE events (PRIMARY KEY (user_id, ts))")
 	if err != nil {
@@ -349,6 +366,116 @@ func columnStrings(rows []types.Item, col string) []string {
 	for _, row := range rows {
 		if av, ok := row[col]; ok && av.T == types.AttrS {
 			out = append(out, av.S)
+		}
+	}
+	return out
+}
+
+func TestInnerJoinOneToOne(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	createJoinTables(t, ex, cat)
+	mustExec(t, ex, cat, "INSERT INTO users (id, email) VALUES ('u1', 'a@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO users (id, email) VALUES ('u2', 'b@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, user_id, status) VALUES ('o1', 'u1', 'paid')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if len(res.Rows) != 1 {
+		t.Fatalf("join rows = %d, want 1: %+v", len(res.Rows), res.Rows)
+	}
+	if got := res.Rows[0]["u.id"].S + "/" + res.Rows[0]["o.order_id"].S; got != "u1/o1" {
+		t.Fatalf("unexpected join row %s: %+v", got, res.Rows[0])
+	}
+}
+
+func TestInnerJoinNoMatches(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	createJoinTables(t, ex, cat)
+	mustExec(t, ex, cat, "INSERT INTO users (id) VALUES ('u1')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, user_id) VALUES ('o1', 'missing')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10")
+	if len(res.Rows) != 0 {
+		t.Fatalf("join should have no matches: %+v", res.Rows)
+	}
+}
+
+func TestInnerJoinOneToManyAndDuplicatedKeys(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE users (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "CREATE TABLE orders (PRIMARY KEY (order_id))")
+	mustExec(t, ex, cat, "INSERT INTO users (id, account_key) VALUES ('u1', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO users (id, account_key) VALUES ('u2', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, account_key) VALUES ('o1', 'acct')")
+	mustExec(t, ex, cat, "INSERT INTO orders (order_id, account_key) VALUES ('o2', 'acct')")
+
+	res := mustExec(t, ex, cat, "SELECT u.id, o.order_id FROM users u INNER JOIN orders o ON u.account_key = o.account_key ALLOW SCAN LIMIT 10")
+	got := joinPairSet(res.Rows, "u.id", "o.order_id")
+	want := map[string]bool{"u1/o1": true, "u1/o2": true, "u2/o1": true, "u2/o2": true}
+	if len(got) != len(want) {
+		t.Fatalf("join pair count = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for pair := range want {
+		if !got[pair] {
+			t.Fatalf("missing join pair %s in %+v", pair, got)
+		}
+	}
+}
+
+func TestInnerJoinRequiresQualifiedProjection(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT id FROM users u INNER JOIN orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous JOIN column") {
+		t.Fatalf("expected ambiguous projection error, got %v", err)
+	}
+}
+
+func TestInnerJoinRequiresAllowScan(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT u.id FROM users u INNER JOIN orders o ON u.id = o.user_id LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "ALLOW SCAN") {
+		t.Fatalf("expected ALLOW SCAN error, got %v", err)
+	}
+}
+
+func TestInnerJoinRejectsNonEquality(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "users", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Create(types.TableDescriptor{Name: "orders", KeySchema: types.KeySchema{PK: "order_id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT u.id FROM users u INNER JOIN orders o ON u.id > o.user_id ALLOW SCAN LIMIT 10", cat)
+	if err == nil || !strings.Contains(err.Error(), "only equality") {
+		t.Fatalf("expected non-equality rejection, got %v", err)
+	}
+}
+
+func createJoinTables(t *testing.T, ex *cefassql.Executor, cat *catalog.Catalog) {
+	t.Helper()
+	mustExec(t, ex, cat, "CREATE TABLE users (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "CREATE TABLE orders (PRIMARY KEY (order_id))")
+}
+
+func joinPairSet(rows []types.Item, leftCol, rightCol string) map[string]bool {
+	out := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		left, leftOK := row[leftCol]
+		right, rightOK := row[rightCol]
+		if leftOK && rightOK && left.T == types.AttrS && right.T == types.AttrS {
+			out[left.S+"/"+right.S] = true
 		}
 	}
 	return out
