@@ -296,6 +296,52 @@ func TestAllowScanCountDoesNotRequireLimit(t *testing.T) {
 	}
 }
 
+func TestAllowScanWhereComparisonsAndOr(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score, tier) VALUES ('a', 'active', 10, 'gold')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score, tier) VALUES ('b', 'active', 35, 'silver')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('c', 'inactive', 50)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, tier) VALUES ('d', 'inactive', 'bronze')")
+
+	res := mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN WHERE (status = 'active' AND score >= 20) OR tier = 'gold' LIMIT 10")
+	if got := stringSet(res.Rows, "id"); !got["a"] || !got["b"] || len(got) != 2 {
+		t.Fatalf("AND/OR comparison result = %+v", res.Rows)
+	}
+
+	res = mustExec(t, ex, cat, "SELECT id FROM t ALLOW SCAN WHERE score < 20 OR score >= 50 LIMIT 10")
+	if got := stringSet(res.Rows, "id"); !got["a"] || !got["c"] || len(got) != 2 {
+		t.Fatalf("range OR result = %+v", res.Rows)
+	}
+}
+
+func TestKeyFirstWhereKeepsResidualPredicateTree(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('a', 'active', 10)")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, score) VALUES ('b', 'active', 35)")
+
+	res := mustExec(t, ex, cat, "SELECT * FROM t WHERE id = 'b' AND (status = 'inactive' OR score >= 35)")
+	if len(res.Rows) != 1 || res.Rows[0]["id"].S != "b" {
+		t.Fatalf("key-first residual OR result = %+v", res.Rows)
+	}
+
+	res = mustExec(t, ex, cat, "SELECT * FROM t WHERE id = 'a' AND (status = 'inactive' OR score >= 35)")
+	if len(res.Rows) != 0 {
+		t.Fatalf("key-first residual OR should filter row: %+v", res.Rows)
+	}
+}
+
+func stringSet(rows []types.Item, col string) map[string]bool {
+	out := map[string]bool{}
+	for _, row := range rows {
+		if av, ok := row[col]; ok && av.T == types.AttrS {
+			out[av.S] = true
+		}
+	}
+	return out
+}
+
 func TestAllowScanScalarOrderBy(t *testing.T) {
 	_, cat, ex := newSQL(t)
 	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
