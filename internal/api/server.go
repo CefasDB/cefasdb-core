@@ -22,6 +22,7 @@ import (
 	"time"
 
 	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
+	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
@@ -239,16 +240,27 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/tables", tableHandlers.HandleTables) // POST=create, GET=list
 	register("/v1/tables/", tableHandlers.HandleTable) // GET=describe
 	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
+	itemHandlers := itemhttp.New(itemhttp.Deps{
+		Cat:               s.cat,
+		StorageFor:        s.storageFor,
+		WriteTargetsForPK: s.itemWriteTargetsForPK,
+		BatchWriteByShard: s.batchWriteByShard,
+		BatchGetByShard:   s.batchGetByShard,
+		EnsureStrongRead:  s.ensureStrongRead,
+		WriteWriteErr:     writeWriteErr,
+		ObserveWrite:      s.observeItemWrite,
+		ObserveRead:       s.observeItemRead,
+	})
 	register("/v1/ListStreams", s.handleListStreams)
 	register("/v1/DescribeStream", s.handleDescribeStream)
 	register("/v1/GetShardIterator", s.handleGetShardIterator)
 	register("/v1/GetRecords", s.handleGetRecords)
-	register("/v1/PutItem", s.handlePutItem)
-	register("/v1/GetItem", s.handleGetItem)
-	register("/v1/DeleteItem", s.handleDeleteItem)
+	register("/v1/PutItem", itemHandlers.HandlePutItem)
+	register("/v1/GetItem", itemHandlers.HandleGetItem)
+	register("/v1/DeleteItem", itemHandlers.HandleDeleteItem)
 	register("/v1/Query", s.handleQuery)
-	register("/v1/BatchWriteItem", s.handleBatchWriteItem)
-	register("/v1/BatchGetItem", s.handleBatchGetItem)
+	register("/v1/BatchWriteItem", itemHandlers.HandleBatchWriteItem)
+	register("/v1/BatchGetItem", itemHandlers.HandleBatchGetItem)
 	register("/v1/SpatialQuery", s.handleSpatialQuery)
 	register("/v1/Sql", s.handleSql)
 	register("/v1/PartiQL", s.handlePartiQL)
@@ -558,26 +570,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // ---------- table management ----------
 
 // ---------- item ops ----------
-
-type putItemRequest struct {
-	Table     string                       `json:"table"`
-	Item      map[string]ddbjson.Attribute `json:"item"`
-	Condition string                       `json:"condition,omitempty"`
-	Binds     map[string]ddbjson.Attribute `json:"binds,omitempty"`
-}
-
-type getItemRequest struct {
-	Table       string                       `json:"table"`
-	Key         map[string]ddbjson.Attribute `json:"key"`
-	Consistency string                       `json:"consistency,omitempty"` // "" or "eventual" → local; "strong" → leader + barrier
-}
-
-type deleteItemRequest struct {
-	Table     string                       `json:"table"`
-	Key       map[string]ddbjson.Attribute `json:"key"`
-	Condition string                       `json:"condition,omitempty"`
-	Binds     map[string]ddbjson.Attribute `json:"binds,omitempty"`
-}
+//
+// PutItem, GetItem, DeleteItem, BatchWriteItem and BatchGetItem live
+// in internal/api/http/item. The query handler stays here for the
+// moment; phase 3c extracts it next.
 
 type queryRequest struct {
 	Table       string             `json:"table"`
@@ -587,173 +583,6 @@ type queryRequest struct {
 	SKHigh      *ddbjson.Attribute `json:"skHigh,omitempty"`
 	Limit       int                `json:"limit,omitempty"`
 	Consistency string             `json:"consistency,omitempty"`
-}
-
-type batchWriteOp struct {
-	Op   string                       `json:"op"` // "put" | "delete"
-	Item map[string]ddbjson.Attribute `json:"item,omitempty"`
-	Key  map[string]ddbjson.Attribute `json:"key,omitempty"`
-}
-
-type batchWriteRequest struct {
-	Table string         `json:"table"`
-	Ops   []batchWriteOp `json:"ops"`
-}
-
-type batchGetRequest struct {
-	Table string                         `json:"table"`
-	Keys  []map[string]ddbjson.Attribute `json:"keys"`
-}
-
-func (s *Server) handlePutItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	started := time.Now()
-	var req putItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeItemWrite, req.Table),
-		auth.WildcardScope(auth.ScopeItemWrite)) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	item, err := ddbjson.DecodeItem(req.Item)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	binds, err := ddbjson.DecodeBinds(req.Binds)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
-		return
-	}
-	pkBytes, err := pkBytesFromItem(item, td.KeySchema)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	targets, err := s.writeTargetsForPK(pkBytes)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	defer targets.Release()
-	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.Condition, Binds: binds}); err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
-	writeJSON(w, http.StatusOK, struct{}{})
-}
-
-func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	started := time.Now()
-	var req getItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeItemRead, req.Table),
-		auth.WildcardScope(auth.ScopeItemRead)) {
-		return
-	}
-	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	keyAttrs, err := ddbjson.DecodeItem(req.Key)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	pkBytes, err := pkBytesFromItem(keyAttrs, td.KeySchema)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	item, err := s.storageFor(pkBytes).GetItem(req.Table, td.KeySchema, keyAttrs)
-	if err != nil {
-		if errors.Is(err, types.ErrItemNotFound) {
-			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
-			writeJSON(w, http.StatusOK, map[string]any{"found": false})
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemBytes(item), started)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"found": true,
-		"item":  ddbjson.EncodeItem(item),
-	})
-}
-
-func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	started := time.Now()
-	var req deleteItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeItemDelete, req.Table),
-		auth.WildcardScope(auth.ScopeItemDelete)) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	keyAttrs, err := ddbjson.DecodeItem(req.Key)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	binds, err := ddbjson.DecodeBinds(req.Binds)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("binds: %w", err))
-		return
-	}
-	pkBytes, err := pkBytesFromItem(keyAttrs, td.KeySchema)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	targets, err := s.writeTargetsForPK(pkBytes)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	defer targets.Release()
-	if err := targets.DeleteItemWith(td, keyAttrs, storage.DeleteOptions{Condition: req.Condition, Binds: binds}); err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
-	writeJSON(w, http.StatusOK, struct{}{})
 }
 
 func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
@@ -828,101 +657,6 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]ddbjson.Attribute, 0, len(items))
 	for _, it := range items {
 		out = append(out, ddbjson.EncodeItem(it))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
-}
-
-func (s *Server) handleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req batchWriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeItemWrite, req.Table),
-		auth.WildcardScope(auth.ScopeItemWrite)) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-
-	ops := make([]storage.BatchOp, 0, len(req.Ops))
-	for i, raw := range req.Ops {
-		switch raw.Op {
-		case "put":
-			item, err := ddbjson.DecodeItem(raw.Item)
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
-				return
-			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
-		case "delete":
-			keyAttrs, err := ddbjson.DecodeItem(raw.Key)
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: %w", i, err))
-				return
-			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpDelete, Key: keyAttrs})
-		default:
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("op %d: unknown op %q", i, raw.Op))
-			return
-		}
-	}
-	if err := s.batchWriteByShard(td, ops); err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct{}{})
-}
-
-func (s *Server) handleBatchGetItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req batchGetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeItemRead, req.Table),
-		auth.WildcardScope(auth.ScopeItemRead)) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	keys := make([]types.Item, 0, len(req.Keys))
-	for i, raw := range req.Keys {
-		k, err := ddbjson.DecodeItem(raw)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("key %d: %w", i, err))
-			return
-		}
-		keys = append(keys, k)
-	}
-	items, err := s.batchGetByShard(req.Table, td.KeySchema, keys)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	out := make([]map[string]ddbjson.Attribute, len(items))
-	for i, it := range items {
-		if it == nil {
-			out[i] = nil
-			continue
-		}
-		out[i] = ddbjson.EncodeItem(it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }

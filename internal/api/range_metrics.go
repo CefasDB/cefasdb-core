@@ -23,6 +23,25 @@ func (s *Server) observeRangeMetric(op string, pkBytes []byte, approxBytes uint6
 	s.metrics.ObserveRangeOperation(shardID, token, op, approxBytes, time.Since(started))
 }
 
+// observeItemWrite / observeItemRead are the (pkBytes, item, started)
+// shaped adapters the itemhttp package consumes. A nil item means the
+// handler had no body to weigh (delete, miss); we fall back to the PK
+// length so the metric still reflects a non-zero work unit.
+func (s *Server) observeItemWrite(pkBytes []byte, item types.Item, started time.Time) {
+	s.observeRangeMetric(rangeMetricWrite, pkBytes, itemOrPKBytes(item, pkBytes), started)
+}
+
+func (s *Server) observeItemRead(pkBytes []byte, item types.Item, started time.Time) {
+	s.observeRangeMetric(rangeMetricRead, pkBytes, itemOrPKBytes(item, pkBytes), started)
+}
+
+func itemOrPKBytes(item types.Item, pkBytes []byte) uint64 {
+	if item == nil {
+		return uint64(len(pkBytes))
+	}
+	return estimatedItemBytes(item)
+}
+
 func (s *GRPCServer) observeRangeMetric(op string, pkBytes []byte, approxBytes uint64, started time.Time) {
 	if s == nil || s.metrics == nil {
 		return

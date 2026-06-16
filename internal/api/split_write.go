@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 
+	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -86,6 +87,18 @@ func (t routedWriteTargets) MirrorPutItem(td types.TableDescriptor, item types.I
 
 func (s *Server) writeTargetsForPK(pkBytes []byte) (routedWriteTargets, error) {
 	return routeWriteTargets(s.db, s.manager, pkBytes)
+}
+
+// itemWriteTargetsForPK adapts (*Server).writeTargetsForPK to the
+// itemhttp.WriteTargets interface. routedWriteTargets already has the
+// three methods the interface declares; the wrapper just narrows the
+// return type so the item package never sees the internal struct.
+func (s *Server) itemWriteTargetsForPK(pkBytes []byte) (itemhttp.WriteTargets, error) {
+	t, err := s.writeTargetsForPK(pkBytes)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func (s *GRPCServer) writeTargetsForPK(pkBytes []byte) (routedWriteTargets, error) {
