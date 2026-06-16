@@ -6,10 +6,7 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -20,7 +17,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/osvaldoandrade/cefas/internal/api"
@@ -369,7 +365,7 @@ func main() {
 	// gRPC listener (optional).
 	var gsrv *grpc.Server
 	if cfg.GRPC.Addr != "" {
-		opts, err := buildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath)
+		opts, err := bootstrapserver.BuildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath)
 		if err != nil {
 			log.Fatalf("grpc opts: %v", err)
 		}
@@ -424,53 +420,103 @@ func main() {
 	}
 }
 
-// buildGRPCOpts assembles ServerOptions for the gRPC server: auth
-// interceptors (if a validator is configured) + TLS / mTLS credentials
-// when cert paths are supplied.
-func buildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grpc.ServerOption, error) {
-	var opts []grpc.ServerOption
+// parsePeers parses the "id1=addr1,id2=addr2" form used by both
+// -raft-peers and -raft-http-peers.
+func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
 
-	if certPath != "" || keyPath != "" {
-		if certPath == "" || keyPath == "" {
-			return nil, fmt.Errorf("both -tls-cert and -tls-key must be set together")
-		}
-		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			return nil, fmt.Errorf("load tls cert: %w", err)
-		}
-		tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
-		if caBundle != "" {
-			caPEM, err := os.ReadFile(caBundle)
-			if err != nil {
-				return nil, fmt.Errorf("read mtls ca: %w", err)
-			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(caPEM) {
-				return nil, fmt.Errorf("mtls ca bundle has no PEM certs")
-			}
-			tlsCfg.ClientCAs = pool
-			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
-		}
-		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+func storageOptionsFromConfig(cfg config.Config, path string) storage.Options {
+	return storage.Options{
+		Path:            path,
+		FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
+		Profile:         cfg.Storage.Profile,
+		Tuning:          storageTuningFromConfig(cfg),
+		Backpressure:    backpressureFromConfig(cfg),
+		StreamRetention: streamRetentionFromConfig(cfg),
 	}
+}
 
-	if v != nil {
-		// Reflection probe stays available without a token so
-		// `grpcurl -plaintext localhost:9090 list` works in dev.
-		skip := map[string]bool{
-			"/grpc.reflection.v1.ServerReflection/ServerReflectionInfo":      true,
-			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": true,
-			"/cefas.v1.Cefas/ClusterStatus":                                  true,
-		}
-		unary, stream := api.AuthInterceptor(v, skip)
-		if unary != nil {
-			opts = append(opts, grpc.UnaryInterceptor(unary))
-		}
-		if stream != nil {
-			opts = append(opts, grpc.StreamInterceptor(stream))
-		}
+func storageTuningFromConfig(cfg config.Config) storage.PebbleTuning {
+	return storage.PebbleTuning{
+		BlockCacheSizeBytes:       cfg.Storage.BlockCacheSizeBytes,
+		MemTableSizeBytes:         cfg.Storage.MemTableSizeBytes,
+		MemTableStopWrites:        cfg.Storage.MemTableStopWritesThreshold,
+		MaxConcurrentCompactions:  cfg.Storage.MaxConcurrentCompactions,
+		L0CompactionConcurrency:   cfg.Storage.L0CompactionConcurrency,
+		L0CompactionThreshold:     cfg.Storage.L0CompactionThreshold,
+		L0CompactionFileThreshold: cfg.Storage.L0CompactionFileThreshold,
+		L0StopWritesThreshold:     cfg.Storage.L0StopWritesThreshold,
+		BytesPerSync:              cfg.Storage.BytesPerSync,
+		WALBytesPerSync:           cfg.Storage.WALBytesPerSync,
 	}
-	return opts, nil
+}
+
+func rangeHotspotConfigFromConfig(cfg config.Config) metrics.RangeHotspotConfig {
+	return metrics.RangeHotspotConfig{
+		Buckets:                      cfg.Metrics.HotspotBuckets,
+		Window:                       cfg.Metrics.HotspotWindow,
+		CoolingWindow:                cfg.Metrics.HotspotCoolingWindow,
+		MaxSummaries:                 cfg.Metrics.HotspotMaxSummaries,
+		ReadThreshold:                cfg.Metrics.HotspotReadThreshold,
+		WriteThreshold:               cfg.Metrics.HotspotWriteThreshold,
+		BytesThreshold:               cfg.Metrics.HotspotBytesThreshold,
+		LatencyThresholdSeconds:      cfg.Metrics.HotspotLatencyThreshold.Seconds(),
+		CompactionDebtThresholdBytes: cfg.Metrics.HotspotCompactionDebtThreshold,
+		ThrottleStateThreshold:       cfg.Metrics.HotspotThrottleStateThreshold,
+	}
+}
+
+func rebalancerConfigFromConfig(cfg config.Config) rebalancer.Config {
+	return rebalancer.Config{
+		Mode:                    rebalancer.Mode(cfg.Rebalancer.Mode),
+		Interval:                cfg.Rebalancer.Interval,
+		MinInterval:             cfg.Rebalancer.MinInterval,
+		MaxConcurrentOperations: cfg.Rebalancer.MaxConcurrentOperations,
+		MaxHotspots:             cfg.Rebalancer.MaxHotspots,
+		MinVoters:               cfg.Rebalancer.MinVoters,
+		ApplyTimeoutMS:          int(cfg.Rebalancer.ApplyTimeout / time.Millisecond),
+		ManualPlanDir:           cfg.Rebalancer.ManualPlanDir,
+	}
+}
+
+func scheduledBackupConfigFromConfig(cfg config.Config, prom *metrics.Metrics, logger func(string, ...any)) storage.ScheduledBackupConfig {
+	return storage.ScheduledBackupConfig{
+		Enabled:      cfg.BackupScheduler.Enabled,
+		DryRun:       cfg.BackupScheduler.DryRun,
+		Interval:     cfg.BackupScheduler.Interval,
+		NameTemplate: cfg.BackupScheduler.NameTemplate,
+		Tables:       append([]string(nil), cfg.BackupScheduler.Tables...),
+		Retention: storage.BackupRetentionOptions{
+			KeepLatest:    cfg.BackupScheduler.Retention.KeepLatest,
+			KeepLatestSet: cfg.BackupScheduler.Retention.KeepLatestSet,
+			MaxAge:        cfg.BackupScheduler.Retention.MaxAge,
+			MaxAgeSet:     cfg.BackupScheduler.Retention.MaxAgeSet,
+			DryRun:        cfg.BackupScheduler.Retention.DryRun,
+		},
+		Logger:  logger,
+		Metrics: prom,
+	}
+}
+
+func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
+	return storage.BackpressureOptions{
+		Enabled:                     cfg.Storage.BackpressureEnabled,
+		RejectOnCritical:            cfg.Storage.BackpressureRejectCritical,
+		WarningL0Files:              cfg.Storage.BackpressureWarningL0Files,
+		CriticalL0Files:             cfg.Storage.BackpressureCriticalL0Files,
+		WarningCompactionDebtBytes:  cfg.Storage.BackpressureWarningDebt,
+		CriticalCompactionDebtBytes: cfg.Storage.BackpressureCriticalDebt,
+		WarningReadAmp:              cfg.Storage.BackpressureWarningReadAmp,
+		CriticalReadAmp:             cfg.Storage.BackpressureCriticalReadAmp,
+		WarningDelay:                cfg.Storage.BackpressureWarningDelay,
+		CriticalDelay:               cfg.Storage.BackpressureCriticalDelay,
+	}
+}
+
+func streamRetentionFromConfig(cfg config.Config) storage.StreamRetentionOptions {
+	return storage.StreamRetentionOptions{
+		Retention: cfg.Storage.StreamRetention,
+		MaxBytes:  cfg.Storage.StreamRetentionMaxBytes,
+	}
 }
 
 // streamAdapter bridges the raft package's CDC types to the api
