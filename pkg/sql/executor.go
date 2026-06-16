@@ -33,17 +33,39 @@ type ItemMutation struct {
 // without teaching the SQL package about plugin registries.
 type MutationHook func(ItemMutation) error
 
-// Storage is the executor's view of the storage engine. The real
-// *storage.DB satisfies it; tests can fake parts.
-type Storage interface {
-	PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error
-	DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error
+// Reader is the read surface the SQL executor needs from the storage
+// engine. Six methods over the limit suggested by the project's ISP
+// audit; kept together because each one is a distinct, irreducible
+// query type the executor must dispatch (point, PK range, GSI, spatial,
+// scan). Splitting further would scatter the planner-to-storage
+// vocabulary across many tiny interfaces with no consumer benefit.
+//
+// Justification: read-side aggregate. Every method operates on items
+// fetched from the same storage namespace; SQL's planner decides which
+// to call based on the parsed statement shape, not on caller identity.
+type Reader interface {
 	GetItem(table string, ks types.KeySchema, key types.Item) (types.Item, error)
 	QueryByPK(table string, ks types.KeySchema, pkAttr types.AttributeValue, limit int) ([]types.Item, error)
 	QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skHigh types.AttributeValue, limit int) ([]types.Item, error)
 	QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error)
 	SpatialQueryItems(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error)
 	ScanTable(table string, limit int) ([]types.Item, error)
+}
+
+// Writer is the mutation surface the SQL executor needs. Two methods —
+// PutItemWith covers INSERT and UPDATE (read-modify-write through
+// Reader.GetItem first), DeleteItemWith covers DELETE.
+type Writer interface {
+	PutItemWith(td types.TableDescriptor, item types.Item, opts storage.PutOptions) error
+	DeleteItemWith(td types.TableDescriptor, key types.Item, opts storage.DeleteOptions) error
+}
+
+// Storage composes Reader and Writer. The real *storage.DB satisfies
+// it; tests that need only one side can take Reader or Writer and let
+// the executor reject the unused half via a nil-method panic.
+type Storage interface {
+	Reader
+	Writer
 }
 
 // CatalogMutator is the schema-management surface the executor uses
