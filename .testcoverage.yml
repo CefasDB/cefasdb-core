@@ -1,14 +1,27 @@
 profile: cover.out
 
-# Phase 0a — gates set to 0 (warn-only).
-# Subsequent sub-PRs ratchet these toward the playbook §8.1 floors:
-#   pkg/core/         >= 95% statement / 90% branch
-#   internal/storage/ >= 80%
+# Phase 8f — overall floor lifted toward the playbook §8.1 targets:
+#   pkg/core/         >= 95% statement
+#   internal/storage/ >= 80% statement
 #   overall           >= 90%
+#
+# File- and package-level defaults stay at 0 in this batch to avoid
+# surprises on outlier files; per-package overrides below pin the
+# load-bearing packages. The CI job `coverage thresholds` keeps
+# `continue-on-error: true` (warn-only) — flipping to blocking is a
+# separate follow-up PR.
 threshold:
   file: 0
   package: 0
-  total: 0
+  total: 90
+
+# Per-path overrides (first match wins; list specific rules before general).
+# Regexp syntax per `vladopajic/go-test-coverage` v2.
+override:
+  - path: ^pkg/core(/|$)
+    threshold: 95
+  - path: ^internal/storage(/|$)
+    threshold: 80
 
 exclude:
   paths:
