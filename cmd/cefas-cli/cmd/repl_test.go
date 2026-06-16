@@ -69,6 +69,22 @@ func TestParseREPLArgsExpandsDDBShortcuts(t *testing.T) {
 			},
 		},
 		{
+			name: "sql analytical group statement",
+			line: `SQL SELECT status, COUNT(*) FROM Users ALLOW SCAN GROUP BY status`,
+			want: []string{
+				"execute-statement",
+				"--statement", "SELECT status, COUNT(*) FROM Users ALLOW SCAN GROUP BY status",
+			},
+		},
+		{
+			name: "sql analytical join statement",
+			line: `SQL SELECT u.id, o.order_id FROM Users u INNER JOIN Orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10`,
+			want: []string{
+				"execute-statement",
+				"--statement", "SELECT u.id, o.order_id FROM Users u INNER JOIN Orders o ON u.id = o.user_id ALLOW SCAN LIMIT 10",
+			},
+		},
+		{
 			name: "normal command unchanged",
 			line: `list-tables --output table`,
 			want: []string{"list-tables", "--output", "table"},
