@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/pebble/vfs"
 
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 )
 
 // openMemDB returns a fresh in-memory Pebble store so the test can
@@ -87,14 +88,9 @@ func TestPublisherCancellationFreesSlot(t *testing.T) {
 	}
 	cancel()
 	// Cancellation is processed by the watcher goroutine.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if pub.SubscriberCount() == 0 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("subscriber slot leaked after ctx cancel")
+	wait.Eventually(t, func() bool {
+		return pub.SubscriberCount() == 0
+	}, 500*time.Millisecond, 5*time.Millisecond, "subscriber slot leaked after ctx cancel")
 }
 
 func TestPublisherFanOutNonBlocking(t *testing.T) {

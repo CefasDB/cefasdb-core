@@ -14,6 +14,7 @@ import (
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -287,27 +288,20 @@ func TestMultiShardCluster(t *testing.T) {
 	}
 
 	// Wait until every shard has a leader.
-	deadline := time.Now().Add(10 * time.Second)
 	leaderOfShard := make([]int, shards)
 	for s := uint32(0); s < shards; s++ {
-		for time.Now().Before(deadline) {
-			found := -1
+		leaderOfShard[s] = -1
+		shardID := s
+		wait.Eventually(t, func() bool {
 			for nodeIdx, mgr := range mgrs {
-				sh, _ := mgr.Shard(s)
+				sh, _ := mgr.Shard(shardID)
 				if sh != nil && sh.Raft != nil && sh.Raft.IsLeader() {
-					found = nodeIdx
-					break
+					leaderOfShard[shardID] = nodeIdx
+					return true
 				}
 			}
-			if found >= 0 {
-				leaderOfShard[s] = found
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if leaderOfShard[s] == -1 {
-			t.Fatalf("shard %d never elected a leader", s)
-		}
+			return false
+		}, 10*time.Second, 50*time.Millisecond, "shard %d never elected a leader", s)
 	}
 	t.Logf("leaders: shard0=n%d shard1=n%d", leaderOfShard[0], leaderOfShard[1])
 
@@ -341,28 +335,20 @@ func TestMultiShardCluster(t *testing.T) {
 
 	// Each follower should see both items on its replica of each
 	// shard within a few seconds.
-	wait := time.Now().Add(5 * time.Second)
-	for time.Now().Before(wait) {
-		all := true
-		for nodeIdx, mgr := range mgrs {
+	wait.Eventually(t, func() bool {
+		for _, mgr := range mgrs {
 			for shardID, key := range keys {
 				sh, _ := mgr.Shard(shardID)
 				if sh == nil {
-					all = false
-					continue
+					return false
 				}
-				_, err := sh.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: key}})
-				if err != nil {
-					_ = nodeIdx
-					all = false
+				if _, err := sh.Storage.GetItem(td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: key}}); err != nil {
+					return false
 				}
 			}
 		}
-		if all {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "followers never converged on the written items")
 
 	// Kill node 0. Surviving shards must keep accepting writes.
 	if err := mgrs[0].Close(); err != nil {
@@ -375,21 +361,20 @@ func TestMultiShardCluster(t *testing.T) {
 		if leaderOfShard[s] != 0 {
 			continue
 		}
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
+		shardID := s
+		wait.Eventually(t, func() bool {
 			for nodeIdx, mgr := range mgrs {
 				if mgr == nil || nodeIdx == 0 {
 					continue
 				}
-				sh, _ := mgr.Shard(s)
+				sh, _ := mgr.Shard(shardID)
 				if sh != nil && sh.Raft.IsLeader() {
-					leaderOfShard[s] = nodeIdx
-					goto next
+					leaderOfShard[shardID] = nodeIdx
+					return true
 				}
 			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	next:
+			return false
+		}, 10*time.Second, 50*time.Millisecond, "shard %d had no surviving leader after n0 close", s)
 	}
 
 	// Write a fresh value on each surviving shard's leader.

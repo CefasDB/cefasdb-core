@@ -12,6 +12,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -498,7 +499,10 @@ func TestStreamRetentionTrimPointRejectsOldIterators(t *testing.T) {
 	defer cleanup()
 	arn := createIteratorStream(t, srv)
 	appendIteratorStreamRecords(t, db, catStore, 1)
-	time.Sleep(120 * time.Millisecond)
+	// Deliberate pacing: wait for the 100ms retention window to lapse
+	// before applying retention. wait.For documents the intent vs.
+	// banning time.Sleep outright via the lint config.
+	wait.For(120 * time.Millisecond)
 	if _, err := db.ApplyStreamRetention("Events", time.Now()); err != nil {
 		t.Fatalf("apply retention: %v", err)
 	}

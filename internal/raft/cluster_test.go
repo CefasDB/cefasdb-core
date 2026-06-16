@@ -11,6 +11,7 @@ import (
 
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -103,52 +104,52 @@ func startCluster(t testing.TB, count int) []*node {
 // election timeouts.
 func waitLeader(t testing.TB, nodes []*node) int {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	leader := -1
+	wait.Eventually(t, func() bool {
 		for i, n := range nodes {
 			if n.raft.IsLeader() {
-				return i
+				leader = i
+				return true
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("no leader after 10s")
-	return -1
+		return false
+	}, 10*time.Second, 50*time.Millisecond, "no leader after 10s")
+	return leader
 }
 
 func waitNewLeader(t testing.TB, nodes []*node, exclude int) int {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	leader := -1
+	wait.Eventually(t, func() bool {
 		for i, n := range nodes {
 			if i == exclude {
 				continue
 			}
 			if n.raft.IsLeader() {
-				return i
+				leader = i
+				return true
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("no replacement leader after 10s")
-	return -1
+		return false
+	}, 10*time.Second, 50*time.Millisecond, "no replacement leader after 10s")
+	return leader
 }
 
 func waitItem(t testing.TB, n *node, table string, ks types.KeySchema, key types.Item, deadline time.Duration) types.Item {
 	t.Helper()
-	end := time.Now().Add(deadline)
-	for time.Now().Before(end) {
-		got, err := n.storage.GetItem(table, ks, key)
+	var got types.Item
+	wait.Eventually(t, func() bool {
+		out, err := n.storage.GetItem(table, ks, key)
 		if err == nil {
-			return got
+			got = out
+			return true
 		}
 		if !errors.Is(err, types.ErrItemNotFound) {
 			t.Fatalf("getItem on %s: %v", n.id, err)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("item not replicated to %s within %v", n.id, deadline)
-	return nil
+		return false
+	}, deadline, 20*time.Millisecond, "item not replicated to %s within %v", n.id, deadline)
+	return got
 }
 
 func sAttr(s string) types.AttributeValue { return types.AttributeValue{T: types.AttrS, S: s} }

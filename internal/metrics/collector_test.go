@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -33,17 +34,12 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 	go RunStorageCollector(ctx, m, "solo", db, staticLeader(true), time.Millisecond)
 
 	var body string
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	wait.Eventually(t, func() bool {
 		body = scrapeMetrics(t, m)
-		if strings.Contains(body, `cefas_raft_is_leader{shard="solo"} 1`) &&
+		return strings.Contains(body, `cefas_raft_is_leader{shard="solo"} 1`) &&
 			strings.Contains(body, `cefas_pebble_read_amp{shard="solo"}`) &&
-			strings.Contains(body, `cefas_pebble_level_files{level="0",shard="solo"}`) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("metrics body missing expected storage collector series\n--- got ---\n%s", body)
+			strings.Contains(body, `cefas_pebble_level_files{level="0",shard="solo"}`)
+	}, time.Second, 10*time.Millisecond, "metrics body missing expected storage collector series\n--- got ---\n%s", body)
 }
 
 func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
@@ -72,16 +68,11 @@ func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	go RunStorageCollector(ctx, m, "solo", db, nil, time.Millisecond)
 
 	var body string
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	wait.Eventually(t, func() bool {
 		body = scrapeMetrics(t, m)
-		if strings.Contains(body, `cefas_stream_records_appended{shard="solo",table="Events"} 1`) &&
-			strings.Contains(body, `cefas_stream_newest_sequence{shard="solo",table="Events"} 1`) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("metrics body missing expected stream retention series\n--- got ---\n%s", body)
+		return strings.Contains(body, `cefas_stream_records_appended{shard="solo",table="Events"} 1`) &&
+			strings.Contains(body, `cefas_stream_newest_sequence{shard="solo",table="Events"} 1`)
+	}, time.Second, 10*time.Millisecond, "metrics body missing expected stream retention series\n--- got ---\n%s", body)
 }
 
 func scrapeMetrics(t *testing.T, m *Metrics) string {
