@@ -28,6 +28,7 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	tablehttp "github.com/osvaldoandrade/cefas/pkg/api/http/table"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -220,8 +221,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		}
 		mux.Handle(path, h)
 	}
-	register("/v1/tables", s.handleTables) // POST=create, GET=list
-	register("/v1/tables/", s.handleTable) // GET=describe
+	tableHandlers := tablehttp.New(s.cat, s.fanOutCatalog)
+	register("/v1/tables", tableHandlers.HandleTables) // POST=create, GET=list
+	register("/v1/tables/", tableHandlers.HandleTable) // GET=describe
 	register("/v1/ListStreams", s.handleListStreams)
 	register("/v1/DescribeStream", s.handleDescribeStream)
 	register("/v1/GetShardIterator", s.handleGetShardIterator)
@@ -725,86 +727,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- table management ----------
-
-type createTableRequest struct {
-	Name                string                         `json:"name"`
-	KeySchema           jsonKeySchema                  `json:"keySchema"`
-	GSIs                []types.GSIDescriptor          `json:"gsis,omitempty"`
-	SpatialIndexes      []types.SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
-	StreamSpecification *types.StreamSpecification     `json:"streamSpecification,omitempty"`
-}
-
-type jsonKeySchema struct {
-	PK string `json:"pk"`
-	SK string `json:"sk,omitempty"`
-}
-
-func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		if !auth.RequireAnyScope(w, r, auth.ScopeTableCreate) {
-			return
-		}
-		var req createTableRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		td := types.TableDescriptor{
-			Name:                req.Name,
-			KeySchema:           types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
-			GSIs:                req.GSIs,
-			SpatialIndexes:      req.SpatialIndexes,
-			StreamSpecification: req.StreamSpecification,
-		}
-		if err := s.cat.Create(td); err != nil {
-			status := http.StatusBadRequest
-			if errors.Is(err, types.ErrTableAlreadyExists) {
-				status = http.StatusConflict
-			}
-			writeErr(w, status, err)
-			return
-		}
-		created, err := s.cat.Describe(td.Name)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		// Fan the descriptor out to every shard so writes routed to
-		// any of them can resolve the schema locally. Shard 0 already
-		// has it via s.cat.Create above.
-		s.fanOutCatalog(created)
-		writeJSON(w, http.StatusCreated, created)
-	case http.MethodGet:
-		if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-			return
-		}
-		writeJSON(w, http.StatusOK, s.cat.List())
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Path[len("/v1/tables/"):]
-	if name == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("table name required"))
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-		return
-	}
-	td, err := s.cat.Describe(name)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, types.ErrTableNotFound) {
-			status = http.StatusNotFound
-		}
-		writeErr(w, status, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, td)
-}
 
 // ---------- item ops ----------
 
