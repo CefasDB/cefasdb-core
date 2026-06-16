@@ -2,8 +2,9 @@
 //
 // Supported statements:
 //
-//	SELECT * | col,...  FROM <table> [USE INDEX (<idx>)]
-//	  [ALLOW SCAN] [WHERE <pred>] [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
+//	SELECT * | col,... | COUNT(*)  FROM <table> [USE INDEX (<idx>)]
+//	  [ALLOW SCAN] [WHERE <pred>] [GROUP BY col,...]
+//	  [ORDER BY <sk> ASC|DESC] [LIMIT <n>]
 //
 //	INSERT INTO <table> (col,...) VALUES (v,...)
 //
@@ -73,6 +74,7 @@ const (
 	tKey
 	tDrop
 	tOrder
+	tGroup
 	tBy
 	tAsc
 	tDesc
@@ -130,6 +132,7 @@ var keywords = map[string]TokenKind{
 	"KEY":       tKey,
 	"DROP":      tDrop,
 	"ORDER":     tOrder,
+	"GROUP":     tGroup,
 	"BY":        tBy,
 	"ASC":       tAsc,
 	"DESC":      tDesc,

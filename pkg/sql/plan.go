@@ -42,6 +42,8 @@ type PlanQuery struct {
 	Limit      int
 	Project    []string // nil → all attributes
 	OrderBy    string
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	OrderDesc  bool
 	Descriptor types.TableDescriptor // resolved by planner so executor doesn't reread it
 	// PostFilter, when non-nil, is evaluated against each row the
@@ -64,6 +66,8 @@ type PlanScan struct {
 	Predicate  Expr
 	OrderBy    string
 	OrderDesc  bool
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	Descriptor types.TableDescriptor
 	Count      bool
 }
