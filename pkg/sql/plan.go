@@ -42,6 +42,8 @@ type PlanQuery struct {
 	Limit      int
 	Project    []string // nil → all attributes
 	OrderBy    string
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	OrderDesc  bool
 	Descriptor types.TableDescriptor // resolved by planner so executor doesn't reread it
 	// PostFilter, when non-nil, is evaluated against each row the
@@ -64,8 +66,26 @@ type PlanScan struct {
 	Predicate  Expr
 	OrderBy    string
 	OrderDesc  bool
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	Descriptor types.TableDescriptor
 	Count      bool
+}
+
+// PlanJoin is the first analytical INNER JOIN path. Both sides are
+// explicit scan inputs and the executor runs a hash join on equality.
+type PlanJoin struct {
+	LeftTable       string
+	LeftAlias       string
+	RightTable      string
+	RightAlias      string
+	LeftColumn      string
+	RightColumn     string
+	Project         []string
+	Predicate       Expr
+	Limit           int
+	LeftDescriptor  types.TableDescriptor
+	RightDescriptor types.TableDescriptor
 }
 
 // PlanSpatial is a geohash / Z-order / radius scan.
@@ -142,6 +162,7 @@ func (*PlanDropTable) plan()   {}
 func (*PlanGetItem) plan()     {}
 func (*PlanQuery) plan()       {}
 func (*PlanScan) plan()        {}
+func (*PlanJoin) plan()        {}
 func (*PlanSpatial) plan()     {}
 func (*PlanANN) plan()         {}
 func (*PlanPutItem) plan()     {}

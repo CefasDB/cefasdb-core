@@ -84,6 +84,8 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execQuery(p)
 	case *PlanScan:
 		return e.execScan(p)
+	case *PlanJoin:
+		return e.execJoin(p)
 	case *PlanSpatial:
 		return e.execSpatial(p)
 	case *PlanANN:
@@ -451,7 +453,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	openLow := p.SKLow.T == types.AttrNull
 	openHigh := p.SKHigh.T == types.AttrNull
 	sourceLimit := p.Limit
-	if p.OrderBy != "" {
+	if p.OrderBy != "" || len(p.GroupBy) > 0 {
 		sourceLimit = 0
 	}
 
@@ -486,6 +488,9 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	if p.Count {
 		return &Result{AffectedRows: len(items)}, nil
 	}
+	if len(p.GroupBy) > 0 {
+		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
+	}
 	if p.OrderBy != "" {
 		sortItemsByColumn(items, p.OrderBy, p.OrderDesc)
 		if p.Limit > 0 && len(items) > p.Limit {
@@ -502,7 +507,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 
 func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	sourceLimit := p.Limit
-	if p.Predicate != nil || p.Count || p.OrderBy != "" {
+	if p.Predicate != nil || p.Count || p.OrderBy != "" || len(p.GroupBy) > 0 {
 		sourceLimit = 0
 	}
 	items, err := e.Storage.ScanTable(p.Table, sourceLimit)
@@ -525,6 +530,9 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	if p.Count {
 		return &Result{AffectedRows: len(items)}, nil
 	}
+	if len(p.GroupBy) > 0 {
+		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
+	}
 	if p.OrderBy != "" {
 		sortItemsByColumn(items, p.OrderBy, p.OrderDesc)
 	}
@@ -535,6 +543,57 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 		project(items, p.Project)
 	}
 	return &Result{Rows: items}, nil
+}
+
+func (e *Executor) execJoin(p *PlanJoin) (*Result, error) {
+	leftItems, err := e.Storage.ScanTable(p.LeftTable, 0)
+	if err != nil {
+		return nil, err
+	}
+	rightItems, err := e.Storage.ScanTable(p.RightTable, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	rightByKey := make(map[string][]types.Item)
+	for _, right := range rightItems {
+		av, ok := right[p.RightColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		key := joinAttrKey(av)
+		rightByKey[key] = append(rightByKey[key], right)
+	}
+
+	var rows []types.Item
+	for _, left := range leftItems {
+		av, ok := left[p.LeftColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		for _, right := range rightByKey[joinAttrKey(av)] {
+			row := joinItems(p.LeftAlias, left, p.RightAlias, right)
+			if p.Predicate != nil {
+				keep, err := EvalBool(p.Predicate, row, nil)
+				if err != nil {
+					return nil, err
+				}
+				if !keep {
+					continue
+				}
+			}
+			if len(p.Project) > 0 {
+				projected := []types.Item{row}
+				project(projected, p.Project)
+				row = projected[0]
+			}
+			rows = append(rows, row)
+			if p.Limit > 0 && len(rows) >= p.Limit {
+				return &Result{Rows: rows}, nil
+			}
+		}
+	}
+	return &Result{Rows: rows}, nil
 }
 
 func (e *Executor) execSpatial(p *PlanSpatial) (*Result, error) {
@@ -873,7 +932,159 @@ func compareFloatSlices(a, b []float64) int {
 	return compareInt(len(a), len(b))
 }
 
+type aggregateGroup struct {
+	key    string
+	values []types.AttributeValue
+	counts []int
+}
+
+func aggregateRows(items []types.Item, groupBy []string, aggs []AggregateExpr, limit int) *Result {
+	groups := make(map[string]*aggregateGroup)
+	for _, it := range items {
+		values := groupValues(it, groupBy)
+		key := groupKey(values)
+		g, ok := groups[key]
+		if !ok {
+			g = &aggregateGroup{
+				key:    key,
+				values: values,
+				counts: make([]int, len(aggs)),
+			}
+			groups[key] = g
+		}
+		for i, agg := range aggs {
+			if countAggregate(agg, it) {
+				g.counts[i]++
+			}
+		}
+	}
+
+	ordered := make([]*aggregateGroup, 0, len(groups))
+	for _, g := range groups {
+		ordered = append(ordered, g)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].key < ordered[j].key
+	})
+	if limit > 0 && len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+
+	rows := make([]types.Item, 0, len(ordered))
+	for _, g := range ordered {
+		row := make(types.Item, len(groupBy)+len(aggs))
+		for i, col := range groupBy {
+			row[col] = g.values[i]
+		}
+		for i, agg := range aggs {
+			row[agg.OutputName] = types.AttributeValue{T: types.AttrN, N: strconv.Itoa(g.counts[i])}
+		}
+		rows = append(rows, row)
+	}
+	return &Result{Rows: rows}
+}
+
+func groupValues(it types.Item, groupBy []string) []types.AttributeValue {
+	values := make([]types.AttributeValue, 0, len(groupBy))
+	for _, col := range groupBy {
+		av, ok := it[col]
+		if !ok {
+			av = types.AttributeValue{T: types.AttrNull}
+		}
+		values = append(values, av)
+	}
+	return values
+}
+
+func countAggregate(agg AggregateExpr, it types.Item) bool {
+	if strings.EqualFold(agg.Func, "COUNT") {
+		if agg.Column == "*" {
+			return true
+		}
+		av, ok := it[agg.Column]
+		return ok && av.T != types.AttrNull
+	}
+	return false
+}
+
+func groupKey(values []types.AttributeValue) string {
+	var b strings.Builder
+	for _, av := range values {
+		writeAttrStableKey(&b, av)
+		b.WriteByte('|')
+	}
+	return b.String()
+}
+
+func joinItems(leftAlias string, left types.Item, rightAlias string, right types.Item) types.Item {
+	out := make(types.Item, len(left)+len(right))
+	for k, v := range left {
+		out[leftAlias+"."+k] = v
+	}
+	for k, v := range right {
+		out[rightAlias+"."+k] = v
+	}
+	return out
+}
+
+func joinAttrKey(av types.AttributeValue) string {
+	var b strings.Builder
+	writeAttrStableKey(&b, av)
+	return b.String()
+}
+
+func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
+	b.WriteString(strconv.Itoa(int(av.T)))
+	b.WriteByte(':')
+	switch av.T {
+	case types.AttrNull:
+		return
+	case types.AttrS:
+		b.WriteString(strconv.Quote(av.S))
+	case types.AttrN:
+		b.WriteString(strconv.Quote(av.N))
+	case types.AttrB:
+		b.WriteString(strconv.Quote(string(av.B)))
+	case types.AttrBOOL:
+		if av.BOOL {
+			b.WriteByte('1')
+		} else {
+			b.WriteByte('0')
+		}
+	case types.AttrSS:
+		writeStringListGroupKey(b, sortedStrings(av.SS))
+	case types.AttrNS:
+		writeStringListGroupKey(b, sortedNumbers(av.NS))
+	case types.AttrBS:
+		for _, v := range sortedBytes(av.BS) {
+			b.WriteString(strconv.Quote(string(v)))
+			b.WriteByte(',')
+		}
+	case types.AttrL:
+		for _, v := range av.L {
+			writeAttrStableKey(b, v)
+			b.WriteByte(',')
+		}
+	case types.AttrM:
+		for _, k := range sortedMapKeys(av.M) {
+			b.WriteString(strconv.Quote(k))
+			b.WriteByte('=')
+			writeAttrStableKey(b, av.M[k])
+			b.WriteByte(',')
+		}
+	case types.AttrVec:
+		for _, v := range av.Vec {
+			b.WriteString(strconv.FormatFloat(v, 'g', -1, 64))
+			b.WriteByte(',')
+		}
+	}
+}
+
 func sortedStrings(in []string) []string {
+	return sortedStringCopy(in)
+}
+
+func sortedStringCopy(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
@@ -917,6 +1128,13 @@ func compareNumberStrings(a, b string) int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func writeStringListGroupKey(b *strings.Builder, values []string) {
+	for _, v := range values {
+		b.WriteString(strconv.Quote(v))
+		b.WriteByte(',')
 	}
 }
 
