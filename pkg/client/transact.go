@@ -12,8 +12,12 @@ import (
 type TransactKind uint8
 
 const (
+	// TransactPut puts Item into Table at the row keyed by Item's primary key.
 	TransactPut TransactKind = iota + 1
+	// TransactDelete deletes the row in Table keyed by Key.
 	TransactDelete
+	// TransactConditionCheck asserts ConditionExpression against the row
+	// keyed by Key in Table without mutating it.
 	TransactConditionCheck
 )
 

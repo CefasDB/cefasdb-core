@@ -1,9 +1,3 @@
-// Atomic read-modify-write client surface (issue #242).
-//
-// AtomicUpdate exposes the server-side counter / CAS primitive on the
-// SDK. The post-image of the row plus the per-action returned value
-// are surfaced as typed Items so callers never touch the generated
-// protobuf stubs.
 package client
 
 import (

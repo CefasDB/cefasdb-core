@@ -25,6 +25,9 @@ type ClusterStatus struct {
 	BackupScheduler   *ScheduledBackupStatus
 }
 
+// ScheduledBackupStatus describes the cluster's automatic-backup
+// scheduler: configuration, the last run's outcome, and the next
+// scheduled invocation time.
 type ScheduledBackupStatus struct {
 	Enabled                bool
 	DryRun                 bool
@@ -51,11 +54,15 @@ type ScheduledBackupStatus struct {
 	LastRetention          *BackupRetentionResult
 }
 
+// TokenRange is a half-open [Start, End) interval of the 64-bit
+// partitioning token space owned by a shard.
 type TokenRange struct {
 	Start uint64
 	End   uint64
 }
 
+// ShardPlacement describes the token ownership and Raft membership
+// for one shard.
 type ShardPlacement struct {
 	ID         uint32
 	Ranges     []TokenRange
@@ -66,6 +73,8 @@ type ShardPlacement struct {
 	LeaderHint string
 }
 
+// RangeHotspotSummary is the per-bucket traffic and latency snapshot
+// the server publishes for range-hotspot diagnostics.
 type RangeHotspotSummary struct {
 	ShardID             string
 	Bucket              int
@@ -86,6 +95,9 @@ type RangeHotspotSummary struct {
 	HotUntilUnix        int64
 }
 
+// NodeCapacity carries the placement hints a node advertises to the
+// scheduler: relative weight, CPU, memory, disk, zone and free-form
+// tags.
 type NodeCapacity struct {
 	Weight      int
 	CPU         int
@@ -95,6 +107,8 @@ type NodeCapacity struct {
 	Tags        []string
 }
 
+// NodeDescriptor is the cluster's view of one peer, including its
+// network addresses, state, advertised capacity and last-seen time.
 type NodeDescriptor struct {
 	ID           string
 	RaftAddr     string
@@ -104,11 +118,15 @@ type NodeDescriptor struct {
 	LastSeenUnix int64
 }
 
+// MembershipOptions narrows AddVoterWithOptions / RemoveServerWithOptions
+// to a specific shard or to every shard at once.
 type MembershipOptions struct {
 	ShardID   *uint32
 	AllShards bool
 }
 
+// PlacementCatalog is the cluster-wide placement snapshot — shards,
+// nodes, the placement epoch, and the strategy that produced it.
 type PlacementCatalog struct {
 	Version       uint64
 	Epoch         uint64
@@ -259,6 +277,8 @@ func (c *Client) AddVoter(ctx context.Context, id, addr string) error {
 	return c.AddVoterWithOptions(ctx, id, addr, MembershipOptions{})
 }
 
+// AddVoterWithOptions is the per-shard form of AddVoter; opts targets
+// either a specific ShardID or every shard.
 func (c *Client) AddVoterWithOptions(ctx context.Context, id, addr string, opts MembershipOptions) error {
 	req := &cefaspb.AddVoterRequest{Id: id, Addr: addr, AllShards: opts.AllShards}
 	if opts.ShardID != nil {
@@ -274,6 +294,8 @@ func (c *Client) RemoveServer(ctx context.Context, id string) error {
 	return c.RemoveServerWithOptions(ctx, id, MembershipOptions{})
 }
 
+// RemoveServerWithOptions is the per-shard form of RemoveServer; opts
+// targets either a specific ShardID or every shard.
 func (c *Client) RemoveServerWithOptions(ctx context.Context, id string, opts MembershipOptions) error {
 	req := &cefaspb.RemoveServerRequest{Id: id, AllShards: opts.AllShards}
 	if opts.ShardID != nil {

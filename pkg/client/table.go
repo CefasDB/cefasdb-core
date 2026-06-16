@@ -1,7 +1,3 @@
-// Table-resource client methods (issue #315). Mirrors the CreateTable
-// / DescribeTable / ListTables / DropTable / TTL RPCs the cefas server
-// exposes. Lives in its own file so the table surface stays additive
-// against pkg/client/client.go.
 package client
 
 import (

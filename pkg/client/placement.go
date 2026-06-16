@@ -6,6 +6,9 @@ import (
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 )
 
+// PlacementPlanRequest packs the inputs PlanPlacement uses to compute
+// a proposed shard / range reshape. Operation selects the planner
+// algorithm; the remaining fields are interpreted per operation.
 type PlacementPlanRequest struct {
 	Operation     string
 	ShardID       uint32
@@ -22,6 +25,8 @@ type PlacementPlanRequest struct {
 	MinVoters     int
 }
 
+// PlacementPlanStep is one ordered action a placement plan would
+// perform; ApplyPlacement executes the steps in order.
 type PlacementPlanStep struct {
 	Action  string
 	ShardID *uint32
@@ -30,6 +35,9 @@ type PlacementPlanStep struct {
 	Detail  string
 }
 
+// PlacementPlan is the planner's diff between the current placement
+// (Before) and the proposed placement (After), together with the
+// ordered Steps and any warnings.
 type PlacementPlan struct {
 	Operation        string
 	BeforeEpoch      uint64
@@ -43,12 +51,17 @@ type PlacementPlan struct {
 	ApplySupported   bool
 }
 
+// PlacementApplyRequest carries a previously-planned PlacementPlan
+// along with the epoch the caller expects the cluster to be at
+// (ExpectedEpoch) and an apply timeout in milliseconds.
 type PlacementApplyRequest struct {
 	Plan          PlacementPlan
 	ExpectedEpoch uint64
 	TimeoutMS     int
 }
 
+// PlacementApplyStep is one executed step inside a PlacementApplyResult,
+// with the per-step Status and human-readable Detail.
 type PlacementApplyStep struct {
 	Action  string
 	ShardID *uint32
@@ -57,6 +70,8 @@ type PlacementApplyStep struct {
 	Detail  string
 }
 
+// PlacementApplyResult is the outcome of ApplyPlacement: the executed
+// steps and the resulting PlacementCatalog at AfterEpoch.
 type PlacementApplyResult struct {
 	Operation   string
 	BeforeEpoch uint64
@@ -65,6 +80,9 @@ type PlacementApplyResult struct {
 	Placement   PlacementCatalog
 }
 
+// SplitFinalizeRequest finalises an in-progress shard split: the
+// parent / child shard IDs, the epoch the caller expects, and whether
+// writes have already been quiesced server-side.
 type SplitFinalizeRequest struct {
 	ParentShardID  uint32
 	ChildShardID   uint32
@@ -73,6 +91,8 @@ type SplitFinalizeRequest struct {
 	WritesQuiesced bool
 }
 
+// SplitFinalizeResult reports the per-shard token ranges before and
+// after a split, the keys copied, and the placement at AfterEpoch.
 type SplitFinalizeResult struct {
 	ParentShardID     uint32
 	ChildShardID      uint32
@@ -87,6 +107,8 @@ type SplitFinalizeResult struct {
 	Placement         PlacementCatalog
 }
 
+// RangeMoveFinalizeRequest finalises an in-progress range move from
+// SourceShardID to TargetShardID at the given expected epoch.
 type RangeMoveFinalizeRequest struct {
 	SourceShardID uint32
 	TargetShardID uint32
@@ -94,6 +116,9 @@ type RangeMoveFinalizeRequest struct {
 	TimeoutMS     int
 }
 
+// RangeMoveFinalizeResult reports the source ranges before / after
+// the move, the moved range, the keys copied, the protocol Phase the
+// server reached, and the resulting PlacementCatalog.
 type RangeMoveFinalizeResult struct {
 	SourceShardID      uint32
 	TargetShardID      uint32
@@ -109,6 +134,8 @@ type RangeMoveFinalizeResult struct {
 	Placement          PlacementCatalog
 }
 
+// PlanPlacement asks the server to compute a placement plan for the
+// reshape described by req without applying it.
 func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (PlacementPlan, error) {
 	pbReq := &cefaspb.PlanPlacementRequest{
 		Operation:    req.Operation,
@@ -142,6 +169,8 @@ func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (P
 	return placementPlanFromPB(resp.GetPlan()), nil
 }
 
+// ApplyPlacement executes a previously-planned PlacementPlan against
+// the cluster; ExpectedEpoch protects against concurrent reshapes.
 func (c *Client) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) (PlacementApplyResult, error) {
 	resp, err := c.stub.ApplyPlacement(c.withAuth(ctx), &cefaspb.ApplyPlacementRequest{
 		Plan:          placementPlanToPB(req.Plan),
@@ -154,6 +183,8 @@ func (c *Client) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) 
 	return placementApplyResultFromPB(resp.GetResult()), nil
 }
 
+// FinalizeSplit commits an in-progress shard split once the child
+// shard has caught up.
 func (c *Client) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (SplitFinalizeResult, error) {
 	resp, err := c.stub.FinalizeSplit(c.withAuth(ctx), &cefaspb.FinalizeSplitRequest{
 		ParentShardId:  req.ParentShardID,
@@ -168,6 +199,8 @@ func (c *Client) FinalizeSplit(ctx context.Context, req SplitFinalizeRequest) (S
 	return splitFinalizeResultFromPB(resp.GetResult()), nil
 }
 
+// FinalizeRangeMove commits an in-progress range move once the target
+// shard has caught up.
 func (c *Client) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeRequest) (RangeMoveFinalizeResult, error) {
 	resp, err := c.stub.FinalizeRangeMove(c.withAuth(ctx), &cefaspb.FinalizeRangeMoveRequest{
 		SourceShardId: req.SourceShardID,

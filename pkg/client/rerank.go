@@ -1,5 +1,3 @@
-// MMR rerank client surface (issue #244). Lives in its own file so
-// the implementation does not touch client.go.
 package client
 
 import (

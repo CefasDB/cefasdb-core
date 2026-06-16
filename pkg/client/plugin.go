@@ -1,7 +1,3 @@
-// Plugin, audience, dedup/freqcap and aggregate surfaces of the SDK.
-//
-// Split out of client.go as part of the per-resource sibling layout
-// (issue #315 / epic #307). Verbatim relocation: no API change.
 package client
 
 import (
