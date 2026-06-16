@@ -1,7 +1,3 @@
-// Package query defines the query-planner surface, the explain
-// format, the Top-K abstraction, and the distance-operator
-// abstraction. The cefas SQL package + every plugin compose against
-// these interfaces; no concrete planner implementation lives here.
 package query
 
 import "github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -30,6 +26,8 @@ type Plan interface {
 // ExplainFormat selects the rendering used by Plan.Explain.
 type ExplainFormat uint8
 
+// ExplainText / ExplainJSON select the explain rendering: the
+// indented text outline or the machine-readable JSON document.
 const (
 	ExplainText ExplainFormat = iota
 	ExplainJSON

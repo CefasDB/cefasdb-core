@@ -1,6 +1,3 @@
-// Package stream defines the change-stream surface plugins use to
-// maintain derived state (e.g. SimHash dedup, MinHash signatures)
-// without polling the base table.
 package stream
 
 import "github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -8,6 +5,9 @@ import "github.com/osvaldoandrade/cefas/pkg/core/model"
 // Op classifies a change event.
 type Op uint8
 
+// OpUnspecified / OpPut / OpDelete classify a change event: the
+// zero value when the source has not set Op, a row insertion or
+// update, and a row deletion.
 const (
 	OpUnspecified Op = iota
 	OpPut

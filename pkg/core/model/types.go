@@ -1,9 +1,3 @@
-// Package model defines the stable data-model surface every cefas
-// plugin depends on. Re-exports the canonical Item / KeySchema /
-// AttributeValue types so plugins never import pkg/types (or any
-// internal package) directly.
-//
-// Plugins must reach for cefas types only through this package.
 package model
 
 import "github.com/osvaldoandrade/cefas/pkg/types"

@@ -127,6 +127,8 @@ func (n NodeID) String() string { return n.v }
 
 // MarshalText / UnmarshalText preserve the legacy string wire form.
 func (n NodeID) MarshalText() ([]byte, error) { return []byte(n.v), nil }
+
+// UnmarshalText parses the legacy string wire form into a NodeID.
 func (n *NodeID) UnmarshalText(b []byte) error {
 	id, err := NewNodeID(string(b))
 	if err != nil {
@@ -179,6 +181,8 @@ func (s StreamShardID) String() string { return s.v }
 
 // MarshalText / UnmarshalText preserve the legacy string wire form.
 func (s StreamShardID) MarshalText() ([]byte, error) { return []byte(s.v), nil }
+
+// UnmarshalText parses the legacy string wire form into a StreamShardID.
 func (s *StreamShardID) UnmarshalText(b []byte) error {
 	id, err := NewStreamShardID(string(b))
 	if err != nil {
@@ -222,6 +226,8 @@ func (t TableID) String() string { return t.v }
 
 // MarshalText / UnmarshalText preserve the legacy string wire form.
 func (t TableID) MarshalText() ([]byte, error) { return []byte(t.v), nil }
+
+// UnmarshalText parses the legacy string wire form into a TableID.
 func (t *TableID) UnmarshalText(b []byte) error {
 	id, err := NewTableID(string(b))
 	if err != nil {

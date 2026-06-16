@@ -1,7 +1,3 @@
-// Package ttl defines the TTL surface plugins and the engine share.
-// The reaper that physically removes expired rows lives in storage;
-// plugins (dedup, freqcap) observe expirations through this interface
-// without importing storage internals.
 package ttl
 
 import "github.com/osvaldoandrade/cefas/pkg/core/model"

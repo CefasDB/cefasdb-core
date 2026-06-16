@@ -1,23 +1,3 @@
-// Package mmr implements the Maximal Marginal Relevance (MMR)
-// diversification operator used as a post-rank on TopK candidate
-// sets. MMR balances per-candidate relevance against intra-slate
-// similarity so a near-duplicate-heavy TopK answer can be reduced
-// to a more diverse slate the application surfaces to the user.
-//
-// The scoring rule (Carbonell & Goldstein, 1998) is
-//
-//	score(c) = λ · relevance(c) − (1 − λ) · max_{p ∈ picked} sim(c, p)
-//
-// With λ = 1.0 the algorithm collapses to the input ranking (relevance
-// dominates). With λ = 0.0 it picks the item least similar to the
-// already-picked slate first, modulo the seed: the first item is still
-// the most-relevant candidate because no picks exist yet to penalise
-// against. Intermediate λ trades off the two.
-//
-// This package is deliberately model-free and deterministic: callers
-// pass a similarity function (a query.DistanceOp via a small adapter
-// or any func) and a ranked candidate list. The engine never touches
-// the storage layer.
 package mmr
 
 import (
