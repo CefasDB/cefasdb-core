@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -382,7 +383,7 @@ func (c *Catalog) newStreamDescriptor(td types.TableDescriptor) (*types.StreamDe
 		KeySchema:               td.KeySchema,
 		Shards: []types.StreamShardDescriptor{
 			{
-				ShardID: types.StreamShardIDSingle,
+				ShardID: model.StreamShardIDSingle.String(),
 				SequenceNumberRange: types.StreamSequenceNumberRange{
 					StartingSequenceNumber: starting,
 				},
@@ -407,7 +408,7 @@ func (c *Catalog) closeStreamDescriptor(td types.TableDescriptor) (*types.Stream
 			KeySchema:               td.KeySchema,
 			Shards: []types.StreamShardDescriptor{
 				{
-					ShardID: types.StreamShardIDSingle,
+					ShardID: model.StreamShardIDSingle.String(),
 					SequenceNumberRange: types.StreamSequenceNumberRange{
 						StartingSequenceNumber: "1",
 					},
@@ -448,7 +449,7 @@ func normalizeStreamMetadata(desc *types.StreamDescriptor) {
 	if len(desc.Shards) == 0 {
 		desc.Shards = []types.StreamShardDescriptor{
 			{
-				ShardID: types.StreamShardIDSingle,
+				ShardID: model.StreamShardIDSingle.String(),
 				SequenceNumberRange: types.StreamSequenceNumberRange{
 					StartingSequenceNumber: "1",
 				},
@@ -458,7 +459,7 @@ func normalizeStreamMetadata(desc *types.StreamDescriptor) {
 	}
 	for i := range desc.Shards {
 		if desc.Shards[i].ShardID == "" {
-			desc.Shards[i].ShardID = types.StreamShardIDSingle
+			desc.Shards[i].ShardID = model.StreamShardIDSingle.String()
 		}
 		if desc.Shards[i].SequenceNumberRange.StartingSequenceNumber == "" {
 			desc.Shards[i].SequenceNumberRange.StartingSequenceNumber = "1"

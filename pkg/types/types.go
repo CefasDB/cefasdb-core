@@ -149,6 +149,17 @@ const (
 	StreamStatusDisabling = "DISABLING"
 	StreamStatusDisabled  = "DISABLED"
 
+	// StreamShardIDSingle is the canonical single-shard identifier
+	// for DynamoDB-compatible streams.
+	//
+	// This package keeps it as a bare string because pkg/types sits
+	// at the bottom of the import graph (pkg/core/model imports
+	// pkg/types, not the other way round). The phase-5 value-object
+	// migration introduced model.StreamShardIDSingle of type
+	// model.StreamShardID as the new source of truth; new callers
+	// should prefer the VO and call .String() only when they need
+	// to hand the wire form to a string-shaped field. Both values
+	// resolve to the same canonical "shardId-000000000000" literal.
 	StreamShardIDSingle = "shardId-000000000000"
 )
 
