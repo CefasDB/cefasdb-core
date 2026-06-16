@@ -452,18 +452,22 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	)
 	openLow := p.SKLow.T == types.AttrNull
 	openHigh := p.SKHigh.T == types.AttrNull
+	sourceLimit := p.Limit
+	if len(p.GroupBy) > 0 {
+		sourceLimit = 0
+	}
 
 	switch {
 	case p.IndexName != "":
 		items, err = e.Storage.QueryByGSI(p.Descriptor, p.IndexName, p.PKValue, storage.QueryOptions{
 			SKLow:  p.SKLow,
 			SKHigh: p.SKHigh,
-			Limit:  p.Limit,
+			Limit:  sourceLimit,
 		})
 	case openLow && openHigh:
-		items, err = e.Storage.QueryByPK(p.Table, p.Descriptor.KeySchema, p.PKValue, p.Limit)
+		items, err = e.Storage.QueryByPK(p.Table, p.Descriptor.KeySchema, p.PKValue, sourceLimit)
 	default:
-		items, err = e.Storage.QueryByPKRange(p.Table, p.Descriptor.KeySchema, p.PKValue, p.SKLow, p.SKHigh, p.Limit)
+		items, err = e.Storage.QueryByPKRange(p.Table, p.Descriptor.KeySchema, p.PKValue, p.SKLow, p.SKHigh, sourceLimit)
 	}
 	if err != nil {
 		return nil, err
@@ -484,6 +488,9 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	if p.Count {
 		return &Result{AffectedRows: len(items)}, nil
 	}
+	if len(p.GroupBy) > 0 {
+		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
+	}
 	if p.OrderDesc {
 		reverse(items)
 	}
@@ -495,7 +502,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 
 func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	sourceLimit := p.Limit
-	if p.Predicate != nil || p.Count {
+	if p.Predicate != nil || p.Count || len(p.GroupBy) > 0 {
 		sourceLimit = 0
 	}
 	items, err := e.Storage.ScanTable(p.Table, sourceLimit)
@@ -515,11 +522,14 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 		}
 		items = filtered
 	}
-	if p.Limit > 0 && len(items) > p.Limit {
-		items = items[:p.Limit]
-	}
 	if p.Count {
 		return &Result{AffectedRows: len(items)}, nil
+	}
+	if len(p.GroupBy) > 0 {
+		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
+	}
+	if p.Limit > 0 && len(items) > p.Limit {
+		items = items[:p.Limit]
 	}
 	if len(p.Project) > 0 {
 		project(items, p.Project)
@@ -758,6 +768,90 @@ func reverse(items []types.Item) {
 	}
 }
 
+type aggregateGroup struct {
+	key    string
+	values []types.AttributeValue
+	counts []int
+}
+
+func aggregateRows(items []types.Item, groupBy []string, aggs []AggregateExpr, limit int) *Result {
+	groups := make(map[string]*aggregateGroup)
+	for _, it := range items {
+		values := groupValues(it, groupBy)
+		key := groupKey(values)
+		g, ok := groups[key]
+		if !ok {
+			g = &aggregateGroup{
+				key:    key,
+				values: values,
+				counts: make([]int, len(aggs)),
+			}
+			groups[key] = g
+		}
+		for i, agg := range aggs {
+			if countAggregate(agg, it) {
+				g.counts[i]++
+			}
+		}
+	}
+
+	ordered := make([]*aggregateGroup, 0, len(groups))
+	for _, g := range groups {
+		ordered = append(ordered, g)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].key < ordered[j].key
+	})
+	if limit > 0 && len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+
+	rows := make([]types.Item, 0, len(ordered))
+	for _, g := range ordered {
+		row := make(types.Item, len(groupBy)+len(aggs))
+		for i, col := range groupBy {
+			row[col] = g.values[i]
+		}
+		for i, agg := range aggs {
+			row[agg.OutputName] = types.AttributeValue{T: types.AttrN, N: strconv.Itoa(g.counts[i])}
+		}
+		rows = append(rows, row)
+	}
+	return &Result{Rows: rows}
+}
+
+func groupValues(it types.Item, groupBy []string) []types.AttributeValue {
+	values := make([]types.AttributeValue, 0, len(groupBy))
+	for _, col := range groupBy {
+		av, ok := it[col]
+		if !ok {
+			av = types.AttributeValue{T: types.AttrNull}
+		}
+		values = append(values, av)
+	}
+	return values
+}
+
+func countAggregate(agg AggregateExpr, it types.Item) bool {
+	if strings.EqualFold(agg.Func, "COUNT") {
+		if agg.Column == "*" {
+			return true
+		}
+		av, ok := it[agg.Column]
+		return ok && av.T != types.AttrNull
+	}
+	return false
+}
+
+func groupKey(values []types.AttributeValue) string {
+	var b strings.Builder
+	for _, av := range values {
+		writeAttrStableKey(&b, av)
+		b.WriteByte('|')
+	}
+	return b.String()
+}
+
 func joinItems(leftAlias string, left types.Item, rightAlias string, right types.Item) types.Item {
 	out := make(types.Item, len(left)+len(right))
 	for k, v := range left {
@@ -771,11 +865,11 @@ func joinItems(leftAlias string, left types.Item, rightAlias string, right types
 
 func joinAttrKey(av types.AttributeValue) string {
 	var b strings.Builder
-	writeJoinAttrKey(&b, av)
+	writeAttrStableKey(&b, av)
 	return b.String()
 }
 
-func writeJoinAttrKey(b *strings.Builder, av types.AttributeValue) {
+func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
 	b.WriteString(strconv.Itoa(int(av.T)))
 	b.WriteByte(':')
 	switch av.T {
@@ -794,29 +888,19 @@ func writeJoinAttrKey(b *strings.Builder, av types.AttributeValue) {
 			b.WriteByte('0')
 		}
 	case types.AttrSS:
-		values := append([]string(nil), av.SS...)
-		sort.Strings(values)
-		for _, v := range values {
-			b.WriteString(strconv.Quote(v))
-			b.WriteByte(',')
-		}
+		writeStringListGroupKey(b, sortedStringCopy(av.SS))
 	case types.AttrNS:
-		values := append([]string(nil), av.NS...)
-		sort.Strings(values)
-		for _, v := range values {
-			b.WriteString(strconv.Quote(v))
-			b.WriteByte(',')
-		}
+		writeStringListGroupKey(b, sortedStringCopy(av.NS))
 	case types.AttrBS:
-		values := append([][]byte(nil), av.BS...)
-		sort.Slice(values, func(i, j int) bool { return bytesCompare(values[i], values[j]) < 0 })
-		for _, v := range values {
+		bs := append([][]byte(nil), av.BS...)
+		sort.Slice(bs, func(i, j int) bool { return bytesCompare(bs[i], bs[j]) < 0 })
+		for _, v := range bs {
 			b.WriteString(strconv.Quote(string(v)))
 			b.WriteByte(',')
 		}
 	case types.AttrL:
 		for _, v := range av.L {
-			writeJoinAttrKey(b, v)
+			writeAttrStableKey(b, v)
 			b.WriteByte(',')
 		}
 	case types.AttrM:
@@ -828,7 +912,7 @@ func writeJoinAttrKey(b *strings.Builder, av types.AttributeValue) {
 		for _, k := range keys {
 			b.WriteString(strconv.Quote(k))
 			b.WriteByte('=')
-			writeJoinAttrKey(b, av.M[k])
+			writeAttrStableKey(b, av.M[k])
 			b.WriteByte(',')
 		}
 	case types.AttrVec:
@@ -836,6 +920,19 @@ func writeJoinAttrKey(b *strings.Builder, av types.AttributeValue) {
 			b.WriteString(strconv.FormatFloat(v, 'g', -1, 64))
 			b.WriteByte(',')
 		}
+	}
+}
+
+func sortedStringCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+func writeStringListGroupKey(b *strings.Builder, values []string) {
+	for _, v := range values {
+		b.WriteString(strconv.Quote(v))
+		b.WriteByte(',')
 	}
 }
 

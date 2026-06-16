@@ -101,28 +101,22 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 	switch p.peek().Kind {
 	case tStar:
 		p.consume()
-	case tCount:
-		p.consume()
-		if _, err := p.expect(tLParen, "("); err != nil {
-			return nil, err
-		}
-		switch p.peek().Kind {
-		case tStar, tIdent:
-			p.consume()
-		default:
-			return nil, fmt.Errorf("expected * or column inside COUNT()")
-		}
-		if _, err := p.expect(tRParen, ")"); err != nil {
-			return nil, err
-		}
-		stmt.Count = true
 	default:
 		for {
-			col, err := p.parseColumnName()
-			if err != nil {
-				return nil, err
+			switch p.peek().Kind {
+			case tCount:
+				agg, err := p.parseCountAggregate()
+				if err != nil {
+					return nil, err
+				}
+				stmt.Aggs = append(stmt.Aggs, agg)
+			default:
+				col, err := p.parseColumnName()
+				if err != nil {
+					return nil, err
+				}
+				stmt.Columns = append(stmt.Columns, col)
 			}
-			stmt.Columns = append(stmt.Columns, col)
 			if p.peek().Kind == tComma {
 				p.consume()
 				continue
@@ -184,6 +178,25 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		stmt.Where = w
 	}
 
+	if p.peek().Kind == tGroup {
+		p.consume()
+		if _, err := p.expect(tBy, "BY"); err != nil {
+			return nil, err
+		}
+		for {
+			id, err := p.expect(tIdent, "group column name")
+			if err != nil {
+				return nil, err
+			}
+			stmt.GroupBy = append(stmt.GroupBy, id.Lit)
+			if p.peek().Kind == tComma {
+				p.consume()
+				continue
+			}
+			break
+		}
+	}
+
 	if p.peek().Kind == tOrder {
 		p.consume()
 		if _, err := p.expect(tBy, "BY"); err != nil {
@@ -236,7 +249,37 @@ func (p *parser) parseSelect() (*SelectStmt, error) {
 		}
 		stmt.Diversify = div
 	}
+	if len(stmt.GroupBy) == 0 && len(stmt.Columns) == 0 && len(stmt.Aggs) == 1 && strings.EqualFold(stmt.Aggs[0].Func, "COUNT") && stmt.Aggs[0].Column == "*" {
+		stmt.Count = true
+	}
 	return stmt, nil
+}
+
+func (p *parser) parseCountAggregate() (AggregateExpr, error) {
+	if _, err := p.expect(tCount, "COUNT"); err != nil {
+		return AggregateExpr{}, err
+	}
+	if _, err := p.expect(tLParen, "("); err != nil {
+		return AggregateExpr{}, err
+	}
+	col := "*"
+	switch p.peek().Kind {
+	case tStar:
+		p.consume()
+	case tIdent:
+		tok := p.consume()
+		col = tok.Lit
+	default:
+		return AggregateExpr{}, fmt.Errorf("expected * or column inside COUNT()")
+	}
+	if _, err := p.expect(tRParen, ")"); err != nil {
+		return AggregateExpr{}, err
+	}
+	out := "count"
+	if col != "*" {
+		out = "count_" + col
+	}
+	return AggregateExpr{Func: "COUNT", Column: col, OutputName: out}, nil
 }
 
 func (p *parser) parseOptionalAlias() string {

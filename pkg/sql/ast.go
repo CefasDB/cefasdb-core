@@ -17,6 +17,8 @@ type SelectStmt struct {
 	Join       *JoinClause
 	AllowScan  bool // explicit opt-in for scan-backed analytical SELECTs
 	Where      Expr // nil → unconditional
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	OrderBy    string
 	OrderDesc  bool
 	OrderANN   bool
@@ -27,6 +29,14 @@ type SelectStmt struct {
 	// the matching-row total as AffectedRows instead of materialising
 	// row data.
 	Count bool
+}
+
+// AggregateExpr is a SELECT-list aggregate. The first analytical
+// implementation supports COUNT(*) and COUNT(col).
+type AggregateExpr struct {
+	Func       string
+	Column     string // "*" for COUNT(*)
+	OutputName string
 }
 
 // JoinClause captures the first-pass INNER JOIN surface:
