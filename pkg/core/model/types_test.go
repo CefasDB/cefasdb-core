@@ -13,9 +13,9 @@ import (
 // adds an *adapter* type (struct wrapper) here, this test fires.
 func TestTypeAliasesRefersToPkgTypes(t *testing.T) {
 	var (
-		_ model.Item           = types.Item{}
-		_ model.KeySchema      = types.KeySchema{}
-		_ model.AttributeValue = types.AttributeValue{}
+		_ model.Item            = types.Item{}
+		_ model.KeySchema       = types.KeySchema{}
+		_ model.AttributeValue  = types.AttributeValue{}
 		_ model.TableDescriptor = types.TableDescriptor{}
 	)
 	// Spot-check one attribute kind alias is wire-compatible.

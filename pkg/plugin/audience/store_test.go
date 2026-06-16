@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/audiencestore"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
 )
 
@@ -279,7 +279,7 @@ func TestDurableStoreOverPebbleSurvivesReopen(t *testing.T) {
 	// is the restart-survival acceptance criterion from #243.
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pebble")
-	db, err := storage.Open(storage.Options{Path: dbPath})
+	db, err := pebble.Open(pebble.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestDurableStoreOverPebbleSurvivesReopen(t *testing.T) {
 	}
 
 	// Reopen and verify the row is still there.
-	db2, err := storage.Open(storage.Options{Path: dbPath})
+	db2, err := pebble.Open(pebble.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

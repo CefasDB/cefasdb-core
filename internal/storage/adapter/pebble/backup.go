@@ -1,4 +1,4 @@
-package storage
+package pebble
 
 import (
 	"encoding/json"
@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -456,7 +458,7 @@ func buildBackupManifest(checkpointDir string, requested []string) ([]string, []
 }
 
 func listCheckpointCatalogTables(checkpoint *pebbledb.DB) ([]string, error) {
-	lower, upper := PrefixCatalog()
+	lower, upper := storage.PrefixCatalog()
 	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint catalog iter: %w", err)
@@ -484,7 +486,7 @@ func listCheckpointCatalogTables(checkpoint *pebbledb.DB) ([]string, error) {
 }
 
 func requireCheckpointTable(checkpoint *pebbledb.DB, table string) error {
-	raw, closer, err := checkpoint.Get(KeyCatalog(table))
+	raw, closer, err := checkpoint.Get(storage.KeyCatalog(table))
 	if err != nil {
 		return fmt.Errorf("backup manifest: table %q descriptor missing in checkpoint: %w", table, err)
 	}
@@ -501,7 +503,7 @@ func requireCheckpointTable(checkpoint *pebbledb.DB, table string) error {
 }
 
 func checkpointTableStats(checkpoint *pebbledb.DB, table string) (BackupTableStats, error) {
-	lower, upper := PrefixPrimaryAll(table)
+	lower, upper := storage.PrefixPrimaryAll(table)
 	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
 		return BackupTableStats{}, fmt.Errorf("checkpoint table iter %q: %w", table, err)

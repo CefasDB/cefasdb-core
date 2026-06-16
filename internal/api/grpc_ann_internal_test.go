@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -21,7 +21,7 @@ import (
 
 func TestIndexedTopKDoesNotUseExactScanFallback(t *testing.T) {
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestPluginIndexDescriptorSurvivesRestartAndRebuild(t *testing.T) {
 	ctx := context.Background()
 	table := "RestartANNDocs"
 
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestPluginIndexDescriptorSurvivesRestartAndRebuild(t *testing.T) {
 	}
 	clearPluginIndexBookForTest()
 
-	db, err = storage.Open(storage.Options{Path: dir})
+	db, err = pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("reopen storage: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestPluginIndexDescriptorSurvivesRestartAndRebuild(t *testing.T) {
 
 func TestCreateIndexBuildFailureDoesNotPersistDescriptor(t *testing.T) {
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestCreateIndexBuildFailureDoesNotPersistDescriptor(t *testing.T) {
 
 func TestConcurrentCreateIndexPublishesOneDescriptor(t *testing.T) {
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}

@@ -6,21 +6,21 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-// indexOp is one mutation against a secondary-index keyspace. The
+// IndexOp is one mutation against a secondary-index keyspace. The
 // storage writer translates these into pebble.Batch operations in the
 // same batch as the primary write — that's what gives cefas all-or-
 // nothing semantics across primary + indexes.
-type indexOp struct {
-	op    indexOpKind
-	key   []byte
-	value []byte
+type IndexOp struct {
+	Op    IndexOpKind
+	Key   []byte
+	Value []byte
 }
 
-type indexOpKind uint8
+type IndexOpKind uint8
 
 const (
-	indexOpSet indexOpKind = iota + 1
-	indexOpDelete
+	IndexOpSet IndexOpKind = iota + 1
+	IndexOpDelete
 )
 
 // planGSI returns the index operations required to move every GSI on
@@ -33,16 +33,16 @@ const (
 //
 // Sparse semantics: an item lacking the GSI's PK (or SK, when present)
 // is simply not indexed — same behaviour as DynamoDB sparse indexes.
-func planGSI(
+func PlanGSI(
 	table string,
 	ks types.KeySchema,
 	gsis []types.GSIDescriptor,
 	prior, next types.Item,
-) ([]indexOp, error) {
+) ([]IndexOp, error) {
 	if len(gsis) == 0 {
 		return nil, nil
 	}
-	ops := make([]indexOp, 0, len(gsis)*2)
+	ops := make([]IndexOp, 0, len(gsis)*2)
 
 	for _, g := range gsis {
 		if g.KeySchema.PK == "" {
@@ -57,7 +57,7 @@ func planGSI(
 			return nil, fmt.Errorf("gsi %q (next): %w", g.Name, err)
 		}
 
-		if priorKey != nil && nextKey != nil && bytesEqual(priorKey, nextKey) {
+		if priorKey != nil && nextKey != nil && BytesEqual(priorKey, nextKey) {
 			// Identical pointer — the value is derived purely from the
 			// primary key bytes (which don't change for a given item),
 			// so byte-equal keys imply byte-equal values. Nothing to
@@ -65,10 +65,10 @@ func planGSI(
 			continue
 		}
 		if priorKey != nil {
-			ops = append(ops, indexOp{op: indexOpDelete, key: priorKey})
+			ops = append(ops, IndexOp{Op: IndexOpDelete, Key: priorKey})
 		}
 		if nextKey != nil {
-			ops = append(ops, indexOp{op: indexOpSet, key: nextKey, value: nextVal})
+			ops = append(ops, IndexOp{Op: IndexOpSet, Key: nextKey, Value: nextVal})
 		}
 	}
 	return ops, nil
@@ -131,7 +131,7 @@ func gsiEntry(
 	return key, val, nil
 }
 
-func bytesEqual(a, b []byte) bool {
+func BytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}

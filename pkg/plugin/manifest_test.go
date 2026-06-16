@@ -28,9 +28,9 @@ func TestManifestValidate(t *testing.T) {
 	}
 	bads := []plugin.Manifest{
 		{Kind: plugin.KindIndex, Version: "1"},                  // no name
-		{Name: "x", Version: "1"},                                // no kind
-		{Name: "x", Kind: plugin.KindIndex},                      // no version
-		{Name: "x", Kind: plugin.KindUnspecified, Version: "1"},  // explicit unspecified
+		{Name: "x", Version: "1"},                               // no kind
+		{Name: "x", Kind: plugin.KindIndex},                     // no version
+		{Name: "x", Kind: plugin.KindUnspecified, Version: "1"}, // explicit unspecified
 	}
 	for i, m := range bads {
 		if err := m.Validate(); err == nil {

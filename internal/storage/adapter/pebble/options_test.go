@@ -1,8 +1,9 @@
-package storage
+package pebble
 
 import (
 	"testing"
 
+	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -60,7 +61,7 @@ func TestCompactTableCoversTableRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lower, upper := PrefixTable("events")
+	lower, upper := storage.PrefixTable("events")
 	if string(res.Lower) != string(lower) || string(res.Upper) != string(upper) {
 		t.Fatalf("range = %q..%q, want %q..%q", res.Lower, res.Upper, lower, upper)
 	}

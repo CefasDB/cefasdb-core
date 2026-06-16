@@ -38,7 +38,7 @@ const (
 	pStreams     = pAdmin + "streams/by-arn/"
 	pStreamTrim  = pAdmin + "streams/retention/"
 
-	segPrimary = "/p/"
+	SegPrimary = "/p/"
 	segGSI     = "/gsi/"
 	segLSI     = "/lsi/"
 	segGeo     = "/geo/"
@@ -46,7 +46,7 @@ const (
 	segTTL     = "/ttl/"
 )
 
-var changeCounterKey = []byte(pAdmin + "change/counter")
+var ChangeCounterKey = []byte(pAdmin + "change/counter")
 
 func KeyChangeLog(index uint64) []byte {
 	base := []byte(pAdmin + "change/log/")
@@ -121,7 +121,7 @@ func PrefixPluginIndexTableDescriptors(table string) (lower, upper []byte) {
 // (see attrCanonicalBytes in item_codec.go). skBytes may be nil (no sort
 // key) — in that case the key terminates after pk_hash8.
 func KeyPrimary(table string, pkSerialized, skBytes []byte) []byte {
-	base := tableBase(table) + segPrimary
+	base := TableBase(table) + SegPrimary
 	h := pkHash8(pkSerialized)
 	k := make([]byte, 0, len(base)+8+len(skBytes))
 	k = append(k, base...)
@@ -133,7 +133,7 @@ func KeyPrimary(table string, pkSerialized, skBytes []byte) []byte {
 // PrefixPrimaryAll returns the [lower, upper) bound covering every item
 // in a table — used for Scan.
 func PrefixPrimaryAll(table string) (lower, upper []byte) {
-	p := []byte(tableBase(table) + segPrimary)
+	p := []byte(TableBase(table) + SegPrimary)
 	return p, prefixUpper(p)
 }
 
@@ -147,7 +147,7 @@ func PrefixTables() (lower, upper []byte) {
 // PrefixTable returns the [lower, upper) bound covering every key that belongs
 // to a table, including primary rows and secondary index entries.
 func PrefixTable(table string) (lower, upper []byte) {
-	p := []byte(tableBase(table) + "/")
+	p := []byte(TableBase(table) + "/")
 	return p, prefixUpper(p)
 }
 
@@ -158,11 +158,11 @@ func PrimaryTokenFromKey(key []byte) (uint64, bool) {
 		return 0, false
 	}
 	rest := key[len(pTables):]
-	pos := bytes.Index(rest, []byte(segPrimary))
+	pos := bytes.Index(rest, []byte(SegPrimary))
 	if pos < 0 {
 		return 0, false
 	}
-	tokenStart := len(pTables) + pos + len(segPrimary)
+	tokenStart := len(pTables) + pos + len(SegPrimary)
 	if len(key) < tokenStart+8 {
 		return 0, false
 	}
@@ -172,7 +172,7 @@ func PrimaryTokenFromKey(key []byte) (uint64, bool) {
 // PrefixPrimaryByPK returns the [lower, upper) bound covering every SK
 // under a single PK — used for Query without an SK condition.
 func PrefixPrimaryByPK(table string, pkSerialized []byte) (lower, upper []byte) {
-	base := tableBase(table) + segPrimary
+	base := TableBase(table) + SegPrimary
 	h := pkHash8(pkSerialized)
 	p := make([]byte, 0, len(base)+8)
 	p = append(p, base...)
@@ -185,7 +185,7 @@ func PrefixPrimaryByPK(table string, pkSerialized []byte) (lower, upper []byte) 
 // the raw serialized SK byte forms. skHigh may be nil to mean "open
 // upper bound within this PK" (i.e. equivalent to PrefixPrimaryByPK).
 func RangePrimaryBySK(table string, pkSerialized, skLow, skHigh []byte) (lower, upper []byte) {
-	base := tableBase(table) + segPrimary
+	base := TableBase(table) + SegPrimary
 	h := pkHash8(pkSerialized)
 
 	lower = make([]byte, 0, len(base)+8+len(skLow))
@@ -208,7 +208,7 @@ func RangePrimaryBySK(table string, pkSerialized, skLow, skHigh []byte) (lower, 
 	return lower, upper
 }
 
-func tableBase(table string) string { return pTables + table }
+func TableBase(table string) string { return pTables + table }
 
 func escapeKeySegment(s string) string { return url.PathEscape(s) }
 
@@ -265,7 +265,7 @@ func be8(n uint64) []byte {
 // identify the underlying item (used here only to compute the unique
 // disambiguator suffix).
 func KeyGSI(table, idxName string, gsiPK, gsiSK, primaryPK, primarySK []byte) []byte {
-	base := tableBase(table) + segGSI + idxName + "/"
+	base := TableBase(table) + segGSI + idxName + "/"
 	gph := pkHash8(gsiPK)
 	suffix := primaryDisambiguator(primaryPK, primarySK)
 	k := make([]byte, 0, len(base)+8+len(gsiSK)+8)
@@ -279,7 +279,7 @@ func KeyGSI(table, idxName string, gsiPK, gsiSK, primaryPK, primarySK []byte) []
 // PrefixGSIByPK returns [lower, upper) covering every entry for a
 // single GSI partition (every SK under one gsi_pk).
 func PrefixGSIByPK(table, idxName string, gsiPK []byte) (lower, upper []byte) {
-	base := tableBase(table) + segGSI + idxName + "/"
+	base := TableBase(table) + segGSI + idxName + "/"
 	gph := pkHash8(gsiPK)
 	p := make([]byte, 0, len(base)+8)
 	p = append(p, base...)
@@ -291,7 +291,7 @@ func PrefixGSIByPK(table, idxName string, gsiPK []byte) (lower, upper []byte) {
 // [skLow, skHigh) within a single gsi_pk. Either bound may be nil for
 // open-ended ranges on that side.
 func RangeGSIBySK(table, idxName string, gsiPK, skLow, skHigh []byte) (lower, upper []byte) {
-	base := tableBase(table) + segGSI + idxName + "/"
+	base := TableBase(table) + segGSI + idxName + "/"
 	gph := pkHash8(gsiPK)
 
 	lower = make([]byte, 0, len(base)+8+len(skLow))
@@ -351,7 +351,7 @@ func EncodeGSIPointer(primaryPK, primarySK []byte) []byte {
 
 // KeyLSI builds a local-secondary-index entry key.
 func KeyLSI(table, idxName string, primaryPK, lsiSK, primarySK []byte) []byte {
-	base := tableBase(table) + segLSI + idxName + "/"
+	base := TableBase(table) + segLSI + idxName + "/"
 	pkh := pkHash8(primaryPK)
 	k := make([]byte, 0, len(base)+8+len(lsiSK)+len(primarySK))
 	k = append(k, base...)
@@ -364,7 +364,7 @@ func KeyLSI(table, idxName string, primaryPK, lsiSK, primarySK []byte) []byte {
 // PrefixLSIByPK returns [lower, upper) covering every LSI entry for a
 // single primary partition.
 func PrefixLSIByPK(table, idxName string, primaryPK []byte) (lower, upper []byte) {
-	base := tableBase(table) + segLSI + idxName + "/"
+	base := TableBase(table) + segLSI + idxName + "/"
 	pkh := pkHash8(primaryPK)
 	p := make([]byte, 0, len(base)+8)
 	p = append(p, base...)
@@ -376,7 +376,7 @@ func PrefixLSIByPK(table, idxName string, primaryPK []byte) (lower, upper []byte
 // in [skLow, skHigh) inside a single primary partition. Either bound
 // may be nil for an open-ended range.
 func RangeLSIBySK(table, idxName string, primaryPK, skLow, skHigh []byte) (lower, upper []byte) {
-	base := tableBase(table) + segLSI + idxName + "/"
+	base := TableBase(table) + segLSI + idxName + "/"
 	pkh := pkHash8(primaryPK)
 
 	lower = make([]byte, 0, len(base)+8+len(skLow))
@@ -408,7 +408,7 @@ func RangeLSIBySK(table, idxName string, primaryPK, skLow, skHigh []byte) (lower
 
 // KeyTTL builds a TTL index entry for an item.
 func KeyTTL(table string, expireUnix uint64, primaryPK, primarySK []byte) []byte {
-	base := tableBase(table) + segTTL
+	base := TableBase(table) + segTTL
 	pkh := pkHash8(primaryPK)
 	k := make([]byte, 0, len(base)+8+8+len(primarySK))
 	k = append(k, base...)
@@ -422,7 +422,7 @@ func KeyTTL(table string, expireUnix uint64, primaryPK, primarySK []byte) []byte
 // whose expire time is strictly less than `before`. Used by the
 // reaper to sweep expired rows.
 func PrefixTTLBefore(table string, before uint64) (lower, upper []byte) {
-	base := tableBase(table) + segTTL
+	base := TableBase(table) + segTTL
 	lower = []byte(base)
 	upper = make([]byte, 0, len(base)+8)
 	upper = append(upper, base...)
@@ -434,7 +434,7 @@ func PrefixTTLBefore(table string, before uint64) (lower, upper []byte) {
 // embedded in a TTL entry key. The pk_hash8 is enough to identify
 // which storage shard owns the row; the SK is the row's primary SK.
 func ParseTTLKey(table string, key []byte) (pkHash, primarySK []byte, ok bool) {
-	prefix := tableBase(table) + segTTL
+	prefix := TableBase(table) + segTTL
 	if len(key) < len(prefix)+8+8 || string(key[:len(prefix)]) != prefix {
 		return nil, nil, false
 	}
@@ -459,7 +459,7 @@ func ParseTTLKey(table string, key []byte) (pkHash, primarySK []byte, ok bool) {
 
 // KeyGeo builds a geohash-index entry key.
 func KeyGeo(table, idxName, geohash string, primaryPK, primarySK []byte) []byte {
-	base := tableBase(table) + segGeo + idxName + "/"
+	base := TableBase(table) + segGeo + idxName + "/"
 	suffix := primaryDisambiguator(primaryPK, primarySK)
 	k := make([]byte, 0, len(base)+len(geohash)+8)
 	k = append(k, base...)
@@ -471,7 +471,7 @@ func KeyGeo(table, idxName, geohash string, primaryPK, primarySK []byte) []byte 
 // PrefixGeoCell returns [lower, upper) covering every entry whose
 // geohash starts with `cellPrefix`. Used by the cover-set scan.
 func PrefixGeoCell(table, idxName, cellPrefix string) (lower, upper []byte) {
-	base := tableBase(table) + segGeo + idxName + "/"
+	base := TableBase(table) + segGeo + idxName + "/"
 	p := make([]byte, 0, len(base)+len(cellPrefix))
 	p = append(p, base...)
 	p = append(p, cellPrefix...)
@@ -481,7 +481,7 @@ func PrefixGeoCell(table, idxName, cellPrefix string) (lower, upper []byte) {
 // KeyZorder builds a Z-order-index entry key. mortonBytes is the
 // fixed-width interleaved key produced by spatial.EncodeMorton.
 func KeyZorder(table, idxName string, mortonBytes []byte, primaryPK, primarySK []byte) []byte {
-	base := tableBase(table) + segZorder + idxName + "/"
+	base := TableBase(table) + segZorder + idxName + "/"
 	suffix := primaryDisambiguator(primaryPK, primarySK)
 	k := make([]byte, 0, len(base)+len(mortonBytes)+8)
 	k = append(k, base...)
@@ -494,7 +494,7 @@ func KeyZorder(table, idxName string, mortonBytes []byte, primaryPK, primarySK [
 // `low` (inclusive) to `high` (inclusive). The caller produced low /
 // high via spatial.MortonRange.
 func RangeZorder(table, idxName string, low, high []byte) (lower, upper []byte) {
-	base := tableBase(table) + segZorder + idxName + "/"
+	base := TableBase(table) + segZorder + idxName + "/"
 	lower = make([]byte, 0, len(base)+len(low))
 	lower = append(lower, base...)
 	lower = append(lower, low...)

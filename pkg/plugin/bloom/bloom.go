@@ -36,9 +36,9 @@ type Config struct {
 // Filter is the state one Bloom index keeps. Concurrent reads + one
 // writer are safe; concurrent writers serialise on mu.
 type Filter struct {
-	mu     sync.RWMutex
-	cfg    Config
-	bits   []uint64 // m/64 slots
+	mu   sync.RWMutex
+	cfg  Config
+	bits []uint64 // m/64 slots
 }
 
 // New constructs a fresh filter from a JSON config blob.

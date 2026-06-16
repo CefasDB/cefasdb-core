@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -16,10 +16,10 @@ func openCat(t *testing.T) *catalog.Catalog {
 	return c
 }
 
-func openCatWithDB(t *testing.T) (*catalog.Catalog, *storage.DB) {
+func openCatWithDB(t *testing.T) (*catalog.Catalog, *pebble.DB) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}

@@ -1,8 +1,10 @@
-package storage
+package pebble
 
 import (
 	"fmt"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
 type CompactionResult struct {
@@ -23,7 +25,7 @@ func (d *DB) CompactTable(table string, parallelize bool) (CompactionResult, err
 	if table == "" {
 		return CompactionResult{}, fmt.Errorf("table is required")
 	}
-	lower, upper := PrefixTable(table)
+	lower, upper := storage.PrefixTable(table)
 	res, err := d.CompactRange(lower, upper, parallelize)
 	res.Table = table
 	return res, err

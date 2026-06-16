@@ -12,7 +12,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/api/streamcore"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
@@ -41,7 +41,7 @@ type GetRecordsObserver func(result streamcore.StreamRecordsResult, err error)
 // register the methods with its existing middleware stack.
 type Handlers struct {
 	cat                *catalog.Catalog
-	db                 *storage.DB
+	db                 *pebble.DB
 	stream             ChangeStream
 	observeIterFailure IteratorFailureObserver
 	observeGetRecords  GetRecordsObserver
@@ -52,7 +52,7 @@ type Handlers struct {
 // callbacks may be nil; the handlers skip recording in that case.
 func New(
 	cat *catalog.Catalog,
-	db *storage.DB,
+	db *pebble.DB,
 	stream ChangeStream,
 	observeIterFailure IteratorFailureObserver,
 	observeGetRecords GetRecordsObserver,

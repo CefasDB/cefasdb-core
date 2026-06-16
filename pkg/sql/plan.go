@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	"github.com/osvaldoandrade/cefas/internal/spatial"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -69,7 +69,7 @@ type PlanScan struct {
 type PlanSpatial struct {
 	Table      string
 	IndexName  string
-	Query      storage.SpatialQuery
+	Query      pebble.SpatialQuery
 	Project    []string
 	Descriptor types.TableDescriptor
 }

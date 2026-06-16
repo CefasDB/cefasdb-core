@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func newStorage(t *testing.T) (*storage.DB, *catalog.Catalog) {
+func newStorage(t *testing.T) (*pebble.DB, *catalog.Catalog) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage open: %v", err)
 	}

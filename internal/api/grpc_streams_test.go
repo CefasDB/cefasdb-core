@@ -10,16 +10,16 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func startStreamFixture(t *testing.T) (cefaspb.CefasClient, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}

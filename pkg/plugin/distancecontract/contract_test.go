@@ -14,8 +14,8 @@ import (
 // helper.
 type fakeOp struct{}
 
-func (fakeOp) Name() string                              { return "fake" }
-func (fakeOp) Supports(_, _ model.AttrType) bool         { return true }
+func (fakeOp) Name() string                      { return "fake" }
+func (fakeOp) Supports(_, _ model.AttrType) bool { return true }
 func (fakeOp) Eval(_, _ model.AttributeValue) (float64, error) {
 	return 0, nil
 }

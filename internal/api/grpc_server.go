@@ -13,11 +13,12 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
@@ -33,7 +34,7 @@ import (
 type GRPCServer struct {
 	cefaspb.UnimplementedCefasServer
 
-	db      *storage.DB
+	db      *pebble.DB
 	cat     *catalog.Catalog
 	cluster Cluster          // nil in single-node mode
 	stream  ChangeStream     // nil when no CDC source attached
@@ -45,7 +46,7 @@ type GRPCServer struct {
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
 // instances the HTTP server uses. Cluster may be nil.
-func NewGRPCServer(db *storage.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
+func NewGRPCServer(db *pebble.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
 	s := &GRPCServer{db: db, cat: cat, cluster: cluster}
 	if db != nil {
 		_ = s.hydratePluginIndexCatalog()
@@ -75,7 +76,7 @@ func (s *GRPCServer) pluginRegistry() *plugin.Registry {
 	return plugin.Default
 }
 
-func (s *GRPCServer) storageFor(pkBytes []byte) *storage.DB {
+func (s *GRPCServer) storageFor(pkBytes []byte) *pebble.DB {
 	if s.manager == nil {
 		return s.db
 	}
@@ -85,20 +86,20 @@ func (s *GRPCServer) storageFor(pkBytes []byte) *storage.DB {
 	return s.db
 }
 
-func (s *GRPCServer) allShards() []*storage.DB {
+func (s *GRPCServer) allShards() []*pebble.DB {
 	if s.manager == nil {
-		return []*storage.DB{s.db}
+		return []*pebble.DB{s.db}
 	}
-	out := make([]*storage.DB, 0, len(s.manager.Shards()))
+	out := make([]*pebble.DB, 0, len(s.manager.Shards()))
 	for _, sh := range s.manager.Shards() {
 		out = append(out, sh.Storage)
 	}
 	return out
 }
 
-func (s *GRPCServer) compact(table string, lower, upper []byte, parallelize bool) ([]storage.CompactionResult, error) {
+func (s *GRPCServer) compact(table string, lower, upper []byte, parallelize bool) ([]pebble.CompactionResult, error) {
 	dbs := s.allShards()
-	results := make([]storage.CompactionResult, 0, len(dbs))
+	results := make([]pebble.CompactionResult, 0, len(dbs))
 	if table != "" {
 		if _, err := s.cat.Describe(table); err != nil {
 			return nil, err
@@ -310,7 +311,7 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := targets.PutItemWith(td, item, storage.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	if err := targets.PutItemWith(td, item, pebble.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
@@ -485,7 +486,7 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := targets.DeleteItemWith(td, key, storage.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	if err := targets.DeleteItemWith(td, key, pebble.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
@@ -507,7 +508,7 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	ops := make([]storage.BatchOp, 0, len(req.GetOps()))
+	ops := make([]pebble.BatchOp, 0, len(req.GetOps()))
 	for i, raw := range req.GetOps() {
 		switch raw.GetKind() {
 		case cefaspb.BatchWriteOp_KIND_PUT:
@@ -515,13 +516,13 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "op %d: %v", i, err)
 			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpPut, Item: item})
+			ops = append(ops, pebble.BatchOp{Op: pebble.BatchOpPut, Item: item})
 		case cefaspb.BatchWriteOp_KIND_DELETE:
 			key, err := pbToItem(raw.GetKey())
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "op %d: %v", i, err)
 			}
-			ops = append(ops, storage.BatchOp{Op: storage.BatchOpDelete, Key: key})
+			ops = append(ops, pebble.BatchOp{Op: pebble.BatchOpDelete, Key: key})
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "op %d: unknown kind", i)
 		}
@@ -532,7 +533,7 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 	return &cefaspb.BatchWriteItemResponse{}, nil
 }
 
-func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.BatchOp) error {
+func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if s.manager == nil {
 		started := time.Now()
 		pluginPlan, err := s.planPluginIndexBatch(s.db, td, ops)
@@ -548,7 +549,7 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 		for _, op := range ops {
 			probe := op.Item
 			approxBytes := estimatedItemBytes(op.Item)
-			if op.Op == storage.BatchOpDelete {
+			if op.Op == pebble.BatchOpDelete {
 				probe = op.Key
 				approxBytes = estimatedItemBytes(op.Key)
 			}
@@ -560,8 +561,8 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 		}
 		return nil
 	}
-	primaryBuckets := make(map[*storage.DB][]storage.BatchOp)
-	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
+	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp)
+	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp)
 	type observation struct {
 		pkBytes     []byte
 		approxBytes uint64
@@ -576,7 +577,7 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 	for _, op := range ops {
 		probe := op.Item
 		approxBytes := estimatedItemBytes(op.Item)
-		if op.Op == storage.BatchOpDelete {
+		if op.Op == pebble.BatchOpDelete {
 			probe = op.Key
 			approxBytes = estimatedItemBytes(op.Key)
 		}
@@ -707,7 +708,7 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	limit := int(req.GetLimit())
 	switch {
 	case req.GetIndexName() != "":
-		items, err = s.queryByIndex(td, req.GetIndexName(), pkVal, storage.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
+		items, err = s.queryByIndex(td, req.GetIndexName(), pkVal, pebble.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
 	case req.GetSkLow() == nil && req.GetSkHigh() == nil:
 		items, err = queryDB.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
 	default:
@@ -757,7 +758,7 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	}
 	limit := int(req.GetLimit())
 
-	dbs := []*storage.DB{s.db}
+	dbs := []*pebble.DB{s.db}
 	if s.manager != nil {
 		dbs = dbs[:0]
 		for _, sh := range s.manager.Shards() {
@@ -808,14 +809,14 @@ func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefas
 	if err != nil {
 		return mapStorageErr(err)
 	}
-	q := storage.SpatialQuery{Limit: int(req.GetLimit())}
+	q := pebble.SpatialQuery{Limit: int(req.GetLimit())}
 	switch shape := req.GetShape().(type) {
 	case *cefaspb.SpatialQueryRequest_Bbox:
 		b := shape.Bbox
 		q.BBox = &spatial.BBox{MinLat: b.GetMinLat(), MinLon: b.GetMinLon(), MaxLat: b.GetMaxLat(), MaxLon: b.GetMaxLon()}
 	case *cefaspb.SpatialQueryRequest_Radius:
 		r := shape.Radius
-		q.Radius = &storage.RadiusQuery{Lat: r.GetLat(), Lon: r.GetLon(), Meters: r.GetMeters()}
+		q.Radius = &pebble.RadiusQuery{Lat: r.GetLat(), Lon: r.GetLon(), Meters: r.GetMeters()}
 	case *cefaspb.SpatialQueryRequest_Z:
 		q.Z = &spatial.ZBBox{Lo: append([]uint32(nil), shape.Z.GetLo()...), Hi: append([]uint32(nil), shape.Z.GetHi()...)}
 	default:
@@ -836,7 +837,7 @@ func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefas
 // scatterSpatial fans the spatial query across every shard. Spatial
 // indexes are partitioned by the item's PK so the matching rows can
 // live on any shard.
-func (s *GRPCServer) scatterSpatial(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error) {
+func (s *GRPCServer) scatterSpatial(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error) {
 	if s.manager == nil {
 		return s.db.SpatialQueryItems(td, idxName, q)
 	}
@@ -990,16 +991,16 @@ func (s *GRPCServer) CreateBackup(ctx context.Context, req *cefaspb.CreateBackup
 	return &cefaspb.CreateBackupResponse{Backup: backupMetaToPB(meta)}, nil
 }
 
-func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (storage.BackupMetadata, error) {
+func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (pebble.BackupMetadata, error) {
 	if s.manager == nil {
 		return s.db.CreateBackupForShard(name, tables, "0", 0)
 	}
-	var primary storage.BackupMetadata
-	coverage := make([]storage.BackupShardCoverage, 0, len(s.manager.Shards()))
+	var primary pebble.BackupMetadata
+	coverage := make([]pebble.BackupShardCoverage, 0, len(s.manager.Shards()))
 	for i, sh := range s.manager.Shards() {
 		meta, err := sh.Storage.CreateBackupForShard(name, tables, fmt.Sprint(sh.ID), sh.Epoch)
 		if err != nil {
-			return storage.BackupMetadata{}, err
+			return pebble.BackupMetadata{}, err
 		}
 		if i == 0 {
 			primary = meta
@@ -1007,7 +1008,7 @@ func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (sto
 		if len(meta.ShardCoverage) > 0 {
 			coverage = append(coverage, meta.ShardCoverage[0])
 		} else {
-			coverage = append(coverage, storage.BackupShardCoverage{
+			coverage = append(coverage, pebble.BackupShardCoverage{
 				ShardID:        fmt.Sprint(sh.ID),
 				PlacementEpoch: sh.Epoch,
 				TableStats:     meta.TableStats,
@@ -1016,7 +1017,7 @@ func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (sto
 	}
 	primary.ShardCoverage = coverage
 	if err := s.db.StoreBackupMetadata(primary); err != nil {
-		return storage.BackupMetadata{}, err
+		return pebble.BackupMetadata{}, err
 	}
 	return primary, nil
 }
@@ -1057,7 +1058,7 @@ func (s *GRPCServer) ApplyBackupRetention(ctx context.Context, req *cefaspb.Appl
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
-	result, err := s.db.ApplyBackupRetention(storage.BackupRetentionOptions{
+	result, err := s.db.ApplyBackupRetention(pebble.BackupRetentionOptions{
 		KeepLatest:    int(req.GetKeepLatest()),
 		KeepLatestSet: req.GetKeepLatestSet(),
 		MaxAge:        time.Duration(req.GetMaxAgeSeconds()) * time.Second,
@@ -1092,14 +1093,14 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 		}
 		return nil
 	}
-	var res storage.RestoreResult
+	var res pebble.RestoreResult
 	var err error
 	if req.GetDryRun() {
 		res, err = s.db.RestoreTableFromBackupWithOptions(
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
-			storage.RestoreOptions{
+			pebble.RestoreOptions{
 				DryRun:            true,
 				TargetChangeIndex: req.GetTargetChangeIndex(),
 				TargetUnixNano:    req.GetTargetUnixNano(),
@@ -1111,7 +1112,7 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
-			storage.RestoreOptions{
+			pebble.RestoreOptions{
 				TargetChangeIndex: req.GetTargetChangeIndex(),
 				TargetUnixNano:    req.GetTargetUnixNano(),
 			},
@@ -1131,7 +1132,7 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 	}, nil
 }
 
-func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
+func backupMetaToPB(m pebble.BackupMetadata) *cefaspb.BackupDescriptor {
 	stats := make([]*cefaspb.BackupTableStats, 0, len(m.TableStats))
 	for _, stat := range m.TableStats {
 		stats = append(stats, backupTableStatsToPB(stat))
@@ -1163,7 +1164,7 @@ func backupMetaToPB(m storage.BackupMetadata) *cefaspb.BackupDescriptor {
 	}
 }
 
-func backupTableStatsToPB(stat storage.BackupTableStats) *cefaspb.BackupTableStats {
+func backupTableStatsToPB(stat pebble.BackupTableStats) *cefaspb.BackupTableStats {
 	if stat.Table == "" && stat.Rows == 0 && stat.Checksum == "" {
 		return nil
 	}
@@ -1174,7 +1175,7 @@ func backupTableStatsToPB(stat storage.BackupTableStats) *cefaspb.BackupTableSta
 	}
 }
 
-func backupDeletionToPB(result storage.BackupDeletionResult) *cefaspb.BackupDeletionResult {
+func backupDeletionToPB(result pebble.BackupDeletionResult) *cefaspb.BackupDeletionResult {
 	return &cefaspb.BackupDeletionResult{
 		BackupName:        result.BackupName,
 		CheckpointPath:    result.CheckpointPath,
@@ -1186,7 +1187,7 @@ func backupDeletionToPB(result storage.BackupDeletionResult) *cefaspb.BackupDele
 	}
 }
 
-func backupRetentionToPB(result storage.BackupRetentionResult) *cefaspb.ApplyBackupRetentionResponse {
+func backupRetentionToPB(result pebble.BackupRetentionResult) *cefaspb.ApplyBackupRetentionResponse {
 	wouldDelete := make([]*cefaspb.BackupRetentionCandidate, 0, len(result.WouldDelete))
 	for _, candidate := range result.WouldDelete {
 		wouldDelete = append(wouldDelete, backupRetentionCandidateToPB(candidate))
@@ -1207,7 +1208,7 @@ func backupRetentionToPB(result storage.BackupRetentionResult) *cefaspb.ApplyBac
 	}
 }
 
-func backupRetentionCandidateToPB(candidate storage.BackupRetentionCandidate) *cefaspb.BackupRetentionCandidate {
+func backupRetentionCandidateToPB(candidate pebble.BackupRetentionCandidate) *cefaspb.BackupRetentionCandidate {
 	return &cefaspb.BackupRetentionCandidate{
 		Backup: backupMetaToPB(candidate.Backup),
 		Reason: candidate.Reason,
@@ -1346,7 +1347,7 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 	return resp, nil
 }
 
-func scheduledBackupStatusToPB(status storage.ScheduledBackupStatus) *cefaspb.ScheduledBackupStatus {
+func scheduledBackupStatusToPB(status pebble.ScheduledBackupStatus) *cefaspb.ScheduledBackupStatus {
 	var retention *cefaspb.ApplyBackupRetentionResponse
 	if status.LastRetention != nil {
 		retention = backupRetentionToPB(*status.LastRetention)
@@ -1859,11 +1860,11 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMissingKey), errors.Is(err, types.ErrInvalidKeyType):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, storage.ErrBackupNotFound):
+	case errors.Is(err, pebble.ErrBackupNotFound):
 		return status.Error(codes.NotFound, err.Error())
-	case errors.Is(err, storage.ErrBackupInUse):
+	case errors.Is(err, pebble.ErrBackupInUse):
 		return status.Error(codes.FailedPrecondition, err.Error())
-	case errors.Is(err, storage.ErrInvalidBackupRetention):
+	case errors.Is(err, pebble.ErrInvalidBackupRetention):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, placement.ErrInvalidPlacementPlan):
 		return status.Error(codes.InvalidArgument, err.Error())
@@ -1879,15 +1880,15 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrConditionFailed):
 		return status.Error(codes.FailedPrecondition, err.Error())
-	case errors.Is(err, storage.ErrNotLeader):
-		var nle *storage.NotLeaderError
+	case errors.Is(err, pebble.ErrNotLeader):
+		var nle *pebble.NotLeaderError
 		if errors.As(err, &nle) && nle.LeaderURL != "" {
 			return status.Errorf(codes.FailedPrecondition, "not leader; retry at %s", nle.LeaderURL)
 		}
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, craft.ErrNotLeader):
 		return status.Error(codes.FailedPrecondition, err.Error())
-	case errors.Is(err, storage.ErrThrottled):
+	case errors.Is(err, pebble.ErrThrottled):
 		return status.Error(codes.ResourceExhausted, err.Error())
 	}
 	return status.Error(codes.Internal, err.Error())

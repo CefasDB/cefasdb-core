@@ -1,4 +1,4 @@
-package storage_test
+package pebble_test
 
 import (
 	"context"
@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 )
 
 func TestScheduledBackupRunnerDisabledNoops(t *testing.T) {
 	db := openDB(t)
-	runner := storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{})
+	runner := pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{})
 
 	status, err := runner.RunOnce(context.Background())
 	if err != nil {
@@ -30,7 +30,7 @@ func TestScheduledBackupDryRunDoesNotCreateBackup(t *testing.T) {
 	db := openDB(t)
 	seedBackupTable(t, db, "Users", "u1")
 	now := time.Unix(100, 0).UTC()
-	runner := storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+	runner := pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,
 		DryRun:       true,
 		Interval:     time.Minute,
@@ -61,12 +61,12 @@ func TestScheduledBackupCreatesBackupAndReportsStatus(t *testing.T) {
 	now := time.Unix(200, 0).UTC()
 	metrics := &scheduledBackupMetricsRecorder{}
 	var logs []string
-	runner := storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+	runner := pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,
 		Interval:     time.Minute,
 		NameTemplate: "sched-{{unix}}",
 		Tables:       []string{"Users"},
-		Retention: storage.BackupRetentionOptions{
+		Retention: pebble.BackupRetentionOptions{
 			KeepLatestSet: true,
 			KeepLatest:    1,
 			DryRun:        true,
@@ -105,7 +105,7 @@ func TestScheduledBackupFailureReportsNameAndReason(t *testing.T) {
 	now := time.Unix(300, 0).UTC()
 	metrics := &scheduledBackupMetricsRecorder{}
 	var logs []string
-	runner := storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+	runner := pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,
 		DryRun:       true,
 		Interval:     time.Minute,

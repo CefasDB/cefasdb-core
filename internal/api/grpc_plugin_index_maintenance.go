@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
@@ -95,7 +95,7 @@ func (s *GRPCServer) planPluginIndexDelete(getter pluginIndexItemGetter, td type
 	}, nil
 }
 
-func (s *GRPCServer) planPluginIndexBatch(getter pluginIndexItemGetter, td types.TableDescriptor, ops []storage.BatchOp) (pluginIndexWritePlan, error) {
+func (s *GRPCServer) planPluginIndexBatch(getter pluginIndexItemGetter, td types.TableDescriptor, ops []pebble.BatchOp) (pluginIndexWritePlan, error) {
 	descs, err := s.pluginIndexBuildDescriptors(td)
 	if err != nil || len(descs) == 0 || len(ops) == 0 {
 		return pluginIndexWritePlan{descriptors: descs}, err
@@ -103,14 +103,14 @@ func (s *GRPCServer) planPluginIndexBatch(getter pluginIndexItemGetter, td types
 	deltas := make([]pluginIndexDelta, 0, len(ops))
 	for i, op := range ops {
 		switch op.Op {
-		case storage.BatchOpPut:
+		case pebble.BatchOpPut:
 			key := itemKeyOnly(op.Item, td.KeySchema)
 			oldItem, err := readPluginIndexOldItem(getter, td, key)
 			if err != nil {
 				return pluginIndexWritePlan{}, fmt.Errorf("op %d plugin index prior: %w", i, err)
 			}
 			deltas = append(deltas, pluginIndexDelta{oldItem: oldItem, newItem: clonePluginIndexItem(op.Item)})
-		case storage.BatchOpDelete:
+		case pebble.BatchOpDelete:
 			key := itemKeyOnly(op.Key, td.KeySchema)
 			oldItem, err := readPluginIndexOldItem(getter, td, key)
 			if err != nil {

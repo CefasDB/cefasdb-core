@@ -11,13 +11,13 @@ import (
 
 	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func newHandlers(t *testing.T, stream backuphttp.ChangeStream, compact backuphttp.CompactFunc) (*backuphttp.Handlers, *storage.DB, *catalog.Catalog, func()) {
+func newHandlers(t *testing.T, stream backuphttp.ChangeStream, compact backuphttp.CompactFunc) (*backuphttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -25,11 +25,11 @@ func newHandlers(t *testing.T, stream backuphttp.ChangeStream, compact backuphtt
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	shards := func() []*storage.DB { return []*storage.DB{db} }
+	shards := func() []*pebble.DB { return []*pebble.DB{db} }
 	return backuphttp.New(db, cat, stream, shards, compact), db, cat, func() { _ = db.Close() }
 }
 
-func seedBackup(t *testing.T, db *storage.DB, cat *catalog.Catalog, name string) {
+func seedBackup(t *testing.T, db *pebble.DB, cat *catalog.Catalog, name string) {
 	t.Helper()
 	td := types.TableDescriptor{Name: "Users", KeySchema: types.KeySchema{PK: "id"}}
 	if err := cat.Create(td); err != nil {
@@ -40,7 +40,7 @@ func seedBackup(t *testing.T, db *storage.DB, cat *catalog.Catalog, name string)
 			"id": types.AttributeValue{T: types.AttrS, S: id},
 			"v":  types.AttributeValue{T: types.AttrS, S: id + "-v"},
 		}
-		if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+		if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestHandleApplyBackupRetentionRoundTrip(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	var resp struct {
-		BackupRetention storage.BackupRetentionResult `json:"BackupRetention"`
+		BackupRetention pebble.BackupRetentionResult `json:"BackupRetention"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -193,7 +193,7 @@ func TestHandleListSnapshotsStreamError(t *testing.T) {
 
 func TestHandleCompactHappyPath(t *testing.T) {
 	t.Parallel()
-	canned := []storage.CompactionResult{
+	canned := []pebble.CompactionResult{
 		{
 			Table:           "Users",
 			StartedAt:       time.Unix(1700000000, 0).UTC(),
@@ -212,7 +212,7 @@ func TestHandleCompactHappyPath(t *testing.T) {
 		upperB64    string
 		parallelize bool
 	}
-	compact := func(table, lowerB64, upperB64 string, parallelize bool) ([]storage.CompactionResult, error) {
+	compact := func(table, lowerB64, upperB64 string, parallelize bool) ([]pebble.CompactionResult, error) {
 		seen.table = table
 		seen.lowerB64 = lowerB64
 		seen.upperB64 = upperB64
@@ -252,7 +252,7 @@ func TestHandleCompactHappyPath(t *testing.T) {
 
 func TestHandleCompactMethodNotAllowed(t *testing.T) {
 	t.Parallel()
-	h, _, _, cleanup := newHandlers(t, nil, func(string, string, string, bool) ([]storage.CompactionResult, error) {
+	h, _, _, cleanup := newHandlers(t, nil, func(string, string, string, bool) ([]pebble.CompactionResult, error) {
 		return nil, nil
 	})
 	defer cleanup()

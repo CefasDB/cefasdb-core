@@ -10,16 +10,16 @@ import (
 
 	queryhttp "github.com/osvaldoandrade/cefas/internal/api/http/query"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-// newHandlers spins up a tempdir-backed storage.DB + catalog and wraps
+// newHandlers spins up a tempdir-backed pebble.DB + catalog and wraps
 // them in a *Handlers configured for single-node behaviour (no shard
 // fan-out, no leader gating, no metrics).
-func newHandlers(t *testing.T) (*queryhttp.Handlers, *storage.DB, *catalog.Catalog, func()) {
+func newHandlers(t *testing.T) (*queryhttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {
 	t.Helper()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
@@ -28,9 +28,9 @@ func newHandlers(t *testing.T) (*queryhttp.Handlers, *storage.DB, *catalog.Catal
 		_ = db.Close()
 		t.Fatalf("catalog: %v", err)
 	}
-	storageFor := func(pkBytes []byte) *storage.DB { return db }
-	allShards := func() []*storage.DB { return []*storage.DB{db} }
-	spatialAllShards := func(td types.TableDescriptor, idxName string, q storage.SpatialQuery) ([]types.Item, error) {
+	storageFor := func(pkBytes []byte) *pebble.DB { return db }
+	allShards := func() []*pebble.DB { return []*pebble.DB{db} }
+	spatialAllShards := func(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error) {
 		return db.SpatialQueryItems(td, idxName, q)
 	}
 	ensureStrong := func(http.ResponseWriter, *http.Request) bool { return true }
@@ -109,7 +109,7 @@ func TestHandleSpatialQueryBBoxHappyPath(t *testing.T) {
 		KeySchema: types.KeySchema{PK: "id"},
 		SpatialIndexes: []types.SpatialIndexDescriptor{{
 			Name:       "by_location",
-			Kind:       storage.SpatialKindGeohash,
+			Kind:       pebble.SpatialKindGeohash,
 			Attributes: []string{"lat", "lon"},
 			Precision:  6,
 		}},
@@ -122,7 +122,7 @@ func TestHandleSpatialQueryBBoxHappyPath(t *testing.T) {
 			"id":  sAttr(id),
 			"lat": nAttr(fmt.Sprintf("%.6f", lat)),
 			"lon": nAttr(fmt.Sprintf("%.6f", lon)),
-		}, storage.PutOptions{}); err != nil {
+		}, pebble.PutOptions{}); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -172,7 +172,7 @@ func TestHandleSpatialQueryMissingShape(t *testing.T) {
 		KeySchema: types.KeySchema{PK: "id"},
 		SpatialIndexes: []types.SpatialIndexDescriptor{{
 			Name:       "by_location",
-			Kind:       storage.SpatialKindGeohash,
+			Kind:       pebble.SpatialKindGeohash,
 			Attributes: []string{"lat", "lon"},
 			Precision:  6,
 		}},

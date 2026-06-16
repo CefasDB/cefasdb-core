@@ -10,10 +10,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/osvaldoandrade/cefas/internal/api"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/internal/api"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/client"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -25,13 +25,13 @@ import (
 type fixture struct {
 	server *grpc.Server
 	listen net.Listener
-	db     *storage.DB
+	db     *pebble.DB
 }
 
 func newFixture(t *testing.T) (*client.Client, *fixture) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage open: %v", err)
 	}
@@ -46,7 +46,7 @@ func newFixture(t *testing.T) (*client.Client, *fixture) {
 	gsrv := grpc.NewServer()
 	apiSrv := api.NewGRPCServer(db, cat, nil)
 	apiSrv.AttachMetrics(metrics.New())
-	apiSrv.AttachBackupScheduler(storage.NewScheduledBackupRunner(db, storage.ScheduledBackupConfig{
+	apiSrv.AttachBackupScheduler(pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,
 		DryRun:       true,
 		Interval:     time.Minute,

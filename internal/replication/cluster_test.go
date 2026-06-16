@@ -10,7 +10,7 @@ import (
 	"time"
 
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -19,7 +19,7 @@ type node struct {
 	t       testing.TB
 	id      string
 	bind    string
-	storage *storage.DB
+	storage *pebble.DB
 	raft    *craft.DB
 }
 
@@ -70,7 +70,7 @@ func startCluster(t testing.TB, count int) []*node {
 	nodes := make([]*node, count)
 	for i := range nodes {
 		dir := t.TempDir()
-		st, err := storage.Open(storage.Options{Path: dir + "/state"})
+		st, err := pebble.Open(pebble.Options{Path: dir + "/state"})
 		if err != nil {
 			t.Fatalf("open storage[%d]: %v", i, err)
 		}
@@ -170,7 +170,7 @@ func TestRaftReplicatesAcrossNodes(t *testing.T) {
 
 	// Write on the leader.
 	item := types.Item{"id": sAttr("k1"), "data": sAttr("hello")}
-	if err := nodes[leader].storage.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := nodes[leader].storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put on leader: %v", err)
 	}
 
@@ -201,8 +201,8 @@ func TestRaftFollowerWritesAreRejected(t *testing.T) {
 	follower := (leader + 1) % len(nodes)
 	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
 
-	err := nodes[follower].storage.PutItemWith(td, types.Item{"id": sAttr("x"), "v": sAttr("y")}, storage.PutOptions{})
-	if !errors.Is(err, storage.ErrNotLeader) {
+	err := nodes[follower].storage.PutItemWith(td, types.Item{"id": sAttr("x"), "v": sAttr("y")}, pebble.PutOptions{})
+	if !errors.Is(err, pebble.ErrNotLeader) {
 		t.Fatalf("expected ErrNotLeader, got %v", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestRaftSurvivesLeaderLoss(t *testing.T) {
 	leader := waitLeader(t, nodes)
 	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
 
-	if err := nodes[leader].storage.PutItemWith(td, types.Item{"id": sAttr("pre"), "data": sAttr("before")}, storage.PutOptions{}); err != nil {
+	if err := nodes[leader].storage.PutItemWith(td, types.Item{"id": sAttr("pre"), "data": sAttr("before")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("pre-failover write: %v", err)
 	}
 	// Wait until at least one follower has applied the entry — this
@@ -235,7 +235,7 @@ func TestRaftSurvivesLeaderLoss(t *testing.T) {
 	}
 
 	newLeader := waitNewLeader(t, nodes, leader)
-	if err := nodes[newLeader].storage.PutItemWith(td, types.Item{"id": sAttr("post"), "data": sAttr("after")}, storage.PutOptions{}); err != nil {
+	if err := nodes[newLeader].storage.PutItemWith(td, types.Item{"id": sAttr("post"), "data": sAttr("after")}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("post-failover write: %v", err)
 	}
 

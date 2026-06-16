@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
@@ -480,7 +480,7 @@ func (s *GRPCServer) loadDecision(id string) (*cefaspb.DecisionRecord, bool, err
 	}
 	v, err := s.db.Get(decisionKey(id))
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, err

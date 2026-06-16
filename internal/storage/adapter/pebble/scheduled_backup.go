@@ -1,4 +1,4 @@
-package storage
+package pebble
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 )
 
 const DefaultScheduledBackupNameTemplate = "scheduled-{{timestamp}}"
@@ -245,7 +247,7 @@ func (r *ScheduledBackupRunner) setNextRun(next time.Time) {
 
 func (r *ScheduledBackupRunner) validateDryRunTables() error {
 	for _, table := range sortedUniqueStrings(r.cfg.Tables) {
-		ok, err := r.db.Has(KeyCatalog(table))
+		ok, err := r.db.Has(storage.KeyCatalog(table))
 		if err != nil {
 			return err
 		}

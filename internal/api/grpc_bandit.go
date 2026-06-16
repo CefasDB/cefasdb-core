@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
@@ -216,13 +216,13 @@ func mapBanditErr(err error) error {
 // the replicator); under raw concurrent writes from the same node we
 // rely on the bandit plugin retry loop to handle losers.
 type dbBanditStore struct {
-	db *storage.DB
+	db *pebble.DB
 
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
 }
 
-func newDBBanditStore(db *storage.DB) *dbBanditStore {
+func newDBBanditStore(db *pebble.DB) *dbBanditStore {
 	return &dbBanditStore{db: db, locks: map[string]*sync.Mutex{}}
 }
 
@@ -239,7 +239,7 @@ func armPrefix(banditID string) []byte {
 func (s *dbBanditStore) GetMeta(banditID string) (*bandit.MetaRecord, bool, error) {
 	v, err := s.db.Get(metaKey(banditID))
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("bandit db get meta: %w", err)
@@ -262,7 +262,7 @@ func (s *dbBanditStore) PutMeta(rec bandit.MetaRecord) error {
 func (s *dbBanditStore) GetArm(banditID, armID string) (*bandit.ArmRecord, bool, error) {
 	v, err := s.db.Get(armKey(banditID, armID))
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("bandit db get arm: %w", err)
@@ -287,7 +287,7 @@ func (s *dbBanditStore) PutArm(rec bandit.ArmRecord, expectedVersion int64) erro
 	if expectedVersion >= 0 {
 		cur, err := s.db.Get(armKey(rec.BanditID, rec.ArmID))
 		switch {
-		case errors.Is(err, storage.ErrNotFound):
+		case errors.Is(err, pebble.ErrNotFound):
 			if expectedVersion != 0 {
 				return bandit.ErrConditionFailed
 			}

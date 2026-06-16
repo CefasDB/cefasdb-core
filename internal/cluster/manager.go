@@ -14,6 +14,7 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/routing"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 )
 
 // ShardConfig configures a single shard's storage + raft. Most fields
@@ -25,9 +26,9 @@ type ShardConfig struct {
 	StoragePath     string
 	FsyncOnCommit   bool
 	StorageProfile  string
-	StorageTuning   storage.PebbleTuning
-	Backpressure    storage.BackpressureOptions
-	StreamRetention storage.StreamRetentionOptions
+	StorageTuning   pebble.PebbleTuning
+	Backpressure    pebble.BackpressureOptions
+	StreamRetention pebble.StreamRetentionOptions
 
 	RaftPath      string
 	RaftStorePath string
@@ -41,7 +42,7 @@ type ShardConfig struct {
 	LogOutput   io.Writer
 }
 
-// Shard is the per-shard handle owned by Manager: one storage.DB
+// Shard is the per-shard handle owned by Manager: one pebble.DB
 // (with raft attached) per shard.
 type Shard struct {
 	ID          uint32
@@ -50,8 +51,8 @@ type Shard struct {
 	Ranges      []placement.TokenRange
 	Voters      []string
 	NonVoters   []string
-	Storage     *storage.DB
-	RaftStorage *storage.DB
+	Storage     *pebble.DB
+	RaftStorage *pebble.DB
 	Raft        *craft.DB
 }
 
@@ -101,11 +102,11 @@ type Config struct {
 
 	FsyncOnCommit   bool
 	StorageProfile  string
-	StorageTuning   storage.PebbleTuning
-	Backpressure    storage.BackpressureOptions
-	StreamRetention storage.StreamRetentionOptions
+	StorageTuning   pebble.PebbleTuning
+	Backpressure    pebble.BackpressureOptions
+	StreamRetention pebble.StreamRetentionOptions
 	RaftProfile     string
-	RaftTuning      storage.PebbleTuning
+	RaftTuning      pebble.PebbleTuning
 
 	HeartbeatMS   int
 	ElectionMS    int
@@ -261,7 +262,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		return nil, fmt.Errorf("mkdir %s: %w", raftDir, err)
 	}
 
-	st, err := storage.Open(storage.Options{
+	st, err := pebble.Open(pebble.Options{
 		Path:            stateDir,
 		FsyncOnCommit:   m.cfg.FsyncOnCommit,
 		Profile:         m.cfg.StorageProfile,
@@ -274,7 +275,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	}
 
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
-		// Single-node mode (no raft). The storage.DB stands alone.
+		// Single-node mode (no raft). The pebble.DB stands alone.
 		return &Shard{
 			ID:        shardID,
 			State:     meta.State,
@@ -288,9 +289,9 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 
 	raftProfile := m.cfg.RaftProfile
 	if raftProfile == "" {
-		raftProfile = storage.ProfileRaft
+		raftProfile = pebble.ProfileRaft
 	}
-	raftStore, err := storage.Open(storage.Options{
+	raftStore, err := pebble.Open(pebble.Options{
 		Path:          raftStoreDir,
 		FsyncOnCommit: m.cfg.FsyncOnCommit,
 		Profile:       raftProfile,
@@ -572,7 +573,7 @@ func (m *Manager) RefreshPlacement() error {
 		return nil
 	}
 	raw, err := shard0.Storage.Get(placementSystemKey)
-	if err == storage.ErrNotFound {
+	if err == pebble.ErrNotFound {
 		return nil
 	}
 	if err != nil {
@@ -747,7 +748,7 @@ func (m *Manager) persistPlacementSnapshot(path string, snapshot placement.Place
 	if !ok || shard0 == nil || shard0.Storage == nil {
 		return nil
 	}
-	if err := shard0.Storage.Set(placementSystemKey, raw); err != nil && !errors.Is(err, storage.ErrNotLeader) {
+	if err := shard0.Storage.Set(placementSystemKey, raw); err != nil && !errors.Is(err, pebble.ErrNotLeader) {
 		return err
 	}
 	return nil

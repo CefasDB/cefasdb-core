@@ -10,10 +10,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/osvaldoandrade/cefas/internal/api"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/internal/api"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -343,7 +344,7 @@ func assertRoutedGRPCValue(t *testing.T, ctx context.Context, stub cefaspb.Cefas
 	}
 }
 
-func assertStoredValue(t *testing.T, db *storage.DB, table string, ks types.KeySchema, id, want string) {
+func assertStoredValue(t *testing.T, db *pebble.DB, table string, ks types.KeySchema, id, want string) {
 	t.Helper()
 	item, err := db.GetItem(table, ks, types.Item{"id": {T: types.AttrS, S: id}})
 	if err != nil {
@@ -354,7 +355,7 @@ func assertStoredValue(t *testing.T, db *storage.DB, table string, ks types.KeyS
 	}
 }
 
-func assertMissing(t *testing.T, db *storage.DB, table string, ks types.KeySchema, id string) {
+func assertMissing(t *testing.T, db *pebble.DB, table string, ks types.KeySchema, id string) {
 	t.Helper()
 	_, err := db.GetItem(table, ks, types.Item{"id": {T: types.AttrS, S: id}})
 	if !errors.Is(err, types.ErrItemNotFound) {

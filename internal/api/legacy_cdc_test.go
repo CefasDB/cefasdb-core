@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 )
 
@@ -39,7 +39,7 @@ func (s legacyCDCStream) ListSnapshots() ([]api.SnapshotMetadata, error) {
 }
 
 func TestLegacyHTTPChangeStreamStillEmitsSSEEvents(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestLegacyHTTPChangeStreamStillEmitsSSEEvents(t *testing.T) {
 }
 
 func TestLegacyGRPCStreamChangesStillFiltersFromIndex(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

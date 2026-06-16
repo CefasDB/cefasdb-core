@@ -1,4 +1,4 @@
-package storage_test
+package pebble_test
 
 import (
 	"fmt"
@@ -7,13 +7,14 @@ import (
 	"github.com/cespare/xxhash/v2"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func openTestDB(t testing.TB) *storage.DB {
+func openTestDB(t testing.TB) *pebble.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestMemoryStorageClassValidatesVectorDimAndReportsFootprint(t *testing.T) {
 	if err := db.PutItemWith(td, types.Item{
 		"id":  sAttr("a"),
 		"emb": {T: types.AttrVec, Vec: []float64{1, 0, 0}},
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put memory vector: %v", err)
 	}
 	if db.MemoryTableFootprint("docs") <= 0 {
@@ -240,7 +241,7 @@ func TestMemoryStorageClassValidatesVectorDimAndReportsFootprint(t *testing.T) {
 	err = db.PutItemWith(td, types.Item{
 		"id":  sAttr("bad"),
 		"emb": {T: types.AttrVec, Vec: []float64{1, 0}},
-	}, storage.PutOptions{})
+	}, pebble.PutOptions{})
 	if err == nil {
 		t.Fatal("expected vector dimension validation error")
 	}

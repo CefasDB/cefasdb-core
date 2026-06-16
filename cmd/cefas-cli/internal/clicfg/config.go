@@ -14,13 +14,13 @@ import (
 
 // Profile is a single named connection target.
 type Profile struct {
-	Endpoint   string        `yaml:"endpoint"`
-	Token      string        `yaml:"token,omitempty"`
-	TokenFile  string        `yaml:"tokenFile,omitempty"`
-	TLSCAPath  string        `yaml:"tlsCaPath,omitempty"`
-	Insecure   bool          `yaml:"insecure,omitempty"`
-	Timeout    time.Duration `yaml:"timeout,omitempty"`
-	Output     string        `yaml:"output,omitempty"`
+	Endpoint  string        `yaml:"endpoint"`
+	Token     string        `yaml:"token,omitempty"`
+	TokenFile string        `yaml:"tokenFile,omitempty"`
+	TLSCAPath string        `yaml:"tlsCaPath,omitempty"`
+	Insecure  bool          `yaml:"insecure,omitempty"`
+	Timeout   time.Duration `yaml:"timeout,omitempty"`
+	Output    string        `yaml:"output,omitempty"`
 }
 
 // File is the on-disk YAML shape.

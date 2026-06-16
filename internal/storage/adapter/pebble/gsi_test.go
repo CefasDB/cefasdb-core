@@ -1,10 +1,11 @@
-package storage_test
+package pebble_test
 
 import (
 	"errors"
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -29,12 +30,12 @@ func TestGSIPutAndQuery(t *testing.T) {
 		{"user_id": sAttr("alice"), "ts": sAttr("003"), "event": sAttr("purchase")},
 	}
 	for _, it := range items {
-		if err := db.PutItemWith(td, it, storage.PutOptions{}); err != nil {
+		if err := db.PutItemWith(td, it, pebble.PutOptions{}); err != nil {
 			t.Fatalf("PutItemWith: %v", err)
 		}
 	}
 
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("QueryByGSI: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestGSIPutAndQuery(t *testing.T) {
 		t.Fatalf("login GSI order wrong: %+v", got)
 	}
 
-	got, err = db.QueryByGSI(td, "by_event", sAttr("purchase"), storage.QueryOptions{})
+	got, err = db.QueryByGSI(td, "by_event", sAttr("purchase"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("QueryByGSI purchase: %v", err)
 	}
@@ -59,23 +60,23 @@ func TestGSIUpdateMovesPointer(t *testing.T) {
 	td := tableWithGSI()
 
 	item := types.Item{"user_id": sAttr("alice"), "ts": sAttr("001"), "event": sAttr("login")}
-	if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	// Update GSI PK from "login" to "logout".
 	item["event"] = sAttr("logout")
-	if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put updated: %v", err)
 	}
 
-	loginHits, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	loginHits, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("query login: %v", err)
 	}
 	if len(loginHits) != 0 {
 		t.Fatalf("login should be empty after rename, got %+v", loginHits)
 	}
-	logoutHits, err := db.QueryByGSI(td, "by_event", sAttr("logout"), storage.QueryOptions{})
+	logoutHits, err := db.QueryByGSI(td, "by_event", sAttr("logout"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("query logout: %v", err)
 	}
@@ -89,16 +90,16 @@ func TestGSIDeleteRemovesPointer(t *testing.T) {
 	td := tableWithGSI()
 
 	item := types.Item{"user_id": sAttr("alice"), "ts": sAttr("001"), "event": sAttr("login")}
-	if err := db.PutItemWith(td, item, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	if err := db.DeleteItemWith(td, types.Item{
 		"user_id": sAttr("alice"),
 		"ts":      sAttr("001"),
-	}, storage.DeleteOptions{}); err != nil {
+	}, pebble.DeleteOptions{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -114,10 +115,10 @@ func TestGSISparseIndex(t *testing.T) {
 	// Item without the "event" attribute — should not appear in any
 	// GSI partition.
 	noEvent := types.Item{"user_id": sAttr("alice"), "ts": sAttr("001"), "other": sAttr("x")}
-	if err := db.PutItemWith(td, noEvent, storage.PutOptions{}); err != nil {
+	if err := db.PutItemWith(td, noEvent, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{})
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -135,9 +136,9 @@ func TestGSIQuerySKRange(t *testing.T) {
 			"user_id": sAttr("alice"),
 			"ts":      sAttr(ts),
 			"event":   sAttr("login"),
-		}, storage.PutOptions{})
+		}, pebble.PutOptions{})
 	}
-	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), storage.QueryOptions{
+	got, err := db.QueryByGSI(td, "by_event", sAttr("login"), pebble.QueryOptions{
 		SKLow:  sAttr("002"),
 		SKHigh: sAttr("004"),
 	})
@@ -156,11 +157,11 @@ func TestConditionalPutWritesOnce(t *testing.T) {
 		KeySchema: types.KeySchema{PK: "id"},
 	}
 	item := types.Item{"id": sAttr("k1"), "data": sAttr("first")}
-	err := db.PutItemWith(td, item, storage.PutOptions{Condition: "attribute_not_exists(id)"})
+	err := db.PutItemWith(td, item, pebble.PutOptions{Condition: "attribute_not_exists(id)"})
 	if err != nil {
 		t.Fatalf("first put: %v", err)
 	}
-	err = db.PutItemWith(td, item, storage.PutOptions{Condition: "attribute_not_exists(id)"})
+	err = db.PutItemWith(td, item, pebble.PutOptions{Condition: "attribute_not_exists(id)"})
 	if !errors.Is(err, storage.ErrConditionFailed) {
 		t.Fatalf("second put expected ErrConditionFailed, got %v", err)
 	}
@@ -173,15 +174,15 @@ func TestConditionalDelete(t *testing.T) {
 		KeySchema: types.KeySchema{PK: "id"},
 	}
 	item := types.Item{"id": sAttr("k1"), "version": nAttr("1")}
-	_ = db.PutItemWith(td, item, storage.PutOptions{})
-	err := db.DeleteItemWith(td, item, storage.DeleteOptions{
+	_ = db.PutItemWith(td, item, pebble.PutOptions{})
+	err := db.DeleteItemWith(td, item, pebble.DeleteOptions{
 		Condition: "version = :v",
 		Binds:     map[string]types.AttributeValue{"v": nAttr("2")},
 	})
 	if !errors.Is(err, storage.ErrConditionFailed) {
 		t.Fatalf("expected ErrConditionFailed on stale version, got %v", err)
 	}
-	err = db.DeleteItemWith(td, item, storage.DeleteOptions{
+	err = db.DeleteItemWith(td, item, pebble.DeleteOptions{
 		Condition: "version = :v",
 		Binds:     map[string]types.AttributeValue{"v": nAttr("1")},
 	})
@@ -194,15 +195,15 @@ func TestBatchWriteItemAtomic(t *testing.T) {
 	db := openTestDB(t)
 	td := tableWithGSI()
 
-	ops := []storage.BatchOp{
-		{Op: storage.BatchOpPut, Item: types.Item{"user_id": sAttr("a"), "ts": sAttr("1"), "event": sAttr("e1")}},
-		{Op: storage.BatchOpPut, Item: types.Item{"user_id": sAttr("b"), "ts": sAttr("2"), "event": sAttr("e1")}},
-		{Op: storage.BatchOpPut, Item: types.Item{"user_id": sAttr("c"), "ts": sAttr("3"), "event": sAttr("e2")}},
+	ops := []pebble.BatchOp{
+		{Op: pebble.BatchOpPut, Item: types.Item{"user_id": sAttr("a"), "ts": sAttr("1"), "event": sAttr("e1")}},
+		{Op: pebble.BatchOpPut, Item: types.Item{"user_id": sAttr("b"), "ts": sAttr("2"), "event": sAttr("e1")}},
+		{Op: pebble.BatchOpPut, Item: types.Item{"user_id": sAttr("c"), "ts": sAttr("3"), "event": sAttr("e2")}},
 	}
 	if err := db.BatchWriteItem(td, ops); err != nil {
 		t.Fatalf("batch write: %v", err)
 	}
-	hits, err := db.QueryByGSI(td, "by_event", sAttr("e1"), storage.QueryOptions{})
+	hits, err := db.QueryByGSI(td, "by_event", sAttr("e1"), pebble.QueryOptions{})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

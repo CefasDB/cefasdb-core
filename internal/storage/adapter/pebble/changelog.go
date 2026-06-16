@@ -1,4 +1,4 @@
-package storage
+package pebble
 
 import (
 	"encoding/binary"
@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -93,10 +95,10 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	}
 	var counter [8]byte
 	binary.BigEndian.PutUint64(counter[:], rec.Index)
-	if err := b.Set(changeCounterKey, counter[:], nil); err != nil {
+	if err := b.Set(storage.ChangeCounterKey, counter[:], nil); err != nil {
 		return rec, err
 	}
-	if err := b.Set(KeyChangeLog(rec.Index), raw, nil); err != nil {
+	if err := b.Set(storage.KeyChangeLog(rec.Index), raw, nil); err != nil {
 		return rec, err
 	}
 	return rec, nil
@@ -238,7 +240,7 @@ func cloneChangeAttr(in types.AttributeValue) types.AttributeValue {
 }
 
 func (d *DB) loadChangeIndexLocked() (uint64, error) {
-	raw, err := d.Get(changeCounterKey)
+	raw, err := d.Get(storage.ChangeCounterKey)
 	if errors.Is(err, ErrNotFound) {
 		return 0, nil
 	}
@@ -338,7 +340,7 @@ func (d *DB) PreviewStreamRetention(table string, now time.Time) (StreamRetentio
 // snapshot. It is intentionally read-only so metrics collection cannot mutate
 // application data.
 func (d *DB) ListStreamRetentionStats() ([]StreamRetentionStats, error) {
-	lower, upper := PrefixStreamRetention()
+	lower, upper := storage.PrefixStreamRetention()
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return nil, err
@@ -372,14 +374,14 @@ func (d *DB) applyStreamRetentionLocked(b *pebbledb.Batch, table string, now tim
 	if err != nil {
 		return StreamRetentionStats{}, fmt.Errorf("marshal stream retention state: %w", err)
 	}
-	if err := b.Set(KeyStreamRetention(table), raw, nil); err != nil {
+	if err := b.Set(storage.KeyStreamRetention(table), raw, nil); err != nil {
 		return StreamRetentionStats{}, err
 	}
 	return stats, nil
 }
 
 func (d *DB) loadStreamRetentionState(table string) (StreamRetentionStats, bool, error) {
-	raw, err := d.Get(KeyStreamRetention(table))
+	raw, err := d.Get(storage.KeyStreamRetention(table))
 	if errors.Is(err, ErrNotFound) {
 		return StreamRetentionStats{}, false, nil
 	}
@@ -394,7 +396,7 @@ func (d *DB) loadStreamRetentionState(table string) (StreamRetentionStats, bool,
 }
 
 func (d *DB) scanStreamRetentionRecords(table string, extra *ChangeRecord) ([]streamRetentionRecord, error) {
-	lower, upper := PrefixChangeLog()
+	lower, upper := storage.PrefixChangeLog()
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return nil, err
@@ -499,11 +501,11 @@ func (d *DB) computeStreamRetentionStats(table string, records []streamRetention
 }
 
 func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
-	lower := KeyChangeLog(fromExclusive + 1)
-	_, upperAll := PrefixChangeLog()
+	lower := storage.KeyChangeLog(fromExclusive + 1)
+	_, upperAll := storage.PrefixChangeLog()
 	upper := upperAll
 	if toInclusive > 0 {
-		upper = KeyChangeLog(toInclusive + 1)
+		upper = storage.KeyChangeLog(toInclusive + 1)
 	}
 	it, err := d.Iter(lower, upper)
 	if err != nil {
@@ -547,11 +549,11 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 	if limit <= 0 {
 		limit = 1000
 	}
-	lower := KeyChangeLog(fromSequence)
-	_, upperAll := PrefixChangeLog()
+	lower := storage.KeyChangeLog(fromSequence)
+	_, upperAll := storage.PrefixChangeLog()
 	upper := upperAll
 	if toSequence > 0 {
-		upper = KeyChangeLog(toSequence + 1)
+		upper = storage.KeyChangeLog(toSequence + 1)
 	}
 	it, err := d.Iter(lower, upper)
 	if err != nil {

@@ -7,14 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/catalog"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func TestHTTPStreamsDiscovery(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestHTTPStreamsDiscovery(t *testing.T) {
 	if err := db.PutItemWith(td, types.Item{
 		"pk": {T: types.AttrS, S: "event-1"},
 		"v":  {T: types.AttrS, S: "payload"},
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put stream row: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestHTTPStreamsDiscovery(t *testing.T) {
 }
 
 func TestHTTPDescribeStreamMissingReturnsNotFound(t *testing.T) {
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

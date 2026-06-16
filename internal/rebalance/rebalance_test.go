@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
+	"github.com/osvaldoandrade/cefas/internal/placement"
 )
 
 type fakePlanner struct {

@@ -75,8 +75,8 @@ type State struct {
 	cfg      Config
 	ks       model.KeySchema
 	items    map[string]model.Item
-	hashes   map[string]uint64        // id → SimHash
-	prefixes map[uint32][]string      // prefix bits → ids
+	hashes   map[string]uint64   // id → SimHash
+	prefixes map[uint32][]string // prefix bits → ids
 }
 
 func newState(cfg Config, ks model.KeySchema) *State {

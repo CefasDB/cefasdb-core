@@ -6,6 +6,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -35,10 +36,10 @@ func mustFail(t *testing.T, ex *cefassql.Executor, cat *catalog.Catalog, src str
 	}
 }
 
-func newSQL(t *testing.T) (*storage.DB, *catalog.Catalog, *cefassql.Executor) {
+func newSQL(t *testing.T) (*pebble.DB, *catalog.Catalog, *cefassql.Executor) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(storage.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{Path: dir})
 	if err != nil {
 		t.Fatalf("storage: %v", err)
 	}

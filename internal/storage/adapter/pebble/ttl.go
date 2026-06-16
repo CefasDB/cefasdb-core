@@ -1,4 +1,4 @@
-package storage
+package pebble
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -22,7 +24,7 @@ func planTTL(
 	ks types.KeySchema,
 	ttlAttr string,
 	prior, next types.Item,
-) ([]indexOp, error) {
+) ([]storage.IndexOp, error) {
 	if ttlAttr == "" {
 		return nil, nil
 	}
@@ -34,15 +36,15 @@ func planTTL(
 	if err != nil {
 		return nil, fmt.Errorf("ttl (next): %w", err)
 	}
-	var ops []indexOp
-	if priorKey != nil && nextKey != nil && bytesEqual(priorKey, nextKey) {
+	var ops []storage.IndexOp
+	if priorKey != nil && nextKey != nil && storage.BytesEqual(priorKey, nextKey) {
 		return nil, nil
 	}
 	if priorKey != nil {
-		ops = append(ops, indexOp{op: indexOpDelete, key: priorKey})
+		ops = append(ops, storage.IndexOp{Op: storage.IndexOpDelete, Key: priorKey})
 	}
 	if nextKey != nil {
-		ops = append(ops, indexOp{op: indexOpSet, key: nextKey, value: nil})
+		ops = append(ops, storage.IndexOp{Op: storage.IndexOpSet, Key: nextKey, Value: nil})
 	}
 	return ops, nil
 }
@@ -69,7 +71,7 @@ func ttlKey(table string, ks types.KeySchema, ttlAttr string, item types.Item) (
 	if err != nil {
 		return nil, err
 	}
-	return KeyTTL(table, expire, pk, sk), nil
+	return storage.KeyTTL(table, expire, pk, sk), nil
 }
 
 // ReaperConfig configures the background TTL sweep.
@@ -179,7 +181,7 @@ func (r *Reaper) Tick(ctx context.Context) error {
 }
 
 func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now uint64) error {
-	lower, upper := PrefixTTLBefore(td.Name, now)
+	lower, upper := storage.PrefixTTLBefore(td.Name, now)
 	it, err := r.db.Iter(lower, upper)
 	if err != nil {
 		return err
@@ -199,7 +201,7 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 		default:
 		}
 		k := append([]byte(nil), it.Key()...)
-		pkHash, sk, ok := ParseTTLKey(td.Name, k)
+		pkHash, sk, ok := storage.ParseTTLKey(td.Name, k)
 		if !ok {
 			continue
 		}
@@ -222,7 +224,7 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 	b := r.db.Batch()
 	defer b.Close()
 	for _, v := range victims {
-		primaryKey := append([]byte(nil), []byte(tableBase(td.Name)+segPrimary)...)
+		primaryKey := append([]byte(nil), []byte(storage.TableBase(td.Name)+storage.SegPrimary)...)
 		primaryKey = append(primaryKey, v.pkHash...)
 		primaryKey = append(primaryKey, v.sk...)
 		var oldItem types.Item
@@ -231,7 +233,7 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 			return err
 		}
 		if raw != nil {
-			oldItem, err = DecodeItem(raw)
+			oldItem, err = storage.DecodeItem(raw)
 			if err != nil {
 				return fmt.Errorf("decode ttl victim: %w", err)
 			}

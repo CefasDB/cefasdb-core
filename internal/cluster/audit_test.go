@@ -9,6 +9,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -56,7 +57,7 @@ func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 	if err := wrongShard.Storage.PutItemWith(td, types.Item{
 		"id": sAttrAudit(key),
 		"v":  sAttrAudit("orphan"),
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put orphan: %v", err)
 	}
 
@@ -93,7 +94,7 @@ func TestAuditPlacementDetectsMissingCatalogDescriptors(t *testing.T) {
 	if err := shard0.Storage.PutItemWith(td, types.Item{
 		"id": sAttrAudit("missing-catalog-key"),
 		"v":  sAttrAudit("value"),
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatalf("put row without descriptor: %v", err)
 	}
 

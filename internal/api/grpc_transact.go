@@ -10,6 +10,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -54,9 +55,9 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 	// Deletes. A TOCTOU window exists between the read and the
 	// commit; single-pebble-process makes it negligible, multi-shard
 	// would need 2PC anyway.
-	batchOps := make([]storage.BatchOp, 0, len(ops))
-	mirrorBuckets := make(map[*storage.DB][]storage.BatchOp)
-	var primary *storage.DB
+	batchOps := make([]pebble.BatchOp, 0, len(ops))
+	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp)
+	var primary *pebble.DB
 	var releases []func()
 	defer func() {
 		for i := len(releases) - 1; i >= 0; i-- {
@@ -108,17 +109,17 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 				return nil, status.Errorf(codes.FailedPrecondition, "ops[%d]: condition failed", i)
 			}
 		}
-		var batchOp *storage.BatchOp
+		var batchOp *pebble.BatchOp
 		switch x := op.GetOp().(type) {
 		case *cefaspb.TransactWriteOp_Put_:
 			item, err := pbToItem(x.Put.GetItem())
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "ops[%d].put.item: %v", i, err)
 			}
-			next := storage.BatchOp{Op: storage.BatchOpPut, Item: item}
+			next := pebble.BatchOp{Op: pebble.BatchOpPut, Item: item}
 			batchOp = &next
 		case *cefaspb.TransactWriteOp_Delete_:
-			next := storage.BatchOp{Op: storage.BatchOpDelete, Key: key}
+			next := pebble.BatchOp{Op: pebble.BatchOpDelete, Key: key}
 			batchOp = &next
 		case *cefaspb.TransactWriteOp_ConditionCheck_:
 			// already evaluated above; emits no mutation

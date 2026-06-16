@@ -1,8 +1,10 @@
-package storage
+package pebble
 
 import (
 	"errors"
 	"fmt"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
@@ -11,11 +13,11 @@ import (
 
 // PutOptions controls optional behaviour for PutItem-style writes.
 type PutOptions struct {
-	// Condition, when non-empty, is evaluated against the prior item
+	// storage.Condition, when non-empty, is evaluated against the prior item
 	// before the write. If it returns false the write is aborted with
-	// ErrConditionFailed. Empty means "no precondition".
+	// storage.ErrConditionFailed. Empty means "no precondition".
 	Condition string
-	// Binds resolves :name placeholders in Condition.
+	// Binds resolves :name placeholders in storage.Condition.
 	Binds map[string]types.AttributeValue
 }
 
@@ -58,7 +60,7 @@ func extractKeyBytes(item types.Item, ks types.KeySchema) (pk, sk []byte, err er
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: PK %q", types.ErrMissingKey, ks.PK)
 	}
-	pk, err = AttrCanonicalBytes(pkAttr)
+	pk, err = storage.AttrCanonicalBytes(pkAttr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("PK %q: %w", ks.PK, err)
 	}
@@ -69,7 +71,7 @@ func extractKeyBytes(item types.Item, ks types.KeySchema) (pk, sk []byte, err er
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: SK %q", types.ErrMissingKey, ks.SK)
 	}
-	sk, err = AttrCanonicalBytes(skAttr)
+	sk, err = storage.AttrCanonicalBytes(skAttr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SK %q: %w", ks.SK, err)
 	}
@@ -101,13 +103,13 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err != nil {
 		return err
 	}
-	primaryKey := KeyPrimary(td.Name, pk, sk)
-	encoded, err := EncodeItem(item)
+	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	encoded, err := storage.EncodeItem(item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
 	}
 
-	cond, err := ParseCondition(opts.Condition)
+	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
 	}
@@ -122,7 +124,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	}
 	var priorItem types.Item
 	if prior != nil {
-		priorItem, err = DecodeItem(prior)
+		priorItem, err = storage.DecodeItem(prior)
 		if err != nil {
 			return fmt.Errorf("decode prior: %w", err)
 		}
@@ -134,15 +136,15 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 			return fmt.Errorf("evaluate condition: %w", err)
 		}
 		if !ok {
-			return ErrConditionFailed
+			return storage.ErrConditionFailed
 		}
 	}
 
-	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, item)
+	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, item)
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
 	}
-	lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, item)
+	lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, item)
 	if err != nil {
 		return fmt.Errorf("plan lsi: %w", err)
 	}
@@ -200,8 +202,8 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err != nil {
 		return err
 	}
-	primaryKey := KeyPrimary(td.Name, pk, sk)
-	cond, err := ParseCondition(opts.Condition)
+	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
 	}
@@ -212,7 +214,7 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	}
 	var priorItem types.Item
 	if prior != nil {
-		priorItem, err = DecodeItem(prior)
+		priorItem, err = storage.DecodeItem(prior)
 		if err != nil {
 			return fmt.Errorf("decode prior: %w", err)
 		}
@@ -224,16 +226,16 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 			return fmt.Errorf("evaluate condition: %w", err)
 		}
 		if !ok {
-			return ErrConditionFailed
+			return storage.ErrConditionFailed
 		}
 	}
 
 	// Plan every secondary delta from priorItem → nil.
-	gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
+	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
 	if err != nil {
 		return fmt.Errorf("plan gsi: %w", err)
 	}
-	lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
+	lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
 	if err != nil {
 		return fmt.Errorf("plan lsi: %w", err)
 	}
@@ -293,15 +295,15 @@ func (d *DB) snapshotGet(key []byte) ([]byte, error) {
 	return out, nil
 }
 
-func applyIndexOps(b *pebbledb.Batch, ops []indexOp) error {
+func applyIndexOps(b *pebbledb.Batch, ops []storage.IndexOp) error {
 	for _, op := range ops {
-		switch op.op {
-		case indexOpSet:
-			if err := b.Set(op.key, op.value, nil); err != nil {
+		switch op.Op {
+		case storage.IndexOpSet:
+			if err := b.Set(op.Key, op.Value, nil); err != nil {
 				return fmt.Errorf("batch set index: %w", err)
 			}
-		case indexOpDelete:
-			if err := b.Delete(op.key, nil); err != nil {
+		case storage.IndexOpDelete:
+			if err := b.Delete(op.Key, nil); err != nil {
 				return fmt.Errorf("batch delete index: %w", err)
 			}
 		}
@@ -316,9 +318,9 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 	if err != nil {
 		return nil, err
 	}
-	primaryKey := KeyPrimary(table, pk, sk)
+	primaryKey := storage.KeyPrimary(table, pk, sk)
 	if v, ok := d.memoryGet(table, primaryKey); ok {
-		return DecodeItem(v)
+		return storage.DecodeItem(v)
 	}
 	v, err := d.Get(primaryKey)
 	if errors.Is(err, ErrNotFound) {
@@ -327,18 +329,18 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 	if err != nil {
 		return nil, err
 	}
-	return DecodeItem(v)
+	return storage.DecodeItem(v)
 }
 
 // QueryByPK returns every item under a single PK. SK ordering is
 // determined by the underlying byte ordering of the canonical SK bytes
 // (lexicographic). Limit ≤ 0 means "no limit".
 func (d *DB) QueryByPK(table string, ks types.KeySchema, pkAttr types.AttributeValue, limit int) ([]types.Item, error) {
-	pk, err := AttrCanonicalBytes(pkAttr)
+	pk, err := storage.AttrCanonicalBytes(pkAttr)
 	if err != nil {
 		return nil, fmt.Errorf("PK %q: %w", ks.PK, err)
 	}
-	lower, upper := PrefixPrimaryByPK(table, pk)
+	lower, upper := storage.PrefixPrimaryByPK(table, pk)
 	if d.memoryHasTable(table) {
 		return d.memoryScan(table, lower, upper, limit)
 	}
@@ -350,24 +352,24 @@ func (d *DB) QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skH
 	if ks.SK == "" {
 		return nil, fmt.Errorf("table %q has no sort key", table)
 	}
-	pk, err := AttrCanonicalBytes(pkAttr)
+	pk, err := storage.AttrCanonicalBytes(pkAttr)
 	if err != nil {
 		return nil, fmt.Errorf("PK %q: %w", ks.PK, err)
 	}
 	var lowBytes, highBytes []byte
 	if skLow.T != types.AttrNull {
-		lowBytes, err = AttrCanonicalBytes(skLow)
+		lowBytes, err = storage.AttrCanonicalBytes(skLow)
 		if err != nil {
 			return nil, fmt.Errorf("SK low: %w", err)
 		}
 	}
 	if skHigh.T != types.AttrNull {
-		highBytes, err = AttrCanonicalBytes(skHigh)
+		highBytes, err = storage.AttrCanonicalBytes(skHigh)
 		if err != nil {
 			return nil, fmt.Errorf("SK high: %w", err)
 		}
 	}
-	lower, upper := RangePrimaryBySK(table, pk, lowBytes, highBytes)
+	lower, upper := storage.RangePrimaryBySK(table, pk, lowBytes, highBytes)
 	if d.memoryHasTable(table) {
 		return d.memoryScan(table, lower, upper, limit)
 	}
@@ -390,28 +392,28 @@ func (d *DB) QueryByLSI(td types.TableDescriptor, idxName string, primaryPKVal t
 	if !found {
 		return nil, fmt.Errorf("table %q has no LSI named %q", td.Name, idxName)
 	}
-	pkBytes, err := AttrCanonicalBytes(primaryPKVal)
+	pkBytes, err := storage.AttrCanonicalBytes(primaryPKVal)
 	if err != nil {
 		return nil, fmt.Errorf("primary PK: %w", err)
 	}
 	var lower, upper []byte
 	if opts.SKLow.T == types.AttrNull && opts.SKHigh.T == types.AttrNull {
-		lower, upper = PrefixLSIByPK(td.Name, idxName, pkBytes)
+		lower, upper = storage.PrefixLSIByPK(td.Name, idxName, pkBytes)
 	} else {
 		var lo, hi []byte
 		if opts.SKLow.T != types.AttrNull {
-			lo, err = AttrCanonicalBytes(opts.SKLow)
+			lo, err = storage.AttrCanonicalBytes(opts.SKLow)
 			if err != nil {
 				return nil, fmt.Errorf("lsi SK low: %w", err)
 			}
 		}
 		if opts.SKHigh.T != types.AttrNull {
-			hi, err = AttrCanonicalBytes(opts.SKHigh)
+			hi, err = storage.AttrCanonicalBytes(opts.SKHigh)
 			if err != nil {
 				return nil, fmt.Errorf("lsi SK high: %w", err)
 			}
 		}
-		lower, upper = RangeLSIBySK(td.Name, idxName, pkBytes, lo, hi)
+		lower, upper = storage.RangeLSIBySK(td.Name, idxName, pkBytes, lo, hi)
 	}
 	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
 }
@@ -431,32 +433,32 @@ func (d *DB) iterateIndex(td types.TableDescriptor, lower, upper []byte, project
 		v := it.Value()
 		ptrCopy := make([]byte, len(v))
 		copy(ptrCopy, v)
-		pk, sk, projectedBytes, mode, err := DecodeProjectedPointer(ptrCopy)
+		pk, sk, projectedBytes, mode, err := storage.DecodeProjectedPointer(ptrCopy)
 		if err != nil {
 			return nil, fmt.Errorf("decode pointer: %w", err)
 		}
 		switch mode {
 		case "ALL":
-			item, err := DecodeItem(projectedBytes)
+			item, err := storage.DecodeItem(projectedBytes)
 			if err != nil {
 				return nil, fmt.Errorf("decode ALL item: %w", err)
 			}
 			out = append(out, item)
 		case "INCLUDE":
-			item, err := DecodeItem(projectedBytes)
+			item, err := storage.DecodeItem(projectedBytes)
 			if err != nil {
 				return nil, fmt.Errorf("decode INCLUDE item: %w", err)
 			}
 			out = append(out, item)
 		default:
-			raw, err := d.Get(KeyPrimary(td.Name, pk, sk))
+			raw, err := d.Get(storage.KeyPrimary(td.Name, pk, sk))
 			if errors.Is(err, ErrNotFound) {
 				continue
 			}
 			if err != nil {
 				return nil, err
 			}
-			item, err := DecodeItem(raw)
+			item, err := storage.DecodeItem(raw)
 			if err != nil {
 				return nil, fmt.Errorf("decode item: %w", err)
 			}
@@ -477,31 +479,31 @@ func (d *DB) QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types
 	if !ok {
 		return nil, fmt.Errorf("table %q has no GSI named %q", td.Name, idxName)
 	}
-	gsiPK, err := AttrCanonicalBytes(gsiPKVal)
+	gsiPK, err := storage.AttrCanonicalBytes(gsiPKVal)
 	if err != nil {
 		return nil, fmt.Errorf("gsi PK: %w", err)
 	}
 	var lower, upper []byte
 	if opts.SKLow.T == types.AttrNull && opts.SKHigh.T == types.AttrNull {
-		lower, upper = PrefixGSIByPK(td.Name, idxName, gsiPK)
+		lower, upper = storage.PrefixGSIByPK(td.Name, idxName, gsiPK)
 	} else {
 		if descriptor.KeySchema.SK == "" {
 			return nil, fmt.Errorf("gsi %q has no sort key", idxName)
 		}
 		var lo, hi []byte
 		if opts.SKLow.T != types.AttrNull {
-			lo, err = AttrCanonicalBytes(opts.SKLow)
+			lo, err = storage.AttrCanonicalBytes(opts.SKLow)
 			if err != nil {
 				return nil, fmt.Errorf("gsi SK low: %w", err)
 			}
 		}
 		if opts.SKHigh.T != types.AttrNull {
-			hi, err = AttrCanonicalBytes(opts.SKHigh)
+			hi, err = storage.AttrCanonicalBytes(opts.SKHigh)
 			if err != nil {
 				return nil, fmt.Errorf("gsi SK high: %w", err)
 			}
 		}
-		lower, upper = RangeGSIBySK(td.Name, idxName, gsiPK, lo, hi)
+		lower, upper = storage.RangeGSIBySK(td.Name, idxName, gsiPK, lo, hi)
 	}
 	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
 }
@@ -520,7 +522,7 @@ func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) 
 // never sees raw pebble bytes. Multi-shard mode requires the caller
 // to scatter the call across each shard's DB.
 func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
-	lower, upper := PrefixPrimaryAll(table)
+	lower, upper := storage.PrefixPrimaryAll(table)
 	if d.memoryHasTable(table) {
 		return d.memoryScan(table, lower, upper, limit)
 	}
@@ -539,7 +541,7 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 		v := it.Value()
 		cp := make([]byte, len(v))
 		copy(cp, v)
-		item, err := DecodeItem(cp)
+		item, err := storage.DecodeItem(cp)
 		if err != nil {
 			return nil, fmt.Errorf("decode at key %q: %w", it.Key(), err)
 		}
@@ -589,20 +591,20 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
-			enc, err := EncodeItem(op.Item)
+			enc, err := storage.EncodeItem(op.Item)
 			if err != nil {
 				return fmt.Errorf("op %d encode: %w", i, err)
 			}
-			primaryKey := KeyPrimary(td.Name, pk, sk)
+			primaryKey := storage.KeyPrimary(td.Name, pk, sk)
 			priorItem, err := readSnapshotItem(snap, primaryKey)
 			if err != nil {
 				return fmt.Errorf("op %d prior: %w", i, err)
 			}
-			gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, op.Item)
+			gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, op.Item)
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
-			lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, op.Item)
+			lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, op.Item)
 			if err != nil {
 				return fmt.Errorf("op %d lsi: %w", i, err)
 			}
@@ -640,16 +642,16 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
-			primaryKey := KeyPrimary(td.Name, pk, sk)
+			primaryKey := storage.KeyPrimary(td.Name, pk, sk)
 			priorItem, err := readSnapshotItem(snap, primaryKey)
 			if err != nil {
 				return fmt.Errorf("op %d prior: %w", i, err)
 			}
-			gsiOps, err := planGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
+			gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
 			if err != nil {
 				return fmt.Errorf("op %d gsi: %w", i, err)
 			}
-			lsiOps, err := planLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
+			lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
 			if err != nil {
 				return fmt.Errorf("op %d lsi: %w", i, err)
 			}
@@ -731,7 +733,7 @@ func readSnapshotItem(snap *pebbledb.Snapshot, key []byte) (types.Item, error) {
 	defer closer.Close()
 	cp := make([]byte, len(v))
 	copy(cp, v)
-	return DecodeItem(cp)
+	return storage.DecodeItem(cp)
 }
 
 func keyItemFromItem(item types.Item, ks types.KeySchema) types.Item {

@@ -44,9 +44,9 @@ func TestSelectAppliesHaversinePostFilter(t *testing.T) {
 	a, geo, d := newBound(t)
 	// São Paulo neighborhood: pack items at various distances.
 	_ = geo.Build(d, func(yield func(model.Item) bool) {
-		_ = yield(storeItem("inside", -23.5510, -46.6340))   // very close to center
-		_ = yield(storeItem("edge", -23.5605, -46.6240))     // ~1.5km away
-		_ = yield(storeItem("far", -23.9608, -46.3336))      // Santos, ~55km
+		_ = yield(storeItem("inside", -23.5510, -46.6340)) // very close to center
+		_ = yield(storeItem("edge", -23.5605, -46.6240))   // ~1.5km away
+		_ = yield(storeItem("far", -23.9608, -46.3336))    // Santos, ~55km
 	})
 	cs, err := a.Select(plugin.AudienceRequest{Lat: -23.5505, Lon: -46.6333, Radius: 2000})
 	if err != nil {

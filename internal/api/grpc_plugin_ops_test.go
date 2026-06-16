@@ -14,6 +14,7 @@ import (
 
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
+
 	// Side-effect imports register the builtin plugins against
 	// plugin.Default so the unsecured fixture surfaces them.
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"

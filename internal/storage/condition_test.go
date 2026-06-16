@@ -73,13 +73,13 @@ func TestConditionNilItemAttributeNotExistsTrue(t *testing.T) {
 
 func TestConditionParseErrors(t *testing.T) {
 	bad := []string{
-		"name =",                    // missing rhs
-		"= :v",                      // missing lhs
-		"name BETWEEN :a OR :b",     // wrong keyword
-		"attribute_exists)",         // missing (
-		"attribute_exists(name",     // missing )
-		"name @ :v",                 // unknown char
-		"name AND",                  // dangling op
+		"name =",                // missing rhs
+		"= :v",                  // missing lhs
+		"name BETWEEN :a OR :b", // wrong keyword
+		"attribute_exists)",     // missing (
+		"attribute_exists(name", // missing )
+		"name @ :v",             // unknown char
+		"name AND",              // dangling op
 	}
 	for _, b := range bad {
 		if _, err := ParseCondition(b); err == nil {

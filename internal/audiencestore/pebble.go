@@ -13,7 +13,7 @@ package audiencestore
 import (
 	"errors"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
 )
 
@@ -21,16 +21,16 @@ import (
 // the cefas storage engine. Reads stay local; writes flow through
 // whatever replicator the DB was opened with (Raft in production,
 // direct commit in single-node mode).
-func NewBackend(db *storage.DB) audience.Backend {
+func NewBackend(db *pebble.DB) audience.Backend {
 	return &backend{db: db}
 }
 
-type backend struct{ db *storage.DB }
+type backend struct{ db *pebble.DB }
 
 func (b *backend) Get(key []byte) ([]byte, bool, error) {
 	v, err := b.db.Get(key)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, err

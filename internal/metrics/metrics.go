@@ -22,7 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
@@ -360,7 +360,7 @@ func (m *Metrics) AuthRejected(reason string) {
 	m.AuthRejectedTotal.WithLabelValues(reason).Inc()
 }
 
-func (m *Metrics) ObserveStreamRetention(shard string, stats storage.StreamRetentionStats) {
+func (m *Metrics) ObserveStreamRetention(shard string, stats pebble.StreamRetentionStats) {
 	if m == nil {
 		return
 	}

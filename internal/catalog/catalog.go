@@ -17,18 +17,19 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog/domain"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 type Catalog struct {
-	db *storage.DB
+	db *pebble.DB
 
 	mu     sync.RWMutex
 	tables map[string]types.TableDescriptor
 }
 
-func New(db *storage.DB) (*Catalog, error) {
+func New(db *pebble.DB) (*Catalog, error) {
 	c := &Catalog{db: db, tables: make(map[string]types.TableDescriptor)}
 	if err := c.loadAll(); err != nil {
 		return nil, fmt.Errorf("catalog load: %w", err)
@@ -124,7 +125,7 @@ func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 		return domain.CloneTableDescriptor(td), nil
 	}
 	raw, err := c.db.Get(storage.KeyCatalog(name))
-	if err == storage.ErrNotFound {
+	if err == pebble.ErrNotFound {
 		return types.TableDescriptor{}, types.ErrTableNotFound
 	}
 	if err != nil {
@@ -157,7 +158,7 @@ func (c *Catalog) List() []types.TableDescriptor {
 // DescribeStream returns persisted metadata for one table stream ARN.
 func (c *Catalog) DescribeStream(streamArn string) (types.StreamDescriptor, error) {
 	raw, err := c.db.Get(storage.KeyStreamDescriptor(streamArn))
-	if err == storage.ErrNotFound {
+	if err == pebble.ErrNotFound {
 		return types.StreamDescriptor{}, types.ErrStreamNotFound
 	}
 	if err != nil {

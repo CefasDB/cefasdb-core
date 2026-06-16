@@ -1,9 +1,11 @@
-package storage
+package pebble
 
 import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/osvaldoandrade/cefas/internal/storage"
 
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 )
@@ -51,14 +53,14 @@ func (d *DB) PutPluginIndexDescriptor(desc index.Descriptor) error {
 	if err != nil {
 		return err
 	}
-	if err := d.Set(KeyPluginIndexDescriptor(desc.Table, desc.Name), raw); err != nil {
+	if err := d.Set(storage.KeyPluginIndexDescriptor(desc.Table, desc.Name), raw); err != nil {
 		return fmt.Errorf("persist plugin index descriptor: %w", err)
 	}
 	return nil
 }
 
 func (d *DB) GetPluginIndexDescriptor(table, name string) (index.Descriptor, bool, error) {
-	raw, err := d.Get(KeyPluginIndexDescriptor(table, name))
+	raw, err := d.Get(storage.KeyPluginIndexDescriptor(table, name))
 	if err == ErrNotFound {
 		return index.Descriptor{}, false, nil
 	}
@@ -73,7 +75,7 @@ func (d *DB) GetPluginIndexDescriptor(table, name string) (index.Descriptor, boo
 }
 
 func (d *DB) ListPluginIndexDescriptors() ([]index.Descriptor, error) {
-	lower, upper := PrefixPluginIndexDescriptors()
+	lower, upper := storage.PrefixPluginIndexDescriptors()
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return nil, err
@@ -104,14 +106,14 @@ func (d *DB) ListPluginIndexDescriptors() ([]index.Descriptor, error) {
 }
 
 func (d *DB) DeletePluginIndexDescriptor(table, name string) error {
-	if err := d.Delete(KeyPluginIndexDescriptor(table, name)); err != nil {
+	if err := d.Delete(storage.KeyPluginIndexDescriptor(table, name)); err != nil {
 		return fmt.Errorf("delete plugin index descriptor: %w", err)
 	}
 	return nil
 }
 
 func (d *DB) DeletePluginIndexDescriptorsForTable(table string) error {
-	lower, upper := PrefixPluginIndexTableDescriptors(table)
+	lower, upper := storage.PrefixPluginIndexTableDescriptors(table)
 	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return err

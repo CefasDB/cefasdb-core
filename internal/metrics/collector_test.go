@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -19,7 +19,7 @@ func (s staticLeader) IsLeader() bool { return bool(s) }
 
 func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 	m := New()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 
 func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	m := New()
-	db, err := storage.Open(storage.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	}
 	if err := db.PutItemWith(td, types.Item{
 		"id": {T: types.AttrS, S: "event-1"},
-	}, storage.PutOptions{}); err != nil {
+	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
