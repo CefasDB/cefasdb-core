@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
+	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
@@ -28,7 +30,6 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
@@ -91,6 +92,38 @@ type BackupSchedulerStatusProvider interface {
 // AttachChangeStream wires the CDC source. Passing nil keeps the
 // stream endpoints off.
 func (s *Server) AttachChangeStream(c ChangeStream) { s.stream = c }
+
+// backupChangeStream adapts s.stream into the minimal interface the
+// backup handler package expects. Returns nil when no stream is
+// attached so the handlers can short-circuit with an empty list.
+func (s *Server) backupChangeStream() backuphttp.ChangeStream {
+	if s.stream == nil {
+		return nil
+	}
+	return backupChangeStreamAdapter{cs: s.stream}
+}
+
+type backupChangeStreamAdapter struct {
+	cs ChangeStream
+}
+
+func (a backupChangeStreamAdapter) ListSnapshots() ([]backuphttp.SnapshotMetadata, error) {
+	metas, err := a.cs.ListSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]backuphttp.SnapshotMetadata, len(metas))
+	for i, m := range metas {
+		out[i] = backuphttp.SnapshotMetadata{
+			ID:          m.ID,
+			Index:       m.Index,
+			Term:        m.Term,
+			UnixSeconds: m.UnixSeconds,
+			SizeBytes:   m.SizeBytes,
+		}
+	}
+	return out, nil
+}
 
 func (s *Server) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.backups = p }
 
@@ -171,26 +204,6 @@ func (s *Server) compact(table, lowerB64, upperB64 string, parallelize bool) ([]
 	return results, nil
 }
 
-func compactionResultsJSON(results []storage.CompactionResult) []map[string]any {
-	out := make([]map[string]any, 0, len(results))
-	for _, r := range results {
-		out = append(out, map[string]any{
-			"table":           r.Table,
-			"lower":           base64.StdEncoding.EncodeToString(r.Lower),
-			"upper":           base64.StdEncoding.EncodeToString(r.Upper),
-			"startedAt":       r.StartedAt.Format(time.RFC3339Nano),
-			"finishedAt":      r.FinishedAt.Format(time.RFC3339Nano),
-			"elapsedSeconds":  r.Elapsed.Seconds(),
-			"parallelized":    r.Parallelized,
-			"beforeL0Files":   r.BeforeL0Files,
-			"afterL0Files":    r.AfterL0Files,
-			"beforeDebtBytes": r.BeforeDebtBytes,
-			"afterDebtBytes":  r.AfterDebtBytes,
-		})
-	}
-	return out
-}
-
 // AttachCluster wires the optional cluster-management surface. Pass a
 // *raft.DB; nil keeps the server in single-node mode.
 func (s *Server) AttachCluster(c Cluster) { s.cluster = c }
@@ -225,6 +238,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	tableHandlers := tablehttp.New(s.cat, s.fanOutCatalog)
 	register("/v1/tables", tableHandlers.HandleTables) // POST=create, GET=list
 	register("/v1/tables/", tableHandlers.HandleTable) // GET=describe
+	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
 	register("/v1/ListStreams", s.handleListStreams)
 	register("/v1/DescribeStream", s.handleDescribeStream)
 	register("/v1/GetShardIterator", s.handleGetShardIterator)
@@ -238,9 +252,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/SpatialQuery", s.handleSpatialQuery)
 	register("/v1/Sql", s.handleSql)
 	register("/v1/PartiQL", s.handlePartiQL)
-	register("/v1/RestoreTableFromBackup", s.handleRestoreTableFromBackup)
-	register("/v1/DeleteBackup", s.handleDeleteBackup)
-	register("/v1/ApplyBackupRetention", s.handleApplyBackupRetention)
+	register("/v1/RestoreTableFromBackup", backupHandlers.HandleRestoreTableFromBackup)
+	register("/v1/DeleteBackup", backupHandlers.HandleDeleteBackup)
+	register("/v1/ApplyBackupRetention", backupHandlers.HandleApplyBackupRetention)
 	register("/v1/Health", s.handleHealth)
 	register("/v1/cluster/status", s.handleClusterStatus)
 	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
@@ -255,8 +269,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
 	mux.HandleFunc("/v1/Stream", s.handleStream)
-	mux.HandleFunc("/v1/admin/snapshots", s.handleListSnapshots)
-	mux.HandleFunc("/v1/admin/compact", s.handleCompact)
+	mux.HandleFunc("/v1/admin/snapshots", backupHandlers.HandleListSnapshots)
+	mux.HandleFunc("/v1/admin/compact", backupHandlers.HandleCompact)
 }
 
 // ---------- streams ----------
@@ -531,196 +545,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-}
-
-// handleListSnapshots is the admin endpoint that lists every retained
-// raft snapshot.
-func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
-	if s.stream == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"snapshots": nil})
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	metas, err := s.stream.ListSnapshots()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"snapshots": metas})
-}
-
-type compactRequest struct {
-	Table       string `json:"table,omitempty"`
-	LowerBase64 string `json:"lower,omitempty"`
-	UpperBase64 string `json:"upper,omitempty"`
-	Parallelize bool   `json:"parallelize,omitempty"`
-}
-
-type restoreTableFromBackupRequest struct {
-	BackupName      string `json:"backupName"`
-	SourceTableName string `json:"sourceTableName"`
-	TargetTableName string `json:"targetTableName"`
-	DryRun          bool   `json:"dryRun,omitempty"`
-}
-
-type restoreTableFromBackupResponse struct {
-	TargetTableName  string                   `json:"targetTableName"`
-	RowsCopied       int                      `json:"rowsCopied"`
-	DryRun           bool                     `json:"dryRun"`
-	SourceTableStats storage.BackupTableStats `json:"sourceTableStats"`
-	ManifestVersion  int                      `json:"manifestVersion"`
-	ManifestStatus   string                   `json:"manifestStatus"`
-	TableStatus      string                   `json:"tableStatus"`
-}
-
-type deleteBackupRequest struct {
-	BackupName string `json:"backupName"`
-}
-
-type applyBackupRetentionRequest struct {
-	KeepLatest    int    `json:"keepLatest,omitempty"`
-	KeepLatestSet bool   `json:"keepLatestSet,omitempty"`
-	MaxAgeSeconds int64  `json:"maxAgeSeconds,omitempty"`
-	MaxAgeSet     bool   `json:"maxAgeSet,omitempty"`
-	MaxAge        string `json:"maxAge,omitempty"`
-	DryRun        bool   `json:"dryRun,omitempty"`
-}
-
-func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req deleteBackupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.db.DeleteBackup(req.BackupName)
-	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"BackupDeletion": result})
-}
-
-func (s *Server) handleApplyBackupRetention(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req applyBackupRetentionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	maxAge := time.Duration(req.MaxAgeSeconds) * time.Second
-	maxAgeSet := req.MaxAgeSet
-	if req.MaxAge != "" {
-		parsed, err := time.ParseDuration(req.MaxAge)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		maxAge = parsed
-		maxAgeSet = true
-	}
-	result, err := s.db.ApplyBackupRetention(storage.BackupRetentionOptions{
-		KeepLatest:    req.KeepLatest,
-		KeepLatestSet: req.KeepLatestSet,
-		MaxAge:        maxAge,
-		MaxAgeSet:     maxAgeSet,
-		DryRun:        req.DryRun,
-	})
-	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"BackupRetention": result})
-}
-
-func (s *Server) handleRestoreTableFromBackup(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req restoreTableFromBackupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	register := func(td types.TableDescriptor) error {
-		if err := s.cat.Create(td); err != nil {
-			return err
-		}
-		if s.manager != nil {
-			for i, sh := range s.manager.Shards() {
-				if i == 0 {
-					continue
-				}
-				if cat, cerr := catalog.New(sh.Storage); cerr == nil {
-					_ = cat.Create(td)
-				}
-			}
-		}
-		return nil
-	}
-	res, err := s.db.RestoreTableFromBackupWithOptions(
-		req.BackupName,
-		req.SourceTableName,
-		req.TargetTableName,
-		storage.RestoreOptions{DryRun: req.DryRun},
-		register,
-	)
-	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	status := "ACTIVE"
-	if res.DryRun {
-		status = "DRY_RUN"
-	}
-	writeJSON(w, http.StatusOK, restoreTableFromBackupResponse{
-		TargetTableName:  res.TargetTable.Name,
-		RowsCopied:       res.RowsCopied,
-		DryRun:           res.DryRun,
-		SourceTableStats: res.SourceStats,
-		ManifestVersion:  res.ManifestVersion,
-		ManifestStatus:   res.ManifestStatus,
-		TableStatus:      status,
-	})
-}
-
-func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req compactRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	results, err := s.compact(req.Table, req.LowerBase64, req.UpperBase64, req.Parallelize)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"compactions": compactionResultsJSON(results)})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
