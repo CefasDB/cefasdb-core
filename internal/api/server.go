@@ -17,11 +17,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
+	clusterhttp "github.com/osvaldoandrade/cefas/internal/api/http/cluster"
 	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	queryhttp "github.com/osvaldoandrade/cefas/internal/api/http/query"
 	streamhttp "github.com/osvaldoandrade/cefas/internal/api/http/stream"
@@ -33,7 +33,6 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -280,15 +279,16 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/DeleteBackup", backupHandlers.HandleDeleteBackup)
 	register("/v1/ApplyBackupRetention", backupHandlers.HandleApplyBackupRetention)
 	register("/v1/Health", s.handleHealth)
-	register("/v1/cluster/status", s.handleClusterStatus)
-	register("/v1/cluster/AddVoter", s.handleClusterAddVoter)
-	register("/v1/cluster/RemoveServer", s.handleClusterRemoveServer)
-	register("/v1/cluster/placement/plan", s.handleClusterPlacementPlan)
-	register("/v1/cluster/placement/apply", s.handleClusterPlacementApply)
-	register("/v1/cluster/placement/audit", s.handleClusterPlacementAudit)
-	register("/v1/cluster/placement/split/finalize", s.handleClusterSplitFinalize)
-	register("/v1/cluster/placement/split/rollback", s.handleClusterSplitRollback)
-	register("/v1/cluster/placement/range-move/finalize", s.handleClusterRangeMoveFinalize)
+	clusterHandlers := clusterhttp.New(s.cluster, s.manager, writeWriteErr, s.clusterStatusExtras)
+	register("/v1/cluster/status", clusterHandlers.HandleStatus)
+	register("/v1/cluster/AddVoter", clusterHandlers.HandleAddVoter)
+	register("/v1/cluster/RemoveServer", clusterHandlers.HandleRemoveServer)
+	register("/v1/cluster/placement/plan", clusterHandlers.HandlePlacementPlan)
+	register("/v1/cluster/placement/apply", clusterHandlers.HandlePlacementApply)
+	register("/v1/cluster/placement/audit", clusterHandlers.HandlePlacementAudit)
+	register("/v1/cluster/placement/split/finalize", clusterHandlers.HandleSplitFinalize)
+	register("/v1/cluster/placement/split/rollback", clusterHandlers.HandleSplitRollback)
+	register("/v1/cluster/placement/range-move/finalize", clusterHandlers.HandleRangeMoveFinalize)
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
@@ -305,51 +305,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ---------- cluster endpoints ----------
-
-type clusterStatusResponse struct {
-	Mode              string                         `json:"mode"` // "single-node" or "raft"
-	IsLeader          bool                           `json:"isLeader"`
-	SelfID            string                         `json:"selfId,omitempty"`
-	BindAddr          string                         `json:"bindAddr,omitempty"`
-	LeaderHTTP        string                         `json:"leaderHttp,omitempty"`
-	RoutingEpoch      uint64                         `json:"routingEpoch,omitempty"`
-	PlacementVersion  uint64                         `json:"placementVersion,omitempty"`
-	ShardCount        int                            `json:"shardCount,omitempty"`
-	PlacementStrategy string                         `json:"placementStrategy,omitempty"`
-	Shards            []cluster.ShardPlacement       `json:"shards,omitempty"`
-	Nodes             []cluster.NodeDescriptor       `json:"nodes,omitempty"`
-	HotRanges         []metrics.RangeHotspotSummary  `json:"hotRanges,omitempty"`
-	BackupScheduler   *storage.ScheduledBackupStatus `json:"backupScheduler,omitempty"`
-}
-
-func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
-	resp := clusterStatusResponse{Mode: "single-node"}
-	if s.cluster != nil {
-		resp.Mode = "raft"
-		resp.IsLeader = s.cluster.IsLeader()
-		resp.SelfID = s.cluster.SelfID()
-		resp.BindAddr = s.cluster.BindAddr()
-		resp.LeaderHTTP = s.cluster.LeaderHTTPAddr()
-	}
-	if s.manager != nil {
-		_ = s.manager.RefreshPlacement()
-		placement := s.manager.Placement()
-		resp.RoutingEpoch = placement.Epoch
-		resp.PlacementVersion = placement.Version
-		resp.ShardCount = len(placement.Shards)
-		resp.PlacementStrategy = placement.Strategy
-		resp.Shards = append([]cluster.ShardPlacement(nil), placement.Shards...)
-		resp.Nodes = sortedPlacementNodes(placement)
-	}
+// clusterStatusExtras supplies the optional sections of the
+// /v1/cluster/status payload (hot ranges, backup scheduler) so the
+// clusterhttp package never has to import internal/metrics or
+// internal/storage directly.
+func (s *Server) clusterStatusExtras() map[string]any {
+	out := map[string]any{}
 	if s.metrics != nil {
-		resp.HotRanges = s.metrics.RangeHotspotSummaries(0)
+		out["hotRanges"] = s.metrics.RangeHotspotSummaries(0)
 	}
 	if s.backups != nil {
 		status := s.backups.Status()
-		resp.BackupScheduler = &status
+		out["backupScheduler"] = &status
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return out
 }
 
 func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDescriptor {
@@ -360,292 +329,6 @@ func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDesc
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
-}
-
-type addVoterRequest struct {
-	ID        model.NodeID `json:"id"`
-	Addr      string       `json:"addr"`
-	TimeoutMS int          `json:"timeoutMs,omitempty"`
-	ShardID   *uint32      `json:"shardId,omitempty"`
-	AllShards bool         `json:"allShards,omitempty"`
-}
-
-func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req addVoterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
-	id := req.ID.String()
-	if s.manager != nil && req.AllShards {
-		if err := s.manager.AddVoterAllShards(id, req.Addr, timeout); err != nil {
-			writeWriteErr(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, struct{}{})
-		return
-	}
-	if s.manager != nil && req.ShardID != nil {
-		if err := s.manager.AddShardVoter(*req.ShardID, id, req.Addr, timeout); err != nil {
-			writeWriteErr(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, struct{}{})
-		return
-	}
-	if s.cluster == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
-		return
-	}
-	if err := s.cluster.AddVoter(id, req.Addr, timeout); err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct{}{})
-}
-
-type removeServerRequest struct {
-	ID        model.NodeID `json:"id"`
-	TimeoutMS int          `json:"timeoutMs,omitempty"`
-	ShardID   *uint32      `json:"shardId,omitempty"`
-	AllShards bool         `json:"allShards,omitempty"`
-}
-
-func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	var req removeServerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
-	id := req.ID.String()
-	if s.manager != nil && req.AllShards {
-		if err := s.manager.RemoveServerAllShards(id, timeout); err != nil {
-			writeWriteErr(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, struct{}{})
-		return
-	}
-	if s.manager != nil && req.ShardID != nil {
-		if err := s.manager.RemoveShardServer(*req.ShardID, id, timeout); err != nil {
-			writeWriteErr(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, struct{}{})
-		return
-	}
-	if s.cluster == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
-		return
-	}
-	if err := s.cluster.RemoveServer(id, timeout); err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct{}{})
-}
-
-func (s *Server) handleClusterPlacementPlan(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	var req cluster.PlacementPlanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	plan, err := s.manager.PlanPlacement(req)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, plan)
-}
-
-func (s *Server) handleClusterPlacementApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	var req cluster.PlacementApplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.manager.ApplyPlacement(r.Context(), req)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleClusterPlacementAudit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	req := cluster.PlacementAuditRequest{IncludeRepairPlan: true}
-	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-	} else {
-		var err error
-		q := r.URL.Query()
-		if req.MaxPrimaryKeysPerShard, err = queryInt(q.Get("maxPrimaryKeysPerShard")); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if req.MaxIssues, err = queryInt(q.Get("maxIssues")); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if q.Has("repairPlan") {
-			req.IncludeRepairPlan, err = strconv.ParseBool(q.Get("repairPlan"))
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Errorf("repairPlan: %w", err))
-				return
-			}
-		}
-	}
-	report, err := s.manager.AuditPlacement(r.Context(), req)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, report)
-}
-
-func queryInt(raw string) (int, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func (s *Server) handleClusterSplitFinalize(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	var req cluster.SplitFinalizeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.manager.FinalizeSplit(r.Context(), req)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleClusterSplitRollback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	var req cluster.SplitRollbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.manager.RollbackSplit(r.Context(), req)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleClusterRangeMoveFinalize(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeClusterAdmin) {
-		return
-	}
-	if s.manager == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster manager not configured"))
-		return
-	}
-	var req cluster.RangeMoveFinalizeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := s.manager.FinalizeRangeMove(r.Context(), req)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 // barrierTimeout is the per-request wait the strong-consistency read
