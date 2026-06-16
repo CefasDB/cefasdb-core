@@ -1,6 +1,7 @@
 package sql_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,6 +61,26 @@ func TestParserSelectAllowScan(t *testing.T) {
 	}
 	if !sel.AllowScan || sel.Table != "t" || sel.Limit != 10 {
 		t.Fatalf("unexpected select: %+v", sel)
+	}
+}
+
+func TestParserSelectGroupByCount(t *testing.T) {
+	stmt, err := cefassql.Parse("SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := stmt.(*cefassql.SelectStmt)
+	if !ok {
+		t.Fatalf("got %T, want *SelectStmt", stmt)
+	}
+	if len(sel.Columns) != 1 || sel.Columns[0] != "status" {
+		t.Fatalf("unexpected columns: %+v", sel.Columns)
+	}
+	if len(sel.GroupBy) != 1 || sel.GroupBy[0] != "status" {
+		t.Fatalf("unexpected group by: %+v", sel.GroupBy)
+	}
+	if len(sel.Aggs) != 1 || sel.Aggs[0].Func != "COUNT" || sel.Aggs[0].Column != "*" || sel.Aggs[0].OutputName != "count" {
+		t.Fatalf("unexpected aggregates: %+v", sel.Aggs)
 	}
 }
 
@@ -255,6 +276,116 @@ func TestAllowScanCountDoesNotRequireLimit(t *testing.T) {
 	}
 	if len(res.Rows) != 0 {
 		t.Fatalf("count should not return rows: %+v", res.Rows)
+	}
+}
+
+func TestAllowScanGroupByCount(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('a', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('b', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('c', 'inactive')")
+	mustExec(t, ex, cat, "INSERT INTO t (id) VALUES ('d')")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 3 {
+		t.Fatalf("group count rows = %d, want 3: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupCount(t, res.Rows, "status", "active", "count", 2)
+	assertGroupCount(t, res.Rows, "status", "inactive", "count", 1)
+	assertGroupCount(t, res.Rows, "status", "<null>", "count", 1)
+}
+
+func TestAllowScanGroupByCountColumn(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, email) VALUES ('a', 'active', 'a@example.test')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status) VALUES ('b', 'active')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, email) VALUES ('c', 'inactive', 'c@example.test')")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(email) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 2 {
+		t.Fatalf("group count rows = %d, want 2: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupCount(t, res.Rows, "status", "active", "count_email", 1)
+	assertGroupCount(t, res.Rows, "status", "inactive", "count_email", 1)
+}
+
+func TestAllowScanGroupByMultipleColumns(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('a', 'active', 'sp')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('b', 'active', 'sp')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('c', 'active', 'rj')")
+	mustExec(t, ex, cat, "INSERT INTO t (id, status, region) VALUES ('d', 'inactive', 'rj')")
+
+	res := mustExec(t, ex, cat, "SELECT status, region, COUNT(*) FROM t ALLOW SCAN GROUP BY status, region")
+	if len(res.Rows) != 3 {
+		t.Fatalf("group count rows = %d, want 3: %+v", len(res.Rows), res.Rows)
+	}
+	assertGroupPairCount(t, res.Rows, "active", "sp", 2)
+	assertGroupPairCount(t, res.Rows, "active", "rj", 1)
+	assertGroupPairCount(t, res.Rows, "inactive", "rj", 1)
+}
+
+func TestAllowScanGroupByEmptyInput(t *testing.T) {
+	_, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE t (PRIMARY KEY (id))")
+
+	res := mustExec(t, ex, cat, "SELECT status, COUNT(*) FROM t ALLOW SCAN GROUP BY status")
+	if len(res.Rows) != 0 {
+		t.Fatalf("empty group by returned rows: %+v", res.Rows)
+	}
+}
+
+func TestAggregateWithoutGroupByRejectsCountColumn(t *testing.T) {
+	_, cat := newStorage(t)
+	if err := cat.Create(types.TableDescriptor{Name: "t", KeySchema: types.KeySchema{PK: "id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cefassql.Compile("SELECT COUNT(email) FROM t ALLOW SCAN", cat)
+	if err == nil || !strings.Contains(err.Error(), "COUNT(*)") {
+		t.Fatalf("expected COUNT(col) rejection, got %v", err)
+	}
+}
+
+func assertGroupCount(t *testing.T, rows []types.Item, groupCol, groupValue, countCol string, want int) {
+	t.Helper()
+	for _, row := range rows {
+		if groupValueMatches(row[groupCol], groupValue) {
+			assertCountValue(t, row, countCol, want)
+			return
+		}
+	}
+	t.Fatalf("group %s=%s not found in %+v", groupCol, groupValue, rows)
+}
+
+func assertGroupPairCount(t *testing.T, rows []types.Item, status, region string, want int) {
+	t.Helper()
+	for _, row := range rows {
+		if groupValueMatches(row["status"], status) && groupValueMatches(row["region"], region) {
+			assertCountValue(t, row, "count", want)
+			return
+		}
+	}
+	t.Fatalf("group status=%s region=%s not found in %+v", status, region, rows)
+}
+
+func groupValueMatches(av types.AttributeValue, want string) bool {
+	if want == "<null>" {
+		return av.T == types.AttrNull
+	}
+	return av.T == types.AttrS && av.S == want
+}
+
+func assertCountValue(t *testing.T, row types.Item, col string, want int) {
+	t.Helper()
+	av, ok := row[col]
+	if !ok || av.T != types.AttrN {
+		t.Fatalf("missing numeric %q in %+v", col, row)
+	}
+	if av.N != strconv.Itoa(want) {
+		t.Fatalf("%s = %s, want %d in %+v", col, av.N, want, row)
 	}
 }
 

@@ -41,6 +41,8 @@ type PlanQuery struct {
 	SKHigh     types.AttributeValue // T == AttrNull means open high
 	Limit      int
 	Project    []string // nil → all attributes
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	OrderDesc  bool
 	Descriptor types.TableDescriptor // resolved by planner so executor doesn't reread it
 	// PostFilter, when non-nil, is evaluated against each row the
@@ -61,6 +63,8 @@ type PlanScan struct {
 	Limit      int
 	Project    []string
 	Predicate  Expr
+	GroupBy    []string
+	Aggs       []AggregateExpr
 	Descriptor types.TableDescriptor
 	Count      bool
 }

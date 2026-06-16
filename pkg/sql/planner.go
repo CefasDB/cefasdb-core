@@ -138,6 +138,12 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSelectAggregates(s); err != nil {
+		return nil, err
+	}
+	if len(s.GroupBy) > 0 && s.OrderBy != "" {
+		return nil, fmt.Errorf("GROUP BY with ORDER BY is not supported yet")
+	}
 	if s.OrderANN {
 		if s.Limit <= 0 {
 			return nil, fmt.Errorf("ANN ORDER BY requires LIMIT")
@@ -182,7 +188,7 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		if s.OrderBy != "" {
 			return nil, fmt.Errorf("scalar ORDER BY with ALLOW SCAN is not supported yet")
 		}
-		if !s.Count && s.Limit <= 0 {
+		if !s.Count && len(s.GroupBy) == 0 && s.Limit <= 0 {
 			return nil, fmt.Errorf("ALLOW SCAN requires LIMIT for row-returning SELECT")
 		}
 		return &PlanScan{
@@ -190,6 +196,8 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 			Limit:      s.Limit,
 			Project:    s.Columns,
 			Predicate:  s.Where,
+			GroupBy:    s.GroupBy,
+			Aggs:       s.Aggs,
 			Descriptor: td,
 			Count:      s.Count,
 		}, nil
@@ -246,11 +254,43 @@ func planSelect(s *SelectStmt, cat Catalog) (Plan, error) {
 		SKHigh:     skHigh,
 		Limit:      limit,
 		Project:    s.Columns,
+		GroupBy:    s.GroupBy,
+		Aggs:       s.Aggs,
 		OrderDesc:  s.OrderDesc,
 		Descriptor: td,
 		PostFilter: postFilter,
 		Count:      s.Count,
 	}, nil
+}
+
+func validateSelectAggregates(s *SelectStmt) error {
+	if len(s.Aggs) == 0 {
+		if len(s.GroupBy) > 0 {
+			return fmt.Errorf("GROUP BY requires an aggregate")
+		}
+		return nil
+	}
+	for _, agg := range s.Aggs {
+		if !strings.EqualFold(agg.Func, "COUNT") {
+			return fmt.Errorf("unsupported aggregate %q", agg.Func)
+		}
+	}
+	if len(s.GroupBy) == 0 {
+		if s.Count {
+			return nil
+		}
+		return fmt.Errorf("aggregate SELECT without GROUP BY only supports COUNT(*)")
+	}
+	groupCols := make(map[string]struct{}, len(s.GroupBy))
+	for _, col := range s.GroupBy {
+		groupCols[col] = struct{}{}
+	}
+	for _, col := range s.Columns {
+		if _, ok := groupCols[col]; !ok {
+			return fmt.Errorf("SELECT column %q must appear in GROUP BY", col)
+		}
+	}
+	return nil
 }
 
 // chooseANNFilterPlan inspects the WHERE clause of an ANN query and
