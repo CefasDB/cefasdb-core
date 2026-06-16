@@ -260,7 +260,7 @@ func streamShardToPB(shard types.StreamShardDescriptor) *cefaspb.StreamShard {
 	}
 }
 
-func streamRecordToPB(rec streamRecordEntry) *cefaspb.StreamRecordEntry {
+func streamRecordToPB(rec StreamRecordEntry) *cefaspb.StreamRecordEntry {
 	return &cefaspb.StreamRecordEntry{
 		EventId:        rec.EventID,
 		EventName:      rec.EventName,

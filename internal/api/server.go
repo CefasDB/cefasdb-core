@@ -24,7 +24,9 @@ import (
 	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
 	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
 	queryhttp "github.com/osvaldoandrade/cefas/internal/api/http/query"
+	streamhttp "github.com/osvaldoandrade/cefas/internal/api/http/stream"
 	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
+	"github.com/osvaldoandrade/cefas/internal/api/streamcore"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
@@ -32,7 +34,6 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -56,14 +57,10 @@ type ChangeStream interface {
 	ListSnapshots() ([]SnapshotMetadata, error)
 }
 
-// ChangeEvent is the wire-agnostic shape of a CDC entry. raft.DB's
-// ChangeEvent is convertible to this.
-type ChangeEvent struct {
-	RaftIndex uint64
-	Op        string // "PUT" | "DELETE"
-	Key       []byte
-	Value     []byte
-}
+// ChangeEvent is the wire-agnostic shape of a CDC entry. It is a
+// type alias to streamcore.ChangeEvent so internal/api and
+// internal/api/http/stream share a single source of truth.
+type ChangeEvent = streamcore.ChangeEvent
 
 // SnapshotMetadata mirrors raft.SnapshotMetadata for API consumers.
 type SnapshotMetadata struct {
@@ -238,6 +235,13 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	tableHandlers := tablehttp.New(s.cat, s.fanOutCatalog)
 	register("/v1/tables", tableHandlers.HandleTables) // POST=create, GET=list
 	register("/v1/tables/", tableHandlers.HandleTable) // GET=describe
+	streamHandlers := streamhttp.New(
+		s.cat,
+		s.db,
+		s.stream,
+		s.observeStreamIteratorFailure,
+		s.observeStreamGetRecords,
+	)
 	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
 	itemHandlers := itemhttp.New(itemhttp.Deps{
 		Cat:               s.cat,
@@ -259,10 +263,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		s.ensureStrongRead,
 		s.observeRangeMetric,
 	)
-	register("/v1/ListStreams", s.handleListStreams)
-	register("/v1/DescribeStream", s.handleDescribeStream)
-	register("/v1/GetShardIterator", s.handleGetShardIterator)
-	register("/v1/GetRecords", s.handleGetRecords)
+	register("/v1/ListStreams", streamHandlers.HandleListStreams)
+	register("/v1/DescribeStream", streamHandlers.HandleDescribeStream)
+	register("/v1/GetShardIterator", streamHandlers.HandleGetShardIterator)
+	register("/v1/GetRecords", streamHandlers.HandleGetRecords)
 	register("/v1/PutItem", itemHandlers.HandlePutItem)
 	register("/v1/GetItem", itemHandlers.HandleGetItem)
 	register("/v1/DeleteItem", itemHandlers.HandleDeleteItem)
@@ -288,283 +292,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
 	}
-	mux.HandleFunc("/v1/Stream", s.handleStream)
+	mux.HandleFunc("/v1/Stream", streamHandlers.HandleStream)
 	mux.HandleFunc("/v1/admin/snapshots", backupHandlers.HandleListSnapshots)
 	mux.HandleFunc("/v1/admin/compact", backupHandlers.HandleCompact)
-}
-
-// ---------- streams ----------
-
-type listStreamsRequest struct {
-	TableName               string `json:"tableName,omitempty"`
-	Limit                   int32  `json:"limit,omitempty"`
-	ExclusiveStartStreamArn string `json:"exclusiveStartStreamArn,omitempty"`
-}
-
-type streamSummaryResponse struct {
-	StreamArn   string `json:"streamArn"`
-	StreamLabel string `json:"streamLabel"`
-	TableName   string `json:"tableName"`
-}
-
-type listStreamsResponse struct {
-	Streams                []streamSummaryResponse `json:"streams"`
-	LastEvaluatedStreamArn string                  `json:"lastEvaluatedStreamArn,omitempty"`
-}
-
-type describeStreamRequest struct {
-	StreamArn             string `json:"streamArn"`
-	Limit                 int32  `json:"limit,omitempty"`
-	ExclusiveStartShardID string `json:"exclusiveStartShardId,omitempty"`
-}
-
-type streamDescriptionResponse struct {
-	StreamArn               string                        `json:"streamArn"`
-	StreamLabel             string                        `json:"streamLabel"`
-	StreamStatus            string                        `json:"streamStatus"`
-	StreamViewType          string                        `json:"streamViewType"`
-	TableName               string                        `json:"tableName"`
-	CreationRequestDateTime int64                         `json:"creationRequestDateTime"`
-	KeySchema               types.KeySchema               `json:"keySchema"`
-	Shards                  []types.StreamShardDescriptor `json:"shards"`
-	LastEvaluatedShardID    string                        `json:"lastEvaluatedShardId,omitempty"`
-}
-
-type describeStreamResponse struct {
-	StreamDescription streamDescriptionResponse `json:"streamDescription"`
-}
-
-type getShardIteratorRequest struct {
-	StreamArn         string `json:"streamArn"`
-	ShardID           string `json:"shardId"`
-	ShardIteratorType string `json:"shardIteratorType"`
-	SequenceNumber    string `json:"sequenceNumber,omitempty"`
-}
-
-type getShardIteratorResponse struct {
-	ShardIterator string `json:"shardIterator"`
-}
-
-type getRecordsRequest struct {
-	ShardIterator string `json:"shardIterator"`
-	Limit         int32  `json:"limit,omitempty"`
-}
-
-type getRecordsResponse struct {
-	Records           []streamRecordHTTP `json:"records"`
-	NextShardIterator string             `json:"nextShardIterator,omitempty"`
-}
-
-type streamRecordHTTP struct {
-	EventID        string               `json:"eventID"`
-	EventName      string               `json:"eventName"`
-	EventVersion   string               `json:"eventVersion"`
-	EventSource    string               `json:"eventSource"`
-	EventSourceARN string               `json:"eventSourceARN"`
-	AWSRegion      string               `json:"awsRegion"`
-	DynamoDB       streamRecordDataHTTP `json:"dynamodb"`
-}
-
-type streamRecordDataHTTP struct {
-	ApproximateCreationDateTime int64                        `json:"approximateCreationDateTime"`
-	Keys                        map[string]ddbjson.Attribute `json:"keys,omitempty"`
-	NewImage                    map[string]ddbjson.Attribute `json:"newImage,omitempty"`
-	OldImage                    map[string]ddbjson.Attribute `json:"oldImage,omitempty"`
-	SequenceNumber              string                       `json:"sequenceNumber"`
-	SizeBytes                   int64                        `json:"sizeBytes,omitempty"`
-	StreamViewType              string                       `json:"streamViewType"`
-}
-
-func (s *Server) handleListStreams(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-		return
-	}
-	var req listStreamsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	streams, err := s.cat.ListStreams(req.TableName)
-	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	page, lastEvaluated, err := paginateStreamDescriptors(streams, normalizeStreamAPILimit(req.Limit), req.ExclusiveStartStreamArn)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	resp := listStreamsResponse{LastEvaluatedStreamArn: lastEvaluated}
-	for _, stream := range page {
-		resp.Streams = append(resp.Streams, streamSummaryResponse{
-			StreamArn:   stream.StreamArn,
-			StreamLabel: stream.StreamLabel,
-			TableName:   stream.TableName,
-		})
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleDescribeStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-		return
-	}
-	var req describeStreamRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.StreamArn == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("streamArn required"))
-		return
-	}
-	desc, err := s.cat.DescribeStream(req.StreamArn)
-	if err != nil {
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	shards, lastEvaluated, err := paginateStreamShards(desc.Shards, normalizeStreamAPILimit(req.Limit), req.ExclusiveStartShardID)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, describeStreamResponse{
-		StreamDescription: streamDescriptionResponse{
-			StreamArn:               desc.StreamArn,
-			StreamLabel:             desc.StreamLabel,
-			StreamStatus:            desc.StreamStatus,
-			StreamViewType:          desc.StreamViewType,
-			TableName:               desc.TableName,
-			CreationRequestDateTime: desc.CreationRequestDateTime,
-			KeySchema:               desc.KeySchema,
-			Shards:                  shards,
-			LastEvaluatedShardID:    lastEvaluated,
-		},
-	})
-}
-
-func (s *Server) handleGetShardIterator(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-		return
-	}
-	var req getShardIteratorRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	shardID, err := model.NewStreamShardID(req.ShardID)
-	if err != nil {
-		err = fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
-		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.StreamArn), err)
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	token, err := createStreamShardIterator(s.cat, s.db, createIteratorRequest{
-		StreamArn:      req.StreamArn,
-		ShardID:        shardID,
-		IteratorType:   req.ShardIteratorType,
-		SequenceNumber: req.SequenceNumber,
-	}, time.Now())
-	if err != nil {
-		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.StreamArn), err)
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	writeJSON(w, http.StatusOK, getShardIteratorResponse{ShardIterator: token})
-}
-
-func (s *Server) handleGetRecords(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
-		return
-	}
-	var req getRecordsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	result, err := getStreamRecords(s.cat, s.db, req.ShardIterator, req.Limit, time.Now())
-	if err != nil {
-		s.observeStreamGetRecords(result, err)
-		writeErr(w, mapWriteErr(err), err)
-		return
-	}
-	s.observeStreamGetRecords(result, nil)
-	resp := getRecordsResponse{NextShardIterator: result.NextShardIterator}
-	for _, record := range result.Records {
-		resp.Records = append(resp.Records, streamRecordToHTTP(record))
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func streamRecordToHTTP(record streamRecordEntry) streamRecordHTTP {
-	return streamRecordHTTP{
-		EventID:        record.EventID,
-		EventName:      record.EventName,
-		EventVersion:   record.EventVersion,
-		EventSource:    record.EventSource,
-		EventSourceARN: record.EventSourceARN,
-		AWSRegion:      record.AWSRegion,
-		DynamoDB: streamRecordDataHTTP{
-			ApproximateCreationDateTime: record.DynamoDB.ApproximateCreationDateTime,
-			Keys:                        ddbjson.EncodeItem(record.DynamoDB.Keys),
-			NewImage:                    ddbjson.EncodeItem(record.DynamoDB.NewImage),
-			OldImage:                    ddbjson.EncodeItem(record.DynamoDB.OldImage),
-			SequenceNumber:              record.DynamoDB.SequenceNumber,
-			SizeBytes:                   record.DynamoDB.SizeBytes,
-			StreamViewType:              record.DynamoDB.StreamViewType,
-		},
-	}
-}
-
-// handleStream is the HTTP/SSE variant of the CDC stream. Clients
-// receive `data:` lines with one JSON ChangeEvent each.
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	if s.stream == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("change stream not configured"))
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeErr(w, http.StatusInternalServerError, fmt.Errorf("server does not support streaming"))
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	events, cancel := s.stream.SubscribeChanges(r.Context())
-	defer cancel()
-
-	enc := json.NewEncoder(w)
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case ev, ok := <-events:
-			if !ok {
-				return
-			}
-			fmt.Fprint(w, "data: ")
-			_ = enc.Encode(ev) // writes JSON + newline
-			flusher.Flush()
-		}
-	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

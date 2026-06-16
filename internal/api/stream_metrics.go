@@ -3,37 +3,13 @@ package api
 import (
 	"errors"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func streamTableForARN(cat *catalog.Catalog, streamArn string) string {
-	if cat == nil || streamArn == "" {
-		return ""
-	}
-	desc, err := cat.DescribeStream(streamArn)
-	if err != nil {
-		return ""
-	}
-	return desc.TableName
-}
-
-func streamErrorReason(err error) string {
-	switch {
-	case errors.Is(err, types.ErrStreamTrimmed):
-		return "trimmed"
-	case errors.Is(err, types.ErrStreamIteratorExpired):
-		return "expired"
-	case errors.Is(err, types.ErrStreamIteratorInvalid):
-		return "invalid"
-	case errors.Is(err, types.ErrStreamNotFound):
-		return "stream_not_found"
-	case errors.Is(err, types.ErrStreamShardNotFound):
-		return "shard_not_found"
-	default:
-		return "err"
-	}
-}
+// observeStreamIteratorFailure and observeStreamGetRecords are the
+// two metric observers shared by the HTTP and gRPC stream handlers.
+// streamErrorReason and StreamTableForARN are package-level aliases
+// onto streamcore (see streams.go).
 
 func (s *GRPCServer) observeStreamIteratorFailure(table string, err error) {
 	if s == nil || s.metrics == nil {
@@ -49,7 +25,7 @@ func (s *GRPCServer) observeStreamIteratorFailure(table string, err error) {
 	}
 }
 
-func (s *GRPCServer) observeStreamGetRecords(result streamRecordsResult, err error) {
+func (s *GRPCServer) observeStreamGetRecords(result StreamRecordsResult, err error) {
 	if s == nil || s.metrics == nil {
 		return
 	}
@@ -82,7 +58,7 @@ func (s *Server) observeStreamIteratorFailure(table string, err error) {
 	}
 }
 
-func (s *Server) observeStreamGetRecords(result streamRecordsResult, err error) {
+func (s *Server) observeStreamGetRecords(result StreamRecordsResult, err error) {
 	if s == nil || s.metrics == nil {
 		return
 	}
