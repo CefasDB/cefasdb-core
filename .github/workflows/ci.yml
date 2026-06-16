@@ -115,3 +115,30 @@ jobs:
         continue-on-error: true
         with:
           args: -severity=medium -confidence=medium ./...
+
+  mutation:
+    name: gremlins unleash (warn-only — phase 8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # gremlins needs the previous commit to detect changed files
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+      - name: gremlins unleash
+        continue-on-error: true
+        run: |
+          gremlins unleash ./pkg/core/... \
+            --workers 2 \
+            --output mutation-report.json
+      - name: upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation-report.json
+          if-no-files-found: ignore
