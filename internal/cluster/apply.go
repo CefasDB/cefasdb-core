@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 func (m *Manager) ApplyPlacement(ctx context.Context, req PlacementApplyRequest) (PlacementApplyResult, error) {
@@ -174,7 +176,11 @@ func validateDecommissionApplyRequest(current PlacementCatalog, plan PlacementPl
 	if target == "" {
 		return invalidPlan("decommission apply found no node state transition")
 	}
-	if blockers := placementNodeActiveReferences(current, target); len(blockers) > 0 {
+	targetNodeID, err := model.NewNodeID(target)
+	if err != nil {
+		return invalidPlan("decommission apply target node %q is invalid: %v", target, err)
+	}
+	if blockers := placementNodeActiveReferences(current, targetNodeID); len(blockers) > 0 {
 		return invalidPlan("node %q still has active placement references: %s", target, strings.Join(blockers, "; "))
 	}
 	for i, before := range current.Shards {

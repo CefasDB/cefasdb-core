@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 type PlacementOperation string
@@ -137,19 +139,20 @@ func validateNodeSet(cat PlacementCatalog, ids []string, min int) error {
 	return nil
 }
 
-func placementNodeActiveReferences(cat PlacementCatalog, nodeID string) []string {
+func placementNodeActiveReferences(cat PlacementCatalog, nodeID model.NodeID) []string {
+	key := nodeID.String()
 	var blockers []string
 	for _, shard := range cat.Shards {
 		if shard.State == ShardStateDecommissioned {
 			continue
 		}
-		if containsString(shard.Voters, nodeID) {
+		if containsString(shard.Voters, key) {
 			blockers = append(blockers, fmt.Sprintf("shard %d voter state=%s ranges=%d", shard.ID, shard.State, len(shard.Ranges)))
 		}
-		if containsString(shard.NonVoters, nodeID) {
+		if containsString(shard.NonVoters, key) {
 			blockers = append(blockers, fmt.Sprintf("shard %d non-voter state=%s", shard.ID, shard.State))
 		}
-		if shard.LeaderHint == nodeID {
+		if shard.LeaderHint == key {
 			blockers = append(blockers, fmt.Sprintf("shard %d leader hint state=%s", shard.ID, shard.State))
 		}
 	}
@@ -167,5 +170,3 @@ func minVoters(v int) int {
 func invalidPlan(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidPlacementPlan, fmt.Sprintf(format, args...))
 }
-
-

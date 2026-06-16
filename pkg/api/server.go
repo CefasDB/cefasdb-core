@@ -1383,11 +1383,11 @@ func sortedPlacementNodes(placement cluster.PlacementCatalog) []cluster.NodeDesc
 }
 
 type addVoterRequest struct {
-	ID        string  `json:"id"`
-	Addr      string  `json:"addr"`
-	TimeoutMS int     `json:"timeoutMs,omitempty"`
-	ShardID   *uint32 `json:"shardId,omitempty"`
-	AllShards bool    `json:"allShards,omitempty"`
+	ID        model.NodeID `json:"id"`
+	Addr      string       `json:"addr"`
+	TimeoutMS int          `json:"timeoutMs,omitempty"`
+	ShardID   *uint32      `json:"shardId,omitempty"`
+	AllShards bool         `json:"allShards,omitempty"`
 }
 
 func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
@@ -1407,8 +1407,9 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
+	id := req.ID.String()
 	if s.manager != nil && req.AllShards {
-		if err := s.manager.AddVoterAllShards(req.ID, req.Addr, timeout); err != nil {
+		if err := s.manager.AddVoterAllShards(id, req.Addr, timeout); err != nil {
 			writeWriteErr(w, r, err)
 			return
 		}
@@ -1416,7 +1417,7 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.manager != nil && req.ShardID != nil {
-		if err := s.manager.AddShardVoter(*req.ShardID, req.ID, req.Addr, timeout); err != nil {
+		if err := s.manager.AddShardVoter(*req.ShardID, id, req.Addr, timeout); err != nil {
 			writeWriteErr(w, r, err)
 			return
 		}
@@ -1427,7 +1428,7 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
 		return
 	}
-	if err := s.cluster.AddVoter(req.ID, req.Addr, timeout); err != nil {
+	if err := s.cluster.AddVoter(id, req.Addr, timeout); err != nil {
 		writeWriteErr(w, r, err)
 		return
 	}
@@ -1435,10 +1436,10 @@ func (s *Server) handleClusterAddVoter(w http.ResponseWriter, r *http.Request) {
 }
 
 type removeServerRequest struct {
-	ID        string  `json:"id"`
-	TimeoutMS int     `json:"timeoutMs,omitempty"`
-	ShardID   *uint32 `json:"shardId,omitempty"`
-	AllShards bool    `json:"allShards,omitempty"`
+	ID        model.NodeID `json:"id"`
+	TimeoutMS int          `json:"timeoutMs,omitempty"`
+	ShardID   *uint32      `json:"shardId,omitempty"`
+	AllShards bool         `json:"allShards,omitempty"`
 }
 
 func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Request) {
@@ -1458,8 +1459,9 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
+	id := req.ID.String()
 	if s.manager != nil && req.AllShards {
-		if err := s.manager.RemoveServerAllShards(req.ID, timeout); err != nil {
+		if err := s.manager.RemoveServerAllShards(id, timeout); err != nil {
 			writeWriteErr(w, r, err)
 			return
 		}
@@ -1467,7 +1469,7 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if s.manager != nil && req.ShardID != nil {
-		if err := s.manager.RemoveShardServer(*req.ShardID, req.ID, timeout); err != nil {
+		if err := s.manager.RemoveShardServer(*req.ShardID, id, timeout); err != nil {
 			writeWriteErr(w, r, err)
 			return
 		}
@@ -1478,7 +1480,7 @@ func (s *Server) handleClusterRemoveServer(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("cluster not configured"))
 		return
 	}
-	if err := s.cluster.RemoveServer(req.ID, timeout); err != nil {
+	if err := s.cluster.RemoveServer(id, timeout); err != nil {
 		writeWriteErr(w, r, err)
 		return
 	}
