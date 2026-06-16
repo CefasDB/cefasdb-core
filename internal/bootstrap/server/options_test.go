@@ -5,7 +5,7 @@ import (
 	"time"
 
 	bootstrapserver "github.com/osvaldoandrade/cefas/internal/bootstrap/server"
-	"github.com/osvaldoandrade/cefas/internal/rebalancer"
+	"github.com/osvaldoandrade/cefas/internal/rebalance"
 	"github.com/osvaldoandrade/cefas/pkg/config"
 )
 
@@ -199,7 +199,7 @@ func TestRebalancerConfig(t *testing.T) {
 	cfg := fixtureConfig()
 	got := bootstrapserver.RebalancerConfig(cfg)
 
-	if got.Mode != rebalancer.ModeAuto {
+	if got.Mode != rebalance.ModeAuto {
 		t.Errorf("Mode = %q, want auto", got.Mode)
 	}
 	if got.Interval != 45*time.Second {

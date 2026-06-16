@@ -1,4 +1,4 @@
-package rebalancer
+package rebalance
 
 import (
 	"context"
