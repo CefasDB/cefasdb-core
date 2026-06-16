@@ -2,3 +2,4 @@ cefas-data/
 /tmp/
 *.test
 *.out
+.claude/
