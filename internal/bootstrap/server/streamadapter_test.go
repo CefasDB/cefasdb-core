@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	craft "github.com/osvaldoandrade/cefas/internal/replication"
 )
 
 // fakeRaft implements raftSource without spinning up Pebble or hraft.
