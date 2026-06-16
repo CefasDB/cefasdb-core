@@ -14,6 +14,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -151,7 +152,7 @@ func TestGetShardIteratorStartPositions(t *testing.T) {
 				t.Fatalf("get iterator: %v", err)
 			}
 			payload := iteratorPayloadFromResponse(t, resp)
-			if payload.StreamArn != arn || payload.ShardID != types.StreamShardIDSingle || payload.IteratorType != tc.iteratorType {
+			if payload.StreamArn != arn || payload.ShardID.String() != types.StreamShardIDSingle || payload.IteratorType != tc.iteratorType {
 				t.Fatalf("payload identity = %+v", payload)
 			}
 			if payload.NextSequenceNumber != tc.wantNext {
@@ -193,13 +194,28 @@ func TestGetShardIteratorValidationErrors(t *testing.T) {
 			code: codes.NotFound,
 		},
 		{
-			name: "unknown shard",
+			// Format is valid (shardId-NNNNNNNNNNNN) but no shard
+			// with this id exists in the stream — the server
+			// reaches the lookup and reports NotFound.
+			name: "unknown shard (valid format)",
+			req: &cefaspb.GetShardIteratorRequest{
+				StreamArn:         arn,
+				ShardId:           "shardId-000000000099",
+				ShardIteratorType: streamIteratorTypeTrimHorizon,
+			},
+			code: codes.NotFound,
+		},
+		{
+			// Malformed shard id is rejected by model.NewStreamShardID
+			// before the catalog lookup, so the server reports
+			// InvalidArgument instead of NotFound.
+			name: "malformed shard id",
 			req: &cefaspb.GetShardIteratorRequest{
 				StreamArn:         arn,
 				ShardId:           "missing-shard",
 				ShardIteratorType: streamIteratorTypeTrimHorizon,
 			},
-			code: codes.NotFound,
+			code: codes.InvalidArgument,
 		},
 		{
 			name: "trimmed sequence",
@@ -236,7 +252,7 @@ func TestStreamShardIteratorTokenRejectsExpiredAndMalformedTokens(t *testing.T) 
 	token, err := encodeStreamShardIterator(streamShardIteratorPayload{
 		Version:            1,
 		StreamArn:          "arn:cefas:dynamodb:local:000000000000:table/Events/stream/label",
-		ShardID:            types.StreamShardIDSingle,
+		ShardID:            model.StreamShardIDSingle,
 		NextSequenceNumber: "1",
 		IteratorType:       streamIteratorTypeTrimHorizon,
 		ExpiresUnixNano:    now.Add(-time.Nanosecond).UnixNano(),
@@ -458,7 +474,7 @@ func TestGetRecordsRejectsExpiredMalformedAndTrimmedIterators(t *testing.T) {
 	expired, err := encodeStreamShardIterator(streamShardIteratorPayload{
 		Version:            1,
 		StreamArn:          arn,
-		ShardID:            types.StreamShardIDSingle,
+		ShardID:            model.StreamShardIDSingle,
 		NextSequenceNumber: "1",
 		IteratorType:       streamIteratorTypeTrimHorizon,
 		ExpiresUnixNano:    now.Add(-time.Nanosecond).UnixNano(),
@@ -477,7 +493,7 @@ func TestGetRecordsRejectsExpiredMalformedAndTrimmedIterators(t *testing.T) {
 	trimmed, err := encodeStreamShardIterator(streamShardIteratorPayload{
 		Version:            1,
 		StreamArn:          arn,
-		ShardID:            types.StreamShardIDSingle,
+		ShardID:            model.StreamShardIDSingle,
 		NextSequenceNumber: "0",
 		IteratorType:       streamIteratorTypeTrimHorizon,
 		ExpiresUnixNano:    now.Add(time.Minute).UnixNano(),
