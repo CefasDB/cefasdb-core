@@ -1,7 +1,3 @@
-// Package condition defines the ConditionEvaluator surface used by
-// every write path that accepts a ConditionExpression (PutItem,
-// DeleteItem, UpdateItem, TransactWriteItems). Plugins and the engine
-// share one evaluator implementation; this interface is the seam.
 package condition
 
 import "github.com/osvaldoandrade/cefas/pkg/core/model"

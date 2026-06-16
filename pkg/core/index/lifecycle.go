@@ -1,6 +1,3 @@
-// Package index defines the secondary-index lifecycle every
-// plugin-backed index honours (and which the existing built-in
-// indexes — GSI, LSI, spatial — already satisfy structurally).
 package index
 
 import "github.com/osvaldoandrade/cefas/pkg/core/model"
