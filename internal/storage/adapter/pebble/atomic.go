@@ -38,53 +38,23 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-// AtomicActionKind selects which mutator the action applies.
-type AtomicActionKind uint8
-
-const (
-	// AtomicActionSet overwrites Attribute with Value verbatim.
-	AtomicActionSet AtomicActionKind = iota + 1
-	// AtomicActionIncrReturn adds Value (numeric) to Attribute and
-	// returns the new value. Equivalent to Redis INCRBY.
-	AtomicActionIncrReturn
-	// AtomicActionAddReturn is an alias for AtomicActionIncrReturn —
-	// shipped because the issue uses both names and callers that
-	// already think in DynamoDB ADD-action terms can keep that
-	// vocabulary.
-	AtomicActionAddReturn
-	// AtomicActionApply evaluates Expression server-side and assigns
-	// the result to Attribute. Whitelisted grammar only.
-	AtomicActionApply
+// AtomicActionKind / AtomicAction / AtomicOptions / AtomicResult and
+// the AtomicAction kind constants are aliased here so existing
+// `pebble.X` references keep compiling. Canonical declarations live
+// in internal/storage.
+type (
+	AtomicActionKind = storage.AtomicActionKind
+	AtomicAction     = storage.AtomicAction
+	AtomicOptions    = storage.AtomicOptions
+	AtomicResult     = storage.AtomicResult
 )
 
-// AtomicAction describes one mutation inside an AtomicUpdate.
-type AtomicAction struct {
-	Kind       AtomicActionKind
-	Attribute  string
-	Value      types.AttributeValue // SET / INCR_RETURN / ADD_RETURN
-	Expression string               // APPLY only
-}
-
-// AtomicOptions bundles the precondition + actions for one AtomicUpdate.
-type AtomicOptions struct {
-	// storage.Condition is the optional ConditionExpression — same grammar
-	// as PutItem / DeleteItem.
-	Condition string
-	Binds     map[string]types.AttributeValue
-	// Actions are applied in declaration order against the snapshot
-	// of the item taken before the batch is built.
-	Actions []AtomicAction
-}
-
-// AtomicResult carries the post-image of the item and a per-action
-// returned value (currently populated for INCR_RETURN / ADD_RETURN /
-// APPLY — the new value of the affected attribute).
-type AtomicResult struct {
-	Item     types.Item
-	OldItem  types.Item
-	Returned []types.AttributeValue
-	Created  bool // true when the item did not exist prior
-}
+const (
+	AtomicActionSet        = storage.AtomicActionSet
+	AtomicActionIncrReturn = storage.AtomicActionIncrReturn
+	AtomicActionAddReturn  = storage.AtomicActionAddReturn
+	AtomicActionApply      = storage.AtomicActionApply
+)
 
 // ErrAtomicUnsupported is returned for action kinds / expression
 // forms the engine does not allow. The whitelist is intentionally
