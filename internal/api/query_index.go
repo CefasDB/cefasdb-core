@@ -7,20 +7,6 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-func (s *Server) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
-	if hasGSI(td, indexName) {
-		return queryGSIAcrossShards(s.allShards(), td, indexName, pkVal, opts)
-	}
-	if hasLSI(td, indexName) {
-		pkBytes, err := storage.AttrCanonicalBytes(pkVal)
-		if err != nil {
-			return nil, fmt.Errorf("primary PK: %w", err)
-		}
-		return s.storageFor(pkBytes).QueryByLSI(td, indexName, pkVal, opts)
-	}
-	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
-}
-
 func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts storage.QueryOptions) ([]types.Item, error) {
 	if hasGSI(td, indexName) {
 		return queryGSIAcrossShards(s.allShards(), td, indexName, pkVal, opts)

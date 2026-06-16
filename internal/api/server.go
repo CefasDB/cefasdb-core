@@ -23,17 +23,16 @@ import (
 
 	backuphttp "github.com/osvaldoandrade/cefas/internal/api/http/backup"
 	itemhttp "github.com/osvaldoandrade/cefas/internal/api/http/item"
+	queryhttp "github.com/osvaldoandrade/cefas/internal/api/http/query"
 	tablehttp "github.com/osvaldoandrade/cefas/internal/api/http/table"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
-	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -251,6 +250,15 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		ObserveWrite:      s.observeItemWrite,
 		ObserveRead:       s.observeItemRead,
 	})
+	queryHandlers := queryhttp.New(
+		s.cat,
+		s.db,
+		s.storageFor,
+		s.allShards,
+		s.spatialAllShards,
+		s.ensureStrongRead,
+		s.observeRangeMetric,
+	)
 	register("/v1/ListStreams", s.handleListStreams)
 	register("/v1/DescribeStream", s.handleDescribeStream)
 	register("/v1/GetShardIterator", s.handleGetShardIterator)
@@ -258,12 +266,12 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/PutItem", itemHandlers.HandlePutItem)
 	register("/v1/GetItem", itemHandlers.HandleGetItem)
 	register("/v1/DeleteItem", itemHandlers.HandleDeleteItem)
-	register("/v1/Query", s.handleQuery)
+	register("/v1/Query", queryHandlers.HandleQuery)
 	register("/v1/BatchWriteItem", itemHandlers.HandleBatchWriteItem)
 	register("/v1/BatchGetItem", itemHandlers.HandleBatchGetItem)
-	register("/v1/SpatialQuery", s.handleSpatialQuery)
-	register("/v1/Sql", s.handleSql)
-	register("/v1/PartiQL", s.handlePartiQL)
+	register("/v1/SpatialQuery", queryHandlers.HandleSpatialQuery)
+	register("/v1/Sql", queryHandlers.HandleSql)
+	register("/v1/PartiQL", queryHandlers.HandlePartiQL)
 	register("/v1/RestoreTableFromBackup", backupHandlers.HandleRestoreTableFromBackup)
 	register("/v1/DeleteBackup", backupHandlers.HandleDeleteBackup)
 	register("/v1/ApplyBackupRetention", backupHandlers.HandleApplyBackupRetention)
@@ -565,322 +573,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// ---------- table management ----------
-
-// ---------- item ops ----------
-//
-// PutItem, GetItem, DeleteItem, BatchWriteItem and BatchGetItem live
-// in internal/api/http/item. The query handler stays here for the
-// moment; phase 3c extracts it next.
-
-type queryRequest struct {
-	Table       string             `json:"table"`
-	IndexName   string             `json:"indexName,omitempty"`
-	PKValue     ddbjson.Attribute  `json:"pkValue"`
-	SKLow       *ddbjson.Attribute `json:"skLow,omitempty"`
-	SKHigh      *ddbjson.Attribute `json:"skHigh,omitempty"`
-	Limit       int                `json:"limit,omitempty"`
-	Consistency string             `json:"consistency,omitempty"`
-}
-
-func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	started := time.Now()
-	var req queryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeQuery, req.Table),
-		auth.WildcardScope(auth.ScopeQuery)) {
-		return
-	}
-	if req.Consistency == "strong" && !s.ensureStrongRead(w, r) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	pkVal, err := req.PKValue.ToAttr()
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
-		return
-	}
-	var lo, hi types.AttributeValue
-	if req.SKLow != nil {
-		lo, err = req.SKLow.ToAttr()
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("skLow: %w", err))
-			return
-		}
-	}
-	if req.SKHigh != nil {
-		hi, err = req.SKHigh.ToAttr()
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("skHigh: %w", err))
-			return
-		}
-	}
-
-	pkBytes, err := storage.AttrCanonicalBytes(pkVal)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
-		return
-	}
-	queryDB := s.storageFor(pkBytes)
-	var items []types.Item
-	if req.IndexName != "" {
-		items, err = s.queryByIndex(td, req.IndexName, pkVal, storage.QueryOptions{
-			SKLow:  lo,
-			SKHigh: hi,
-			Limit:  req.Limit,
-		})
-	} else if req.SKLow == nil && req.SKHigh == nil {
-		items, err = queryDB.QueryByPK(req.Table, td.KeySchema, pkVal, req.Limit)
-	} else {
-		items, err = queryDB.QueryByPKRange(req.Table, td.KeySchema, pkVal, lo, hi, req.Limit)
-	}
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemsBytes(items), started)
-
-	out := make([]map[string]ddbjson.Attribute, 0, len(items))
-	for _, it := range items {
-		out = append(out, ddbjson.EncodeItem(it))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
-}
-
-type sqlRequest struct {
-	Query string `json:"query"`
-}
-
-func (s *Server) handleSql(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req sqlRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	// Parse first so we can enforce the right scope per statement
-	// type before the executor touches storage.
-	stmt, err := cefassql.Parse(req.Query)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !sqlEnforceScope(w, r, stmt) {
-		return
-	}
-	plan, err := cefassql.PlanStmt(stmt, s.cat)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
-	res, err := ex.Execute(plan)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	out := struct {
-		AffectedRows int                            `json:"affectedRows"`
-		Rows         []map[string]ddbjson.Attribute `json:"rows,omitempty"`
-	}{AffectedRows: res.AffectedRows}
-	for _, row := range res.Rows {
-		out.Rows = append(out.Rows, ddbjson.EncodeItem(row))
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// sqlEnforceScope routes per-statement scope checks. SELECT requires
-// the read or query scope on the affected table; DML requires write.
-// CREATE/DROP follow the table-level scopes. Returns false when the
-// response is already written.
-func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt) bool {
-	switch s := stmt.(type) {
-	case *cefassql.SelectStmt:
-		return auth.RequireAnyScope(w, r,
-			auth.TableScope(auth.ScopeQuery, s.Table),
-			auth.WildcardScope(auth.ScopeQuery),
-			auth.TableScope(auth.ScopeItemRead, s.Table),
-			auth.WildcardScope(auth.ScopeItemRead),
-		)
-	case *cefassql.InsertStmt:
-		return auth.RequireAnyScope(w, r,
-			auth.TableScope(auth.ScopeItemWrite, s.Table),
-			auth.WildcardScope(auth.ScopeItemWrite),
-		)
-	case *cefassql.UpdateStmt:
-		return auth.RequireAnyScope(w, r,
-			auth.TableScope(auth.ScopeItemWrite, s.Table),
-			auth.WildcardScope(auth.ScopeItemWrite),
-		)
-	case *cefassql.DeleteStmt:
-		return auth.RequireAnyScope(w, r,
-			auth.TableScope(auth.ScopeItemDelete, s.Table),
-			auth.WildcardScope(auth.ScopeItemDelete),
-		)
-	case *cefassql.CreateTableStmt:
-		return auth.RequireAnyScope(w, r, auth.ScopeTableCreate)
-	case *cefassql.DropTableStmt:
-		return auth.RequireAnyScope(w, r, auth.ScopeTableDrop)
-	}
-	return true
-}
-
-// partiqlRequest mirrors the AWS DynamoDB ExecuteStatement shape:
-// `Statement` is the SQL text, `Parameters` substitute `?` markers in
-// order. The handler binds the parameters into the SQL text and then
-// runs the regular cefas SQL pipeline so the result shape matches
-// /v1/Sql.
-type partiqlRequest struct {
-	Statement  string                      `json:"Statement"`
-	Parameters []cefassql.PartiQLParameter `json:"Parameters,omitempty"`
-}
-
-func (s *Server) handlePartiQL(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req partiqlRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	bound, err := cefassql.BindPartiQL(req.Statement, req.Parameters)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	stmt, err := cefassql.Parse(bound)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !sqlEnforceScope(w, r, stmt) {
-		return
-	}
-	plan, err := cefassql.PlanStmt(stmt, s.cat)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	ex := &cefassql.Executor{Storage: s.db, Catalog: s.cat}
-	res, err := ex.Execute(plan)
-	if err != nil {
-		writeWriteErr(w, r, err)
-		return
-	}
-	out := struct {
-		AffectedRows int                            `json:"affectedRows"`
-		Rows         []map[string]ddbjson.Attribute `json:"rows,omitempty"`
-	}{AffectedRows: res.AffectedRows}
-	for _, row := range res.Rows {
-		out.Rows = append(out.Rows, ddbjson.EncodeItem(row))
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-type spatialQueryRequest struct {
-	Table     string      `json:"table"`
-	IndexName string      `json:"indexName"`
-	BBox      *bboxJSON   `json:"bbox,omitempty"`
-	Radius    *radiusJSON `json:"radius,omitempty"`
-	Z         *zboxJSON   `json:"z,omitempty"`
-	Limit     int         `json:"limit,omitempty"`
-}
-
-type bboxJSON struct {
-	MinLat float64 `json:"minLat"`
-	MinLon float64 `json:"minLon"`
-	MaxLat float64 `json:"maxLat"`
-	MaxLon float64 `json:"maxLon"`
-}
-
-type radiusJSON struct {
-	Lat    float64 `json:"lat"`
-	Lon    float64 `json:"lon"`
-	Meters float64 `json:"meters"`
-}
-
-type zboxJSON struct {
-	Lo []uint32 `json:"lo"`
-	Hi []uint32 `json:"hi"`
-}
-
-func (s *Server) handleSpatialQuery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req spatialQueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if !auth.RequireAnyScope(w, r,
-		auth.TableScope(auth.ScopeSpatial, req.Table),
-		auth.WildcardScope(auth.ScopeSpatial)) {
-		return
-	}
-	td, err := s.cat.Describe(req.Table)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	q := storage.SpatialQuery{Limit: req.Limit}
-	switch {
-	case req.BBox != nil:
-		b := spatial.BBox{
-			MinLat: req.BBox.MinLat,
-			MinLon: req.BBox.MinLon,
-			MaxLat: req.BBox.MaxLat,
-			MaxLon: req.BBox.MaxLon,
-		}
-		q.BBox = &b
-	case req.Radius != nil:
-		q.Radius = &storage.RadiusQuery{
-			Lat:    req.Radius.Lat,
-			Lon:    req.Radius.Lon,
-			Meters: req.Radius.Meters,
-		}
-	case req.Z != nil:
-		q.Z = &spatial.ZBBox{Lo: req.Z.Lo, Hi: req.Z.Hi}
-	default:
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("one of bbox/radius/z required"))
-		return
-	}
-	items, err := s.spatialAllShards(td, req.IndexName, q)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, types.ErrSpatialNotFound) {
-			status = http.StatusNotFound
-		} else if errors.Is(err, types.ErrInvalidSpatial) {
-			status = http.StatusBadRequest
-		}
-		writeErr(w, status, err)
-		return
-	}
-	out := make([]map[string]ddbjson.Attribute, 0, len(items))
-	for _, it := range items {
-		out = append(out, ddbjson.EncodeItem(it))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
 // ---------- cluster endpoints ----------
