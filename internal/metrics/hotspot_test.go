@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 func TestRangeHotspotBucketForTokenIsBoundedAndDeterministic(t *testing.T) {
@@ -41,8 +43,8 @@ func TestRangeHotspotSummaryMarksHotAndCooling(t *testing.T) {
 		LatencyThresholdSeconds: 1,
 	})
 
-	tracker.RecordOperation("0", 1<<63, "write", 1, time.Millisecond)
-	tracker.RecordOperation("0", 1<<63, "write", 1, time.Millisecond)
+	tracker.RecordOperation(model.MustShardID(0), 1<<63, "write", 1, time.Millisecond)
+	tracker.RecordOperation(model.MustShardID(0), 1<<63, "write", 1, time.Millisecond)
 	snap := tracker.Snapshot(1)
 	if len(snap) != 1 {
 		t.Fatalf("snapshot len = %d, want 1", len(snap))
@@ -75,7 +77,7 @@ func TestMetricsExposeRangeSeries(t *testing.T) {
 		BytesThreshold:          1 << 20,
 		LatencyThresholdSeconds: 1,
 	})
-	m.ObserveRangeOperation("2", 1<<63, "write", 42, 2*time.Millisecond)
+	m.ObserveRangeOperation(model.MustShardID(2), 1<<63, "write", 42, 2*time.Millisecond)
 	m.ObserveRangePressure("2", 512, 1)
 
 	body := scrapeMetrics(t, m)

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 const (
@@ -166,19 +168,21 @@ func (t *RangeHotspotTracker) BucketForToken(token uint64) int {
 	return int(hi)
 }
 
-func (t *RangeHotspotTracker) RecordOperation(shardID string, token uint64, op string, bytes uint64, latency time.Duration) {
+// RecordOperation captures a single read/write event against a
+// token bucket. shardID is a model.ShardID (phase 5b); the
+// tracker stores the bucket map keyed by shardID.String() so the
+// upstream label form is preserved verbatim.
+func (t *RangeHotspotTracker) RecordOperation(shardID model.ShardID, token uint64, op string, bytes uint64, latency time.Duration) {
 	if t == nil {
 		return
 	}
-	if shardID == "" {
-		shardID = "0"
-	}
+	label := shardID.String()
 	bucket := t.BucketForToken(token)
 	now := time.Now()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	stats := t.bucketLocked(shardID, bucket, now)
+	stats := t.bucketLocked(label, bucket, now)
 	stats.rollWindow(t.cfg, now)
 	switch op {
 	case "write":
