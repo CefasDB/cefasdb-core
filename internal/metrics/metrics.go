@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
 // Metrics groups every cefas metric instance so the storage / API
@@ -445,7 +446,12 @@ func (m *Metrics) ObserveScheduledBackup(backupName, outcome, reason string, dur
 // ObserveRangeOperation records bounded per-token-bucket read/write
 // signals. `op` is intentionally limited by callers to read/write to
 // keep Prometheus label cardinality stable.
-func (m *Metrics) ObserveRangeOperation(shardID string, token uint64, op string, bytes uint64, latency time.Duration) {
+//
+// shardID is a model.ShardID value object (phase 5b); the underlying
+// label form is shardID.String(), so "0" / "1" / "unrouted" emit
+// byte-for-byte the same series the legacy string parameter
+// produced.
+func (m *Metrics) ObserveRangeOperation(shardID model.ShardID, token uint64, op string, bytes uint64, latency time.Duration) {
 	if m == nil || m.RangeHotspotRegistry == nil {
 		return
 	}
@@ -454,12 +460,13 @@ func (m *Metrics) ObserveRangeOperation(shardID string, token uint64, op string,
 	}
 	bucket := m.RangeHotspotRegistry.BucketForToken(token)
 	bucketLabel := bucketLabel(bucket)
-	m.RangeOpsTotal.WithLabelValues(shardID, bucketLabel, op).Inc()
+	label := shardID.String()
+	m.RangeOpsTotal.WithLabelValues(label, bucketLabel, op).Inc()
 	if bytes > 0 {
-		m.RangeBytesTotal.WithLabelValues(shardID, bucketLabel, op).Add(float64(bytes))
+		m.RangeBytesTotal.WithLabelValues(label, bucketLabel, op).Add(float64(bytes))
 	}
 	if latency > 0 {
-		m.RangeLatencySeconds.WithLabelValues(shardID, bucketLabel, op).Observe(latency.Seconds())
+		m.RangeLatencySeconds.WithLabelValues(label, bucketLabel, op).Observe(latency.Seconds())
 	}
 	m.RangeHotspotRegistry.RecordOperation(shardID, token, op, bytes, latency)
 }

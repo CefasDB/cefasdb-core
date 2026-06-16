@@ -1,12 +1,12 @@
 package api
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -31,17 +31,26 @@ func (s *GRPCServer) observeRangeMetric(op string, pkBytes []byte, approxBytes u
 	s.metrics.ObserveRangeOperation(shardID, token, op, approxBytes, time.Since(started))
 }
 
-func rangeMetricRoute(mgr *cluster.Manager, pkBytes []byte) (string, uint64) {
+// rangeMetricRoute returns the routing decision for a metric
+// observation. nil manager is the single-node default, where every
+// operation maps to shard 0; UnroutedShardID fires only when the
+// router rejects the token (genuine routing miss) so the dashboard
+// distinguishes "no cluster" from "cluster with a routing gap".
+func rangeMetricRoute(mgr *cluster.Manager, pkBytes []byte) (model.ShardID, uint64) {
 	if mgr == nil {
-		return "0", xxhash.Sum64(pkBytes)
+		return model.MustShardID(0), xxhash.Sum64(pkBytes)
 	}
 	router := mgr.Router()
 	token := router.TokenForPK(pkBytes)
 	id, err := router.ShardForUint64(token)
 	if err != nil {
-		return "unrouted", token
+		return model.UnroutedShardID, token
 	}
-	return strconv.FormatUint(uint64(id), 10), token
+	shardID, err := model.NewShardID(id)
+	if err != nil {
+		return model.UnroutedShardID, token
+	}
+	return shardID, token
 }
 
 func estimatedItemBytes(item types.Item) uint64 {
