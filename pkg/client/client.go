@@ -1,22 +1,3 @@
-// Package client is the typed Go SDK for cefas. It wraps the
-// generated gRPC stubs with helpers that consume the public
-// pkg/types.Item / AttributeValue model so application code never
-// touches generated protobuf structs directly.
-//
-// Usage:
-//
-//	c, err := client.Dial(ctx, "localhost:9090", client.WithBearer("..."))
-//	defer c.Close()
-//
-//	err = c.PutItem(ctx, "events", types.Item{
-//	    "user_id": types.AttributeValue{T: types.AttrS, S: "alice"},
-//	    "ts":      types.AttributeValue{T: types.AttrN, N: "100"},
-//	})
-//
-//	items, err := c.Query(ctx, "events").
-//	    PK(types.AttributeValue{T: types.AttrS, S: "alice"}).
-//	    Limit(50).
-//	    Run(ctx)
 package client
 
 import (
@@ -128,4 +109,3 @@ func (c *Client) withAuth(ctx context.Context) context.Context {
 	}
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.bearer)
 }
-

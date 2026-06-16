@@ -1,11 +1,3 @@
-// Backup, restore, and compaction client surface.
-//
-// This file groups the SDK-side helpers that manage durable
-// snapshots of the live keyspace (CreateBackup / ListBackups /
-// DeleteBackup / ApplyBackupRetention), restore individual tables
-// from a snapshot (RestoreTableFromBackup), and trigger manual LSM
-// compaction (CompactTable). The wire types are wrapped in
-// Go-friendly structs so callers never touch generated protobufs.
 package client
 
 import (
@@ -33,18 +25,25 @@ type BackupDescriptor struct {
 	ChangeUnixNano  int64
 }
 
+// BackupTableStats reports per-table row count and checksum captured
+// inside a backup manifest.
 type BackupTableStats struct {
 	Table    string
 	Rows     int64
 	Checksum string
 }
 
+// BackupShardCoverage reports the per-shard table statistics observed
+// at the placement epoch the backup was taken under.
 type BackupShardCoverage struct {
 	ShardID        string
 	PlacementEpoch uint64
 	TableStats     []BackupTableStats
 }
 
+// BackupDeletionResult describes the outcome of a DeleteBackup call,
+// including whether the metadata and the checkpoint directory were
+// removed cleanly.
 type BackupDeletionResult struct {
 	BackupName        string
 	CheckpointPath    string
@@ -55,6 +54,9 @@ type BackupDeletionResult struct {
 	CleanupError      string
 }
 
+// BackupRetentionOptions parameterises ApplyBackupRetention; either
+// or both of KeepLatest / MaxAge may be set, gated by their *Set
+// companions.
 type BackupRetentionOptions struct {
 	KeepLatest    int
 	KeepLatestSet bool
@@ -63,11 +65,15 @@ type BackupRetentionOptions struct {
 	DryRun        bool
 }
 
+// BackupRetentionCandidate is one backup the retention pass would
+// (or did) delete, paired with the human-readable reason.
 type BackupRetentionCandidate struct {
 	Backup BackupDescriptor
 	Reason string
 }
 
+// BackupRetentionResult bundles the effective retention thresholds
+// and the deletion outcomes from ApplyBackupRetention.
 type BackupRetentionResult struct {
 	DryRun        bool
 	KeepLatest    int
@@ -103,6 +109,8 @@ func (c *Client) ListBackups(ctx context.Context) ([]BackupDescriptor, error) {
 	return out, nil
 }
 
+// DeleteBackup removes the named backup and its checkpoint files,
+// returning a per-step deletion summary.
 func (c *Client) DeleteBackup(ctx context.Context, name string) (BackupDeletionResult, error) {
 	resp, err := c.stub.DeleteBackup(c.withAuth(ctx), &cefaspb.DeleteBackupRequest{Name: name})
 	if err != nil {
@@ -111,6 +119,9 @@ func (c *Client) DeleteBackup(ctx context.Context, name string) (BackupDeletionR
 	return backupDeletionFromPB(resp.GetResult()), nil
 }
 
+// ApplyBackupRetention deletes backups that fall outside the retention
+// window described by opts; when opts.DryRun is set only the candidate
+// list is returned.
 func (c *Client) ApplyBackupRetention(ctx context.Context, opts BackupRetentionOptions) (BackupRetentionResult, error) {
 	resp, err := c.stub.ApplyBackupRetention(c.withAuth(ctx), &cefaspb.ApplyBackupRetentionRequest{
 		KeepLatest:    int32(opts.KeepLatest),
@@ -213,12 +224,17 @@ func backupRetentionFromPB(resp *cefaspb.ApplyBackupRetentionResponse) BackupRet
 	}
 }
 
+// RestoreTableFromBackupOptions tunes RestoreTableFromBackupWithOptions
+// with an optional dry-run and point-in-time targets.
 type RestoreTableFromBackupOptions struct {
 	DryRun            bool
 	TargetChangeIndex uint64
 	TargetUnixNano    int64
 }
 
+// RestoreTableFromBackupResult summarises a restore call, reporting the
+// destination table, the row count copied, and the backup manifest
+// status the server inspected.
 type RestoreTableFromBackupResult struct {
 	TargetTableName  string
 	RowsCopied       int
@@ -240,6 +256,9 @@ func (c *Client) RestoreTableFromBackup(ctx context.Context, backupName, sourceT
 	return result.RowsCopied, nil
 }
 
+// RestoreTableFromBackupWithOptions is the configurable form of
+// RestoreTableFromBackup; opts toggles dry-run and point-in-time
+// targets.
 func (c *Client) RestoreTableFromBackupWithOptions(ctx context.Context, backupName, sourceTable, targetTable string, opts RestoreTableFromBackupOptions) (RestoreTableFromBackupResult, error) {
 	resp, err := c.stub.RestoreTableFromBackup(c.withAuth(ctx), &cefaspb.RestoreTableFromBackupRequest{
 		BackupName:        backupName,
@@ -267,6 +286,8 @@ func (c *Client) RestoreTableFromBackupWithOptions(ctx context.Context, backupNa
 	}, nil
 }
 
+// CompactionResult describes one compaction job executed by
+// CompactTable, with timing and before/after LSM metrics.
 type CompactionResult struct {
 	Table            string
 	Lower            []byte
@@ -281,6 +302,9 @@ type CompactionResult struct {
 	AfterDebtBytes   uint64
 }
 
+// CompactTable triggers a manual LSM compaction over the named table
+// and returns one CompactionResult per executed job; parallelize lets
+// the server fan out across shards when supported.
 func (c *Client) CompactTable(ctx context.Context, table string, parallelize bool) ([]CompactionResult, error) {
 	resp, err := c.stub.Compact(c.withAuth(ctx), &cefaspb.CompactRequest{Table: table, Parallelize: parallelize})
 	if err != nil {

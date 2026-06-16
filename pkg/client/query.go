@@ -26,11 +26,14 @@ func (c *Client) Query(ctx context.Context, table string) *QueryBuilder {
 	return &QueryBuilder{c: c, table: table, req: &cefaspb.QueryRequest{Table: table}}
 }
 
+// PK pins the partition-key value the query must match.
 func (b *QueryBuilder) PK(v types.AttributeValue) *QueryBuilder {
 	b.req.PkValue = attrToPB(v)
 	return b
 }
 
+// SKBetween restricts the sort-key range to [lo, hi]; either bound may
+// be the zero (AttrNull) AttributeValue to leave that side open.
 func (b *QueryBuilder) SKBetween(lo, hi types.AttributeValue) *QueryBuilder {
 	if lo.T != types.AttrNull {
 		b.req.SkLow = attrToPB(lo)
@@ -41,16 +44,19 @@ func (b *QueryBuilder) SKBetween(lo, hi types.AttributeValue) *QueryBuilder {
 	return b
 }
 
+// Index targets a named secondary index instead of the primary key.
 func (b *QueryBuilder) Index(name string) *QueryBuilder {
 	b.req.IndexName = name
 	return b
 }
 
+// Limit caps the number of items returned by the query.
 func (b *QueryBuilder) Limit(n int) *QueryBuilder {
 	b.req.Limit = int32(n)
 	return b
 }
 
+// Strong upgrades the query to strong (leader-served) consistency.
 func (b *QueryBuilder) Strong() *QueryBuilder {
 	b.req.Consistency = cefaspb.Consistency_CONSISTENCY_STRONG
 	return b

@@ -1,8 +1,3 @@
-// Item-resource client surface.
-//
-// PutItem / GetItem / UpdateItem / DeleteItem and the batch variants
-// expose the single-row CRUD shape of the SDK on top of the typed
-// pkg/types.Item model.
 package client
 
 import (

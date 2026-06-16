@@ -1,7 +1,3 @@
-// Bandit client methods (issue #246). Mirrors the BanditCreate /
-// BanditSample / BanditReward / BanditDescribe RPCs the cefas server
-// exposes. Lives in its own file so the bandit surface stays additive
-// against pkg/client/client.go.
 package client
 
 import (

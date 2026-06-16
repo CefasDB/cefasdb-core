@@ -7,6 +7,9 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
+// PipelineStageTiming reports per-stage input / output counts and
+// elapsed time for a server-side pipeline run (Recommend,
+// NextBestAction, etc.).
 type PipelineStageTiming struct {
 	Stage       string
 	InputCount  int
@@ -15,6 +18,9 @@ type PipelineStageTiming struct {
 	ReasonCodes []string
 }
 
+// RecommendRequest packs the inputs to the server-side Recommend
+// pipeline: ANN candidate retrieval, optional filter, MMR rerank,
+// dedup and frequency-cap stages.
 type RecommendRequest struct {
 	Table                string
 	Field                string
@@ -34,18 +40,24 @@ type RecommendRequest struct {
 	FreqCapWindowSeconds int64
 }
 
+// RecommendRow is one returned recommendation, with the matching
+// distance and an optional Reason annotation.
 type RecommendRow struct {
 	Item     types.Item
 	Distance float64
 	Reason   string
 }
 
+// RecommendResponse bundles the returned rows, the per-stage timings,
+// and any pipeline-level reason codes.
 type RecommendResponse struct {
 	Rows        []RecommendRow
 	Stages      []PipelineStageTiming
 	ReasonCodes []string
 }
 
+// Recommend runs the server-side recommendation pipeline (ANN +
+// optional rerank / dedup / freq-cap) and returns the ranked slate.
 func (c *Client) Recommend(ctx context.Context, req RecommendRequest) (RecommendResponse, error) {
 	resp, err := c.stub.Recommend(c.withAuth(ctx), &cefaspb.RecommendRequest{
 		Table:                req.Table,
@@ -80,6 +92,9 @@ func (c *Client) Recommend(ctx context.Context, req RecommendRequest) (Recommend
 	return out, nil
 }
 
+// NBAAction is one candidate action offered to the NextBestAction
+// pipeline; Disabled flags an action that must be skipped, with
+// Reason carrying the explanation.
 type NBAAction struct {
 	ActionID string
 	Disabled bool
@@ -87,6 +102,9 @@ type NBAAction struct {
 	Context  map[string]string
 }
 
+// NextBestActionRequest packs the inputs to the NextBestAction
+// bandit-backed pipeline: the bandit ID, the user, the candidate
+// actions, optional fallback and capping parameters.
 type NextBestActionRequest struct {
 	BanditID           string
 	UserID             string
@@ -99,6 +117,8 @@ type NextBestActionRequest struct {
 	DecisionTTLSeconds int64
 }
 
+// NextBestActionResponse carries the selected action, whether the
+// fallback was used, and per-stage diagnostics.
 type NextBestActionResponse struct {
 	DecisionID  string
 	ActionID    string
@@ -107,6 +127,8 @@ type NextBestActionResponse struct {
 	Stages      []PipelineStageTiming
 }
 
+// NextBestAction asks the server to select the next-best action for
+// a user via a bandit, honouring caps and decision-TTL.
 func (c *Client) NextBestAction(ctx context.Context, req NextBestActionRequest) (NextBestActionResponse, error) {
 	actions := make([]*cefaspb.NBAAction, 0, len(req.Actions))
 	for _, a := range req.Actions {
@@ -140,6 +162,9 @@ func (c *Client) NextBestAction(ctx context.Context, req NextBestActionRequest) 
 	}, nil
 }
 
+// RecordRewardRequest packs the reward attribution payload sent to
+// RecordReward; DecisionID resolves to the original bandit / action
+// when set, otherwise BanditID and ActionID are used.
 type RecordRewardRequest struct {
 	DecisionID string
 	BanditID   string
@@ -148,11 +173,15 @@ type RecordRewardRequest struct {
 	Context    map[string]string
 }
 
+// RecordRewardResponse echoes the bandit and action the server
+// attributed the reward to.
 type RecordRewardResponse struct {
 	BanditID string
 	ActionID string
 }
 
+// RecordReward attributes a reward to a previous NextBestAction
+// decision (or to an explicit bandit / action pair).
 func (c *Client) RecordReward(ctx context.Context, req RecordRewardRequest) (RecordRewardResponse, error) {
 	resp, err := c.stub.RecordReward(c.withAuth(ctx), &cefaspb.RecordRewardRequest{
 		DecisionId: req.DecisionID,
@@ -167,6 +196,8 @@ func (c *Client) RecordReward(ctx context.Context, req RecordRewardRequest) (Rec
 	return RecordRewardResponse{BanditID: resp.GetBanditId(), ActionID: resp.GetActionId()}, nil
 }
 
+// DecisionRecord is the persisted server-side audit trail for one
+// NextBestAction decision, suitable for later reward attribution.
 type DecisionRecord struct {
 	DecisionID    string
 	BanditID      string
@@ -179,6 +210,8 @@ type DecisionRecord struct {
 	ExpiresAtUnix int64
 }
 
+// GetDecision returns the stored DecisionRecord for decisionID; the
+// boolean is false when the decision has expired or never existed.
 func (c *Client) GetDecision(ctx context.Context, decisionID string) (DecisionRecord, bool, error) {
 	resp, err := c.stub.GetDecision(c.withAuth(ctx), &cefaspb.GetDecisionRequest{DecisionId: decisionID})
 	if err != nil {
