@@ -140,13 +140,13 @@ linters:
               desc: "domain must not depend on transport"
 
   exclusions:
+    generated: lax
     paths:
       - third_party
       - npm
       - deploy
-    rules:
-      - path: \.pb\.go$
-      - path: _gen\.go$
+      - .*\.pb\.go$
+      - .*_gen\.go$
 
 formatters:
   enable:

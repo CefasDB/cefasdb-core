@@ -27,10 +27,8 @@ jobs:
       - run: go vet ./...
 
   test:
-    name: race tests
+    name: race tests (warn-only — phase 0a)
     runs-on: ubuntu-latest
-    # Phase 0a — surface failures without blocking merges.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -38,6 +36,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: go test -race -shuffle=on
+        continue-on-error: true
         run: go test -race -count=1 -shuffle=on -covermode=atomic -coverpkg=./... -coverprofile=cover.out ./...
       - name: upload coverage profile
         if: always()
@@ -48,10 +47,8 @@ jobs:
           if-no-files-found: ignore
 
   lint:
-    name: golangci-lint
+    name: golangci-lint (warn-only — phase 0a)
     runs-on: ubuntu-latest
-    # Phase 0a — warn-only; gates flip to error in phase-0f.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -59,15 +56,15 @@ jobs:
           go-version-file: go.mod
           cache: true
       - uses: golangci/golangci-lint-action@v7
+        continue-on-error: true
         with:
           version: v2.7.2
           args: --timeout=5m
 
   coverage:
-    name: coverage thresholds
+    name: coverage thresholds (warn-only — phase 0a)
     needs: test
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -80,26 +77,28 @@ jobs:
       - name: install go-test-coverage
         run: go install github.com/vladopajic/go-test-coverage/v2@latest
       - name: enforce thresholds
+        continue-on-error: true
         run: go-test-coverage --config .testcoverage.yml
 
   vulncheck:
-    name: govulncheck
+    name: govulncheck (warn-only — phase 0a)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - run: govulncheck ./...
+      - name: govulncheck
+        continue-on-error: true
+        run: govulncheck ./...
 
   gosec:
-    name: gosec
+    name: gosec (warn-only — phase 0a)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: securego/gosec@master
+        continue-on-error: true
         with:
           args: -severity=medium -confidence=medium ./...
