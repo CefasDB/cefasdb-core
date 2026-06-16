@@ -22,9 +22,9 @@ func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRe
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	page, lastEvaluated, err := paginateStreamDescriptors(
+	page, lastEvaluated, err := PaginateStreamDescriptors(
 		streams,
-		normalizeStreamAPILimit(req.GetLimit()),
+		NormalizeStreamAPILimit(req.GetLimit()),
 		req.GetExclusiveStartStreamArn(),
 	)
 	if err != nil {
@@ -50,9 +50,9 @@ func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeSt
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	shards, lastEvaluated, err := paginateStreamShards(
+	shards, lastEvaluated, err := PaginateStreamShards(
 		desc.Shards,
-		normalizeStreamAPILimit(req.GetLimit()),
+		NormalizeStreamAPILimit(req.GetLimit()),
 		req.GetExclusiveStartShardId(),
 	)
 	if err != nil {
@@ -71,17 +71,17 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 	shardID, err := model.NewStreamShardID(req.GetShardId())
 	if err != nil {
 		err = fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
-		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.GetStreamArn()), err)
+		s.observeStreamIteratorFailure(StreamTableForARN(s.cat, req.GetStreamArn()), err)
 		return nil, mapStorageErr(err)
 	}
-	token, err := createStreamShardIterator(s.cat, s.db, createIteratorRequest{
+	token, err := CreateStreamShardIterator(s.cat, s.db, CreateIteratorRequest{
 		StreamArn:      req.GetStreamArn(),
 		ShardID:        shardID,
 		IteratorType:   req.GetShardIteratorType(),
 		SequenceNumber: req.GetSequenceNumber(),
 	}, time.Now())
 	if err != nil {
-		s.observeStreamIteratorFailure(streamTableForARN(s.cat, req.GetStreamArn()), err)
+		s.observeStreamIteratorFailure(StreamTableForARN(s.cat, req.GetStreamArn()), err)
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.GetShardIteratorResponse{ShardIterator: token}, nil
@@ -91,7 +91,7 @@ func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequ
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
-	result, err := getStreamRecords(
+	result, err := GetStreamRecords(
 		s.cat,
 		s.db,
 		req.GetShardIterator(),
