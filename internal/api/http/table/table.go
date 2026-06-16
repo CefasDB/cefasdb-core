@@ -1,19 +1,3 @@
-// Package table owns the HTTP handlers for the table-resource
-// endpoints (/v1/tables, /v1/tables/<name>).
-//
-// Handlers are exposed as methods on *Handlers so the composition
-// root (pkg/api.Server) can wrap each handler with its standard
-// auth + metrics middleware via the same register helper it uses
-// for every other route. The package depends only on:
-//
-//   - catalog.Catalog        — table metadata read/write
-//   - internal/auth          — scope checks
-//   - pkg/api/http/httpx     — JSON write helpers
-//   - pkg/types              — wire types
-//
-// It deliberately has no back-channel into pkg/api so the import
-// graph stays one-way (pkg/api → pkg/api/http/table, never the
-// reverse).
 package table
 
 import (
@@ -22,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -39,8 +23,8 @@ type FanOutFunc func(td types.TableDescriptor)
 // it once during pkg/api.Server.Routes and let the server register
 // the methods with its existing middleware stack.
 type Handlers struct {
-	cat     *catalog.Catalog
-	fanOut  FanOutFunc
+	cat    *catalog.Catalog
+	fanOut FanOutFunc
 }
 
 // New constructs the handler set. fanOut may be nil — in that case

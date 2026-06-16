@@ -1,8 +1,3 @@
-// Package httpx is the tiny shared vocabulary for the per-resource
-// handler packages under pkg/api/http. It exposes the two write
-// helpers the entire HTTP surface uses (WriteJSON, WriteErr) so each
-// resource package depends on httpx instead of either reaching back
-// into pkg/api or re-inventing its own JSON encoding.
 package httpx
 
 import (
