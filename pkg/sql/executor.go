@@ -453,7 +453,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	openLow := p.SKLow.T == types.AttrNull
 	openHigh := p.SKHigh.T == types.AttrNull
 	sourceLimit := p.Limit
-	if len(p.GroupBy) > 0 {
+	if p.OrderBy != "" || len(p.GroupBy) > 0 {
 		sourceLimit = 0
 	}
 
@@ -491,7 +491,12 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 	if len(p.GroupBy) > 0 {
 		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
 	}
-	if p.OrderDesc {
+	if p.OrderBy != "" {
+		sortItemsByColumn(items, p.OrderBy, p.OrderDesc)
+		if p.Limit > 0 && len(items) > p.Limit {
+			items = items[:p.Limit]
+		}
+	} else if p.OrderDesc {
 		reverse(items)
 	}
 	if len(p.Project) > 0 {
@@ -502,7 +507,7 @@ func (e *Executor) execQuery(p *PlanQuery) (*Result, error) {
 
 func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	sourceLimit := p.Limit
-	if p.Predicate != nil || p.Count || len(p.GroupBy) > 0 {
+	if p.Predicate != nil || p.Count || p.OrderBy != "" || len(p.GroupBy) > 0 {
 		sourceLimit = 0
 	}
 	items, err := e.Storage.ScanTable(p.Table, sourceLimit)
@@ -527,6 +532,9 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 	}
 	if len(p.GroupBy) > 0 {
 		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
+	}
+	if p.OrderBy != "" {
+		sortItemsByColumn(items, p.OrderBy, p.OrderDesc)
 	}
 	if p.Limit > 0 && len(items) > p.Limit {
 		items = items[:p.Limit]
@@ -768,6 +776,162 @@ func reverse(items []types.Item) {
 	}
 }
 
+func sortItemsByColumn(items []types.Item, column string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		av, aOK := items[i][column]
+		bv, bOK := items[j][column]
+		switch {
+		case !aOK && !bOK:
+			return false
+		case !aOK:
+			return false
+		case !bOK:
+			return true
+		}
+		cmp := compareAVForOrder(av, bv)
+		if desc && cmp != 0 {
+			cmp = -cmp
+		}
+		return cmp < 0
+	})
+}
+
+func compareAVForOrder(a, b types.AttributeValue) int {
+	if a.T != b.T {
+		return compareInt(attrOrderRank(a.T), attrOrderRank(b.T))
+	}
+	switch a.T {
+	case types.AttrNull:
+		return 0
+	case types.AttrS, types.AttrN, types.AttrB, types.AttrBOOL:
+		if cmp, err := compareAV(a, b); err == nil {
+			return cmp
+		}
+	case types.AttrSS:
+		return compareStringSlices(sortedStrings(a.SS), sortedStrings(b.SS))
+	case types.AttrNS:
+		return compareStringSlices(sortedNumbers(a.NS), sortedNumbers(b.NS))
+	case types.AttrBS:
+		return compareBytesSlices(sortedBytes(a.BS), sortedBytes(b.BS))
+	case types.AttrL:
+		return compareAVSlices(a.L, b.L)
+	case types.AttrM:
+		return compareAVMaps(a.M, b.M)
+	case types.AttrVec:
+		return compareFloatSlices(a.Vec, b.Vec)
+	}
+	return 0
+}
+
+func attrOrderRank(t types.AttrType) int {
+	switch t {
+	case types.AttrS:
+		return 1
+	case types.AttrN:
+		return 2
+	case types.AttrB:
+		return 3
+	case types.AttrBOOL:
+		return 4
+	case types.AttrSS:
+		return 5
+	case types.AttrNS:
+		return 6
+	case types.AttrBS:
+		return 7
+	case types.AttrL:
+		return 8
+	case types.AttrM:
+		return 9
+	case types.AttrVec:
+		return 10
+	case types.AttrNull:
+		return 11
+	default:
+		return 100 + int(t)
+	}
+}
+
+func compareInt(a, b int) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareStringSlices(a, b []string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if cmp := strings.Compare(a[i], b[i]); cmp != 0 {
+			return cmp
+		}
+	}
+	return compareInt(len(a), len(b))
+}
+
+func compareBytesSlices(a, b [][]byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if cmp := bytesCompare(a[i], b[i]); cmp != 0 {
+			return cmp
+		}
+	}
+	return compareInt(len(a), len(b))
+}
+
+func compareAVSlices(a, b []types.AttributeValue) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if cmp := compareAVForOrder(a[i], b[i]); cmp != 0 {
+			return cmp
+		}
+	}
+	return compareInt(len(a), len(b))
+}
+
+func compareAVMaps(a, b map[string]types.AttributeValue) int {
+	aKeys := sortedMapKeys(a)
+	bKeys := sortedMapKeys(b)
+	if cmp := compareStringSlices(aKeys, bKeys); cmp != 0 {
+		return cmp
+	}
+	for _, k := range aKeys {
+		if cmp := compareAVForOrder(a[k], b[k]); cmp != 0 {
+			return cmp
+		}
+	}
+	return 0
+}
+
+func compareFloatSlices(a, b []float64) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		switch {
+		case a[i] < b[i]:
+			return -1
+		case a[i] > b[i]:
+			return 1
+		}
+	}
+	return compareInt(len(a), len(b))
+}
+
 type aggregateGroup struct {
 	key    string
 	values []types.AttributeValue
@@ -888,13 +1052,11 @@ func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
 			b.WriteByte('0')
 		}
 	case types.AttrSS:
-		writeStringListGroupKey(b, sortedStringCopy(av.SS))
+		writeStringListGroupKey(b, sortedStrings(av.SS))
 	case types.AttrNS:
-		writeStringListGroupKey(b, sortedStringCopy(av.NS))
+		writeStringListGroupKey(b, sortedNumbers(av.NS))
 	case types.AttrBS:
-		bs := append([][]byte(nil), av.BS...)
-		sort.Slice(bs, func(i, j int) bool { return bytesCompare(bs[i], bs[j]) < 0 })
-		for _, v := range bs {
+		for _, v := range sortedBytes(av.BS) {
 			b.WriteString(strconv.Quote(string(v)))
 			b.WriteByte(',')
 		}
@@ -904,12 +1066,7 @@ func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
 			b.WriteByte(',')
 		}
 	case types.AttrM:
-		keys := make([]string, 0, len(av.M))
-		for k := range av.M {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
+		for _, k := range sortedMapKeys(av.M) {
 			b.WriteString(strconv.Quote(k))
 			b.WriteByte('=')
 			writeAttrStableKey(b, av.M[k])
@@ -923,10 +1080,55 @@ func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
 	}
 }
 
+func sortedStrings(in []string) []string {
+	return sortedStringCopy(in)
+}
+
 func sortedStringCopy(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
+}
+
+func sortedNumbers(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Slice(out, func(i, j int) bool {
+		return compareNumberStrings(out[i], out[j]) < 0
+	})
+	return out
+}
+
+func sortedBytes(in [][]byte) [][]byte {
+	out := append([][]byte(nil), in...)
+	sort.Slice(out, func(i, j int) bool {
+		return bytesCompare(out[i], out[j]) < 0
+	})
+	return out
+}
+
+func sortedMapKeys(m map[string]types.AttributeValue) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func compareNumberStrings(a, b string) int {
+	af, errA := strconv.ParseFloat(a, 64)
+	bf, errB := strconv.ParseFloat(b, 64)
+	if errA != nil || errB != nil {
+		return strings.Compare(a, b)
+	}
+	switch {
+	case af < bf:
+		return -1
+	case af > bf:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func writeStringListGroupKey(b *strings.Builder, values []string) {

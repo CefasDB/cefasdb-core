@@ -41,6 +41,7 @@ type PlanQuery struct {
 	SKHigh     types.AttributeValue // T == AttrNull means open high
 	Limit      int
 	Project    []string // nil → all attributes
+	OrderBy    string
 	GroupBy    []string
 	Aggs       []AggregateExpr
 	OrderDesc  bool
@@ -63,6 +64,8 @@ type PlanScan struct {
 	Limit      int
 	Project    []string
 	Predicate  Expr
+	OrderBy    string
+	OrderDesc  bool
 	GroupBy    []string
 	Aggs       []AggregateExpr
 	Descriptor types.TableDescriptor
