@@ -10,24 +10,10 @@ import (
 // active until RangeMoveFinalize verifies the data and publishes
 // cutover.
 func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, error) {
-	if cat.Strategy != PlacementStrategyTokenRange {
-		return PlacementPlan{}, invalidPlan("range move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
-	}
-	if req.RangeStart == nil || req.RangeEnd == nil {
-		return PlacementPlan{}, invalidPlan("range move requires rangeStart and rangeEnd")
-	}
-	sourceIdx, source, err := findShard(cat, req.ShardID)
+	sourceIdx, source, moveRange, err := validateRangeMoveInputs(cat, req)
 	if err != nil {
 		return PlacementPlan{}, err
 	}
-	if source.State != ShardStateActive {
-		return PlacementPlan{}, invalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateActive, source.State)
-	}
-	moveRange := TokenRange{Start: *req.RangeStart, End: *req.RangeEnd}
-	if err := validateRangeOwnedBySource(source, moveRange); err != nil {
-		return PlacementPlan{}, err
-	}
-
 	targetShardID, err := rangeMoveTargetID(cat, req)
 	if err != nil {
 		return PlacementPlan{}, err
@@ -39,7 +25,43 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 	if len(voters) == 0 {
 		return PlacementPlan{}, invalidPlan("range move target shard %d needs at least one voter", targetShardID)
 	}
+	after, err := applyRangeMoveTransition(cat, sourceIdx, targetShardID, moveRange, voters)
+	if err != nil {
+		return PlacementPlan{}, err
+	}
+	return buildRangeMovePlan(cat, after, source.ID, targetShardID, moveRange, voters, policyWarnings), nil
+}
 
+// validateRangeMoveInputs gathers every precondition for the
+// range-move path: token-range strategy, both range bounds supplied,
+// source shard exists and is Active, and the requested range is in
+// fact owned by the source.
+func validateRangeMoveInputs(cat PlacementCatalog, req PlacementPlanRequest) (int, ShardPlacement, TokenRange, error) {
+	if cat.Strategy != PlacementStrategyTokenRange {
+		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("range move requires %s placement, got %s", PlacementStrategyTokenRange, cat.Strategy)
+	}
+	if req.RangeStart == nil || req.RangeEnd == nil {
+		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("range move requires rangeStart and rangeEnd")
+	}
+	sourceIdx, source, err := findShard(cat, req.ShardID)
+	if err != nil {
+		return 0, ShardPlacement{}, TokenRange{}, err
+	}
+	if source.State != ShardStateActive {
+		return 0, ShardPlacement{}, TokenRange{}, invalidPlan("source shard %d must be %s, got %s", source.ID, ShardStateActive, source.State)
+	}
+	moveRange := TokenRange{Start: *req.RangeStart, End: *req.RangeEnd}
+	if err := validateRangeOwnedBySource(source, moveRange); err != nil {
+		return 0, ShardPlacement{}, TokenRange{}, err
+	}
+	return sourceIdx, source, moveRange, nil
+}
+
+// applyRangeMoveTransition mutates the catalog to reflect the
+// in-flight move: source → Moving, target → Creating with the
+// pending range and voter set. Returns the validated next-epoch
+// catalog.
+func applyRangeMoveTransition(cat PlacementCatalog, sourceIdx int, targetShardID uint32, moveRange TokenRange, voters []string) (PlacementCatalog, error) {
 	after := nextCatalog(cat)
 	after.Shards[sourceIdx].State = ShardStateMoving
 	after.Shards[sourceIdx].Epoch = after.Epoch
@@ -52,14 +74,19 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 	})
 	after.normalize()
 	if err := ValidatePlacement(after); err != nil {
-		return PlacementPlan{}, err
+		return PlacementCatalog{}, err
 	}
+	return after, nil
+}
 
+// buildRangeMovePlan assembles the user-facing PlacementPlan from
+// the validated before/after catalogs. Kept separate so planRangeMove
+// stays inside the §9 LOC cap.
+func buildRangeMovePlan(cat, after PlacementCatalog, sourceID, targetID uint32, moveRange TokenRange, voters, policyWarnings []string) PlacementPlan {
 	warnings := []string{
 		"range-move apply opens the target shard online and publishes a transition placement; source routing stays active until range-move finalize verifies data and publishes cutover",
 	}
 	warnings = append(warnings, policyWarnings...)
-
 	return PlacementPlan{
 		Operation:        PlacementOperationRangeMove,
 		BeforeEpoch:      cat.Epoch,
@@ -69,8 +96,8 @@ func planRangeMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPla
 		RequiresDataCopy: true,
 		ApplySupported:   true,
 		Warnings:         warnings,
-		Steps:            rangeMoveSteps(source.ID, targetShardID, moveRange, voters),
-	}, nil
+		Steps:            rangeMoveSteps(sourceID, targetID, moveRange, voters),
+	}
 }
 
 func validateRangeOwnedBySource(source ShardPlacement, moveRange TokenRange) error {
