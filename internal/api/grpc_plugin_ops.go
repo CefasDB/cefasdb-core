@@ -18,6 +18,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
@@ -50,6 +51,8 @@ type annConfig struct {
 // ---------- CreateIndex / DescribeIndex / RebuildIndex ----------
 
 func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRequest) (*cefaspb.CreateIndexResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "CreateIndex")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
@@ -100,6 +103,8 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 }
 
 func (s *GRPCServer) DescribeIndex(ctx context.Context, req *cefaspb.DescribeIndexRequest) (*cefaspb.DescribeIndexResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribeIndex")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -114,6 +119,8 @@ func (s *GRPCServer) DescribeIndex(ctx context.Context, req *cefaspb.DescribeInd
 }
 
 func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndexRequest) (*cefaspb.RebuildIndexResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "RebuildIndex")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
@@ -275,6 +282,8 @@ func (s *GRPCServer) indexItemSourceFor(table string) (func(yield func(model.Ite
 // ---------- Explain ----------
 
 func (s *GRPCServer) Explain(ctx context.Context, req *cefaspb.ExplainRequest) (*cefaspb.ExplainResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Explain")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -309,6 +318,8 @@ func (s *GRPCServer) Explain(ctx context.Context, req *cefaspb.ExplainRequest) (
 // ---------- TopK ----------
 
 func (s *GRPCServer) TopK(ctx context.Context, req *cefaspb.TopKRequest) (*cefaspb.TopKResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "TopK")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -387,6 +398,8 @@ func attrVectorDim(av model.AttributeValue) int {
 // ---------- Cohort ----------
 
 func (s *GRPCServer) CohortCreate(ctx context.Context, req *cefaspb.CohortCreateRequest) (*cefaspb.CohortCreateResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "CohortCreate")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
@@ -428,6 +441,8 @@ func (s *GRPCServer) CohortCreate(ctx context.Context, req *cefaspb.CohortCreate
 }
 
 func (s *GRPCServer) CohortEstimate(ctx context.Context, req *cefaspb.CohortEstimateRequest) (*cefaspb.CohortEstimateResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "CohortEstimate")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -461,7 +476,8 @@ func (s *GRPCServer) CohortEstimate(ctx context.Context, req *cefaspb.CohortEsti
 // ---------- Audience ----------
 
 func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb.Cefas_GeoAudienceServer) error {
-	ctx := stream.Context()
+	ctx, span := tracing.Tracer().Start(stream.Context(), "GeoAudience")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -511,6 +527,8 @@ func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb
 }
 
 func (s *GRPCServer) Dedup(ctx context.Context, req *cefaspb.DedupRequest) (*cefaspb.DedupResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Dedup")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemWrite); err != nil {
 		return nil, err
 	}
@@ -528,6 +546,8 @@ func (s *GRPCServer) Dedup(ctx context.Context, req *cefaspb.DedupRequest) (*cef
 }
 
 func (s *GRPCServer) FreqCap(ctx context.Context, req *cefaspb.FreqCapRequest) (*cefaspb.FreqCapResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "FreqCap")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeItemRead); err != nil {
 		return nil, err
 	}
@@ -545,6 +565,8 @@ func (s *GRPCServer) FreqCap(ctx context.Context, req *cefaspb.FreqCapRequest) (
 }
 
 func (s *GRPCServer) Aggregate(ctx context.Context, req *cefaspb.AggregateRequest) (*cefaspb.AggregateResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Aggregate")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {

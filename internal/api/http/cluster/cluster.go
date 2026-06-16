@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/api/http/httpx"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/cluster"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 )
 
@@ -77,6 +78,8 @@ type clusterStatusResponse struct {
 // HandleStatus serves /v1/cluster/status: a snapshot of mode, leader,
 // placement, optional hot ranges, and optional backup scheduler.
 func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "ClusterStatus")
+	defer span.End()
 	resp := clusterStatusResponse{Mode: "single-node"}
 	if h.cluster != nil {
 		resp.Mode = "raft"
@@ -127,6 +130,8 @@ type addVoterRequest struct {
 
 // HandleAddVoter serves /v1/cluster/AddVoter. POST only.
 func (h *Handlers) HandleAddVoter(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "AddVoter")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -180,6 +185,8 @@ type removeServerRequest struct {
 
 // HandleRemoveServer serves /v1/cluster/RemoveServer. POST only.
 func (h *Handlers) HandleRemoveServer(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "RemoveServer")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -226,6 +233,8 @@ func (h *Handlers) HandleRemoveServer(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlacementPlan serves /v1/cluster/placement/plan. POST only.
 func (h *Handlers) HandlePlacementPlan(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "PlanPlacement")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -252,6 +261,8 @@ func (h *Handlers) HandlePlacementPlan(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlacementApply serves /v1/cluster/placement/apply. POST only.
 func (h *Handlers) HandlePlacementApply(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracing.Tracer().Start(r.Context(), "ApplyPlacement")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -268,7 +279,7 @@ func (h *Handlers) HandlePlacementApply(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.manager.ApplyPlacement(r.Context(), req)
+	result, err := h.manager.ApplyPlacement(ctx, req)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
@@ -278,6 +289,8 @@ func (h *Handlers) HandlePlacementApply(w http.ResponseWriter, r *http.Request) 
 
 // HandlePlacementAudit serves /v1/cluster/placement/audit. GET + POST.
 func (h *Handlers) HandlePlacementAudit(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracing.Tracer().Start(r.Context(), "AuditPlacement")
+	defer span.End()
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -314,7 +327,7 @@ func (h *Handlers) HandlePlacementAudit(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	report, err := h.manager.AuditPlacement(r.Context(), req)
+	report, err := h.manager.AuditPlacement(ctx, req)
 	if err != nil {
 		httpx.WriteErr(w, http.StatusInternalServerError, err)
 		return
@@ -335,6 +348,8 @@ func queryInt(raw string) (int, error) {
 
 // HandleSplitFinalize serves /v1/cluster/placement/split/finalize.
 func (h *Handlers) HandleSplitFinalize(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracing.Tracer().Start(r.Context(), "FinalizeSplit")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -351,7 +366,7 @@ func (h *Handlers) HandleSplitFinalize(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.manager.FinalizeSplit(r.Context(), req)
+	result, err := h.manager.FinalizeSplit(ctx, req)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
@@ -361,6 +376,8 @@ func (h *Handlers) HandleSplitFinalize(w http.ResponseWriter, r *http.Request) {
 
 // HandleSplitRollback serves /v1/cluster/placement/split/rollback.
 func (h *Handlers) HandleSplitRollback(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracing.Tracer().Start(r.Context(), "RollbackSplit")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -377,7 +394,7 @@ func (h *Handlers) HandleSplitRollback(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.manager.RollbackSplit(r.Context(), req)
+	result, err := h.manager.RollbackSplit(ctx, req)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
@@ -388,6 +405,8 @@ func (h *Handlers) HandleSplitRollback(w http.ResponseWriter, r *http.Request) {
 // HandleRangeMoveFinalize serves
 // /v1/cluster/placement/range-move/finalize.
 func (h *Handlers) HandleRangeMoveFinalize(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracing.Tracer().Start(r.Context(), "FinalizeRangeMove")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -404,7 +423,7 @@ func (h *Handlers) HandleRangeMoveFinalize(w http.ResponseWriter, r *http.Reques
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.manager.FinalizeRangeMove(r.Context(), req)
+	result, err := h.manager.FinalizeRangeMove(ctx, req)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return

@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
@@ -32,6 +33,8 @@ const defaultRerankField = "embedding"
 // after a TopK / SQL ANN query without the server having to remember
 // where the candidates came from.
 func (s *GRPCServer) Rerank(ctx context.Context, req *cefaspb.RerankRequest) (*cefaspb.RerankResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Rerank")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {

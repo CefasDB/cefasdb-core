@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -99,6 +100,8 @@ type compactRequest struct {
 
 // HandleRestoreTableFromBackup serves POST /v1/RestoreTableFromBackup.
 func (h *Handlers) HandleRestoreTableFromBackup(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "RestoreTableFromBackup")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -156,6 +159,8 @@ func (h *Handlers) HandleRestoreTableFromBackup(w http.ResponseWriter, r *http.R
 
 // HandleDeleteBackup serves POST /v1/DeleteBackup.
 func (h *Handlers) HandleDeleteBackup(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "DeleteBackup")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -178,6 +183,8 @@ func (h *Handlers) HandleDeleteBackup(w http.ResponseWriter, r *http.Request) {
 
 // HandleApplyBackupRetention serves POST /v1/ApplyBackupRetention.
 func (h *Handlers) HandleApplyBackupRetention(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "ApplyBackupRetention")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -220,6 +227,8 @@ func (h *Handlers) HandleApplyBackupRetention(w http.ResponseWriter, r *http.Req
 // original Routes() wiring; the handler enforces ScopeClusterAdmin
 // itself when a stream is attached.
 func (h *Handlers) HandleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "ListSnapshots")
+	defer span.End()
 	if h.stream == nil {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"snapshots": nil})
 		return
@@ -239,6 +248,8 @@ func (h *Handlers) HandleListSnapshots(w http.ResponseWriter, r *http.Request) {
 // is registered without auth middleware in Routes(); the handler
 // enforces ScopeClusterAdmin itself.
 func (h *Handlers) HandleCompact(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Compact")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

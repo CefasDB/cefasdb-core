@@ -9,12 +9,15 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
 func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRequest) (*cefaspb.ListStreamsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListStreams")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -40,6 +43,8 @@ func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRe
 }
 
 func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeStreamRequest) (*cefaspb.DescribeStreamResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribeStream")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -65,6 +70,8 @@ func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeSt
 }
 
 func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShardIteratorRequest) (*cefaspb.GetShardIteratorResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetShardIterator")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -88,6 +95,8 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 }
 
 func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequest) (*cefaspb.GetRecordsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetRecords")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}

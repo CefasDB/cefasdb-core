@@ -12,6 +12,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
@@ -141,6 +142,8 @@ type zboxJSON struct {
 // HandleQuery serves /v1/Query — primary-key, range and indexed
 // queries.
 func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Query")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -221,6 +224,8 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 // HandleSpatialQuery serves /v1/SpatialQuery — bbox / radius / Z-box
 // lookups against a table's spatial index.
 func (h *Handlers) HandleSpatialQuery(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "SpatialQuery")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -283,6 +288,8 @@ func (h *Handlers) HandleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 // HandleSql serves /v1/Sql — parses, plans and executes a single SQL
 // statement.
 func (h *Handlers) HandleSql(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "Sql")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -308,6 +315,8 @@ func (h *Handlers) HandleSql(w http.ResponseWriter, r *http.Request) {
 // HandlePartiQL serves /v1/PartiQL — AWS DynamoDB ExecuteStatement
 // shape (statement + positional parameters).
 func (h *Handlers) HandlePartiQL(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "PartiQL")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

@@ -11,6 +11,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
@@ -111,6 +112,8 @@ type batchGetRequest struct {
 
 // HandlePutItem serves /v1/PutItem.
 func (h *Handlers) HandlePutItem(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "PutItem")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -162,6 +165,8 @@ func (h *Handlers) HandlePutItem(w http.ResponseWriter, r *http.Request) {
 
 // HandleGetItem serves /v1/GetItem.
 func (h *Handlers) HandleGetItem(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "GetItem")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -214,6 +219,8 @@ func (h *Handlers) HandleGetItem(w http.ResponseWriter, r *http.Request) {
 
 // HandleDeleteItem serves /v1/DeleteItem.
 func (h *Handlers) HandleDeleteItem(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "DeleteItem")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -265,6 +272,8 @@ func (h *Handlers) HandleDeleteItem(w http.ResponseWriter, r *http.Request) {
 
 // HandleBatchWriteItem serves /v1/BatchWriteItem.
 func (h *Handlers) HandleBatchWriteItem(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "BatchWriteItem")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -316,6 +325,8 @@ func (h *Handlers) HandleBatchWriteItem(w http.ResponseWriter, r *http.Request) 
 
 // HandleBatchGetItem serves /v1/BatchGetItem.
 func (h *Handlers) HandleBatchGetItem(w http.ResponseWriter, r *http.Request) {
+	_, span := tracing.Tracer().Start(r.Context(), "BatchGetItem")
+	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

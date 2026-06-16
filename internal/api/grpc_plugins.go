@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 )
@@ -18,6 +19,8 @@ import (
 // Public-ish: requires ScopeTableDescribe — same posture as
 // DescribeTable.
 func (s *GRPCServer) ListPlugins(ctx context.Context, req *cefaspb.ListPluginsRequest) (*cefaspb.ListPluginsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListPlugins")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -47,6 +50,8 @@ func (s *GRPCServer) ListPlugins(ctx context.Context, req *cefaspb.ListPluginsRe
 
 // DescribePlugin returns the descriptor for a single plugin.
 func (s *GRPCServer) DescribePlugin(ctx context.Context, req *cefaspb.DescribePluginRequest) (*cefaspb.DescribePluginResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribePlugin")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -97,14 +102,14 @@ func parsePluginKind(s string) (plugin.Kind, error) {
 
 func pluginStatusToPB(s plugin.Status) *cefaspb.PluginDescriptor {
 	return &cefaspb.PluginDescriptor{
-		Name:           s.Name,
-		Kind:           s.Kind,
-		Version:        s.Version,
-		Description:    s.Description,
-		State:          s.State,
-		LastError:      s.LastError,
-		LastErrorUnix:  s.LastErrorAtUnix,
-		ItemsIndexed:   s.ItemsIndexed,
-		StartedAtUnix:  s.StartedAtUnix,
+		Name:          s.Name,
+		Kind:          s.Kind,
+		Version:       s.Version,
+		Description:   s.Description,
+		State:         s.State,
+		LastError:     s.LastError,
+		LastErrorUnix: s.LastErrorAtUnix,
+		ItemsIndexed:  s.ItemsIndexed,
+		StartedAtUnix: s.StartedAtUnix,
 	}
 }

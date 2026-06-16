@@ -17,6 +17,7 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/raft"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
 	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
@@ -126,6 +127,8 @@ func (s *GRPCServer) compact(table string, lower, upper []byte, parallelize bool
 // ---------- schema ----------
 
 func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRequest) (*cefaspb.CreateTableResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "CreateTable")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
@@ -153,6 +156,8 @@ func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRe
 }
 
 func (s *GRPCServer) DescribeTable(ctx context.Context, req *cefaspb.DescribeTableRequest) (*cefaspb.DescribeTableResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribeTable")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -165,6 +170,8 @@ func (s *GRPCServer) DescribeTable(ctx context.Context, req *cefaspb.DescribeTab
 }
 
 func (s *GRPCServer) ListTables(ctx context.Context, _ *cefaspb.ListTablesRequest) (*cefaspb.ListTablesResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListTables")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -191,6 +198,8 @@ func (s *GRPCServer) enrichTableDescriptor(td types.TableDescriptor) types.Table
 }
 
 func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableRequest) (*cefaspb.DropTableResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DropTable")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDrop); err != nil {
 		return nil, err
 	}
@@ -204,6 +213,8 @@ func (s *GRPCServer) DropTable(ctx context.Context, req *cefaspb.DropTableReques
 }
 
 func (s *GRPCServer) UpdateTimeToLive(ctx context.Context, req *cefaspb.UpdateTimeToLiveRequest) (*cefaspb.UpdateTimeToLiveResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "UpdateTimeToLive")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
 		return nil, err
 	}
@@ -245,6 +256,8 @@ func (s *GRPCServer) UpdateTimeToLive(ctx context.Context, req *cefaspb.UpdateTi
 }
 
 func (s *GRPCServer) DescribeTimeToLive(ctx context.Context, req *cefaspb.DescribeTimeToLiveRequest) (*cefaspb.DescribeTimeToLiveResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribeTimeToLive")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -263,6 +276,8 @@ func (s *GRPCServer) DescribeTimeToLive(ctx context.Context, req *cefaspb.Descri
 // ---------- item ----------
 
 func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (*cefaspb.PutItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "PutItem")
+	defer span.End()
 	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
@@ -305,6 +320,8 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 }
 
 func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (*cefaspb.GetItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetItem")
+	defer span.End()
 	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
@@ -341,6 +358,8 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 }
 
 func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequest) (*cefaspb.UpdateItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "UpdateItem")
+	defer span.End()
 	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
@@ -432,6 +451,8 @@ func returnValuesName(v cefaspb.ReturnValues) string {
 }
 
 func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequest) (*cefaspb.DeleteItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DeleteItem")
+	defer span.End()
 	started := time.Now()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemDelete, req.GetTable()),
@@ -474,6 +495,8 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 }
 
 func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWriteItemRequest) (*cefaspb.BatchWriteItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BatchWriteItem")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemWrite, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemWrite)); err != nil {
@@ -602,6 +625,8 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []storage.Ba
 }
 
 func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItemRequest) (*cefaspb.BatchGetItemResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "BatchGetItem")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeItemRead, req.GetTable()),
 		auth.WildcardScope(auth.ScopeItemRead)); err != nil {
@@ -637,8 +662,9 @@ func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItem
 // ---------- streaming ----------
 
 func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_QueryServer) error {
+	ctx, span := tracing.Tracer().Start(stream.Context(), "Query")
+	defer span.End()
 	started := time.Now()
-	ctx := stream.Context()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeQuery, req.GetTable()),
 		auth.WildcardScope(auth.ScopeQuery)); err != nil {
@@ -699,7 +725,8 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 }
 
 func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanServer) error {
-	ctx := stream.Context()
+	ctx, span := tracing.Tracer().Start(stream.Context(), "Scan")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeScan, req.GetTable()),
 		auth.WildcardScope(auth.ScopeScan)); err != nil {
@@ -769,7 +796,8 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 }
 
 func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefaspb.Cefas_SpatialQueryServer) error {
-	ctx := stream.Context()
+	ctx, span := tracing.Tracer().Start(stream.Context(), "SpatialQuery")
+	defer span.End()
 	if err := requireAnyScope(ctx,
 		auth.TableScope(auth.ScopeSpatial, req.GetTable()),
 		auth.WildcardScope(auth.ScopeSpatial)); err != nil {
@@ -829,6 +857,8 @@ func (s *GRPCServer) scatterSpatial(td types.TableDescriptor, idxName string, q 
 // ---------- sql ----------
 
 func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb.SqlResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Sql")
+	defer span.End()
 	stmt, err := cefassql.Parse(req.GetQuery())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -906,10 +936,12 @@ func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {
 func (s *GRPCServer) AttachChangeStream(c ChangeStream) { s.stream = c }
 
 func (s *GRPCServer) StreamChanges(req *cefaspb.StreamChangesRequest, stream cefaspb.Cefas_StreamChangesServer) error {
+	ctx, span := tracing.Tracer().Start(stream.Context(), "StreamChanges")
+	defer span.End()
 	if s.stream == nil {
 		return status.Error(codes.FailedPrecondition, "change stream not configured")
 	}
-	events, cancel := s.stream.SubscribeChanges(stream.Context())
+	events, cancel := s.stream.SubscribeChanges(ctx)
 	defer cancel()
 	for {
 		select {
@@ -939,6 +971,8 @@ func (s *GRPCServer) StreamChanges(req *cefaspb.StreamChangesRequest, stream cef
 }
 
 func (s *GRPCServer) CreateBackup(ctx context.Context, req *cefaspb.CreateBackupRequest) (*cefaspb.CreateBackupResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "CreateBackup")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -987,6 +1021,8 @@ func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (sto
 }
 
 func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequest) (*cefaspb.ListBackupsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListBackups")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
@@ -1002,6 +1038,8 @@ func (s *GRPCServer) ListBackups(ctx context.Context, _ *cefaspb.ListBackupsRequ
 }
 
 func (s *GRPCServer) DeleteBackup(ctx context.Context, req *cefaspb.DeleteBackupRequest) (*cefaspb.DeleteBackupResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DeleteBackup")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1013,6 +1051,8 @@ func (s *GRPCServer) DeleteBackup(ctx context.Context, req *cefaspb.DeleteBackup
 }
 
 func (s *GRPCServer) ApplyBackupRetention(ctx context.Context, req *cefaspb.ApplyBackupRetentionRequest) (*cefaspb.ApplyBackupRetentionResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ApplyBackupRetention")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1030,6 +1070,8 @@ func (s *GRPCServer) ApplyBackupRetention(ctx context.Context, req *cefaspb.Appl
 }
 
 func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.RestoreTableFromBackupRequest) (*cefaspb.RestoreTableFromBackupResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "RestoreTableFromBackup")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1172,6 +1214,8 @@ func backupRetentionCandidateToPB(candidate storage.BackupRetentionCandidate) *c
 }
 
 func (s *GRPCServer) ListSnapshots(ctx context.Context, _ *cefaspb.ListSnapshotsRequest) (*cefaspb.ListSnapshotsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListSnapshots")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1196,6 +1240,8 @@ func (s *GRPCServer) ListSnapshots(ctx context.Context, _ *cefaspb.ListSnapshots
 }
 
 func (s *GRPCServer) Compact(ctx context.Context, req *cefaspb.CompactRequest) (*cefaspb.CompactResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "Compact")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1269,6 +1315,8 @@ func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []typ
 }
 
 func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatusRequest) (*cefaspb.ClusterStatusResponse, error) {
+	_, span := tracing.Tracer().Start(ctx, "ClusterStatus")
+	defer span.End()
 	resp := &cefaspb.ClusterStatusResponse{Mode: "single-node"}
 	if s.cluster != nil {
 		resp.Mode = "raft"
@@ -1406,6 +1454,8 @@ func pbNodeDescriptors(in []cluster.NodeDescriptor) []*cefaspb.NodeDescriptor {
 }
 
 func (s *GRPCServer) AddVoter(ctx context.Context, req *cefaspb.AddVoterRequest) (*cefaspb.AddVoterResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "AddVoter")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1435,6 +1485,8 @@ func (s *GRPCServer) AddVoter(ctx context.Context, req *cefaspb.AddVoterRequest)
 }
 
 func (s *GRPCServer) RemoveServer(ctx context.Context, req *cefaspb.RemoveServerRequest) (*cefaspb.RemoveServerResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "RemoveServer")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1464,6 +1516,8 @@ func (s *GRPCServer) RemoveServer(ctx context.Context, req *cefaspb.RemoveServer
 }
 
 func (s *GRPCServer) PlanPlacement(ctx context.Context, req *cefaspb.PlanPlacementRequest) (*cefaspb.PlanPlacementResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "PlanPlacement")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1478,6 +1532,8 @@ func (s *GRPCServer) PlanPlacement(ctx context.Context, req *cefaspb.PlanPlaceme
 }
 
 func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlacementRequest) (*cefaspb.ApplyPlacementResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ApplyPlacement")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1496,6 +1552,8 @@ func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlace
 }
 
 func (s *GRPCServer) FinalizeSplit(ctx context.Context, req *cefaspb.FinalizeSplitRequest) (*cefaspb.FinalizeSplitResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "FinalizeSplit")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
@@ -1516,6 +1574,8 @@ func (s *GRPCServer) FinalizeSplit(ctx context.Context, req *cefaspb.FinalizeSpl
 }
 
 func (s *GRPCServer) FinalizeRangeMove(ctx context.Context, req *cefaspb.FinalizeRangeMoveRequest) (*cefaspb.FinalizeRangeMoveResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "FinalizeRangeMove")
+	defer span.End()
 	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
 		return nil, err
 	}
