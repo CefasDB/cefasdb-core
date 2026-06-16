@@ -10,21 +10,34 @@ type Stmt interface {
 // the access path (primary / GSI / spatial), then runs ORDER BY /
 // LIMIT in the executor.
 type SelectStmt struct {
-	Table     string
-	Columns   []string // nil → SELECT *
-	IndexName string   // "" → primary; else USE INDEX (idx)
-	AllowScan bool     // explicit opt-in for scan-backed analytical SELECTs
-	Where     Expr     // nil → unconditional
-	OrderBy   string
-	OrderDesc bool
-	OrderANN  bool
-	ANNTarget []float64
-	Diversify *DiversifyClause
-	Limit     int
+	Table      string
+	TableAlias string
+	Columns    []string // nil → SELECT *
+	IndexName  string   // "" → primary; else USE INDEX (idx)
+	Join       *JoinClause
+	AllowScan  bool // explicit opt-in for scan-backed analytical SELECTs
+	Where      Expr // nil → unconditional
+	OrderBy    string
+	OrderDesc  bool
+	OrderANN   bool
+	ANNTarget  []float64
+	Diversify  *DiversifyClause
+	Limit      int
 	// Count = true for SELECT COUNT(*) FROM ... — executor returns
 	// the matching-row total as AffectedRows instead of materialising
 	// row data.
 	Count bool
+}
+
+// JoinClause captures the first-pass INNER JOIN surface:
+//
+//	FROM left [alias] INNER JOIN right [alias] ON left.col = right.col
+type JoinClause struct {
+	RightTable string
+	RightAlias string
+	LeftRef    ColumnRef
+	RightRef   ColumnRef
+	Op         BinOp
 }
 
 // DiversifyClause is the post-ANN diversification suffix:
