@@ -300,7 +300,7 @@ func main() {
 		// and /v1/admin/snapshots have a source.
 		pub := craft.NewPublisher(2048)
 		raftDB.AttachPublisher(pub)
-		apiSrv.AttachChangeStream(&streamAdapter{raft: raftDB})
+		apiSrv.AttachChangeStream(bootstrapserver.NewStreamAdapter(raftDB))
 	} else if mgr != nil {
 		// In multi-shard mode the cluster-status surface uses shard
 		// 0's raft handle as a representative; per-shard status is
@@ -387,7 +387,7 @@ func main() {
 		}
 		gsrvImpl.AttachBackupScheduler(backupScheduler)
 		if raftDB != nil {
-			gsrvImpl.AttachChangeStream(&streamAdapter{raft: raftDB})
+			gsrvImpl.AttachChangeStream(bootstrapserver.NewStreamAdapter(raftDB))
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
 		api.RegisterAtomic(gsrv, gsrvImpl)
@@ -519,54 +519,103 @@ func streamRetentionFromConfig(cfg config.Config) storage.StreamRetentionOptions
 	}
 }
 
-// streamAdapter bridges the raft package's CDC types to the api
-// package's wire-agnostic shape. Lives here so neither package needs
-// to import the other.
-type streamAdapter struct {
-	raft *craft.DB
+// parsePeers parses the "id1=addr1,id2=addr2" form used by both
+// -raft-peers and -raft-http-peers.
+func parsePeers(s string) (map[string]string, error) { return config.ParsePeers(s) }
+
+func storageOptionsFromConfig(cfg config.Config, path string) storage.Options {
+	return storage.Options{
+		Path:            path,
+		FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
+		Profile:         cfg.Storage.Profile,
+		Tuning:          storageTuningFromConfig(cfg),
+		Backpressure:    backpressureFromConfig(cfg),
+		StreamRetention: streamRetentionFromConfig(cfg),
+	}
 }
 
-func (a *streamAdapter) SubscribeChanges(ctx context.Context) (<-chan api.ChangeEvent, func()) {
-	pub := a.raft.Publisher()
-	if pub == nil {
-		out := make(chan api.ChangeEvent)
-		close(out)
-		return out, func() {}
+func storageTuningFromConfig(cfg config.Config) storage.PebbleTuning {
+	return storage.PebbleTuning{
+		BlockCacheSizeBytes:       cfg.Storage.BlockCacheSizeBytes,
+		MemTableSizeBytes:         cfg.Storage.MemTableSizeBytes,
+		MemTableStopWrites:        cfg.Storage.MemTableStopWritesThreshold,
+		MaxConcurrentCompactions:  cfg.Storage.MaxConcurrentCompactions,
+		L0CompactionConcurrency:   cfg.Storage.L0CompactionConcurrency,
+		L0CompactionThreshold:     cfg.Storage.L0CompactionThreshold,
+		L0CompactionFileThreshold: cfg.Storage.L0CompactionFileThreshold,
+		L0StopWritesThreshold:     cfg.Storage.L0StopWritesThreshold,
+		BytesPerSync:              cfg.Storage.BytesPerSync,
+		WALBytesPerSync:           cfg.Storage.WALBytesPerSync,
 	}
-	src, cancel := pub.Subscribe(ctx)
-	out := make(chan api.ChangeEvent, 64)
-	go func() {
-		defer close(out)
-		for ev := range src {
-			op := "PUT"
-			if ev.Op == craft.OpDelete {
-				op = "DELETE"
-			}
-			select {
-			case out <- api.ChangeEvent{RaftIndex: ev.RaftIndex, Op: op, Key: ev.Key, Value: ev.Value}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return out, cancel
 }
 
-func (a *streamAdapter) ListSnapshots() ([]api.SnapshotMetadata, error) {
-	metas, err := a.raft.ListSnapshots()
-	if err != nil {
-		return nil, err
+func rangeHotspotConfigFromConfig(cfg config.Config) metrics.RangeHotspotConfig {
+	return metrics.RangeHotspotConfig{
+		Buckets:                      cfg.Metrics.HotspotBuckets,
+		Window:                       cfg.Metrics.HotspotWindow,
+		CoolingWindow:                cfg.Metrics.HotspotCoolingWindow,
+		MaxSummaries:                 cfg.Metrics.HotspotMaxSummaries,
+		ReadThreshold:                cfg.Metrics.HotspotReadThreshold,
+		WriteThreshold:               cfg.Metrics.HotspotWriteThreshold,
+		BytesThreshold:               cfg.Metrics.HotspotBytesThreshold,
+		LatencyThresholdSeconds:      cfg.Metrics.HotspotLatencyThreshold.Seconds(),
+		CompactionDebtThresholdBytes: cfg.Metrics.HotspotCompactionDebtThreshold,
+		ThrottleStateThreshold:       cfg.Metrics.HotspotThrottleStateThreshold,
 	}
-	out := make([]api.SnapshotMetadata, 0, len(metas))
-	for _, m := range metas {
-		out = append(out, api.SnapshotMetadata{
-			ID:        m.ID,
-			Index:     m.Index,
-			Term:      m.Term,
-			SizeBytes: m.SizeBytes,
-		})
+}
+
+func rebalancerConfigFromConfig(cfg config.Config) rebalancer.Config {
+	return rebalancer.Config{
+		Mode:                    rebalancer.Mode(cfg.Rebalancer.Mode),
+		Interval:                cfg.Rebalancer.Interval,
+		MinInterval:             cfg.Rebalancer.MinInterval,
+		MaxConcurrentOperations: cfg.Rebalancer.MaxConcurrentOperations,
+		MaxHotspots:             cfg.Rebalancer.MaxHotspots,
+		MinVoters:               cfg.Rebalancer.MinVoters,
+		ApplyTimeoutMS:          int(cfg.Rebalancer.ApplyTimeout / time.Millisecond),
+		ManualPlanDir:           cfg.Rebalancer.ManualPlanDir,
 	}
-	return out, nil
+}
+
+func scheduledBackupConfigFromConfig(cfg config.Config, prom *metrics.Metrics, logger func(string, ...any)) storage.ScheduledBackupConfig {
+	return storage.ScheduledBackupConfig{
+		Enabled:      cfg.BackupScheduler.Enabled,
+		DryRun:       cfg.BackupScheduler.DryRun,
+		Interval:     cfg.BackupScheduler.Interval,
+		NameTemplate: cfg.BackupScheduler.NameTemplate,
+		Tables:       append([]string(nil), cfg.BackupScheduler.Tables...),
+		Retention: storage.BackupRetentionOptions{
+			KeepLatest:    cfg.BackupScheduler.Retention.KeepLatest,
+			KeepLatestSet: cfg.BackupScheduler.Retention.KeepLatestSet,
+			MaxAge:        cfg.BackupScheduler.Retention.MaxAge,
+			MaxAgeSet:     cfg.BackupScheduler.Retention.MaxAgeSet,
+			DryRun:        cfg.BackupScheduler.Retention.DryRun,
+		},
+		Logger:  logger,
+		Metrics: prom,
+	}
+}
+
+func backpressureFromConfig(cfg config.Config) storage.BackpressureOptions {
+	return storage.BackpressureOptions{
+		Enabled:                     cfg.Storage.BackpressureEnabled,
+		RejectOnCritical:            cfg.Storage.BackpressureRejectCritical,
+		WarningL0Files:              cfg.Storage.BackpressureWarningL0Files,
+		CriticalL0Files:             cfg.Storage.BackpressureCriticalL0Files,
+		WarningCompactionDebtBytes:  cfg.Storage.BackpressureWarningDebt,
+		CriticalCompactionDebtBytes: cfg.Storage.BackpressureCriticalDebt,
+		WarningReadAmp:              cfg.Storage.BackpressureWarningReadAmp,
+		CriticalReadAmp:             cfg.Storage.BackpressureCriticalReadAmp,
+		WarningDelay:                cfg.Storage.BackpressureWarningDelay,
+		CriticalDelay:               cfg.Storage.BackpressureCriticalDelay,
+	}
+}
+
+func streamRetentionFromConfig(cfg config.Config) storage.StreamRetentionOptions {
+	return storage.StreamRetentionOptions{
+		Retention: cfg.Storage.StreamRetention,
+		MaxBytes:  cfg.Storage.StreamRetentionMaxBytes,
+	}
 }
 
 // overlayFlags pushes flag values into the cfg struct. Only non-zero
