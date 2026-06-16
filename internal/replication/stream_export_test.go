@@ -1,4 +1,4 @@
-package raft
+package replication
 
 import (
 	pebbledb "github.com/cockroachdb/pebble"

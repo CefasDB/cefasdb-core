@@ -1,4 +1,4 @@
-package raft_test
+package replication_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/vfs"
 
-	craft "github.com/osvaldoandrade/cefas/internal/raft"
+	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 )
 

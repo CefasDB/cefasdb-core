@@ -1,8 +1,8 @@
-// Package raft replicates cefas writes across a cluster using
+// Package replication replicates cefas writes across a cluster using
 // hashicorp/raft. Every write to storage.DB flows through Replicate as
 // an opaque pebble.Batch.Repr; raft replicates the bytes; followers
 // apply them to their local Pebble via the FSM. Reads stay local.
-package raft
+package replication
 
 import (
 	"fmt"
