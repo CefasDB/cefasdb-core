@@ -84,6 +84,8 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execQuery(p)
 	case *PlanScan:
 		return e.execScan(p)
+	case *PlanJoin:
+		return e.execJoin(p)
 	case *PlanSpatial:
 		return e.execSpatial(p)
 	case *PlanANN:
@@ -520,19 +522,70 @@ func (e *Executor) execScan(p *PlanScan) (*Result, error) {
 		}
 		items = filtered
 	}
-	if p.Limit > 0 && len(items) > p.Limit {
-		items = items[:p.Limit]
-	}
 	if p.Count {
 		return &Result{AffectedRows: len(items)}, nil
 	}
 	if len(p.GroupBy) > 0 {
 		return aggregateRows(items, p.GroupBy, p.Aggs, p.Limit), nil
 	}
+	if p.Limit > 0 && len(items) > p.Limit {
+		items = items[:p.Limit]
+	}
 	if len(p.Project) > 0 {
 		project(items, p.Project)
 	}
 	return &Result{Rows: items}, nil
+}
+
+func (e *Executor) execJoin(p *PlanJoin) (*Result, error) {
+	leftItems, err := e.Storage.ScanTable(p.LeftTable, 0)
+	if err != nil {
+		return nil, err
+	}
+	rightItems, err := e.Storage.ScanTable(p.RightTable, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	rightByKey := make(map[string][]types.Item)
+	for _, right := range rightItems {
+		av, ok := right[p.RightColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		key := joinAttrKey(av)
+		rightByKey[key] = append(rightByKey[key], right)
+	}
+
+	var rows []types.Item
+	for _, left := range leftItems {
+		av, ok := left[p.LeftColumn]
+		if !ok || av.T == types.AttrNull {
+			continue
+		}
+		for _, right := range rightByKey[joinAttrKey(av)] {
+			row := joinItems(p.LeftAlias, left, p.RightAlias, right)
+			if p.Predicate != nil {
+				keep, err := EvalBool(p.Predicate, row, nil)
+				if err != nil {
+					return nil, err
+				}
+				if !keep {
+					continue
+				}
+			}
+			if len(p.Project) > 0 {
+				projected := []types.Item{row}
+				project(projected, p.Project)
+				row = projected[0]
+			}
+			rows = append(rows, row)
+			if p.Limit > 0 && len(rows) >= p.Limit {
+				return &Result{Rows: rows}, nil
+			}
+		}
+	}
+	return &Result{Rows: rows}, nil
 }
 
 func (e *Executor) execSpatial(p *PlanSpatial) (*Result, error) {
@@ -793,13 +846,30 @@ func countAggregate(agg AggregateExpr, it types.Item) bool {
 func groupKey(values []types.AttributeValue) string {
 	var b strings.Builder
 	for _, av := range values {
-		writeAttrGroupKey(&b, av)
+		writeAttrStableKey(&b, av)
 		b.WriteByte('|')
 	}
 	return b.String()
 }
 
-func writeAttrGroupKey(b *strings.Builder, av types.AttributeValue) {
+func joinItems(leftAlias string, left types.Item, rightAlias string, right types.Item) types.Item {
+	out := make(types.Item, len(left)+len(right))
+	for k, v := range left {
+		out[leftAlias+"."+k] = v
+	}
+	for k, v := range right {
+		out[rightAlias+"."+k] = v
+	}
+	return out
+}
+
+func joinAttrKey(av types.AttributeValue) string {
+	var b strings.Builder
+	writeAttrStableKey(&b, av)
+	return b.String()
+}
+
+func writeAttrStableKey(b *strings.Builder, av types.AttributeValue) {
 	b.WriteString(strconv.Itoa(int(av.T)))
 	b.WriteByte(':')
 	switch av.T {
@@ -830,7 +900,7 @@ func writeAttrGroupKey(b *strings.Builder, av types.AttributeValue) {
 		}
 	case types.AttrL:
 		for _, v := range av.L {
-			writeAttrGroupKey(b, v)
+			writeAttrStableKey(b, v)
 			b.WriteByte(',')
 		}
 	case types.AttrM:
@@ -842,7 +912,7 @@ func writeAttrGroupKey(b *strings.Builder, av types.AttributeValue) {
 		for _, k := range keys {
 			b.WriteString(strconv.Quote(k))
 			b.WriteByte('=')
-			writeAttrGroupKey(b, av.M[k])
+			writeAttrStableKey(b, av.M[k])
 			b.WriteByte(',')
 		}
 	case types.AttrVec:
