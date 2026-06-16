@@ -46,6 +46,19 @@ jobs:
           path: cover.out
           if-no-files-found: ignore
 
+  integration:
+    name: integration tests (warn-only — phase 2a)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -tags=integration -race
+        continue-on-error: true
+        run: go test -tags=integration -race -count=1 -timeout=15m ./...
+
   lint:
     name: golangci-lint (warn-only — phase 0a)
     runs-on: ubuntu-latest

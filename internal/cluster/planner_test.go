@@ -16,6 +16,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/spatial"
 	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
@@ -683,15 +684,10 @@ func TestApplyPlacementPreparesSplitWithRaft(t *testing.T) {
 
 func waitShardLeader(t *testing.T, mgr *cluster.Manager, shardID uint32) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	wait.Eventually(t, func() bool {
 		sh, ok := mgr.Shard(shardID)
-		if ok && sh != nil && sh.Raft != nil && sh.Raft.IsLeader() {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("shard %d did not become leader", shardID)
+		return ok && sh != nil && sh.Raft != nil && sh.Raft.IsLeader()
+	}, 5*time.Second, 25*time.Millisecond, "shard %d did not become leader", shardID)
 }
 
 func TestApplyPlacementRejectsBeforeMismatch(t *testing.T) {
