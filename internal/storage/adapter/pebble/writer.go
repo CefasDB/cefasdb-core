@@ -11,45 +11,23 @@ import (
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 
-// PutOptions controls optional behaviour for PutItem-style writes.
-type PutOptions struct {
-	// storage.Condition, when non-empty, is evaluated against the prior item
-	// before the write. If it returns false the write is aborted with
-	// storage.ErrConditionFailed. Empty means "no precondition".
-	Condition string
-	// Binds resolves :name placeholders in storage.Condition.
-	Binds map[string]types.AttributeValue
-}
-
-// DeleteOptions mirrors PutOptions for deletes.
-type DeleteOptions struct {
-	Condition string
-	Binds     map[string]types.AttributeValue
-}
-
-// QueryOptions configures a Query / QueryByGSI call.
-type QueryOptions struct {
-	// SKLow / SKHigh, when their type is not AttrNull, constrain the
-	// sort key to [SKLow, SKHigh).
-	SKLow  types.AttributeValue
-	SKHigh types.AttributeValue
-	// Limit ≤ 0 means no limit.
-	Limit int
-}
-
-// BatchOp describes a single mutation inside a BatchWriteItem call.
-// Exactly one of Item / Key is set; Op selects which.
-type BatchOp struct {
-	Op   BatchOpKind
-	Item types.Item
-	Key  types.Item // for delete: just the key attributes
-}
-
-type BatchOpKind uint8
+// PutOptions / DeleteOptions / QueryOptions / BatchOp / BatchOpKind
+// and the BatchOp kind constants are aliased here so existing
+// `pebble.X` references keep compiling. The canonical declarations
+// live in internal/storage so they can be referenced by the
+// Reader / Writer / Engine boundary interfaces without forcing
+// callers to import the pebble adapter.
+type (
+	PutOptions    = storage.PutOptions
+	DeleteOptions = storage.DeleteOptions
+	QueryOptions  = storage.QueryOptions
+	BatchOp       = storage.BatchOp
+	BatchOpKind   = storage.BatchOpKind
+)
 
 const (
-	BatchOpPut BatchOpKind = iota + 1
-	BatchOpDelete
+	BatchOpPut    = storage.BatchOpPut
+	BatchOpDelete = storage.BatchOpDelete
 )
 
 // extractKeyBytes pulls the canonical serialized PK and SK bytes from an

@@ -23,6 +23,12 @@ type Replicator interface {
 	LeaderHTTPAddr() string
 }
 
+// Compile-time assertion: *DB satisfies the engine boundary
+// declared in internal/storage. Keeping the assertion local to the
+// adapter means a future change to the Reader / Writer interfaces
+// surfaces here at build time, not at the consumer site.
+var _ storage.Engine = (*DB)(nil)
+
 // ErrNotLeader is returned by write APIs when a replicator is attached
 // and this node is not the leader. The concrete value is *NotLeaderError
 // carrying the leader's HTTP URL when known.
