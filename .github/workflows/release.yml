@@ -111,7 +111,7 @@ jobs:
           fi
 
           VERSION="${RELEASE_TAG#v}"
-          cd npm
+          cd dist/npm
           npm version --no-git-tag-version --allow-same-version "$VERSION"
           npm pack --dry-run --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org
           npm publish --access public --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org
