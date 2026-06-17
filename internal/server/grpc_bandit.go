@@ -32,7 +32,7 @@ import (
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
-	"github.com/CefasDb/cefasdb/pkg/plugin/bandit"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/bandit"
 )
 
 // Posterior records live under the cefas internal namespace so they

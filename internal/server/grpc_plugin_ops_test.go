@@ -17,7 +17,7 @@ import (
 
 	// Side-effect imports register the builtin plugins against
 	// plugin.Default so the unsecured fixture surfaces them.
-	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
+	_ "github.com/CefasDb/cefasdb/internal/plugin/builtin/registry"
 )
 
 func putKV(t *testing.T, stub cefaspb.CefasClient, table, pk, attr, val string) {

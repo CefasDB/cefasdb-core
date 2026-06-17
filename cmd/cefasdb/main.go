@@ -34,7 +34,7 @@ import (
 
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
-	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
+	_ "github.com/CefasDb/cefasdb/internal/plugin/builtin/registry"
 )
 
 func main() {

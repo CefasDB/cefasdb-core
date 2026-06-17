@@ -21,8 +21,8 @@ import (
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/core/query/mmr"
-	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
-	"github.com/CefasDb/cefasdb/pkg/plugin/bandit"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/bandit"
 	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )

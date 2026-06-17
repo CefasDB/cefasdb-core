@@ -24,8 +24,8 @@ import (
 	"github.com/CefasDb/cefasdb/internal/core/model"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
-	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
-	"github.com/CefasDb/cefasdb/pkg/plugin/roaring"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/roaring"
 )
 
 // pluginIndexBook is the in-memory descriptor cache for plugin-backed

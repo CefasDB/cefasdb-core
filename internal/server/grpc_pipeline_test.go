@@ -6,8 +6,8 @@ import (
 
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
-	"github.com/CefasDb/cefasdb/pkg/plugin/bandit"
-	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/bandit"
+	_ "github.com/CefasDb/cefasdb/internal/plugin/builtin/registry"
 )
 
 func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {

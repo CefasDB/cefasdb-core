@@ -14,7 +14,7 @@ import (
 	"errors"
 
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
 )
 
 // NewBackend returns an audience.Backend that persists state into

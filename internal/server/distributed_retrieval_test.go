@@ -9,7 +9,7 @@ import (
 	"github.com/CefasDb/cefasdb/internal/placement"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
+	_ "github.com/CefasDb/cefasdb/internal/plugin/builtin/registry"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 

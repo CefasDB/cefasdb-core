@@ -15,8 +15,8 @@ import (
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
-	"github.com/CefasDb/cefasdb/pkg/plugin/cosine"
-	"github.com/CefasDb/cefasdb/pkg/plugin/vectorlsh"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/cosine"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/vectorlsh"
 )
 
 func TestIndexedTopKDoesNotUseExactScanFallback(t *testing.T) {
