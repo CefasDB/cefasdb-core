@@ -17,10 +17,10 @@ x-cefas-build: &cefas-build
   context: ..
   dockerfile: deploy/Dockerfile
   args:
-    VERSION: ${CEFAS_IMAGE_TAG:-0.1.3}
+    VERSION: ${CEFAS_IMAGE_TAG:-latest}
 
 x-cefas-common: &cefas-common
-  image: ghcr.io/cefasdb/cefas:${CEFAS_IMAGE_TAG:-0.1.3}
+  image: ghcr.io/cefasdb/cefasdb:${CEFAS_IMAGE_TAG:-latest}
   environment:
     CEFAS_STORAGE_PROFILE: ${STORAGE_PROFILE:-balanced}
     CEFAS_STORAGE_BACKPRESSURE_ENABLED: ${STORAGE_BACKPRESSURE_ENABLED:-true}
