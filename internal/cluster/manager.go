@@ -51,6 +51,7 @@ type Shard struct {
 	Ranges      []placement.TokenRange
 	Voters      []string
 	NonVoters   []string
+	LeaderHint  string
 	Storage     *pebble.DB
 	RaftStorage *pebble.DB
 	Raft        *craft.DB
@@ -205,13 +206,14 @@ func Open(ctx context.Context, cfg Config) (*Manager, error) {
 	if err := mgr.RefreshPlacement(); err != nil {
 		fmt.Fprintf(cfg.LogOutput, "cluster: placement refresh skipped: %v\n", err)
 	}
+	mgr.startLeaderHintReconciliation()
 	return mgr, nil
 }
 
 func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog, error) {
 	cat, err := placement.LoadPlacementFile(path)
 	if err == nil {
-		return cat, nil
+		return placement.BackfillLeaderHints(cat), nil
 	}
 	if !os.IsNotExist(err) {
 		return placement.PlacementCatalog{}, err
@@ -224,7 +226,7 @@ func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog,
 	if err := placement.SavePlacementFile(path, cat); err != nil {
 		return placement.PlacementCatalog{}, err
 	}
-	return cat, nil
+	return placement.BackfillLeaderHints(cat), nil
 }
 
 func hasExistingShardState(root string) bool {
@@ -277,13 +279,14 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
 		// Single-node mode (no raft). The pebble.DB stands alone.
 		return &Shard{
-			ID:        shardID,
-			State:     meta.State,
-			Epoch:     meta.Epoch,
-			Ranges:    append([]placement.TokenRange(nil), meta.Ranges...),
-			Voters:    append([]string(nil), meta.Voters...),
-			NonVoters: append([]string(nil), meta.NonVoters...),
-			Storage:   st,
+			ID:         shardID,
+			State:      meta.State,
+			Epoch:      meta.Epoch,
+			Ranges:     append([]placement.TokenRange(nil), meta.Ranges...),
+			Voters:     append([]string(nil), meta.Voters...),
+			NonVoters:  append([]string(nil), meta.NonVoters...),
+			LeaderHint: meta.LeaderHint,
+			Storage:    st,
 		}, nil
 	}
 
@@ -347,6 +350,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Ranges:      append([]placement.TokenRange(nil), meta.Ranges...),
 		Voters:      append([]string(nil), meta.Voters...),
 		NonVoters:   append([]string(nil), meta.NonVoters...),
+		LeaderHint:  meta.LeaderHint,
 		Storage:     st,
 		RaftStorage: raftStore,
 		Raft:        rdb,
@@ -645,6 +649,7 @@ func (m *Manager) applyPlacement(cat placement.PlacementCatalog, save bool) erro
 		sh.Ranges = append([]placement.TokenRange(nil), meta.Ranges...)
 		sh.Voters = append([]string(nil), meta.Voters...)
 		sh.NonVoters = append([]string(nil), meta.NonVoters...)
+		sh.LeaderHint = meta.LeaderHint
 	}
 	path := m.placementPath
 	snapshot := m.cat.Clone()

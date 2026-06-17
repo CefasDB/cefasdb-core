@@ -459,6 +459,36 @@ func (d *DB) RemoveServer(id string, timeout time.Duration) error {
 	return f.Error()
 }
 
+// TransferLeadership asks the local leader to hand leadership to the
+// supplied voter. It is a no-op when the requested target is this node.
+func (d *DB) TransferLeadership(id, addr string, timeout time.Duration) error {
+	if d == nil || d.raft == nil {
+		return fmt.Errorf("raft: not initialised")
+	}
+	if id == "" || addr == "" {
+		return fmt.Errorf("raft: leadership transfer target id and addr are required")
+	}
+	if id == d.cfg.SelfID {
+		return nil
+	}
+	if !d.IsLeader() {
+		return ErrNotLeader
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- d.raft.LeadershipTransferToServer(hraft.ServerID(id), hraft.ServerAddress(addr)).Error()
+	}()
+	if timeout <= 0 {
+		return <-done
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("raft: leadership transfer to %s timed out after %s", id, timeout)
+	}
+}
+
 // Barrier waits for all currently-committed log entries to be applied
 // on this node. Used by tests that need a quiescent state, and by the
 // strong-consistency read path in the storage layer.
