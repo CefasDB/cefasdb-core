@@ -207,7 +207,7 @@ Ports:
 - `9091`: Prometheus
 - `3000`: Grafana, default login `admin` / `admin`
 
-Kubernetes deployment files live under `deploy/helm/cefas`.
+Kubernetes deployment files live under `dist/helm/cefas`.
 
 ## Configuration
 
@@ -397,7 +397,7 @@ go build ./cmd/cefasctl
 ```
 
 Releases are produced by GitHub Actions. The release workflow builds the CLI,
-publishes GitHub Release assets, and publishes the npm package from `npm/`.
+publishes GitHub Release assets, and publishes the npm package from `dist/npm/`.
 
 ## License
 

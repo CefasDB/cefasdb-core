@@ -28,5 +28,5 @@ exclude:
     - \.pb\.go$
     - _test\.go$
     - ^third_party/
-    - ^npm/
+    - ^dist/npm/
     - ^deploy/
