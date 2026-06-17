@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/osvaldoandrade/cefas/internal/api"
+	apiserver "github.com/osvaldoandrade/cefas/internal/server"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 )
 
@@ -55,7 +55,7 @@ func BuildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grp
 			"/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo": true,
 			"/cefas.v1.Cefas/ClusterStatus":                                  true,
 		}
-		unary, stream := api.AuthInterceptor(v, skip)
+		unary, stream := apiserver.AuthInterceptor(v, skip)
 		if unary != nil {
 			opts = append(opts, grpc.UnaryInterceptor(unary))
 		}

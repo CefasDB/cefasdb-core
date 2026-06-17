@@ -7,7 +7,7 @@ package server
 import (
 	"context"
 
-	"github.com/osvaldoandrade/cefas/internal/api"
+	apiserver "github.com/osvaldoandrade/cefas/internal/server"
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 )
 
@@ -36,21 +36,21 @@ func NewStreamAdapter(raftDB *craft.DB) *StreamAdapter {
 	return &StreamAdapter{raft: raftDB}
 }
 
-// SubscribeChanges implements api.ChangeStream. It fans the raft
+// SubscribeChanges implements apiserver.ChangeStream. It fans the raft
 // publisher's events through a buffered channel and translates the
 // raft ChangeOp enum into the wire string ("PUT" / "DELETE").
-func (a *StreamAdapter) SubscribeChanges(ctx context.Context) (<-chan api.ChangeEvent, func()) {
+func (a *StreamAdapter) SubscribeChanges(ctx context.Context) (<-chan apiserver.ChangeEvent, func()) {
 	var pub *craft.Publisher
 	if a != nil && a.raft != nil {
 		pub = a.raft.Publisher()
 	}
 	if pub == nil {
-		out := make(chan api.ChangeEvent)
+		out := make(chan apiserver.ChangeEvent)
 		close(out)
 		return out, func() {}
 	}
 	src, cancel := pub.Subscribe(ctx)
-	out := make(chan api.ChangeEvent, 64)
+	out := make(chan apiserver.ChangeEvent, 64)
 	go func() {
 		defer close(out)
 		for ev := range src {
@@ -59,7 +59,7 @@ func (a *StreamAdapter) SubscribeChanges(ctx context.Context) (<-chan api.Change
 				op = "DELETE"
 			}
 			select {
-			case out <- api.ChangeEvent{RaftIndex: ev.RaftIndex, Op: op, Key: ev.Key, Value: ev.Value}:
+			case out <- apiserver.ChangeEvent{RaftIndex: ev.RaftIndex, Op: op, Key: ev.Key, Value: ev.Value}:
 			case <-ctx.Done():
 				return
 			}
@@ -68,9 +68,9 @@ func (a *StreamAdapter) SubscribeChanges(ctx context.Context) (<-chan api.Change
 	return out, cancel
 }
 
-// ListSnapshots implements api.ChangeStream by projecting the raft
+// ListSnapshots implements apiserver.ChangeStream by projecting the raft
 // SnapshotMetadata onto the api-side mirror type.
-func (a *StreamAdapter) ListSnapshots() ([]api.SnapshotMetadata, error) {
+func (a *StreamAdapter) ListSnapshots() ([]apiserver.SnapshotMetadata, error) {
 	if a == nil || a.raft == nil {
 		return nil, nil
 	}
@@ -78,9 +78,9 @@ func (a *StreamAdapter) ListSnapshots() ([]api.SnapshotMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]api.SnapshotMetadata, 0, len(metas))
+	out := make([]apiserver.SnapshotMetadata, 0, len(metas))
 	for _, m := range metas {
-		out = append(out, api.SnapshotMetadata{
+		out = append(out, apiserver.SnapshotMetadata{
 			ID:        m.ID,
 			Index:     m.Index,
 			Term:      m.Term,

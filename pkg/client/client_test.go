@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/server"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	"github.com/osvaldoandrade/cefas/internal/metrics"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
@@ -44,7 +44,7 @@ func newFixture(t *testing.T) (*client.Client, *fixture) {
 		t.Fatalf("listen: %v", err)
 	}
 	gsrv := grpc.NewServer()
-	apiSrv := api.NewGRPCServer(db, cat, nil)
+	apiSrv := server.NewGRPCServer(db, cat, nil)
 	apiSrv.AttachMetrics(metrics.New())
 	apiSrv.AttachBackupScheduler(pebble.NewScheduledBackupRunner(db, pebble.ScheduledBackupConfig{
 		Enabled:      true,

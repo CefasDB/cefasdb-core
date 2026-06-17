@@ -1,0 +1,120 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/osvaldoandrade/cefas/internal/tracing"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/pkg/types"
+)
+
+func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRequest) (*cefaspb.ListStreamsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "ListStreams")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	streams, err := s.cat.ListStreams(req.GetTableName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	page, lastEvaluated, err := PaginateStreamDescriptors(
+		streams,
+		NormalizeStreamAPILimit(req.GetLimit()),
+		req.GetExclusiveStartStreamArn(),
+	)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	resp := &cefaspb.ListStreamsResponse{
+		LastEvaluatedStreamArn: lastEvaluated,
+	}
+	for _, stream := range page {
+		resp.Streams = append(resp.Streams, streamSummaryToPB(stream))
+	}
+	return resp, nil
+}
+
+func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeStreamRequest) (*cefaspb.DescribeStreamResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "DescribeStream")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	if req.GetStreamArn() == "" {
+		return nil, status.Error(codes.InvalidArgument, "stream_arn required")
+	}
+	desc, err := s.cat.DescribeStream(req.GetStreamArn())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	shards, lastEvaluated, err := PaginateStreamShards(
+		desc.Shards,
+		NormalizeStreamAPILimit(req.GetLimit()),
+		req.GetExclusiveStartShardId(),
+	)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	desc.Shards = shards
+	out := streamDescriptionToPB(desc)
+	out.LastEvaluatedShardId = lastEvaluated
+	return &cefaspb.DescribeStreamResponse{StreamDescription: out}, nil
+}
+
+func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShardIteratorRequest) (*cefaspb.GetShardIteratorResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetShardIterator")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	shardID, err := model.NewStreamShardID(req.GetShardId())
+	if err != nil {
+		err = fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+		s.observeStreamIteratorFailure(StreamTableForARN(s.cat, req.GetStreamArn()), err)
+		return nil, mapStorageErr(err)
+	}
+	token, err := CreateStreamShardIterator(s.cat, s.db, CreateIteratorRequest{
+		StreamArn:      req.GetStreamArn(),
+		ShardID:        shardID,
+		IteratorType:   req.GetShardIteratorType(),
+		SequenceNumber: req.GetSequenceNumber(),
+	}, time.Now())
+	if err != nil {
+		s.observeStreamIteratorFailure(StreamTableForARN(s.cat, req.GetStreamArn()), err)
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.GetShardIteratorResponse{ShardIterator: token}, nil
+}
+
+func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequest) (*cefaspb.GetRecordsResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "GetRecords")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
+		return nil, err
+	}
+	result, err := GetStreamRecords(
+		s.cat,
+		s.db,
+		req.GetShardIterator(),
+		req.GetLimit(),
+		time.Now(),
+	)
+	if err != nil {
+		s.observeStreamGetRecords(result, err)
+		return nil, mapStorageErr(err)
+	}
+	s.observeStreamGetRecords(result, nil)
+	resp := &cefaspb.GetRecordsResponse{NextShardIterator: result.NextShardIterator}
+	for _, record := range result.Records {
+		resp.Records = append(resp.Records, streamRecordToPB(record))
+	}
+	return resp, nil
+}

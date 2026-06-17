@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/server"
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	bootstrapserver "github.com/osvaldoandrade/cefas/internal/bootstrap/server"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
@@ -310,7 +310,7 @@ func main() {
 	backupScheduler := pebble.NewScheduledBackupRunner(db, bootstrapserver.ScheduledBackupConfig(cfg, prom, logf))
 
 	mux := http.NewServeMux()
-	apiSrv := api.New(db, cat)
+	apiSrv := server.New(db, cat)
 	if raftDB != nil {
 		apiSrv.AttachCluster(raftDB)
 		// Wire the CDC publisher + stream adapter so /v1/Stream
@@ -389,7 +389,7 @@ func main() {
 			os.Exit(1)
 		}
 		gsrv = grpc.NewServer(opts...)
-		var clu api.Cluster
+		var clu server.Cluster
 		if raftDB != nil {
 			clu = raftDB
 		} else if mgr != nil {
@@ -397,7 +397,7 @@ func main() {
 				clu = sh.Raft
 			}
 		}
-		gsrvImpl := api.NewGRPCServer(db, cat, clu)
+		gsrvImpl := server.NewGRPCServer(db, cat, clu)
 		if mgr != nil {
 			gsrvImpl.AttachManager(mgr)
 		}
@@ -409,7 +409,7 @@ func main() {
 			gsrvImpl.AttachChangeStream(bootstrapserver.NewStreamAdapter(raftDB))
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
-		api.RegisterAtomic(gsrv, gsrvImpl)
+		server.RegisterAtomic(gsrv, gsrvImpl)
 		if cfg.GRPC.Reflection {
 			reflection.Register(gsrv)
 		}
