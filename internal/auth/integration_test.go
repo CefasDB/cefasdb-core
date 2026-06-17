@@ -14,7 +14,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/auth"
 )
 
 // mockJWKS spins up an HTTP server that serves an RSA public key as

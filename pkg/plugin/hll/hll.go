@@ -14,8 +14,8 @@ import (
 	"math/bits"
 	"sync"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // hllSeed is the process-stable seed every Observe call hashes with.

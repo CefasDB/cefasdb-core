@@ -12,7 +12,7 @@ and **PR 6** (protocol/API cleanup).
 ## Audit results
 
 In-repo importer counts measured with
-`grep -rln '"github.com/osvaldoandrade/cefas/<pkg>"' --include="*.go" .`
+`grep -rln '"github.com/CefasDb/cefasdb/<pkg>"' --include="*.go" .`
 on commit `9af22a9` (post PR 3).
 
 ### Top-level `pkg/`

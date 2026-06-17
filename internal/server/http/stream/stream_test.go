@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	streamhttp "github.com/osvaldoandrade/cefas/internal/server/http/stream"
-	"github.com/osvaldoandrade/cefas/internal/server/streamcore"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	streamhttp "github.com/CefasDb/cefasdb/internal/server/http/stream"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // newHandlers spins up a tempdir-backed storage + catalog and returns

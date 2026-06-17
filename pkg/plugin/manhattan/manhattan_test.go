@@ -3,8 +3,8 @@ package manhattan_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/manhattan"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/manhattan"
 )
 
 func vec(xs ...string) model.AttributeValue {

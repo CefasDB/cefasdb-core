@@ -8,14 +8,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/placement"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/internal/core/index"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 const annVectorBind = ":vector"

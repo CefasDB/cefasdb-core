@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // translateUpdateItem turns an aws-shaped UpdateItem request into a

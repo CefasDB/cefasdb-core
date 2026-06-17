@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/server"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/server"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/placement"
 )
 
 func TestHTTPPlacementPlanSplit(t *testing.T) {

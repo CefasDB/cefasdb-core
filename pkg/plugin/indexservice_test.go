@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 type recIndexPlugin struct {

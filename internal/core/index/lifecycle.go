@@ -1,6 +1,6 @@
 package index
 
-import "github.com/osvaldoandrade/cefas/internal/core/model"
+import "github.com/CefasDb/cefasdb/internal/core/model"
 
 // Descriptor names an index and points at the plugin that owns it.
 // PluginName is "" for built-in (GSI / LSI / spatial) indexes.

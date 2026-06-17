@@ -7,10 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/server"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/server"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestHTTPRestoreTableFromBackupDryRun(t *testing.T) {

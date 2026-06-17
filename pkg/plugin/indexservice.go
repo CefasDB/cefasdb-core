@@ -3,8 +3,8 @@ package plugin
 import (
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
 )
 
 // ItemSource is a pull iterator over the base table. The IndexService

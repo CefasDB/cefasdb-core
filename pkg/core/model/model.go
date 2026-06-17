@@ -1,14 +1,14 @@
 // Package model is a deprecated public-API shim that re-exports
 // every symbol from internal/core/model.
 //
-// Deprecated: import "github.com/osvaldoandrade/cefas/internal/core/model"
+// Deprecated: import "github.com/CefasDb/cefasdb/internal/core/model"
 // directly. This shim exists so external code that imported the
 // public path before the PR 5 carve-out keeps building during a
 // migration window. It will be removed in a future minor release.
 package model
 
 import (
-	internalmodel "github.com/osvaldoandrade/cefas/internal/core/model"
+	internalmodel "github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // Value-object IDs.

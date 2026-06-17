@@ -8,12 +8,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // awsTransactLimit mirrors DynamoDB's hard cap on a single transaction.

@@ -20,11 +20,11 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/server"
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
+	"github.com/CefasDb/cefasdb/internal/server"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 // mockJWKS exposes an RSA public key as JWKS for the gRPC interceptor

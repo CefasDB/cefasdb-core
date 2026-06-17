@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/geohash"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/hll"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
+	"github.com/CefasDb/cefasdb/pkg/plugin/geohash"
+	"github.com/CefasDb/cefasdb/pkg/plugin/hll"
 )
 
 func storeItem(pk string, lat, lon float64) model.Item {

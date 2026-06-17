@@ -3,8 +3,8 @@ package distancecontract_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
 )
 
 // fakeOp is a hand-rolled DistanceOp that returns a constant 0 for

@@ -10,8 +10,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // EarthRadiusMeters is the WGS-84 mean Earth radius.

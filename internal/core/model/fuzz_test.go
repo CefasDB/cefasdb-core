@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // FuzzShardID exercises NewShardID + (*ShardID).UnmarshalText and the

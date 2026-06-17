@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/testharness"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/trigram"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/testharness"
+	"github.com/CefasDb/cefasdb/pkg/plugin/trigram"
 )
 
 func item(pk, name string) model.Item {

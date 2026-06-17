@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/internal/vecattr"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/internal/vecattr"
 )
 
 type Op struct{}

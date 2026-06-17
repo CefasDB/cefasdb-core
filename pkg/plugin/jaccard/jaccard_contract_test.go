@@ -3,8 +3,8 @@ package jaccard_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/jaccard"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/jaccard"
 )
 
 func TestDistanceContract(t *testing.T) {

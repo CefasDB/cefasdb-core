@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cms"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cms"
 )
 
 func TestFrequencyIsAtLeastTrue(t *testing.T) {

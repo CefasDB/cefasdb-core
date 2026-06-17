@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/internal/core/query/mmr"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cosine"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/query/mmr"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cosine"
 )
 
 // vec wraps a float slice in a model.AttributeValue carrying AttrVec.

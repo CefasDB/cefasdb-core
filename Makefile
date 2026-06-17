@@ -1,4 +1,4 @@
-MODULE := github.com/osvaldoandrade/cefas
+MODULE := github.com/CefasDb/cefasdb
 COVERAGE_FILE := cover.out
 GOBIN := $(shell go env GOPATH)/bin
 

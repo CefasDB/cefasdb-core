@@ -9,12 +9,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/internal/core/index"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 func TestPluginIndexMaintenanceCallsPluginForWritePaths(t *testing.T) {

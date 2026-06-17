@@ -8,10 +8,10 @@ package server
 import (
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/rebalance"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/metrics"
+	"github.com/CefasDb/cefasdb/internal/rebalance"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/config"
 )
 
 // StorageOptions assembles the pebble.Options struct that pebble.Open

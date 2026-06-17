@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
-	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/bandit"
+	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
 )
 
 func TestRecommendMatchesManualTopKPlusRerank(t *testing.T) {

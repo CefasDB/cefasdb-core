@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/geohash"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/haversine"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/hll"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/internal/pkid"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/geohash"
+	"github.com/CefasDb/cefasdb/pkg/plugin/haversine"
+	"github.com/CefasDb/cefasdb/pkg/plugin/hll"
+	"github.com/CefasDb/cefasdb/pkg/plugin/internal/pkid"
 )
 
 // IndexBinding tells Select which geohash index to read. Callers set

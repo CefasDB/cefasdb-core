@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/hamming"
+	"github.com/CefasDb/cefasdb/pkg/plugin/hamming"
 )
 
 // Property tests for the Hamming distance plugin.

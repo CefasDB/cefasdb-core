@@ -12,12 +12,12 @@ The repository ships two main binaries:
 
 Long-form documentation lives in the GitHub Wiki.
 
-- [Wiki Home](https://github.com/osvaldoandrade/cefas/wiki)
-- [Get Started](https://github.com/osvaldoandrade/cefas/wiki/Get-Started-Overview)
-- [Concepts and Architecture](https://github.com/osvaldoandrade/cefas/wiki/Concepts-Overview)
-- [Plugins and Extensions](https://github.com/osvaldoandrade/cefas/wiki/Plugins-Overview)
-- [Interfaces](https://github.com/osvaldoandrade/cefas/wiki/Interfaces-Overview)
-- [Operations](https://github.com/osvaldoandrade/cefas/wiki/Operations-Overview)
+- [Wiki Home](https://github.com/CefasDb/cefasdb/wiki)
+- [Get Started](https://github.com/CefasDb/cefasdb/wiki/Get-Started-Overview)
+- [Concepts and Architecture](https://github.com/CefasDb/cefasdb/wiki/Concepts-Overview)
+- [Plugins and Extensions](https://github.com/CefasDb/cefasdb/wiki/Plugins-Overview)
+- [Interfaces](https://github.com/CefasDb/cefasdb/wiki/Interfaces-Overview)
+- [Operations](https://github.com/CefasDb/cefasdb/wiki/Operations-Overview)
 - [DynamoDB Streams Compatibility](docs/dynamodb-streams.md)
 
 ## What It Does

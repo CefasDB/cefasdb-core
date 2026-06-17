@@ -3,14 +3,14 @@
   "version": "0.1.3",
   "description": "cefas CLI (installs a prebuilt Go binary from GitHub Releases)",
   "license": "MIT",
-  "homepage": "https://github.com/osvaldoandrade/cefas#readme",
+  "homepage": "https://github.com/CefasDb/cefasdb#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/osvaldoandrade/cefas.git",
+    "url": "git+https://github.com/CefasDb/cefasdb.git",
     "directory": "npm"
   },
   "bugs": {
-    "url": "https://github.com/osvaldoandrade/cefas/issues"
+    "url": "https://github.com/CefasDb/cefasdb/issues"
   },
   "bin": {
     "cefas": "bin/cefas.js"

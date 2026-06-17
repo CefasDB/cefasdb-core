@@ -3,7 +3,7 @@ package server
 import (
 	"errors"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // observeStreamIteratorFailure and observeStreamGetRecords are the

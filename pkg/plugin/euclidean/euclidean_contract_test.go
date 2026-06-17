@@ -3,8 +3,8 @@ package euclidean_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/euclidean"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/euclidean"
 )
 
 func TestDistanceContract(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 var simpleNumberRE = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)

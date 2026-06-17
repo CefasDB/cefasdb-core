@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
-	"github.com/osvaldoandrade/cefas/pkg/client"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func registerCreateIndex(root *cobra.Command) {

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestRoundTripScalars(t *testing.T) {

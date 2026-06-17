@@ -18,11 +18,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // AtomicServer implements cefaspb.CefasAtomicServer over the same

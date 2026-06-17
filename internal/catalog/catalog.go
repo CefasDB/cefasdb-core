@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog/domain"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/catalog/domain"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 type Catalog struct {

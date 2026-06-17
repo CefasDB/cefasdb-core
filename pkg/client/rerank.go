@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // RerankCandidate is one input row to Rerank. Distance is the

@@ -3,8 +3,8 @@ package damerau_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/damerau"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/damerau"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
 )
 
 func TestDistanceContract(t *testing.T) {

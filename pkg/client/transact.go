@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // TransactKind selects the wire op for a TransactWriteOp.

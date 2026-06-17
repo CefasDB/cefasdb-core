@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // initBernoulli wires three Beta-Bernoulli arms with the given true

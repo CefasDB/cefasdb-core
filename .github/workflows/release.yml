@@ -61,7 +61,7 @@ jobs:
               echo "Building cefasctl $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
-                -ldflags "-s -w -X github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd.Version=${VERSION}" \
+                -ldflags "-s -w -X github.com/CefasDb/cefasdb/cmd/cefasctl/cmd.Version=${VERSION}" \
                 -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
                 ./cmd/cefasctl
               echo "Building cefasdb $GOOS/$GOARCH"

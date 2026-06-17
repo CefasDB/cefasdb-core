@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // Storage families and strategy names — exported so callers (gRPC

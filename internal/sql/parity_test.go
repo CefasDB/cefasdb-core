@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func mustExec(t *testing.T, ex *cefassql.Executor, cat *catalog.Catalog, src string) *cefassql.Result {

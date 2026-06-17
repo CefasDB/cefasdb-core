@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/jaccard"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/jaccard"
 )
 
 func ss(v ...string) model.AttributeValue { return model.AttributeValue{T: model.AttrSS, SS: v} }

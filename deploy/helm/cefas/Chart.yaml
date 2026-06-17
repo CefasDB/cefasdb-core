@@ -4,8 +4,8 @@ description: cefas — distributed multi-model database with native spatial inde
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-home: https://github.com/osvaldoandrade/cefas
+home: https://github.com/CefasDb/cefasdb
 sources:
-  - https://github.com/osvaldoandrade/cefas
+  - https://github.com/CefasDb/cefasdb
 maintainers:
   - name: osvaldoandrade

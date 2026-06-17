@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/audiencestore"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
+	"github.com/CefasDb/cefasdb/internal/audiencestore"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
 )
 
 func mustDurable(t *testing.T, id string, be audience.Backend, now func() time.Time) *audience.Store {

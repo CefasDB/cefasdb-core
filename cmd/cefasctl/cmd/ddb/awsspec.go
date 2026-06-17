@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // parseKV parses a comma-separated `Key=Value,Key=Value` shorthand

@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/haversine"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/haversine"
 )
 
 func loc(lat, lon string) model.AttributeValue {

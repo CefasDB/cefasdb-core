@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 func TestTransactWriteItemsAppliesPutAndDelete(t *testing.T) {

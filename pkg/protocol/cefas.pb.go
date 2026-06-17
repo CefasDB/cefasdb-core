@@ -14,12 +14,11 @@
 package cefaspb
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -13138,7 +13137,7 @@ const file_cefas_proto_rawDesc = "" +
 	"\fBanditReward\x12\x1d.cefas.v1.BanditRewardRequest\x1a\x1e.cefas.v1.BanditRewardResponse\x12S\n" +
 	"\x0eBanditDescribe\x12\x1f.cefas.v1.BanditDescribeRequest\x1a .cefas.v1.BanditDescribeResponse2\\\n" +
 	"\vCefasAtomic\x12M\n" +
-	"\fAtomicUpdate\x12\x1d.cefas.v1.AtomicUpdateRequest\x1a\x1e.cefas.v1.AtomicUpdateResponseB7Z5github.com/osvaldoandrade/cefas/pkg/api/proto;cefaspbb\x06proto3"
+	"\fAtomicUpdate\x12\x1d.cefas.v1.AtomicUpdateRequest\x1a\x1e.cefas.v1.AtomicUpdateResponseB1Z/github.com/CefasDb/cefasdb/pkg/protocol;cefaspbb\x06proto3"
 
 var (
 	file_cefas_proto_rawDescOnce sync.Once

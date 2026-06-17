@@ -8,15 +8,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/server/http/httpx"
-	"github.com/osvaldoandrade/cefas/internal/server/streamcore"
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/tracing"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // ChangeStream is the CDC subset the SSE /v1/Stream handler needs.

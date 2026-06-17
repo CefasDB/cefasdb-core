@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 )
 
 const DefaultScheduledBackupNameTemplate = "scheduled-{{timestamp}}"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 )
 
 type CompactionResult struct {

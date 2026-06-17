@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/hll"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/hll"
 )
 
 func TestEstimateWithinErrorBound(t *testing.T) {

@@ -1,6 +1,6 @@
 package ttl
 
-import "github.com/osvaldoandrade/cefas/internal/core/model"
+import "github.com/CefasDb/cefasdb/internal/core/model"
 
 // Observer is notified whenever the reaper removes an expired row.
 // Implementations must be cheap + non-blocking — the reaper does not

@@ -3,7 +3,7 @@ package ddb
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestParseStreamSpecificationEnabledWithViewType(t *testing.T) {

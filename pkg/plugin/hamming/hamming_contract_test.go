@@ -3,8 +3,8 @@ package hamming_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/hamming"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/hamming"
 )
 
 func TestDistanceContract(t *testing.T) {

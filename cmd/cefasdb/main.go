@@ -19,22 +19,22 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/osvaldoandrade/cefas/internal/server"
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	bootstrapserver "github.com/osvaldoandrade/cefas/internal/bootstrap/server"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/rebalance"
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/server"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	bootstrapserver "github.com/CefasDb/cefasdb/internal/bootstrap/server"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/metrics"
+	"github.com/CefasDb/cefasdb/internal/rebalance"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/config"
 
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
-	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
+	_ "github.com/CefasDb/cefasdb/pkg/plugin/builtins"
 )
 
 func main() {

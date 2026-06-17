@@ -13,8 +13,8 @@ package audiencestore
 import (
 	"errors"
 
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
 )
 
 // NewBackend returns an audience.Backend that persists state into

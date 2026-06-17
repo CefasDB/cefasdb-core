@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 )

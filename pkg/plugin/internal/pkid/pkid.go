@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
 )
 
 // Of returns the string id of `item` under ks. Combines PK with SK

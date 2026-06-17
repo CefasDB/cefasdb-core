@@ -22,8 +22,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/core/query"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/core/query"
 )
 
 // Case is one (a, b) input pair the contract uses to exercise the

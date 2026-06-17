@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/placement"
 )
 
 // TestRouterReturnsErrorForUncoveredToken pins the post-panic

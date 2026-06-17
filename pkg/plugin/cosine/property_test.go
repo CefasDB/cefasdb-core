@@ -7,7 +7,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cosine"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cosine"
 )
 
 // Property tests for the cosine distance plugin.

@@ -3,8 +3,8 @@ package cosine_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cosine"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cosine"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
 )
 
 func TestDistanceContract(t *testing.T) {

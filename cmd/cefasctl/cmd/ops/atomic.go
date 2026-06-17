@@ -14,12 +14,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/clicfg"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
-	"github.com/osvaldoandrade/cefas/pkg/client"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/clicfg"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func registerAtomic(root *cobra.Command) {

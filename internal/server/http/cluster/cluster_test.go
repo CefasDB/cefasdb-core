@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	clusterhttp "github.com/osvaldoandrade/cefas/internal/server/http/cluster"
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/placement"
+	clusterhttp "github.com/CefasDb/cefasdb/internal/server/http/cluster"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/placement"
 )
 
 // stubCluster is the minimal Cluster surface the package needs. It

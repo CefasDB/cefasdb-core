@@ -3,8 +3,8 @@ package condition_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/condition"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/condition"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // A trivial in-memory evaluator proves the interface is satisfiable

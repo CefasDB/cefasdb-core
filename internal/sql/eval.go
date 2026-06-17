@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // EvalBool evaluates a boolean expression against an item. Used both

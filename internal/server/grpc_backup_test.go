@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

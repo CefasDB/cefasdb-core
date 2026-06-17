@@ -5,11 +5,11 @@ import (
 	"math/bits"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/simhash"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/testharness"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/simhash"
+	"github.com/CefasDb/cefasdb/pkg/plugin/testharness"
 )
 
 func item(pk, body string) model.Item {

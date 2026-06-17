@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Item binary format (TLV, big-endian):

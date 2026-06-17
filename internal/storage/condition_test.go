@@ -3,7 +3,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestConditionEvaluate(t *testing.T) {

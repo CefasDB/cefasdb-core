@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
+	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
 )
 
 // Benchmarks exist so the PR can justify the "≤2x slowdown" target

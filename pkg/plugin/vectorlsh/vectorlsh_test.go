@@ -4,11 +4,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/testharness"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/vectorlsh"
+	"github.com/CefasDb/cefasdb/pkg/core/index"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/testharness"
+	"github.com/CefasDb/cefasdb/pkg/plugin/vectorlsh"
 )
 
 func vec(pk string, xs ...float64) model.Item {

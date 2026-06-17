@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // EligibilityRequest packs the per-(campaign, user) check into a

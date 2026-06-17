@@ -3,8 +3,8 @@ package haversine_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/haversine"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/haversine"
 )
 
 func TestDistanceContract(t *testing.T) {

@@ -3,8 +3,8 @@ package manhattan_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/distancecontract"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/manhattan"
+	"github.com/CefasDb/cefasdb/pkg/plugin/distancecontract"
+	"github.com/CefasDb/cefasdb/pkg/plugin/manhattan"
 )
 
 func TestDistanceContract(t *testing.T) {

@@ -1,6 +1,6 @@
 package model
 
-import "github.com/osvaldoandrade/cefas/pkg/types"
+import "github.com/CefasDb/cefasdb/pkg/types"
 
 // Item is a row's attribute map.
 type Item = types.Item

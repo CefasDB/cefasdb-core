@@ -6,11 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/fileloader"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/fileloader"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 )
 
 func registerExecuteStatement(root *cobra.Command) {

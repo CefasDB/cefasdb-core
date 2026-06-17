@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // PartiQLParameter is the wire shape of a parameter on the AWS

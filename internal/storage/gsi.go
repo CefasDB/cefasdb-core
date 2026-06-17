@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // IndexOp is one mutation against a secondary-index keyspace. The

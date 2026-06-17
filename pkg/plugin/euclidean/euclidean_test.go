@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/euclidean"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/euclidean"
 )
 
 func vec(xs ...string) model.AttributeValue {

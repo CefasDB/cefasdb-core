@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 var (

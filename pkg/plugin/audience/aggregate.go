@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
 )
 
 // AggregateSpec describes one aggregation. GroupBy names the

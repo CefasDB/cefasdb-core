@@ -25,10 +25,10 @@ func TestCoreHasNoEngineImports(t *testing.T) {
 	}
 
 	forbidden := []string{
-		"github.com/osvaldoandrade/cefas/internal/",
-		"github.com/osvaldoandrade/cefas/internal/server",
-		"github.com/osvaldoandrade/cefas/internal/sql",
-		"github.com/osvaldoandrade/cefas/pkg/client",
+		"github.com/CefasDb/cefasdb/internal/",
+		"github.com/CefasDb/cefasdb/internal/server",
+		"github.com/CefasDb/cefasdb/internal/sql",
+		"github.com/CefasDb/cefasdb/pkg/client",
 	}
 
 	// Deprecated migration shims are allowed to bridge to their

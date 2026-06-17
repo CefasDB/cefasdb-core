@@ -1,6 +1,6 @@
 package query
 
-import "github.com/osvaldoandrade/cefas/internal/core/model"
+import "github.com/CefasDb/cefasdb/internal/core/model"
 
 // Statement is whatever the front-end (SQL parser, structured API,
 // CLI) hands the planner. The opaque interface lets the planner

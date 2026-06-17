@@ -3,7 +3,7 @@ package runner
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestMakeItemKeyRoundTrip(t *testing.T) {

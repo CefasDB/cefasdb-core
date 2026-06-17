@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
-	"github.com/osvaldoandrade/cefas/internal/routing"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
+	"github.com/CefasDb/cefasdb/internal/routing"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 // ShardConfig configures a single shard's storage + raft. Most fields

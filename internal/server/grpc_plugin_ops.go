@@ -16,16 +16,16 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/internal/core/index"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/audience"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/roaring"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin/audience"
+	"github.com/CefasDb/cefasdb/pkg/plugin/roaring"
 )
 
 // pluginIndexBook is the in-memory descriptor cache for plugin-backed

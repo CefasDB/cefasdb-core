@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/fileloader"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/fileloader"
 )
 
 func TestLoadInline(t *testing.T) {

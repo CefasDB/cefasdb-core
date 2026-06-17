@@ -9,8 +9,8 @@ package hamming
 import (
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // Op satisfies plugin.DistancePlugin.

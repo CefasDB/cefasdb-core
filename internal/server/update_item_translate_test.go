@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestSubstituteNamesAndValues(t *testing.T) {

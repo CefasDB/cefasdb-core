@@ -9,8 +9,8 @@ import (
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/vfs"
 
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
-	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
+	"github.com/CefasDb/cefasdb/internal/testutil/wait"
 )
 
 // openMemDB returns a fresh in-memory Pebble store so the test can

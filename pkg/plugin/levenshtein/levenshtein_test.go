@@ -3,8 +3,8 @@ package levenshtein_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/levenshtein"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/levenshtein"
 )
 
 func s(v string) model.AttributeValue { return model.AttributeValue{T: model.AttrS, S: v} }

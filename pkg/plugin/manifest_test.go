@@ -3,7 +3,7 @@ package plugin_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 func TestManifestKindString(t *testing.T) {

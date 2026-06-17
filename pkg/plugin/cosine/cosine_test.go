@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cosine"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cosine"
 )
 
 func vec(xs ...float64) model.AttributeValue {

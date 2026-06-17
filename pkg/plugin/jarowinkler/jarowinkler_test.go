@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/plugin/jarowinkler"
+	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/pkg/plugin/jarowinkler"
 )
 
 func s(v string) model.AttributeValue { return model.AttributeValue{T: model.AttrS, S: v} }

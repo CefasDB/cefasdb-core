@@ -37,7 +37,7 @@ FROM gcr.io/distroless/static:nonroot
 ARG VERSION=dev
 ARG COMMIT=unknown
 
-LABEL org.opencontainers.image.source="https://github.com/osvaldoandrade/cefas" \
+LABEL org.opencontainers.image.source="https://github.com/CefasDb/cefasdb" \
       org.opencontainers.image.title="cefas" \
       org.opencontainers.image.description="cefas database server" \
       org.opencontainers.image.revision="${COMMIT}" \

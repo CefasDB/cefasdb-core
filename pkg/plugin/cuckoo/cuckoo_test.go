@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin/cuckoo"
+	"github.com/CefasDb/cefasdb/pkg/plugin/cuckoo"
 )
 
 func TestAddContainsRemove(t *testing.T) {

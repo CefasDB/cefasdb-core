@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
 )
 
 func registerFreqCap(root *cobra.Command) {

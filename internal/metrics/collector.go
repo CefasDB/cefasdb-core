@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 type LeaderGate interface {
