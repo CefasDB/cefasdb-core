@@ -1,39 +1,73 @@
 # CefasDB
 
-## What is CefasDB?
-
-CefasDB is a NoSQL document database with HTTP/JSON and gRPC
-APIs, server-side SQL, and an optional Raft multi-shard mode for
+CefasDB is a NoSQL document database written in Go. It exposes
+HTTP/JSON and gRPC APIs, accepts SQL through `ExecuteStatement`, and
+can run as a single binary or as a Raft multi-shard cluster for
 horizontal scale. It targets teams that need predictable
-millisecond-class reads on operational data and run the binary
-themselves.
+millisecond-class reads on operational data and prefer to run the
+binary themselves.
 
-For more information, please see [docs.cefasdb.com].
+The project ships two binaries:
+
+- `cefasdb` — the database server.
+- `cefas` — the CLI client, mirroring the AWS DynamoDB CLI surface.
+
+User and operator documentation lives at [docs.cefasdb.com].
 
 [docs.cefasdb.com]: https://docs.cefasdb.com
 
 ## Install
+
+The fastest path is to run the server in a container and install the
+CLI on the host.
+
+### Server (Docker)
+
+```sh
+docker run --rm -p 8080:8080 -p 9090:9090 \
+  ghcr.io/cefasdb/cefasdb:latest \
+  -http :8080 -grpc :9090 -grpc-reflection
+```
+
+Images are published per release with the tags `<version>`,
+`v<version>`, and `latest`. Pin to a specific release:
+
+```sh
+docker pull ghcr.io/cefasdb/cefasdb:0.8.5
+```
+
+### CLI (npm)
 
 ```sh
 npm install -g @cefasdb/cefas
 cefas --help
 ```
 
-Node.js 18 or newer is required for the installer wrapper; the
-installed command is the native Go CLI.
+Node.js 18+ is required only for the installer wrapper; the installed
+command is the native Go binary.
 
-## Build from source
+### From source
+
+The Makefile builds both binaries into `./bin`:
 
 ```sh
-go build -o ./bin/cefasdb ./cmd/cefasdb
-go build -o ./bin/cefas   ./cmd/cefasctl
+git clone https://github.com/CefasDb/cefasdb-core
+cd cefasdb-core
+make build              # produces ./bin/cefasdb and ./bin/cefas
 ```
 
-For developer setup, see the [developer guide].
+Other helpful targets (`make help` lists everything):
 
-[developer guide]: https://github.com/CefasDB/cefasdb-docs/blob/main/dev/building.md
+```sh
+make server             # cefasdb only
+make cli                # cefas only
+make install            # both binaries into $GOBIN
+make clean              # remove ./bin and cover.out
+```
 
-## Running
+Go 1.25+ is required.
+
+## Run
 
 ```sh
 ./bin/cefasdb \
@@ -49,72 +83,45 @@ In another shell:
 ./bin/cefas --endpoint localhost:9090 --insecure list-tables
 ```
 
-For all run options:
+For the full flag surface:
 
 ```sh
 ./bin/cefasdb --help
+./bin/cefas   --help
 ```
-
-## Running with Docker
-
-```sh
-docker run --rm -p 8080:8080 -p 9090:9090 \
-  ghcr.io/cefasdb/cefasdb:latest \
-  -http :8080 -grpc :9090 -grpc-reflection
-```
-
-Pinned tag form:
-
-```sh
-docker pull ghcr.io/cefasdb/cefasdb:0.8.4
-```
-
-Tags published per release: `<version>`, `v<version>`, `latest`.
-
-## Testing
-
-```sh
-make test
-```
-
-See the [testing guide] for the full suite.
-
-[testing guide]: https://github.com/CefasDB/cefasdb-docs/blob/main/dev/testing.md
 
 ## APIs
 
-CefasDB exposes HTTP/JSON and gRPC APIs and accepts SQL through
-`ExecuteStatement`. See the [API reference] for the full
-contract.
+CefasDB exposes the same surface on three transports:
 
-[API reference]: https://docs.cefasdb.com/reference/apis
+- gRPC on `:9090` (service `cefas.v1.Cefas`, defined in
+  [`pkg/protocol/cefas.proto`](pkg/protocol/cefas.proto)). Reflection
+  is enabled with `-grpc-reflection`.
+- HTTP/JSON on `:8080` via grpc-gateway. Each RPC is reachable at
+  `POST /v1/<RpcName>` with a JSON body that mirrors the proto.
+- SQL through `ExecuteStatement` (PartiQL-compatible).
 
-## Documentation
+Generated godoc for every exported package is published at
+[docs.cefasdb.com/api/](https://docs.cefasdb.com/api/).
 
-User and operator documentation lives at [docs.cefasdb.com]
-and is sourced from [CefasDB/cefasdb-docs].
+## Test
 
-[CefasDB/cefasdb-docs]: https://github.com/CefasDB/cefasdb-docs
+```sh
+make test               # race + shuffle, atomic coverage to cover.out
+make cover              # enforce thresholds from .testcoverage.yml
+make ci                 # vet + lint + test + cover + sec
+```
 
-## Contributing
+`make help` lists the full set of quality targets (`fmt`, `lint`,
+`vet`, `mut`, `sec`, `bench`).
 
-If you want to report a bug, submit a pull request, or propose a
-change, please read the [contribution guide]. Developers working
-on CefasDB itself should read the [developer guide].
+## Community
 
-[contribution guide]: https://github.com/CefasDB/cefasdb-docs/blob/main/CONTRIBUTING.md
-
-## Contact
-
-- [Community forum] for users to discuss configuration,
-  management, and operations.
-- [Developers mailing list] for development topics.
-
-[Community forum]: https://forum.cefasdb.com
-[Developers mailing list]: https://groups.google.com/g/cefasdb-dev
+- [GitHub Discussions](https://github.com/orgs/CefasDb/discussions) —
+  questions, proposals, release announcements.
+- [Issues](https://github.com/CefasDb/cefasdb-core/issues) — bugs and
+  feature requests against the server and CLI.
 
 ## License
 
-See [docs.cefasdb.com/legal] for license terms.
-
-[docs.cefasdb.com/legal]: https://docs.cefasdb.com/legal
+MIT. See [`LICENSE`](LICENSE).

@@ -1,11 +1,30 @@
 MODULE := github.com/CefasDb/cefasdb
 COVERAGE_FILE := cover.out
 GOBIN := $(shell go env GOPATH)/bin
+BIN_DIR := ./bin
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: help fmt lint vet test cover mut sec bench tools ci
+.PHONY: help build server cli install clean fmt lint vet test cover mut sec bench tools ci
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+build: server cli ## Build the cefasdb server and the cefas CLI into ./bin.
+
+server: ## Build the cefasdb server into ./bin/cefasdb.
+	@mkdir -p $(BIN_DIR)
+	go build $(LDFLAGS) -o $(BIN_DIR)/cefasdb ./cmd/cefasdb
+
+cli: ## Build the cefas CLI into ./bin/cefas.
+	@mkdir -p $(BIN_DIR)
+	go build $(LDFLAGS) -o $(BIN_DIR)/cefas ./cmd/cefasctl
+
+install: build ## Install both binaries into $GOBIN.
+	go install $(LDFLAGS) ./cmd/cefasdb ./cmd/cefasctl
+
+clean: ## Remove built binaries and the coverage profile.
+	rm -rf $(BIN_DIR) $(COVERAGE_FILE)
 
 tools: ## Install developer tools used by other targets.
 	go install mvdan.cc/gofumpt@latest
