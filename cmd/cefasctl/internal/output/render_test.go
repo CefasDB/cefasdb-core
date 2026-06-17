@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func sAttr(s string) types.AttributeValue { return types.AttributeValue{T: types.AttrS, S: s} }

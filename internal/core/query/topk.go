@@ -4,7 +4,7 @@ import (
 	"container/heap"
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // TopKResult is one row in a Top-K answer.

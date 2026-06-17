@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // AtomicActionKind selects which mutator AtomicUpdate runs against

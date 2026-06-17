@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	apiserver "github.com/osvaldoandrade/cefas/internal/server"
-	"github.com/osvaldoandrade/cefas/internal/auth"
+	apiserver "github.com/CefasDb/cefasdb/internal/server"
+	"github.com/CefasDb/cefasdb/internal/auth"
 )
 
 // BuildGRPCOpts assembles ServerOptions for the gRPC server: auth

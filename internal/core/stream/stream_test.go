@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/internal/core/stream"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/stream"
 )
 
 type recSub struct {

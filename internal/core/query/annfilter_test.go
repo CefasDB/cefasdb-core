@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/internal/core/query"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/query"
 )
 
 func TestChooseStrategyHighSelectivityWithIndexPicksFilterFirst(t *testing.T) {

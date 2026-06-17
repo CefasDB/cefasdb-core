@@ -3,10 +3,10 @@ package server
 import (
 	"fmt"
 
-	itemhttp "github.com/osvaldoandrade/cefas/internal/server/http/item"
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 type routedWriteTargets struct {

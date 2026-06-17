@@ -3,6 +3,6 @@
 // `aws dynamodb` can be ported by replacing the command name.
 package main
 
-import "github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd"
+import "github.com/CefasDb/cefasdb/cmd/cefasctl/cmd"
 
 func main() { cmd.Execute() }

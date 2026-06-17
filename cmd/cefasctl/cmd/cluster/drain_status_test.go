@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/client"
 )
 
 func TestClusterDrainProgressShowsBlockers(t *testing.T) {

@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd/cluster"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd/ddb"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd/ops"
-	plugincmd "github.com/osvaldoandrade/cefas/cmd/cefasctl/cmd/plugin"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/cmd/cluster"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/cmd/ddb"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/cmd/ops"
+	plugincmd "github.com/CefasDb/cefasdb/cmd/cefasctl/cmd/plugin"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
 )
 
 // Version is the cefasctl build version. Set via -ldflags at build

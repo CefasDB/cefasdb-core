@@ -7,8 +7,8 @@ package server
 import (
 	"context"
 
-	apiserver "github.com/osvaldoandrade/cefas/internal/server"
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
+	apiserver "github.com/CefasDb/cefasdb/internal/server"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 )
 
 // raftSource is the minimal raft surface StreamAdapter needs. It lets

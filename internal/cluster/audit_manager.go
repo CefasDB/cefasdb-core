@@ -7,8 +7,8 @@ import (
 	"hash/fnv"
 	"sort"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/storage"
 )
 
 // AuditPlacement runs the pure catalog audit (placement-only checks)

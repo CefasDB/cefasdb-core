@@ -3,7 +3,7 @@ package query
 import (
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // ANNFilterStrategy is the rule-based execution mode the planner

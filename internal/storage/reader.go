@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/osvaldoandrade/cefas/pkg/types"
+import "github.com/CefasDb/cefasdb/pkg/types"
 
 // Reader is the read surface of the cefas storage engine. The
 // Pebble-backed adapter at internal/storage/adapter/pebble.DB

@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/osvaldoandrade/cefas/internal/spatial"
+import "github.com/CefasDb/cefasdb/internal/spatial"
 
 // SpatialQuery describes a multidimensional read. Exactly one of
 // BBox / Radius / Z must be populated.

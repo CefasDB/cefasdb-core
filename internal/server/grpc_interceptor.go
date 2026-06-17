@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/auth"
 )
 
 // AuthInterceptor returns gRPC unary and stream interceptors that

@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/server/http/httpx"
-	"github.com/osvaldoandrade/cefas/internal/auth"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	"github.com/osvaldoandrade/cefas/internal/spatial"
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/tracing"
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/spatial"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // StorageForFunc returns the pebble.DB that owns the supplied

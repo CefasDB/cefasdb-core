@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 func TestScheduledBackupRunnerDisabledNoops(t *testing.T) {

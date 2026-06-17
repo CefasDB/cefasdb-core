@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func openChangeLogTestDB(t *testing.T) *DB {

@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 // PlacementPlanRequest packs the inputs PlanPlacement uses to compute

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func newStorage(t *testing.T) (*pebble.DB, *catalog.Catalog) {

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/index"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 type stubLifecycle struct {

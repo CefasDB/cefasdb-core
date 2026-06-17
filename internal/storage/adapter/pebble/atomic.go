@@ -33,9 +33,9 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // AtomicActionKind / AtomicAction / AtomicOptions / AtomicResult and

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	backuphttp "github.com/osvaldoandrade/cefas/internal/server/http/backup"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	backuphttp "github.com/CefasDb/cefasdb/internal/server/http/backup"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func newHandlers(t *testing.T, stream backuphttp.ChangeStream, compact backuphttp.CompactFunc) (*backuphttp.Handlers, *pebble.DB, *catalog.Catalog, func()) {

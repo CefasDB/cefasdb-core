@@ -12,12 +12,12 @@ import (
 	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
-	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/internal/placement"
-	"github.com/osvaldoandrade/cefas/internal/routing"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/routing"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/testutil/wait"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func pickPort(t testing.TB) string {

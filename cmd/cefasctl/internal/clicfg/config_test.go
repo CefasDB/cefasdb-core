@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/clicfg"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/clicfg"
 )
 
 func TestDefaults(t *testing.T) {

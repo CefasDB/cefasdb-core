@@ -1,6 +1,6 @@
 package condition
 
-import "github.com/osvaldoandrade/cefas/internal/core/model"
+import "github.com/CefasDb/cefasdb/internal/core/model"
 
 // Evaluator evaluates a DynamoDB-shaped condition expression against
 // an item and a bind map. Empty expressions evaluate to true.

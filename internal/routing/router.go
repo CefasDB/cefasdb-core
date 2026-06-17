@@ -11,7 +11,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/placement"
 )
 
 // ErrNoShardForToken is returned by Router.ShardForPK / ShardForUint64

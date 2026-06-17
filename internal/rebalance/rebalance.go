@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/metrics"
-	"github.com/osvaldoandrade/cefas/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/metrics"
+	"github.com/CefasDb/cefasdb/internal/placement"
 )
 
 type Mode string

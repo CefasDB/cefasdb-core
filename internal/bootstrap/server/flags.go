@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/config"
 )
 
 // OverlayFlags pushes flag values into the cfg struct. Only non-zero

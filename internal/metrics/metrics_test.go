@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/metrics"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/metrics"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 func TestMetricsHandlerExposesRegisteredSeries(t *testing.T) {

@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // ListStreamsOptions mirrors DynamoDB Streams ListStreams pagination.

@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/internal/core/query"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/query"
 )
 
 // absDiff is a tiny stand-in distance: |a.N - b.N| as float64. Lets

@@ -12,9 +12,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	runner "github.com/osvaldoandrade/cefas/cmd/cefas-loadtest/runner"
-	"github.com/osvaldoandrade/cefas/pkg/client"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	runner "github.com/CefasDb/cefasdb/cmd/cefas-loadtest/runner"
+	"github.com/CefasDb/cefasdb/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 var logger = slog.New(slog.NewTextHandler(os.Stderr, nil))

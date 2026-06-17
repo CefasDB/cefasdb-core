@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
+	"github.com/CefasDb/cefasdb/internal/testutil/wait"
 )
 
 func TestEventuallyReturnsWhenConditionFires(t *testing.T) {

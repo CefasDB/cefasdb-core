@@ -1,6 +1,6 @@
 package stream
 
-import "github.com/osvaldoandrade/cefas/internal/core/model"
+import "github.com/CefasDb/cefasdb/internal/core/model"
 
 // Op classifies a change event.
 type Op uint8

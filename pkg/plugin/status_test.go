@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 type spStub struct {

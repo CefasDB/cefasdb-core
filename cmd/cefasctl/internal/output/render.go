@@ -11,8 +11,8 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Format selects the renderer.

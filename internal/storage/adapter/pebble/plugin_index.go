@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 
-	"github.com/osvaldoandrade/cefas/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/index"
 )
 
 const PluginIndexDescriptorVersion = 1

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 type lcPlugin struct {

@@ -1,4 +1,4 @@
-module github.com/osvaldoandrade/cefas
+module github.com/CefasDb/cefasdb
 
 go 1.25.0
 

@@ -16,8 +16,8 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-isatty"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
 )
 
 func runREPL(ctx context.Context, session *runtime.Session, in io.Reader, out, errOut io.Writer) error {

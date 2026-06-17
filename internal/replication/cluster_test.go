@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	craft "github.com/osvaldoandrade/cefas/internal/replication"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/testutil/wait"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 type node struct {

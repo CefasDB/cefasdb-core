@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/client"
 )
 
 type batchJob struct {

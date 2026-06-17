@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	"github.com/osvaldoandrade/cefas/internal/core/query/mmr"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	"github.com/CefasDb/cefasdb/internal/core/query/mmr"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Result is the executor output. SELECT statements populate Rows;

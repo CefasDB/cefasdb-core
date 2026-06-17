@@ -12,7 +12,7 @@
 package server
 
 import (
-	"github.com/osvaldoandrade/cefas/internal/server/streamcore"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
 )
 
 // Iterator-type string constants are part of the wire vocabulary

@@ -3,10 +3,10 @@ package sql
 import (
 	"strconv"
 
-	"github.com/osvaldoandrade/cefas/internal/spatial"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/spatial"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Plan is the executor input — a self-contained description of what

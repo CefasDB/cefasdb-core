@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // planLSI mirrors planGSI but routes through the primary partition's

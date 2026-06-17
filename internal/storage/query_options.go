@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/osvaldoandrade/cefas/pkg/types"
+import "github.com/CefasDb/cefasdb/pkg/types"
 
 // PutOptions controls optional behaviour for PutItem-style writes.
 type PutOptions struct {

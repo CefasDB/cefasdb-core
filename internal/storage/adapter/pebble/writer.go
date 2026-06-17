@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 
 	pebbledb "github.com/cockroachdb/pebble"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // PutOptions / DeleteOptions / QueryOptions / BatchOp / BatchOpKind

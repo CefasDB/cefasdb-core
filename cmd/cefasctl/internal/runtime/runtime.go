@@ -12,10 +12,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/clicfg"
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
-	"github.com/osvaldoandrade/cefas/pkg/client"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/clicfg"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
+	"github.com/CefasDb/cefasdb/pkg/client"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Options is the complete CLI connection/runtime option set.

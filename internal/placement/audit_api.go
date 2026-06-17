@@ -3,7 +3,7 @@ package placement
 import (
 	"bytes"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 )
 
 // AuditCollector is the public-facing wrapper around the internal

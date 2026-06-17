@@ -3,8 +3,8 @@ package model_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // TestTypeAliasesRefersToPkgTypes pins the contract that the model

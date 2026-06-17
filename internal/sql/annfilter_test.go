@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // fakeCatalog implements cefassql.Catalog for planner-level tests

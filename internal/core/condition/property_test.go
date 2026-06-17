@@ -5,8 +5,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/osvaldoandrade/cefas/internal/core/condition"
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/condition"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // The condition package only publishes the Evaluator interface. The

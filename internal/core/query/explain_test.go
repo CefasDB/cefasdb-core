@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/core/query"
+	"github.com/CefasDb/cefasdb/internal/core/query"
 )
 
 func sampleTree() query.PlanNode {

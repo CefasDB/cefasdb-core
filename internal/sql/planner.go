@@ -7,10 +7,10 @@ import (
 
 	_ "unsafe" // for go:linkname placeholder; kept inert today
 
-	"github.com/osvaldoandrade/cefas/internal/spatial"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/spatial"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // Catalog is the planner's view of the table catalog. The wider

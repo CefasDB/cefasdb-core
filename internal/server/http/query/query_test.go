@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	queryhttp "github.com/osvaldoandrade/cefas/internal/server/http/query"
-	"github.com/osvaldoandrade/cefas/internal/catalog"
-	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	queryhttp "github.com/CefasDb/cefasdb/internal/server/http/query"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // newHandlers spins up a tempdir-backed pebble.DB + catalog and wraps

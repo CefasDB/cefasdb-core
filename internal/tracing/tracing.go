@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "github.com/osvaldoandrade/cefas"
+const tracerName = "github.com/CefasDb/cefasdb"
 
 // Config controls the OTLP exporter. Endpoint empty means "tracing
 // disabled" — Init becomes a no-op and Tracer() returns a no-op

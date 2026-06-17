@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/osvaldoandrade/cefas/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/storage"
 
-	"github.com/osvaldoandrade/cefas/internal/spatial"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/spatial"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 const (

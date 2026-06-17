@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/osvaldoandrade/cefas/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // planDrain derives the placement-plan that removes a node from

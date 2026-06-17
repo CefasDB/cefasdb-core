@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
+	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
 )
 
 func runCommand(ctx context.Context, session *runtime.Session, args []string, in io.Reader, out, errOut io.Writer) error {

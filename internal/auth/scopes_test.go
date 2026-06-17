@@ -6,7 +6,7 @@ import (
 
 	identitymw "github.com/codecompany/identity-middleware/pkg/identitymiddleware"
 
-	"github.com/osvaldoandrade/cefas/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/auth"
 )
 
 func TestHasScopeExactAndWildcard(t *testing.T) {

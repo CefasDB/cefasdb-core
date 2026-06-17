@@ -3,7 +3,7 @@ package sql_test
 import (
 	"testing"
 
-	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 )
 
 // FuzzParse exercises Parse with arbitrary inputs to surface panics,

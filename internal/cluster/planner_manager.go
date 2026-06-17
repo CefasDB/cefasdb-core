@@ -1,6 +1,6 @@
 package cluster
 
-import "github.com/osvaldoandrade/cefas/internal/placement"
+import "github.com/CefasDb/cefasdb/internal/placement"
 
 // PlanPlacement refreshes the manager's view of the catalog and then
 // delegates to placement.BuildPlacementPlan to produce the plan. Pure

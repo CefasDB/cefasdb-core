@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/osvaldoandrade/cefas/pkg/types"
+import "github.com/CefasDb/cefasdb/pkg/types"
 
 // AtomicActionKind selects which mutator the action applies.
 type AtomicActionKind uint8

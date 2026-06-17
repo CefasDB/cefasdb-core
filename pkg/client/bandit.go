@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 // BanditArmSpec is the typed form of cefaspb.BanditArmSpec. Family is

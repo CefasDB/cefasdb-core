@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // ErrConditionFailed is returned by PutItem / DeleteItem when the

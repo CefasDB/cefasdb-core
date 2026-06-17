@@ -1,7 +1,11 @@
-// Mirror of pkg/core/coregraph_test.go for pkg/plugin: nothing under
-// pkg/plugin may import an engine internal (internal/*, pkg/api,
-// pkg/sql, pkg/client). Plugins must stay portable across cefas
-// versions and embeddings.
+// Architectural guard for the plugin SDK. After the PR 7 package
+// restructure, pkg/plugin is the contract third-party plugin authors
+// write against — it legitimately references types under
+// internal/core/* (Descriptor, Lifecycle, DistanceOp, KeySchema
+// aliases) because those types ARE the plugin contract. What still
+// must never leak in is the engine surface: internal/server,
+// internal/sql, internal/storage, internal/cluster — anything that
+// would tie plugin code to a specific cefasdb embedding.
 package plugin_test
 
 import (
@@ -19,12 +23,28 @@ func TestPluginHasNoEngineImports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
+
+	// Engine packages a plugin must never reach into. internal/core
+	// is intentionally absent — it is the shared kernel the plugin
+	// contract sits on. pkg/client is forbidden so plugins do not
+	// embed the Go SDK call paths.
 	forbidden := []string{
-		"github.com/osvaldoandrade/cefas/internal/",
-		"github.com/osvaldoandrade/cefas/internal/server",
-		"github.com/osvaldoandrade/cefas/internal/sql",
-		"github.com/osvaldoandrade/cefas/pkg/client",
+		"github.com/CefasDb/cefasdb/internal/server",
+		"github.com/CefasDb/cefasdb/internal/sql",
+		"github.com/CefasDb/cefasdb/internal/storage",
+		"github.com/CefasDb/cefasdb/internal/cluster",
+		"github.com/CefasDb/cefasdb/internal/placement",
+		"github.com/CefasDb/cefasdb/internal/routing",
+		"github.com/CefasDb/cefasdb/internal/replication",
+		"github.com/CefasDb/cefasdb/internal/catalog",
+		"github.com/CefasDb/cefasdb/internal/rebalance",
+		"github.com/CefasDb/cefasdb/internal/bootstrap",
+		"github.com/CefasDb/cefasdb/internal/metrics",
+		"github.com/CefasDb/cefasdb/internal/config",
+		"github.com/CefasDb/cefasdb/internal/compat",
+		"github.com/CefasDb/cefasdb/pkg/client",
 	}
+
 	fset := token.NewFileSet()
 	visited := 0
 	walkErr := filepath.WalkDir(abs, func(path string, d fs.DirEntry, walkErr error) error {

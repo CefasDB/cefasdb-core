@@ -14,9 +14,9 @@ cd "$ROOT"
 protoc \
   --proto_path=pkg/protocol \
   --go_out=. \
-  --go_opt=module=github.com/osvaldoandrade/cefas \
+  --go_opt=module=github.com/CefasDb/cefasdb \
   --go-grpc_out=. \
-  --go-grpc_opt=module=github.com/osvaldoandrade/cefas \
+  --go-grpc_opt=module=github.com/CefasDb/cefasdb \
   pkg/protocol/cefas.proto
 
 echo "generated:"

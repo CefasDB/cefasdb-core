@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/internal/placement"
-	"github.com/osvaldoandrade/cefas/pkg/types"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func TestFinalizeRangeMoveRetriesCleanupAfterPublishFailure(t *testing.T) {

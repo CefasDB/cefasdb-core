@@ -128,9 +128,9 @@ linters:
             - $gostd
             - github.com/google/uuid
             - github.com/shopspring/decimal
-            - github.com/osvaldoandrade/cefas/pkg/core
-            - github.com/osvaldoandrade/cefas/pkg/plugin
-            - github.com/osvaldoandrade/cefas/pkg/types
+            - github.com/CefasDb/cefasdb/pkg/core
+            - github.com/CefasDb/cefasdb/pkg/plugin
+            - github.com/CefasDb/cefasdb/pkg/types
           deny:
             - pkg: database/sql
               desc: "domain must not depend on persistence"
@@ -158,4 +158,4 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/osvaldoandrade/cefas)
+        - prefix(github.com/CefasDb/cefasdb)

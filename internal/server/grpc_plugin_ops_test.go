@@ -12,12 +12,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
-	"github.com/osvaldoandrade/cefas/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 
 	// Side-effect imports register the builtin plugins against
 	// plugin.Default so the unsecured fixture surfaces them.
-	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
+	_ "github.com/CefasDb/cefasdb/internal/plugin/builtin/registry"
 )
 
 func putKV(t *testing.T, stub cefaspb.CefasClient, table, pk, attr, val string) {
