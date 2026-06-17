@@ -3,8 +3,8 @@ package core_test
 import (
 	"testing"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 // Sanity contract: pkg/core's Descriptor carries enough fields to

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

@@ -3,7 +3,7 @@ package placement
 import (
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 // planDecommission marks a previously-drained node as

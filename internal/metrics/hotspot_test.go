@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 func TestRangeHotspotBucketForTokenIsBoundedAndDeterministic(t *testing.T) {

@@ -12,9 +12,9 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
+	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 )
 

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 type PlacementOperation string

@@ -27,8 +27,19 @@ func TestCoreHasNoEngineImports(t *testing.T) {
 	forbidden := []string{
 		"github.com/osvaldoandrade/cefas/internal/",
 		"github.com/osvaldoandrade/cefas/internal/server",
-		"github.com/osvaldoandrade/cefas/pkg/sql",
+		"github.com/osvaldoandrade/cefas/internal/sql",
 		"github.com/osvaldoandrade/cefas/pkg/client",
+	}
+
+	// Deprecated migration shims are allowed to bridge to their
+	// canonical internal/ homes — they exist precisely to keep the
+	// old public path compiling for one release while external
+	// callers migrate. Each exemption is scoped to a specific file
+	// so a regular file cannot accidentally drift into the pattern.
+	shimExempt := map[string]bool{
+		filepath.Join(abs, "index", "index.go"): true,
+		filepath.Join(abs, "model", "model.go"): true,
+		filepath.Join(abs, "query", "query.go"): true,
 	}
 
 	fset := token.NewFileSet()
@@ -41,6 +52,9 @@ func TestCoreHasNoEngineImports(t *testing.T) {
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if shimExempt[path] {
 			return nil
 		}
 		visited++

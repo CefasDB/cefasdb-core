@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
+	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

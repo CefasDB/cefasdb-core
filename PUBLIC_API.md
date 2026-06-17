@@ -76,11 +76,11 @@ executes:
 | `pkg/core/condition` | No | 2 importers, internal. |
 | `pkg/core/index` | **Yes** (deprecated alias) | 36 importers (including plugin authors who may write external plugins against it). |
 | `pkg/core/model` | **Yes** (deprecated alias) | 98 importers; the aggregate-root IDs are the kind of type a downstream tool might keep. |
-| `pkg/core/query` | No | 16 importers, internal. |
+| `pkg/core/query` | **Yes** (minimal shim — DistanceOp only) | 16 internal importers + the third-party plugin contract uses `query.DistanceOp`. Discovered during PR 5 execution; the shim re-exports just that one interface. |
 | `pkg/core/query/mmr` | No | 4 importers, internal. |
 | `pkg/core/stream` | No | 1 importer. |
 | `pkg/core/ttl` | No | 2 importers. |
 
-The aliases in `pkg/core/index` and `pkg/core/model` keep the
+The aliases in `pkg/core/{index,model,query}` keep the
 `go get`-stability promise for plugin authors who may have written
 custom plugins against them while we migrate.
