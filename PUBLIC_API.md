@@ -5,86 +5,76 @@ are part of the public Go API surface that downstream consumers
 (third-party modules, the `npm` wrapper, custom integrations) can
 `go get` and import directly.
 
-The audit was produced as **PR 4** of the repo-restructure series
-and informs **PR 5** (move internal-only packages into `internal/`)
-and **PR 6** (protocol/API cleanup).
+The audit was first produced as **PR 4** of the repo-restructure
+series. After **PR 7** (module-path migration + final package
+hygiene) the public surface is locked down to four packages.
 
-## Audit results
+## Final public surface
 
-In-repo importer counts measured with
-`grep -rln '"github.com/CefasDb/cefasdb/<pkg>"' --include="*.go" .`
-on commit `9af22a9` (post PR 3).
+| Package | Role |
+|---|---|
+| `pkg/client/` | The Go SDK. The blessed in-process client that talks to a `cefasdb` over HTTP/JSON or gRPC. |
+| `pkg/plugin/` | The plugin SDK third-party plugin authors implement against — `Lifecycle`, `Descriptor`, `IndexPlugin`, `AudiencePlugin`, `BanditPlugin`, `DistancePlugin`, the registration API, and the test harness. |
+| `pkg/protocol/` | Generated protobuf + the `.proto` source. Defines `cefas.v1` on the wire. |
+| `pkg/types/` | Public DTO vocabulary — `TableDescriptor`, `Item`, `AttributeValue`, `StreamDescriptor`, and every error sentinel the gRPC handler surfaces. |
 
-### Top-level `pkg/`
+That's it. Four packages, each with a clear external contract.
 
-| Package | In-repo importers | External-API status | Action | Rationale |
-|---|---:|---|---|---|
-| ~~`pkg/api/`~~ | 0 | n/a | ✅ DELETED in PR 6 (empty wrapper) | Held only `proto/`; flattened into `pkg/protocol/`. |
-| `pkg/protocol/` | 49 | **KEEP** as the gRPC wire contract | ✅ Renamed from `pkg/api/proto/` in PR 6 | Generated protobuf + the `.proto` source. Any Go client of cefas builds against it. The on-the-wire protobuf package is `cefas.v1` and the Go import alias is `cefaspb`; both are unchanged. |
-| `pkg/client/` | 25 | **KEEP** — the Go SDK | None | The blessed in-process Go client (`Client`, `TableClient`, etc.). Largest documented exported surface; downstream code goes through this. |
-| `pkg/config/` | 5 | **KEEP** — declarative config schema | None | Defines the YAML/env-vars/flag schema for `cefasdb`. Operators may build wrappers that compose `config.Config` values; embedding teams may load it. |
-| `pkg/core/` (top-level) | 0 | move | **MOVE → `internal/core/`** in PR 5 | Top level holds only `doc.go` + two graph/satisfaction tests; no exported types referenced externally. The real content is in sub-packages — see below. |
-| `pkg/core/condition/` | 2 | private — only internal `pkg/sql` and `internal/server` consume | **MOVE → `internal/core/condition/`** | Condition-expression parser. Used by the SQL executor and the gRPC handler; no external use. |
-| `pkg/core/index/` | 36 | private | **MOVE → `internal/core/index/`** | `index.Descriptor` and helpers — consumed by plugins (`pkg/plugin/*`) and internal storage paths. **Note**: moving this requires the plugin packages to re-import from the new path; treat as part of the same PR. |
-| `pkg/core/model/` | 98 | private | **MOVE → `internal/core/model/`** | The aggregate-root domain IDs (NodeID, ShardID, StreamShardID, KeySchema). Most-imported package in the repo. **Move with care**: large blast radius. |
-| `pkg/core/query/` | 16 | private | **MOVE → `internal/core/query/`** | Query primitives (`DistanceOp`, `TopKResult`, planner helpers). |
-| `pkg/core/query/mmr/` | 4 | private | **MOVE → `internal/core/query/mmr/`** | Max-Marginal-Relevance re-ranker. |
-| `pkg/core/stream/` | 1 | private | **MOVE → `internal/core/stream/`** | Stream primitives. |
-| `pkg/core/ttl/` | 2 | private | **MOVE → `internal/core/ttl/`** | TTL primitives. |
-| `pkg/ddbjson/` | 24 | **KEEP** — DynamoDB JSON wire format | None | Public-API parity with AWS DynamoDB JSON. External clients porting from `aws-sdk-go` need this. |
-| `pkg/plugin/` | 12 (+ sub-package importers) | **KEEP** — third-party plugin SDK | None | The contract any external plugin author writes against. Sub-packages (`audience`, `bandit`, `bloom`, etc.) are the built-in plugin implementations and are also public — third-party operators may import them by name. |
-| `pkg/plugin/internal/{hashfield,pkid,vecattr}/` | various | private (Go-internal rule applies) | None | The `internal` sub-package keeps these reachable only from `pkg/plugin/...` per Go's visibility rule. Already correctly scoped. |
-| `pkg/query/` | 0 | empty directory | **DELETE** in PR 5 | Empty placeholder with no `.go` files. Cruft from an earlier reshape. |
-| `pkg/sql/` | 8 | private — only `internal/server` + `cmd/cefasctl` consume | **MOVE → `internal/sql/`** in PR 5 | SQL parser/planner/executor. The wire surface is the gRPC `ExecuteStatement` RPC; no external user imports the Go package directly. |
-| `pkg/types/` | 109 | **KEEP** — DTO surface for the public API | None | `TableDescriptor`, `Item`, `AttributeValue`, `StreamDescriptor`, every error sentinel returned by the gRPC handler. The lingua franca of the public surface; the SDK (`pkg/client`) and the wire codec (`pkg/ddbjson`) both depend on it. |
+## What moved to `internal/` in PR 7
 
-## Summary
-
-After PR 5 + PR 6 land, `pkg/` contains exactly:
-
-```
-pkg/
-├── client/      ← the Go SDK
-├── config/      ← config schema for operators
-├── core/        ← deprecated shims (index, model, query) for plugin authors
-├── ddbjson/     ← DynamoDB JSON wire format
-├── plugin/      ← third-party plugin SDK + built-ins
-├── protocol/    ← gRPC wire format (renamed from pkg/api/proto)
-└── types/       ← public DTO vocabulary
-```
-
-Six load-bearing packages with clear external contracts, plus
-`pkg/core/` which is the deprecated migration namespace and is
-scheduled for removal in a future minor release once external
-plugin authors have migrated to `internal/core/<X>` directly.
-
-## Shim policy (informs PR 5)
-
-For every `pkg/core/*` and `pkg/sql` moved to `internal/`:
-
-- **No shim** for packages with zero external importers in this repo
-  AND no documented external use. The move is mechanical (`git mv`
-  + import-path update across in-repo consumers).
-- **Type-alias shim** in the old location if a sub-package is
-  exceptionally widely-imported AND the move risks silent breakage
-  for an unknown external user — leave a deprecated `pkg/X/doc.go`
-  that re-exports the canonical `internal/X` types with a clear
-  `// Deprecated: ...` notice. Drop after one minor release.
-
-Decision per package, to be confirmed with the operator before PR 5
-executes:
-
-| Package | Shim? | Rationale |
+| Old path | New path | Why |
 |---|---|---|
-| `pkg/sql` | **No** | 8 in-repo importers, no `npm/` or third-party use known. |
-| `pkg/core/condition` | No | 2 importers, internal. |
-| `pkg/core/index` | **Yes** (deprecated alias) | 36 importers (including plugin authors who may write external plugins against it). |
-| `pkg/core/model` | **Yes** (deprecated alias) | 98 importers; the aggregate-root IDs are the kind of type a downstream tool might keep. |
-| `pkg/core/query` | **Yes** (minimal shim — DistanceOp only) | 16 internal importers + the third-party plugin contract uses `query.DistanceOp`. Discovered during PR 5 execution; the shim re-exports just that one interface. |
-| `pkg/core/query/mmr` | No | 4 importers, internal. |
-| `pkg/core/stream` | No | 1 importer. |
-| `pkg/core/ttl` | No | 2 importers. |
+| `pkg/config/` | `internal/config/` | Boot/runtime schema for `cefasdb` only — operators load it via the binary, not via a Go import. |
+| `pkg/ddbjson/` | `internal/compat/ddbjson/` | DynamoDB-JSON encode/decode helpers — wire-format adapter code, not a public Go contract. |
+| `pkg/plugin/<23 built-ins>/` | `internal/plugin/builtin/<each>/` | The implementations (cosine, euclidean, geohash, jaccard, …) cefasdb ships with. The SDK in `pkg/plugin/` is the contract; the built-ins are the reference implementations. |
+| `pkg/plugin/builtins/` | `internal/plugin/builtin/registry/` | Side-effect-import registry that wires every built-in into `plugin.Default`. The binary imports it at startup. |
+| `pkg/plugin/internal/{hashfield,pkid,vecattr}/` | `internal/plugin/internal/<each>/` | Helpers shared across the built-ins, never reached from out-of-tree plugins. |
+| `pkg/core/{index,model,query}/` shims | — (deleted) | Deprecated migration shims added in PR 5. The PR 7 module-path migration is itself a hard break, so the shims served their purpose. External plugin authors import `internal/core/*` directly (or, for the `model.X = types.X` aliases, just `pkg/types`). |
+| `pkg/core/` | — (deleted) | Empty after the shim removal. |
+| `pkg/sql/` | `internal/sql/` | Moved in PR 5; remains internal. |
+| `pkg/api/proto/` | `pkg/protocol/` | Renamed in PR 6. |
 
-The aliases in `pkg/core/{index,model,query}` keep the
-`go get`-stability promise for plugin authors who may have written
-custom plugins against them while we migrate.
+## Module path migration (PR 7 commit A)
+
+```
+github.com/osvaldoandrade/cefas
+              ↓
+github.com/CefasDb/cefasdb
+```
+
+Touches every `.go` file, `go.mod`, the `.proto`'s `option
+go_package`, `scripts/genproto.sh`, deploy (Dockerfile, Helm
+chart), CI (`.github/workflows/release.yml`), `.golangci.yml`,
+`Makefile`, `npm/` wrapper, and the in-repo docs. The protobuf
+generated files (`cefas.pb.go`, `cefas_grpc.pb.go`) are
+regenerated via `protoc` so the embedded `FileDescriptorProto`
+keeps a valid length prefix.
+
+External Go importers update their imports + `go get` paths;
+gRPC clients in any language see no change (the on-the-wire
+`package cefas.v1` and every message/RPC name + field number is
+unchanged).
+
+## Architecture invariants enforced by tests
+
+`pkg/plugin/plugingraph_test.go` enumerates the engine surfaces
+plugin code must never import — `internal/server`,
+`internal/sql`, `internal/storage`, `internal/cluster`,
+`internal/placement`, `internal/routing`, `internal/replication`,
+`internal/catalog`, `internal/rebalance`, `internal/bootstrap`,
+`internal/metrics`, `internal/config`, `internal/compat`, and
+`pkg/client`. The `internal/core/*` packages are the shared
+plugin kernel (Descriptor, Lifecycle, DistanceOp, the
+model-aliased types) and are intentionally allowed.
+
+## Wire-format stability (unchanged across the whole restructure)
+
+- Protobuf `package cefas.v1;`
+- gRPC service name `cefas.v1.Cefas`
+- Every message and RPC name and field number
+- HTTP JSON request/response shapes (DynamoDB-compatible)
+- Persisted Pebble keys (catalog, primary rows, GSI/LSI pointers, streams, TTL, plugin indexes)
+- Raft transport and snapshot format
+- Metric names (still `cefas_*`)
+- Error sentinels and their text
+- `cefasdb` CLI flag names and config keys
