@@ -12,7 +12,7 @@ set -euo pipefail
 # Large run example:
 #   REFRESH_AUTH=0 TOTAL_RECORDS=1000000 PARTITION_COUNT=1000 \
 #     BATCH_SIZE=500 LOAD_CONCURRENCY=16 QUERY_PARTITIONS=10 \
-#     QUERY_LIMIT=1000 GET_PROBES=20 PRINT_SAMPLE=0 ./cefasctl-normal-load.sh
+#     QUERY_LIMIT=1000 GET_PROBES=20 PRINT_SAMPLE=0 ./scripts/loadtest/cefasctl-normal-load.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -406,7 +406,7 @@ fi
 if [[ "$REQUIRE_AUTH" == "1" && -z "$CEFAS_TOKEN" && ! -f "$CEFAS_TOKEN_FILE" ]]; then
   echo "Erro: auth obrigatoria. Salve o token em $CEFAS_TOKEN_FILE ou defina CEFAS_TOKEN." >&2
   echo "Ou defina CEFAS_AUTH_EMAIL/CEFAS_AUTH_PASSWORD para gerar token automaticamente." >&2
-  echo "Para testar um servidor local sem auth: REQUIRE_AUTH=0 ./cefasctl-smoke.sh" >&2
+  echo "Para testar um servidor local sem auth: REQUIRE_AUTH=0 ./scripts/loadtest/cefasctl-smoke.sh" >&2
   exit 1
 fi
 
