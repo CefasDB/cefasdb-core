@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

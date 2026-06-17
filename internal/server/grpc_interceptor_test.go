@@ -24,7 +24,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 // mockJWKS exposes an RSA public key as JWKS for the gRPC interceptor

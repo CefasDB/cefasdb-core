@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 func createTable(t *testing.T, stub cefaspb.CefasClient, name string) {

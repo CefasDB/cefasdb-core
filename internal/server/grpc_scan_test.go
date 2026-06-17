@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 func putString(t *testing.T, stub cefaspb.CefasClient, table, pk, v string) {

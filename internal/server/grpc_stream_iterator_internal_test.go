@@ -13,7 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/testutil/wait"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/internal/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )

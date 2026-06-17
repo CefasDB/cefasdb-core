@@ -8,7 +8,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/storage"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )

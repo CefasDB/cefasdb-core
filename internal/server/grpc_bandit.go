@@ -30,7 +30,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
 )

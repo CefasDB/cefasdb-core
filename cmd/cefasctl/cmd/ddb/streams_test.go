@@ -14,7 +14,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/server"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 type streamCLIFixture struct {
