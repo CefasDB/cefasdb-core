@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # Large run example:
 #   REFRESH_AUTH=0 TOTAL_RECORDS=1000000 POST_INDEX_RECORDS=100000 \
-#     BATCH_SIZE=500 LOAD_CONCURRENCY=16 PRINT_SAMPLE=0 ./cefasctl-geohash-load.sh
+#     BATCH_SIZE=500 LOAD_CONCURRENCY=16 PRINT_SAMPLE=0 ./scripts/loadtest/cefasctl-geohash-load.sh
 #
 # For large result sets the script automatically applies --limit
 # FULL_QUERY_MAX_RESULTS unless QUERY_LIMIT is set or ALLOW_FULL_LARGE_QUERY=1.
