@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
-	"github.com/osvaldoandrade/cefas/internal/api"
+	"github.com/osvaldoandrade/cefas/internal/server"
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
@@ -328,7 +328,7 @@ func newREPLCLIFixture(t *testing.T) replCLIFixture {
 		t.Fatalf("listen: %v", err)
 	}
 	gsrv := grpc.NewServer()
-	cefaspb.RegisterCefasServer(gsrv, api.NewGRPCServer(db, cat, nil))
+	cefaspb.RegisterCefasServer(gsrv, server.NewGRPCServer(db, cat, nil))
 	go func() { _ = gsrv.Serve(ln) }()
 	t.Cleanup(func() {
 		gsrv.GracefulStop()

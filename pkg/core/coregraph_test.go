@@ -26,7 +26,7 @@ func TestCoreHasNoEngineImports(t *testing.T) {
 
 	forbidden := []string{
 		"github.com/osvaldoandrade/cefas/internal/",
-		"github.com/osvaldoandrade/cefas/internal/api",
+		"github.com/osvaldoandrade/cefas/internal/server",
 		"github.com/osvaldoandrade/cefas/pkg/sql",
 		"github.com/osvaldoandrade/cefas/pkg/client",
 	}
