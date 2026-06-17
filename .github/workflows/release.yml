@@ -144,7 +144,7 @@ jobs:
       packages: write
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository_owner }}/cefas
+      IMAGE_NAME: ${{ github.repository_owner }}/cefasdb
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -195,6 +195,6 @@ jobs:
 
       # Package visibility is a one-time setting per package, not per release.
       # After the first push, set it via:
-      #   https://github.com/users/<owner>/packages/container/cefas/settings
+      #   https://github.com/users/<owner>/packages/container/cefasdb/settings
       # -> "Danger Zone" -> "Change package visibility" -> Public.
       # The setting persists across all subsequent pushes.

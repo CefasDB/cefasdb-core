@@ -55,6 +55,22 @@ For all run options:
 ./bin/cefasdb --help
 ```
 
+## Running with Docker
+
+```sh
+docker run --rm -p 8080:8080 -p 9090:9090 \
+  ghcr.io/cefasdb/cefasdb:latest \
+  -http :8080 -grpc :9090 -grpc-reflection
+```
+
+Pinned tag form:
+
+```sh
+docker pull ghcr.io/cefasdb/cefasdb:0.8.4
+```
+
+Tags published per release: `<version>`, `v<version>`, `latest`.
+
 ## Testing
 
 ```sh
