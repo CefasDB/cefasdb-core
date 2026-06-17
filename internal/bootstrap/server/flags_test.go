@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CefasDb/cefasdb/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/config"
 )
 
 func TestSplitCSVFlag(t *testing.T) {

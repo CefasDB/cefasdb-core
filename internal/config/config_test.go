@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CefasDb/cefasdb/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/config"
 )
 
 func TestDefaultsPopulated(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 
 	bootstrapserver "github.com/CefasDb/cefasdb/internal/bootstrap/server"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
-	"github.com/CefasDb/cefasdb/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/config"
 )
 
 // fixtureConfig returns a config.Config with non-zero values across

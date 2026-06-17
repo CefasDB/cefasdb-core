@@ -30,7 +30,7 @@ import (
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	"github.com/CefasDb/cefasdb/pkg/config"
+	"github.com/CefasDb/cefasdb/internal/config"
 
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
