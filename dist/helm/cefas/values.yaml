@@ -5,7 +5,7 @@
 # replicaCount ≥ 3 and the multi-Raft flags below.
 
 image:
-  repository: ghcr.io/osvaldoandrade/cefas
+  repository: ghcr.io/cefasdb/cefas
   tag: latest
   pullPolicy: IfNotPresent
 

@@ -50,7 +50,7 @@ function githubToken() {
 
 function githubHeaders(extraHeaders) {
   const headers = {
-    "User-Agent": "@osvaldoandrade/cefas postinstall",
+    "User-Agent": "@cefasdb/cefas postinstall",
     ...extraHeaders,
   };
   const token = githubToken();
@@ -165,7 +165,7 @@ async function main() {
     fail("missing package version");
   }
 
-  const repo = process.env.CEFAS_GITHUB_REPO || "osvaldoandrade/cefas";
+  const repo = process.env.CEFAS_GITHUB_REPO || "CefasDB/cefasdb-core";
   const tag = process.env.CEFAS_RELEASE_TAG || `v${pkg.version}`;
   const ext = goos === "windows" ? ".exe" : "";
   const assetName = `cefas-${goos}-${goarch}${ext}`;
