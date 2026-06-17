@@ -21,7 +21,7 @@ concurrency:
 
 env:
   BIN_NAME: cefas
-  NPM_PACKAGE: "@osvaldoandrade/cefas"
+  NPM_PACKAGE: "@cefasdb/cefas"
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
@@ -93,7 +93,7 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-          scope: "@osvaldoandrade"
+          scope: "@cefasdb"
 
       - name: Publish npm package (npmjs)
         shell: bash
@@ -109,8 +109,8 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           cd npm
           npm version --no-git-tag-version --allow-same-version "$VERSION"
-          npm pack --dry-run --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
-          npm publish --access public --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
+          npm pack --dry-run --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org
+          npm publish --access public --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org
 
       - name: Smoke test npm install
         shell: bash
@@ -120,7 +120,7 @@ jobs:
           PREFIX="${RUNNER_TEMP}/cefas-npm-smoke"
 
           for attempt in {1..12}; do
-            if npm view "${NPM_PACKAGE}@${VERSION}" version --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            if npm view "${NPM_PACKAGE}@${VERSION}" version --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 12 ]; then
@@ -130,7 +130,7 @@ jobs:
             sleep 10
           done
 
-          npm install --global --prefix "$PREFIX" "${NPM_PACKAGE}@${VERSION}" --registry=https://registry.npmjs.org --@osvaldoandrade:registry=https://registry.npmjs.org
+          npm install --global --prefix "$PREFIX" "${NPM_PACKAGE}@${VERSION}" --registry=https://registry.npmjs.org --@cefasdb:registry=https://registry.npmjs.org
           "$PREFIX/bin/${BIN_NAME}" version
 
   publish-image:
