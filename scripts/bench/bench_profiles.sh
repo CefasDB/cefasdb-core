@@ -14,7 +14,7 @@ for profile in $PROFILES; do
     COMPOSE_FILE="$COMPOSE_FILE" \
     STORAGE_PROFILE="$profile" \
     RESET_CLUSTER="${RESET_CLUSTER:-1}" \
-    scripts/bench_cluster.sh
+    scripts/bench/bench_cluster.sh
 done
 
 echo "Profile comparison results under $BASE_RESULT_DIR"
