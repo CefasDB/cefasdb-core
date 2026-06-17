@@ -162,6 +162,9 @@ func (c *PlacementCatalog) Normalize() {
 		}
 		sort.Strings(c.Shards[i].Voters)
 		sort.Strings(c.Shards[i].NonVoters)
+		if c.Shards[i].LeaderHint != "" && !containsString(c.Shards[i].Voters, c.Shards[i].LeaderHint) {
+			c.Shards[i].LeaderHint = ""
+		}
 	}
 	sort.Slice(c.Shards, func(i, j int) bool { return c.Shards[i].ID < c.Shards[j].ID })
 	if c.Nodes != nil {
@@ -216,10 +219,11 @@ func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 	placements := make([]ShardPlacement, 0, shards)
 	for i := 0; i < shards; i++ {
 		sh := ShardPlacement{
-			ID:     uint32(i),
-			State:  ShardStateActive,
-			Epoch:  1,
-			Voters: append([]string(nil), voters...),
+			ID:         uint32(i),
+			State:      ShardStateActive,
+			Epoch:      1,
+			Voters:     append([]string(nil), voters...),
+			LeaderHint: leaderHintForShard(voters, uint32(i)),
 		}
 		if strategy == PlacementStrategyTokenRange {
 			sh.Ranges = []TokenRange{ranges[i]}
@@ -264,6 +268,33 @@ func sortedMapKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func leaderHintForShard(voters []string, shardID uint32) string {
+	voters = sortedUnique(voters)
+	if len(voters) == 0 {
+		return ""
+	}
+	return voters[int(shardID)%len(voters)]
+}
+
+// BackfillLeaderHints assigns deterministic per-shard leader targets to
+// catalogs produced before LeaderHint was populated.
+func BackfillLeaderHints(cat PlacementCatalog) PlacementCatalog {
+	cat.Normalize()
+	for i := range cat.Shards {
+		if cat.Shards[i].LeaderHint == "" {
+			cat.Shards[i].LeaderHint = leaderHintForShard(cat.Shards[i].Voters, cat.Shards[i].ID)
+		}
+	}
+	return cat
+}
+
+func normalizeLeaderHint(sh ShardPlacement) string {
+	if sh.LeaderHint != "" && containsString(sh.Voters, sh.LeaderHint) {
+		return sh.LeaderHint
+	}
+	return leaderHintForShard(sh.Voters, sh.ID)
 }
 
 func splitTokenRanges(n int) []TokenRange {

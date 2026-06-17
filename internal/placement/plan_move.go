@@ -22,6 +22,7 @@ func planMove(cat PlacementCatalog, req PlacementPlanRequest) (PlacementPlan, er
 	after.Shards[shardIdx].Epoch = after.Epoch
 	after.Shards[shardIdx].Voters = voters
 	after.Shards[shardIdx].NonVoters = removeAny(after.Shards[shardIdx].NonVoters, voters)
+	after.Shards[shardIdx].LeaderHint = normalizeLeaderHint(after.Shards[shardIdx])
 	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {
 		return PlacementPlan{}, err

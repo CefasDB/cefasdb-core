@@ -108,11 +108,12 @@ func applySplitTransition(cat PlacementCatalog, shardIdx int, newShardID uint32,
 	after.Shards[shardIdx].State = ShardStateSplitting
 	after.Shards[shardIdx].Epoch = after.Epoch
 	after.Shards = append(after.Shards, ShardPlacement{
-		ID:     newShardID,
-		Ranges: []TokenRange{childRange},
-		State:  ShardStateCreating,
-		Epoch:  after.Epoch,
-		Voters: voters,
+		ID:         newShardID,
+		Ranges:     []TokenRange{childRange},
+		State:      ShardStateCreating,
+		Epoch:      after.Epoch,
+		Voters:     voters,
+		LeaderHint: leaderHintForShard(voters, newShardID),
 	})
 	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {

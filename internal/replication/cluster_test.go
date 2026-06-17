@@ -207,6 +207,27 @@ func TestRaftFollowerWritesAreRejected(t *testing.T) {
 	}
 }
 
+func TestRaftTransfersLeadershipToSpecificNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	nodes := startCluster(t, 3)
+	defer func() {
+		for _, n := range nodes {
+			n.close()
+		}
+	}()
+
+	leader := waitLeader(t, nodes)
+	target := (leader + 1) % len(nodes)
+	if err := nodes[leader].raft.TransferLeadership(nodes[target].id, nodes[target].bind, 5*time.Second); err != nil {
+		t.Fatalf("transfer leadership: %v", err)
+	}
+	wait.Eventually(t, func() bool {
+		return nodes[target].raft.IsLeader()
+	}, 10*time.Second, 50*time.Millisecond, "leadership did not transfer to %s", nodes[target].id)
+}
+
 func TestRaftSurvivesLeaderLoss(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")

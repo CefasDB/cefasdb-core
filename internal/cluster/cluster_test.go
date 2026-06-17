@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/CefasDb/cefasdb/internal/cluster"
 	"github.com/CefasDb/cefasdb/internal/placement"
 	"github.com/CefasDb/cefasdb/internal/routing"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/testutil/wait"
 	"github.com/CefasDb/cefasdb/pkg/types"
+	pebbledb "github.com/cockroachdb/pebble"
 )
 
 func pickPort(t testing.TB) string {
@@ -150,6 +150,77 @@ func TestManagerCreatesTokenRangePlacementForFreshRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "placement.json")); err != nil {
 		t.Fatalf("placement file not created: %v", err)
+	}
+}
+
+func TestManagerCopiesLeaderHintsIntoShardHandles(t *testing.T) {
+	root := t.TempDir()
+	cat := placement.DefaultPlacement(
+		2,
+		"n0",
+		map[string]string{"n0": "127.0.0.1:9100", "n1": "127.0.0.1:9101"},
+		nil,
+		placement.NodeCapacity{},
+		placement.PlacementStrategyTokenRange,
+	)
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n0",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	for _, meta := range cat.Shards {
+		sh, ok := mgr.Shard(meta.ID)
+		if !ok {
+			t.Fatalf("missing shard %d", meta.ID)
+		}
+		if sh.LeaderHint != meta.LeaderHint {
+			t.Fatalf("shard %d leader hint = %q, want %q", meta.ID, sh.LeaderHint, meta.LeaderHint)
+		}
+	}
+}
+
+func TestManagerBackfillsMissingLeaderHints(t *testing.T) {
+	root := t.TempDir()
+	cat := placement.DefaultPlacement(
+		2,
+		"n0",
+		map[string]string{"n0": "127.0.0.1:9100", "n1": "127.0.0.1:9101"},
+		nil,
+		placement.NodeCapacity{},
+		placement.PlacementStrategyTokenRange,
+	)
+	for i := range cat.Shards {
+		cat.Shards[i].LeaderHint = ""
+	}
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      root,
+		Shards:    2,
+		SelfID:    "n0",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	got := mgr.Placement()
+	want := []string{"n0", "n1"}
+	for i, sh := range got.Shards {
+		if sh.LeaderHint != want[i] {
+			t.Fatalf("shard %d leader hint = %q, want %q", sh.ID, sh.LeaderHint, want[i])
+		}
 	}
 }
 

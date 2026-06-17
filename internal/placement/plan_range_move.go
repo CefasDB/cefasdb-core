@@ -66,11 +66,12 @@ func applyRangeMoveTransition(cat PlacementCatalog, sourceIdx int, targetShardID
 	after.Shards[sourceIdx].State = ShardStateMoving
 	after.Shards[sourceIdx].Epoch = after.Epoch
 	after.Shards = append(after.Shards, ShardPlacement{
-		ID:     targetShardID,
-		Ranges: []TokenRange{moveRange},
-		State:  ShardStateCreating,
-		Epoch:  after.Epoch,
-		Voters: voters,
+		ID:         targetShardID,
+		Ranges:     []TokenRange{moveRange},
+		State:      ShardStateCreating,
+		Epoch:      after.Epoch,
+		Voters:     voters,
+		LeaderHint: leaderHintForShard(voters, targetShardID),
 	})
 	after.Normalize()
 	if err := ValidatePlacement(after); err != nil {

@@ -136,7 +136,7 @@ func drainShards(after PlacementCatalog, req PlacementPlanRequest, targets []str
 		steps = append(steps, membershipDiffSteps(after, sh.ID, currentVoters, voters)...)
 		sh.Voters = voters
 		sh.NonVoters = RemoveString(sh.NonVoters, req.NodeID)
-		if sh.LeaderHint == req.NodeID {
+		if sh.LeaderHint == req.NodeID || !containsString(sh.Voters, sh.LeaderHint) {
 			sh.LeaderHint = ""
 		}
 		sh.State = ShardStateActive
