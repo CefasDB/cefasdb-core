@@ -527,6 +527,22 @@ func (d *DB) Replicate(repr []byte) error {
 	return <-req.done
 }
 
+// ReplicateAsync submits a batch to the raft log without waiting for
+// quorum/apply. It is used by eventual-write mode after the leader has
+// committed the batch locally. Failures are intentionally observed only
+// by raft internals; callers have already received their local ack.
+func (d *DB) ReplicateAsync(repr []byte) error {
+	if !d.IsLeader() {
+		return ErrNotLeader
+	}
+	if len(repr) == 0 {
+		return nil
+	}
+	cp := append([]byte(nil), repr...)
+	d.raft.Apply(cp, d.cfg.applyTimeout())
+	return nil
+}
+
 // applyLoop merges concurrent Replicate calls into a single raft.Apply.
 // Producer batches are independent (different keys → different
 // payloads), so merge order within a single apply call is irrelevant;

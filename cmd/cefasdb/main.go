@@ -19,18 +19,18 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/CefasDb/cefasdb/internal/server"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	bootstrapserver "github.com/CefasDb/cefasdb/internal/bootstrap/server"
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/config"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
+	"github.com/CefasDb/cefasdb/internal/server"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	"github.com/CefasDb/cefasdb/internal/config"
 
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
@@ -89,8 +89,10 @@ func main() {
 		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
 
 		// Multi-Raft sharding.
-		shardsN = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
-		muxAddr = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
+		shardsN           = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
+		replicationFactor = flag.Int("replication-factor", 0, "Number of voters per shard during fresh multi-Raft placement bootstrap. 0 uses every peer.")
+		writeConsistency  = flag.String("write-consistency", "", "Data-shard write consistency: one/local/eventual for local ack + async replication, or quorum/strong for synchronous Raft.")
+		muxAddr           = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
 
 		// gRPC flags.
 		grpcAddr       = flag.String("grpc", "", "gRPC listen address (e.g. ':9090'). Empty disables gRPC.")
@@ -158,7 +160,7 @@ func main() {
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
 		*streamRetention, *streamRetentionMaxBytes,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
-		*shardsN, *muxAddr,
+		*shardsN, *replicationFactor, *writeConsistency, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
 		*metricsOff, *tracingURL, *tracingIns,
 		*rebalancerEnabled, *rebalancerMode, *rebalancerInterval, *rebalancerMinInterval,
@@ -200,19 +202,21 @@ func main() {
 
 	if cfg.Cluster.Shards > 0 {
 		mgr, err = cluster.Open(context.Background(), cluster.Config{
-			Root:            cfg.Data,
-			Shards:          cfg.Cluster.Shards,
-			SelfID:          cfg.Cluster.SelfID,
-			MuxAddr:         cfg.Cluster.MuxAddr,
-			Peers:           cfg.Cluster.Peers,
-			PeerHTTPAddrs:   cfg.Cluster.HTTPPeers,
-			Bootstrap:       cfg.Cluster.Bootstrap,
-			FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
-			StorageProfile:  cfg.Storage.Profile,
-			StorageTuning:   bootstrapserver.StorageTuning(cfg),
-			Backpressure:    bootstrapserver.BackpressureOptions(cfg),
-			StreamRetention: bootstrapserver.StreamRetentionOptions(cfg),
-			RaftProfile:     cfg.Storage.RaftProfile,
+			Root:              cfg.Data,
+			Shards:            cfg.Cluster.Shards,
+			ReplicationFactor: cfg.Cluster.ReplicationFactor,
+			WriteConsistency:  cfg.Cluster.WriteConsistency,
+			SelfID:            cfg.Cluster.SelfID,
+			MuxAddr:           cfg.Cluster.MuxAddr,
+			Peers:             cfg.Cluster.Peers,
+			PeerHTTPAddrs:     cfg.Cluster.HTTPPeers,
+			Bootstrap:         cfg.Cluster.Bootstrap,
+			FsyncOnCommit:     cfg.Storage.FsyncOnCommit,
+			StorageProfile:    cfg.Storage.Profile,
+			StorageTuning:     bootstrapserver.StorageTuning(cfg),
+			Backpressure:      bootstrapserver.BackpressureOptions(cfg),
+			StreamRetention:   bootstrapserver.StreamRetentionOptions(cfg),
+			RaftProfile:       cfg.Storage.RaftProfile,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)
