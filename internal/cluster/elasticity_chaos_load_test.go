@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/routing"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
@@ -328,12 +330,12 @@ func runDrainLoadScenario(t *testing.T, bucket string) elasticityScenarioReport 
 	waitForElasticityWrites(t, rec, 96)
 	stop()
 
-	placement := mgr.Placement()
-	if placement.Nodes["n1"].State != placement.NodeStateDraining {
-		t.Fatalf("n1 state = %s, want draining", placement.Nodes["n1"].State)
+	cat := mgr.Placement()
+	if cat.Nodes["n1"].State != placement.NodeStateDraining {
+		t.Fatalf("n1 state = %s, want draining", cat.Nodes["n1"].State)
 	}
-	if containsString(placement.Shards[0].Voters, "n1") || !containsString(placement.Shards[0].Voters, "n2") {
-		t.Fatalf("drain voters = %v, want n1 removed and n2 present", placement.Shards[0].Voters)
+	if slices.Contains(cat.Shards[0].Voters, "n1") || !slices.Contains(cat.Shards[0].Voters, "n2") {
+		t.Fatalf("drain voters = %v, want n1 removed and n2 present", cat.Shards[0].Voters)
 	}
 
 	return buildElasticityScenarioReport(t, mgr, td, bucket, rec, plan.BeforeEpoch, mgr.RoutingEpoch(), "metadata_apply")
@@ -389,7 +391,7 @@ func writeDrainPlacement(t *testing.T, root string) {
 	cat.Nodes["n2"] = placement.NodeDescriptor{ID: "n2", RaftAddr: "127.0.0.1:9202", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1}}
 	cat.Nodes["n3"] = placement.NodeDescriptor{ID: "n3", RaftAddr: "127.0.0.1:9203", State: placement.NodeStateActive, Capacity: placement.NodeCapacity{Weight: 1}}
 	cat.Normalize()
-	if err := placement.SavePlacementFile(filepath.Join(root, defaultPlacementFileName), cat); err != nil {
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
 		t.Fatalf("save drain placement: %v", err)
 	}
 }
@@ -472,7 +474,7 @@ func putElasticityItem(mgr *Manager, td types.TableDescriptor, item types.Item) 
 	return nil
 }
 
-func nextElasticityKey(router *Router, rng *placement.TokenRange, bucket string, seq int64) (string, error) {
+func nextElasticityKey(router *routing.Router, rng *placement.TokenRange, bucket string, seq int64) (string, error) {
 	for attempt := int64(0); attempt < 200_000; attempt++ {
 		key := fmt.Sprintf("%s-key-%06d-%06d", bucket, seq, attempt)
 		if rng == nil {

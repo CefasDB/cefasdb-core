@@ -88,7 +88,7 @@ jobs:
           name: coverage
         continue-on-error: true
       - name: install go-test-coverage
-        run: go install github.com/vladopajic/go-test-coverage/v2@latest
+        run: go install github.com/vladopajic/go-test-coverage/v2@v2.18.3
       - name: enforce thresholds
         continue-on-error: true
         run: go-test-coverage --config .testcoverage.yml
