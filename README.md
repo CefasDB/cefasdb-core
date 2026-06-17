@@ -1,65 +1,144 @@
 # CefasDB
 
-CefasDB is a high-performance NoSQL key-value and document database for
-operational workloads. It is designed for predictable millisecond-class access,
-horizontal scale, and a small operational footprint while still giving teams
-direct control over deployment, storage, replication, and extensions.
+> A high-performance NoSQL document store built for predictable
+> millisecond-class access, horizontal scale, and a small operational
+> footprint — with first-class support for plugins, vector search,
+> multi-Raft replication, and DynamoDB-compatible wire shapes.
 
-The repository ships two main binaries:
+The repository ships two binaries:
 
-- `cefasdb`: a Go database server backed by Pebble, with HTTP/JSON and gRPC APIs.
-- `cefas`: a command-line client distributed as a prebuilt Go binary through npm.
+| Binary | Purpose |
+|---|---|
+| `cefasdb` | The Go database server. Pebble-backed storage, HTTP/JSON and gRPC APIs, optional Raft multi-shard mode. |
+| `cefasctl` | The CLI. Distributed as a prebuilt Go binary through npm under the command name `cefas`. |
 
-Long-form documentation lives in the GitHub Wiki.
+Long-form documentation lives in the [GitHub Wiki](https://github.com/CefasDb/cefasdb/wiki):
+[Get Started](https://github.com/CefasDb/cefasdb/wiki/Get-Started-Overview)
+· [Concepts](https://github.com/CefasDb/cefasdb/wiki/Concepts-Overview)
+· [Plugins](https://github.com/CefasDb/cefasdb/wiki/Plugins-Overview)
+· [Interfaces](https://github.com/CefasDb/cefasdb/wiki/Interfaces-Overview)
+· [Operations](https://github.com/CefasDb/cefasdb/wiki/Operations-Overview)
 
-- [Wiki Home](https://github.com/CefasDb/cefasdb/wiki)
-- [Get Started](https://github.com/CefasDb/cefasdb/wiki/Get-Started-Overview)
-- [Concepts and Architecture](https://github.com/CefasDb/cefasdb/wiki/Concepts-Overview)
-- [Plugins and Extensions](https://github.com/CefasDb/cefasdb/wiki/Plugins-Overview)
-- [Interfaces](https://github.com/CefasDb/cefasdb/wiki/Interfaces-Overview)
-- [Operations](https://github.com/CefasDb/cefasdb/wiki/Operations-Overview)
-- [DynamoDB Streams Compatibility](docs/dynamodb-streams.md)
+---
 
-## What It Does
+## What it does
 
-cefas stores flexible documents behind a partition key and optional sort key. On
-top of that storage model it provides:
+`cefasdb` stores flexible documents behind a partition key and
+optional sort key. On top of that it provides:
 
-- Point reads and writes through `GetItem`, `PutItem`, `DeleteItem`, and batch APIs.
-- Partition queries with optional sort-key ranges and consistent-read routing.
-- Conditional writes, item updates, table metadata, TTL, backup, and restore support.
-- SQL execution through the server query layer.
-- Plugin-backed indexes for text, probabilistic, vector, spatial, and audience use cases.
-- Cluster operations for Raft-backed replicated deployments.
-- Prometheus metrics, optional OTLP tracing, and bearer-token authorization.
+- **Item APIs.** `GetItem`, `PutItem`, `DeleteItem`, batch, atomic
+  read-modify-write, conditional writes, TTL.
+- **Query APIs.** Partition queries with sort-key ranges, GSI/LSI
+  secondary indexes, spatial indexes (geohash + Z-order), ANN
+  vector search.
+- **SQL.** Server-side parser/planner/executor with EXPLAIN.
+- **Streams.** DynamoDB-Streams-compatible change feed with
+  retention.
+- **Cluster.** Multi-Raft replication with placement, online
+  split / range-move / drain / decommission, and an autonomous
+  rebalancer.
+- **Plugins.** Pluggable indexes (text, probabilistic, vector,
+  spatial), distance operators, audience segments, and bandits.
+- **Ops.** Backups with PITR, scheduled retention, Prometheus
+  metrics, optional OTLP tracing, bearer-token authorization.
 
-The item wire format is a compact typed JSON shape. Examples use tags such as
-`S` for strings, `N` for numbers, `BOOL` for booleans, `L` for lists, and `M`
-for maps.
+The item wire format is a compact typed JSON envelope: tags such
+as `S` for strings, `N` for numbers, `BOOL`, `L` for lists, `M`
+for maps, and `V` for native vectors.
 
-## Install The CLI
+---
 
-The npm package installs the `cefas` CLI by downloading the matching prebuilt
-binary from GitHub Releases.
+## Architecture
+
+A request flows from a client (`cefasctl`, the Go SDK, or any HTTP
+or gRPC caller) through the server transport layer into the
+planner, the partition router, and finally the Pebble-backed
+engine. Multi-Raft replication is wired into the storage layer:
+writes that go through `storage.Engine.PutItemWith` /
+`DeleteItemWith` are routed through `internal/replication` when a
+Raft cluster is attached.
+
+```mermaid
+flowchart LR
+    Client["Client<br/>(cefasctl · pkg/client · curl)"]
+    Client -->|HTTP / gRPC| Server["internal/server<br/>handlers · auth · tracing"]
+
+    Server --> SQL["internal/sql<br/>parser · planner · executor"]
+    Server --> Router["internal/routing<br/>Router.ShardForPK"]
+
+    SQL --> Storage
+    Router --> Cluster["internal/cluster<br/>Manager · WriteTargets"]
+
+    Cluster --> Storage["internal/storage<br/>Reader · Writer · Engine"]
+    Cluster --> Repl["internal/replication<br/>hashicorp/raft"]
+
+    Storage -->|engine boundary| Pebble["adapter/pebble<br/>Pebble LSM"]
+    Repl -.->|replicates batches| Pebble
+```
+
+---
+
+## Package layout
+
+Four public packages under `pkg/` (the contract third-party Go
+code can `go get` and import). Everything else is `internal/`.
+
+```mermaid
+flowchart TB
+    subgraph pkg["pkg/ — public surface"]
+        direction LR
+        ClientPkg["client<br/>(Go SDK)"]
+        PluginPkg["plugin<br/>(plugin SDK)"]
+        ProtocolPkg["protocol<br/>(gRPC wire)"]
+        TypesPkg["types<br/>(DTOs)"]
+    end
+
+    subgraph cmd["cmd/ — binaries"]
+        Cefasdb["cefasdb<br/>server"]
+        Cefasctl["cefasctl<br/>CLI"]
+    end
+
+    subgraph internal["internal/ — engine"]
+        Server["server<br/>(HTTP + gRPC)"]
+        Sql["sql"]
+        Storage["storage<br/>+ adapter/pebble"]
+        Clu["cluster · placement<br/>routing · replication<br/>rebalance"]
+        Core["core/<br/>condition · index<br/>model · query · ttl"]
+        Plg["plugin/builtin<br/>(23 built-ins)"]
+    end
+
+    Cefasdb --> Server
+    Cefasctl --> ClientPkg
+    ClientPkg --> ProtocolPkg
+    Server --> Sql
+    Server --> Storage
+    Server --> Clu
+    Sql --> Core
+    Storage --> Core
+    PluginPkg -.->|contract| Plg
+    PluginPkg -.->|shared kernel| Core
+```
+
+**Module path:** `github.com/CefasDb/cefasdb`
+
+---
+
+## Install the CLI
 
 ```sh
-npm install -g @osvaldoandrade/cefas
+npm install -g @cefasdb/cefas
 cefas --help
 ```
 
-Node.js 18 or newer is required for the installer wrapper. The installed command
-is the native Go CLI.
+Node.js 18+ for the installer wrapper; the installed command is
+the native Go CLI.
 
-## Build Locally
-
-```sh
-go build -o ./bin/cefasdb ./cmd/cefasdb
-go build -o ./bin/cefas ./cmd/cefasctl
-```
-
-Run the local server with HTTP and gRPC enabled:
+## Build locally
 
 ```sh
+go build -o ./bin/cefasdb  ./cmd/cefasdb
+go build -o ./bin/cefas    ./cmd/cefasctl
+
 ./bin/cefasdb \
   -data ./cefas-data \
   -http :8080 \
@@ -73,9 +152,9 @@ In another shell, point the CLI at the local gRPC endpoint:
 ./bin/cefas --endpoint localhost:9090 --insecure list-tables
 ```
 
-## First Table
+---
 
-Create a table with a partition key and sort key:
+## First table
 
 ```sh
 cefas --endpoint localhost:9090 --insecure create-table \
@@ -84,11 +163,7 @@ cefas --endpoint localhost:9090 --insecure create-table \
   --attribute-definitions AttributeName=sk,AttributeType=S \
   --key-schema AttributeName=pk,KeyType=HASH \
   --key-schema AttributeName=sk,KeyType=RANGE
-```
 
-Write and read an item:
-
-```sh
 cefas --endpoint localhost:9090 --insecure put-item \
   --table-name Users \
   --item '{"pk":{"S":"USER#1"},"sk":{"S":"PROFILE"},"name":{"S":"Ova"}}'
@@ -96,48 +171,92 @@ cefas --endpoint localhost:9090 --insecure put-item \
 cefas --endpoint localhost:9090 --insecure get-item \
   --table-name Users \
   --key '{"pk":{"S":"USER#1"},"sk":{"S":"PROFILE"}}'
-```
 
-Run a partition query:
-
-```sh
 cefas --endpoint localhost:9090 --insecure query \
-  --table-name Users \
-  --pk-value '{"S":"USER#1"}' \
-  --limit 25
+  --table-name Users --pk-value '{"S":"USER#1"}' --limit 25
 ```
 
-## Plugins And Indexes
+---
 
-cefas includes a plugin registry for index, distance, estimator, and audience
-operations. The built-in server registers plugins such as `trigram`, `bloom`,
-`geohash`, vector distance operators, cardinality sketches, and frequency tools.
+## Cluster mode
+
+A `cefasdb` cluster is a set of nodes that each host every shard's
+Raft group. One TCP port per node multiplexes traffic for every
+shard via `MuxAcceptor`; per-shard groups commit in parallel so
+throughput scales horizontally. Routing is deterministic — the
+`Router` resolves a partition key to a shard ID by xxhash → token
+→ active placement range.
+
+```mermaid
+flowchart TB
+    Client["Client"]
+    Client -->|"ShardForPK(pkBytes)"| Router{"routing.Router<br/>token-range table"}
+    Router -.->|"shardID + epoch"| N1
+
+    subgraph N1["Node n1"]
+        direction TB
+        N1Mux["MuxAcceptor :7700"]
+        N1S0["Shard 0<br/>Raft group A"]
+        N1S1["Shard 1<br/>Raft group B"]
+    end
+    subgraph N2["Node n2"]
+        N2Mux["MuxAcceptor :7700"]
+        N2S0["Shard 0<br/>Raft group A"]
+        N2S1["Shard 1<br/>Raft group B"]
+    end
+    subgraph N3["Node n3"]
+        N3Mux["MuxAcceptor :7700"]
+        N3S0["Shard 0<br/>Raft group A"]
+        N3S1["Shard 1<br/>Raft group B"]
+    end
+
+    N1S0 <-->|"Raft"| N2S0
+    N1S0 <-->|"Raft"| N3S0
+    N1S1 <-->|"Raft"| N2S1
+    N1S1 <-->|"Raft"| N3S1
+```
+
+**Elasticity ops.** Online `split`, `range-move`, `move`,
+`drain`, and `decommission`. Plans are returned dry-run first;
+apply after review.
 
 ```sh
-cefas --endpoint localhost:9090 --insecure list-plugins
+cefas cluster plan split        --shard 0 --min-voters 3
+cefas cluster plan range-move   --source-shard 0 \
+                                --range-start 0 \
+                                --range-end 9223372036854775808 \
+                                --min-voters 3
+cefas cluster plan move         --shard 0 --source-node n1 --target-node n4 --min-voters 3
+cefas cluster plan drain        --node n1 --min-voters 3
+cefas cluster plan decommission --node n1
 
-cefas --endpoint localhost:9090 --insecure create-index \
-  --table Users \
-  --name user_name_trigram \
-  --type trigram \
-  --field name
+cefas cluster apply --plan file://split-plan.json --yes
+cefas cluster split finalize --parent-shard 0 --child-shard 1 \
+                              --expected-epoch 2 --writes-quiesced --yes
 ```
 
-Operational commands include `topk`, `aggregate`, `cohort`, `geo audience`,
-`dedup`, `freqcap`, `explain`, `describe-index`, and `rebuild-index`.
+**Placement audit** runs online with bounded storage sampling:
 
-## Vectors, ANN, Memory Tables, And PITR
-
-Native vector attributes use the `V` tag with an optional dimension marker:
-
-```json
-{"id":{"S":"d1"},"emb":{"V":[0.1,0.2,0.3],"D":3}}
+```sh
+curl -sS -X POST "$CEFAS_HTTP/v1/cluster/placement/audit" \
+  -H "Authorization: Bearer $CEFAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"maxPrimaryKeysPerShard":4096,"maxIssues":200,"includeRepairPlan":true}'
 ```
 
-Declare vector dimensions at table creation time to make writes fail fast on
-dimension mismatches. Use `--storage-class memory` for a Raft-replicated table
-that keeps a process-local in-memory read copy while preserving the normal
-write-ahead batch path for replication, backups, and restart recovery.
+**Autonomous rebalancer.** Opt-in via `rebalancer.enabled`.
+Consumes hot-range metrics + placement state on a fixed interval
+and proposes split / range-move / drain plans. Modes: `dry-run`
+(log), `manual` (write plan files to `rebalancer.manualPlanDir`),
+`auto` (apply safe plans directly).
+
+---
+
+## Vectors, ANN, PITR
+
+Native vector attributes use the `V` tag with an optional
+dimension marker; declare dimensions at table creation time to
+make writes fail fast on mismatches:
 
 ```sh
 cefas --endpoint localhost:9090 --insecure create-table \
@@ -146,26 +265,13 @@ cefas --endpoint localhost:9090 --insecure create-table \
   --attribute-definitions 'AttributeName=emb,AttributeType=V<3>' \
   --key-schema AttributeName=id,KeyType=HASH \
   --storage-class memory
-```
 
-Create a unified ANN index with explicit algorithm and metric parameters. The
-`ann` descriptor uses the vector LSH index internally today and keeps the metric
-available for `top-k` and SQL planning.
-
-```sh
 cefas --endpoint localhost:9090 --insecure create-index \
-  --table Documents \
-  --name emb_ann \
-  --type ann \
-  --field emb \
-  --dim 3 \
-  --algorithm lsh \
-  --metric cosine
+  --table Documents --name emb_ann --type ann --field emb \
+  --dim 3 --algorithm lsh --metric cosine
 
 cefas --endpoint localhost:9090 --insecure top-k \
-  --table Documents \
-  --by "ann(emb, :q)" \
-  --k 10 \
+  --table Documents --by "ann(emb, :q)" --k 10 \
   --query '{"V":[0.1,0.2,0.3],"D":3}'
 ```
 
@@ -175,229 +281,158 @@ SQL can rank by the ANN index directly:
 SELECT id FROM Documents ORDER BY emb ANN OF [0.1,0.2,0.3] LIMIT 10;
 ```
 
-Backups record table stats, shard coverage, placement epoch, and the storage
-change index captured at checkpoint time. Point-in-time restore uses the backup
-checkpoint plus retained local changelog entries. Retain both the backup
-checkpoint directory and the live `cefas/admin/change/log/` history for every
-target point you need to restore; a target change index or timestamp before the
-backup high-water mark or beyond retained history is rejected.
+**Backups + PITR.** Backups record the storage change index at
+checkpoint time. Restore can replay retained changelog entries up
+to a target change index or timestamp:
 
 ```sh
-cefas --endpoint localhost:9090 --insecure create-backup --backup-name nightly
-
-cefas --endpoint localhost:9090 --insecure restore-table-from-backup \
+cefas create-backup --backup-name nightly
+cefas restore-table-from-backup \
   --backup-name nightly \
   --source-table-name Documents \
   --target-table-name Documents_recovered \
   --target-change-index 12345
+cefas apply-backup-retention --keep-latest 7 --max-age 720h --dry-run
 ```
 
-## Run With Docker
+Scheduled backups can run from the server flags:
 
-The demo Compose stack runs `cefasdb`, Prometheus, and Grafana:
+```sh
+cefasdb \
+  -backup-scheduler-enabled \
+  -backup-scheduler-interval 1h \
+  -backup-scheduler-name-template 'hourly-{{timestamp}}' \
+  -backup-scheduler-retention-keep-latest 24
+```
+
+---
+
+## Plugins
+
+`pkg/plugin/` is the SDK third-party plugin authors implement
+against:
+
+- `IndexPlugin`, `AudiencePlugin`, `BanditPlugin`, `DistancePlugin`
+- `Lifecycle` (Create / Describe / Rebuild / Drop) and `Descriptor`
+- `testharness/` for plugin authors
+- `distancecontract/` for distance-metric authors
+
+`internal/plugin/builtin/` ships 23 implementations: similarity
+metrics (`cosine`, `euclidean`, `manhattan`, `hamming`,
+`haversine`, `jaccard`, `jarowinkler`, `levenshtein`, `damerau`),
+sketches (`bloom`, `cbloom`, `cuckoo`, `cms`, `hll`, `minhash`,
+`simhash`), structured indexes (`trigram`, `radix`, `roaring`,
+`geohash`, `vectorlsh`), and the `audience` + `bandit` operators.
+
+```sh
+cefas list-plugins
+cefas create-index --table Users --name user_name_trigram \
+                   --type trigram --field name
+```
+
+---
+
+## Run with Docker
+
+The demo Compose stack runs `cefasdb` plus Prometheus and Grafana:
 
 ```sh
 docker compose -f deploy/docker-compose.yml up --build
 ```
 
-Ports:
+Ports: `8080` (HTTP + `/metrics`), `9090` (gRPC), `9091`
+(Prometheus), `3000` (Grafana, default `admin` / `admin`).
 
-- `8080`: HTTP API and `/metrics`
-- `9090`: gRPC API
-- `9091`: Prometheus
-- `3000`: Grafana, default login `admin` / `admin`
+A Helm chart for Kubernetes lives in `dist/helm/cefas`.
 
-Kubernetes deployment files live under `dist/helm/cefas`.
+---
 
 ## Configuration
 
-`cefasdb` accepts flags, environment variables, and a YAML file. Precedence is:
-
-```text
-flags > CEFAS_* environment variables > YAML file > defaults
-```
+Precedence: **flags > `CEFAS_*` env vars > YAML file > defaults**.
 
 Common server flags:
 
 | Flag | Default | Purpose |
-| ---- | ------- | ------- |
-| `-data` | `./cefas-data` | Pebble data directory. |
-| `-http` | `:8080` | HTTP listen address. |
-| `-grpc` | empty | gRPC listen address. Empty disables gRPC. |
-| `-fsync` | `false` | Fsync on commit for stronger crash durability. |
-| `-config` | empty | YAML config file path. |
-| `-metrics-disabled` | `false` | Disable Prometheus metrics. |
-| `-tracing-endpoint` | empty | OTLP/gRPC collector endpoint. |
+|---|---|---|
+| `-data` | `./cefas-data` | Pebble data directory |
+| `-http` | `:8080` | HTTP listen address |
+| `-grpc` | empty | gRPC listen address (empty disables gRPC) |
+| `-fsync` | `false` | Fsync on commit for stronger crash durability |
+| `-config` | empty | YAML config file path |
+| `-metrics-disabled` | `false` | Disable Prometheus metrics |
+| `-tracing-endpoint` | empty | OTLP/gRPC collector endpoint |
 
-Hot range tracking is configured under `metrics.*` in YAML or `CEFAS_METRICS_*`
-environment variables. The defaults keep Prometheus cardinality bounded at
-`shard_count * 64` buckets. Useful overrides include
-`metrics.hotspotBuckets`, `metrics.hotspotWindow`,
-`metrics.hotspotCoolingWindow`, `metrics.hotspotReadThreshold`,
-`metrics.hotspotWriteThreshold`, `metrics.hotspotBytesThreshold`,
-`metrics.hotspotLatencyThreshold`, and
-`metrics.hotspotCompactionDebtThresholdBytes`.
+Hot-range tracking lives under `metrics.*` (or `CEFAS_METRICS_*`)
+with bounded Prometheus cardinality (`shard_count × 64` buckets).
+Defaults can be overridden via `metrics.hotspot{Buckets,Window,
+CoolingWindow,ReadThreshold,WriteThreshold,BytesThreshold,
+LatencyThreshold,CompactionDebtThresholdBytes}`.
 
-The autonomous rebalancer is opt-in with `rebalancer.enabled` or
-`CEFAS_REBALANCER_ENABLED=true`. It consumes `HotRanges` and placement state on
-a fixed interval, proposes deterministic split/range-move/drain plans, and
-enforces `rebalancer.maxConcurrentOperations` plus `rebalancer.minInterval`.
-Use `rebalancer.mode: dry-run` to log decisions, `manual` with
-`rebalancer.manualPlanDir` to write plans for approval, or `auto` to apply safe
-plans directly.
+The CLI reads `~/.cefas/config.yaml`, `CEFAS_*` env vars, and
+global flags (`--endpoint`, `--token`, `--token-file`, `--ca`,
+`--insecure`, `--output`, `--timeout`).
 
-The CLI reads `~/.cefas/config.yaml`, `CEFAS_*` environment variables, and global
-flags such as `--endpoint`, `--token`, `--token-file`, `--ca`, `--insecure`,
-`--output`, and `--timeout`.
+---
 
-Cluster placement planning commands return dry-run plans for shard elasticity
-operations:
-
-```sh
-cefas cluster plan split --shard 0 --min-voters 3
-cefas cluster plan range-move --source-shard 0 --range-start 0 --range-end 9223372036854775808 --min-voters 3
-cefas cluster plan move --shard 0 --source-node n1 --target-node n4 --min-voters 3
-cefas cluster plan drain --node n1 --min-voters 3
-cefas cluster plan decommission --node n1
-```
-
-When `split`, `range-move`, or `drain` does not receive explicit target voters,
-the planner selects active nodes deterministically from node weight, CPU, memory,
-disk, tags, shard count, range load, and zone anti-affinity. Draining and
-decommissioned nodes are never selected as new targets. Use repeated
-`--target-voter` flags on split/range-move or repeated `--target-node` flags on
-drain to override the policy.
-
-Split, move, drain, and decommission plans can be applied after review. Drain
-moves shard memberships off the node and leaves it in `draining`; decommission
-is a separate final metadata step that is refused while any active shard voter,
-non-voter, or leader-hint reference remains. `cefas cluster status` includes
-`DrainProgress` with the remaining blockers and `HotRanges` with bounded
-token-bucket read/write, bytes, latency, compaction-debt, and throttling
-summaries. Applying a split opens the child shard online and publishes the
-transition catalog; it does not copy or activate the child range yet.
-
-```sh
-cefas cluster apply --plan file://split-plan.json --yes
-cefas cluster apply --plan file://move-plan.json --yes
-```
-
-Placement audit can run online with bounded storage sampling. It reports token
-coverage gaps, overlapping active owners, primary keys stored on the wrong
-shard, and primary rows whose shard is missing the table catalog descriptor.
-The report includes a checksum of the bounded primary-key sample. The emitted
-`repairPlan` is explicit and review-only; repair actions are not applied by the
-audit endpoint.
-
-```sh
-curl -s -X POST "$CEFAS_HTTP/v1/cluster/placement/audit" \
-  -H "Authorization: Bearer $CEFAS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"maxPrimaryKeysPerShard":4096,"maxIssues":200,"includeRepairPlan":true}'
-```
-
-Once the child shard is open and writes to the split range are paused, finalize
-the split to copy the child range, activate both shards, and clean the range
-from the parent:
-
-```sh
-cefas cluster split finalize --parent-shard 0 --child-shard 1 --expected-epoch 2 --writes-quiesced --yes
-```
-
-Elasticity chaos/load validation runs locally through `go test` and does not
-require external services. The suite exercises live split, live range move, and
-node drain while writes are active, injects restart-style failures in copy,
-catch-up, catalog publish, and cleanup phases, and verifies routed reads, item
-counts, checksums, GSI query results, routing epochs, p99 latency, throughput,
-errors, and a consistency verdict. The autonomous rebalancer gate runs a fixed
-skewed workload before and after the hotspot-driven split, then fails unless the
-max shard share drops from full concentration to a balanced post-rebalance
-distribution. Set `CEFAS_ELASTICITY_REPORT` and `CEFAS_REBALANCER_REPORT` to
-persist repeatable JSON reports for CI artifacts:
-
-```sh
-CEFAS_ELASTICITY_REPORT=reports/elasticity-chaos-load.json \
-CEFAS_REBALANCER_REPORT=reports/rebalancer-skew.json \
-  go test ./internal/cluster -run 'TestElasticityChaosLoadSuite|TestAutonomousRebalancerSkewReductionGate' -count=1 -v
-```
-
-Admin-named backups include a versioned manifest. The manifest records the
-requested table set, the captured table set, and a deterministic row
-count/checksum for each table in the checkpoint. Restore validates the source
-table against that manifest before creating the target catalog entry or copying
-rows. Backups created before manifests remain listable with
-`manifest_status=legacy`. Retention can run as a dry-run first; when deletion
-cannot remove a checkpoint directory it reports `partialCleanup` and
-`cleanupError` explicitly.
-
-```sh
-cefas create-backup --backup-name before-maintenance
-cefas list-backups
-cefas restore-table-from-backup \
-  --backup-name before-maintenance \
-  --source-table-name Users \
-  --target-table-name Users_restored
-cefas restore-table-from-backup \
-  --backup-name before-maintenance \
-  --source-table-name Users \
-  --target-table-name Users_restored \
-  --dry-run
-cefas apply-backup-retention --keep-latest 7 --max-age 720h --dry-run
-cefas delete-backup --backup-name before-maintenance
-cefasdb \
-  -backup-scheduler-enabled \
-  -backup-scheduler-dry-run \
-  -backup-scheduler-interval 1h \
-  -backup-scheduler-name-template 'hourly-{{timestamp}}' \
-  -backup-scheduler-retention-keep-latest 24 \
-  -backup-scheduler-retention-dry-run
-cefas cluster status
-curl -s -X POST "$CEFAS_HTTP/v1/RestoreTableFromBackup" \
-  -H "Authorization: Bearer $CEFAS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"backupName":"before-maintenance","sourceTableName":"Users","targetTableName":"Users_restored","dryRun":true}'
-curl -s -X POST "$CEFAS_HTTP/v1/ApplyBackupRetention" \
-  -H "Authorization: Bearer $CEFAS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"keepLatest":7,"keepLatestSet":true,"maxAge":"720h","dryRun":true}'
-```
-
-## Project Layout
+## Repository layout
 
 ```text
-cmd/cefasdb        server entrypoint
-cmd/cefasctl           CLI entrypoint and subcommands
-internal/storage        Pebble storage, keys, TTL, backup, restore, indexes
-internal/raft           Raft replication, snapshots, change stream plumbing
-internal/cluster        multi-shard routing and cluster manager
-pkg/api                 HTTP and gRPC API implementation
-pkg/client              Go client used by the CLI
-pkg/sql                 SQL parser, planner, and executor
-pkg/plugin              plugin interfaces, registry, and built-ins
-npm                     npm wrapper for installing the prebuilt CLI
-deploy                  Docker, Compose, Helm, Prometheus, and Grafana assets
+cmd/                 binaries (cefasdb, cefasctl, cefas-loadtest)
+deploy/              runtime: Dockerfile, docker-compose*, grafana/, prometheus/
+dist/                publishable: helm/, npm/
+internal/            engine implementation
+  ├── server/        HTTP + gRPC handlers
+  ├── sql/           parser, planner, executor
+  ├── storage/       Reader / Writer / Engine boundary
+  │   └── adapter/pebble/
+  ├── core/          condition, index, model, query, query/mmr, stream, ttl
+  ├── cluster/       Manager, orchestration
+  ├── placement/     PlacementCatalog, plan strategies, audit
+  ├── routing/       Router, tokens
+  ├── replication/   hashicorp/raft glue
+  ├── rebalance/     autonomous rebalancer
+  ├── catalog/       table-descriptor adapter + domain
+  ├── plugin/builtin/ 23 built-in plugin implementations
+  ├── config/        config loader
+  ├── compat/ddbjson/ DynamoDB-JSON wire adapter
+  ├── metrics/       Prometheus
+  ├── tracing/       OTLP
+  ├── auth/          bearer-token authz
+  └── bootstrap/     boot-time wiring
+pkg/                 public Go API
+  ├── client/        Go SDK
+  ├── plugin/        plugin SDK + distancecontract + testharness
+  ├── protocol/      gRPC wire (cefas.v1)
+  └── types/         DTOs (TableDescriptor, Item, AttributeValue)
+scripts/             admin/, bench/, gen/, loadtest/
+third_party/         vendored deps
 ```
+
+---
 
 ## Development
 
-Run the test suite with an isolated Go build cache when your environment restricts
-the default cache directory:
+```sh
+make ci             # vet + lint + test + coverage + sec
+make test           # race + shuffle + coverage
+make lint           # golangci-lint
+make bench          # all benchmarks
+make sec            # govulncheck + gosec + osv-scanner
+```
+
+Run the test suite with an isolated Go build cache when your
+environment restricts the default cache directory:
 
 ```sh
 GOCACHE=/tmp/cefas-gocache go test ./...
 ```
 
-Useful checks before publishing changes:
+Releases are produced by GitHub Actions. The release workflow
+builds the CLI, publishes GitHub Release assets, and publishes
+the npm package from `dist/npm/`.
 
-```sh
-go test ./...
-go vet ./...
-go build ./cmd/cefasdb
-go build ./cmd/cefasctl
-```
-
-Releases are produced by GitHub Actions. The release workflow builds the CLI,
-publishes GitHub Release assets, and publishes the npm package from `dist/npm/`.
+---
 
 ## License
 
