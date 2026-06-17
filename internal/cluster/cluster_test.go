@@ -224,6 +224,102 @@ func TestManagerBackfillsMissingLeaderHints(t *testing.T) {
 	}
 }
 
+func TestManagerSkipsRaftForNonVoterShard(t *testing.T) {
+	root := t.TempDir()
+	peers := map[string]string{
+		"n1": pickPort(t),
+		"n2": pickPort(t),
+		"n3": pickPort(t),
+		"n4": pickPort(t),
+	}
+	httpPeers := map[string]string{
+		"n1": "http://n1:8080",
+		"n2": "http://n2:8080",
+		"n3": "http://n3:8080",
+		"n4": "http://n4:8080",
+	}
+	cat := placement.DefaultPlacementWithReplicationFactor(
+		2,
+		"n1",
+		peers,
+		httpPeers,
+		placement.NodeCapacity{},
+		placement.PlacementStrategyTokenRange,
+		3,
+	)
+	if err := placement.SavePlacementFile(filepath.Join(root, "placement.json"), cat); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:          root,
+		Shards:        2,
+		SelfID:        "n1",
+		MuxAddr:       peers["n1"],
+		Peers:         peers,
+		PeerHTTPAddrs: httpPeers,
+		Bootstrap:     true,
+		LogOutput:     io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	voterShard, ok := mgr.Shard(0)
+	if !ok || voterShard.Raft == nil {
+		t.Fatalf("shard 0 should open raft on n1")
+	}
+	nonVoterShard, ok := mgr.Shard(1)
+	if !ok {
+		t.Fatalf("missing shard 1")
+	}
+	for _, voter := range nonVoterShard.Voters {
+		if voter == "n1" {
+			t.Fatalf("test setup expected n1 outside shard 1 voters: %v", nonVoterShard.Voters)
+		}
+	}
+	if nonVoterShard.Raft != nil {
+		t.Fatalf("non-voter shard opened raft")
+	}
+	err = nonVoterShard.Storage.Set([]byte("k"), []byte("v"))
+	if !errors.Is(err, pebble.ErrNotLeader) {
+		t.Fatalf("non-voter write error = %v, want ErrNotLeader", err)
+	}
+	var nle *pebble.NotLeaderError
+	if !errors.As(err, &nle) || nle.LeaderHTTPAddr() != "http://n2:8080" {
+		t.Fatalf("non-voter redirect = %v, want http://n2:8080", err)
+	}
+}
+
+func TestManagerAppliesFastWriteConsistencyOnlyToDataShards(t *testing.T) {
+	mgr, err := cluster.Open(context.Background(), cluster.Config{
+		Root:      t.TempDir(),
+		Shards:    2,
+		SelfID:    "n1",
+		LogOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	meta, ok := mgr.Shard(0)
+	if !ok {
+		t.Fatal("missing metadata shard")
+	}
+	data, ok := mgr.Shard(1)
+	if !ok {
+		t.Fatal("missing data shard")
+	}
+	if got := meta.Storage.WriteConsistency(); got != pebble.WriteConsistencyQuorum {
+		t.Fatalf("metadata shard consistency = %q, want quorum", got)
+	}
+	if got := data.Storage.WriteConsistency(); got != pebble.WriteConsistencyOne {
+		t.Fatalf("data shard consistency = %q, want one", got)
+	}
+}
+
 func TestManagerPreservesLegacyModuloForExistingShardState(t *testing.T) {
 	root := t.TempDir()
 	st, err := pebble.Open(pebble.Options{Path: filepath.Join(root, "shards", "0", "state")})
