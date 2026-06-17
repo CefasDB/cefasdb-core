@@ -1,6 +1,6 @@
 {
   "name": "@cefasdb/cefas",
-  "version": "0.1.3",
+  "version": "0.8.1",
   "description": "cefas CLI (installs a prebuilt Go binary from GitHub Releases)",
   "license": "MIT",
   "homepage": "https://github.com/CefasDB/cefasdb-core#readme",
