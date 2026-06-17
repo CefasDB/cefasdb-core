@@ -11,7 +11,7 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 

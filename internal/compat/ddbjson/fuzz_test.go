@@ -3,7 +3,7 @@ package ddbjson_test
 import (
 	"testing"
 
-	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 )
 
 // FuzzUnmarshal asserts that ParseItem and ParseBinds never panic on

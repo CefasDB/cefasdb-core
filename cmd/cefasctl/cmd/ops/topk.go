@@ -11,7 +11,7 @@ import (
 	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/fileloader"
 	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/output"
 	"github.com/CefasDb/cefasdb/cmd/cefasctl/internal/runtime"
-	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 )
 
 // byExprRegex grabs (op, field, :bind) out of the aws-cli style

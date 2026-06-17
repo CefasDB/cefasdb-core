@@ -12,7 +12,7 @@ import (
 	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	"github.com/CefasDb/cefasdb/pkg/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
