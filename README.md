@@ -5,22 +5,12 @@ gRPC interfaces, an optional Raft multi-shard mode, and a plugin
 SDK third-party Go authors compile against. It targets teams that
 need predictable millisecond-class reads on a few hundred GB to a
 few TB of operational data, want a DynamoDB-compatible wire shape,
-and can run the binary themselves on a small fleet of nodes. It
-is not a general-purpose analytical engine, not a managed
-service, and not a drop-in replacement for a relational database
-with foreign-key enforcement.
+and can run the binary themselves on a small fleet of nodes.
 
 The repository ships two binaries. `cefasdb` is the server: it
 opens Pebble, loads the catalog, and serves HTTP/JSON and gRPC.
 `cefasctl` is the Go CLI, distributed as a prebuilt binary
-through npm under the command name `cefas`. Long-form
-documentation lives in the
-[GitHub Wiki](https://github.com/CefasDb/cefasdb/wiki):
-[Get Started](https://github.com/CefasDb/cefasdb/wiki/Get-Started-Overview),
-[Concepts](https://github.com/CefasDb/cefasdb/wiki/Concepts-Overview),
-[Plugins](https://github.com/CefasDb/cefasdb/wiki/Plugins-Overview),
-[Interfaces](https://github.com/CefasDb/cefasdb/wiki/Interfaces-Overview),
-and [Operations](https://github.com/CefasDb/cefasdb/wiki/Operations-Overview).
+through npm. 
 
 ## What CefasDB does
 
