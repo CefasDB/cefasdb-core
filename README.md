@@ -2,10 +2,11 @@
 
 ## What is CefasDB?
 
-CefasDB is a NoSQL document database with a DynamoDB-compatible
-wire shape, SQL on the server, and an optional Raft multi-shard
-mode. It targets teams that need predictable millisecond-class
-reads on operational data and run the binary themselves.
+CefasDB is a NoSQL document database with HTTP/JSON and gRPC
+APIs, server-side SQL, and an optional Raft multi-shard mode for
+horizontal scale. It targets teams that need predictable
+millisecond-class reads on operational data and run the binary
+themselves.
 
 For more information, please see [docs.cefasdb.com].
 
@@ -66,10 +67,9 @@ See the [testing guide] for the full suite.
 
 ## APIs
 
-CefasDB exposes a DynamoDB-compatible HTTP/JSON surface and a
-gRPC surface. The server also accepts SQL through
-`ExecuteStatement`. See [API reference] for the contract and
-supported subset.
+CefasDB exposes HTTP/JSON and gRPC APIs and accepts SQL through
+`ExecuteStatement`. See the [API reference] for the full
+contract.
 
 [API reference]: https://docs.cefasdb.com/reference/apis
 
