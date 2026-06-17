@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // AsFloats returns av's numeric vector in float64 form. Supported

@@ -17,8 +17,8 @@ import (
 	"hash/fnv"
 	"sync"
 
-	"github.com/CefasDb/cefasdb/pkg/core/index"
-	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/index"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/internal/hashfield"
 )

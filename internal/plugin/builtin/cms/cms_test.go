@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/CefasDb/cefasdb/pkg/core/model"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/cms"
 )
 
