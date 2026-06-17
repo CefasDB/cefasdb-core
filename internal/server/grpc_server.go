@@ -20,7 +20,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	cefassql "github.com/osvaldoandrade/cefas/internal/sql"

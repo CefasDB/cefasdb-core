@@ -29,7 +29,7 @@ import (
 	craft "github.com/osvaldoandrade/cefas/internal/replication"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/pkg/config"
 
 	// Side-effect import: every built-in plugin registers against

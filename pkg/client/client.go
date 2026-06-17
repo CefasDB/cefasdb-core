@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 // Client is a typed cefas gRPC client. Safe for concurrent use.

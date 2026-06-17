@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 // ---------- cluster ----------

@@ -12,12 +12,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 protoc \
-  --proto_path=pkg/api/proto \
+  --proto_path=pkg/protocol \
   --go_out=. \
   --go_opt=module=github.com/osvaldoandrade/cefas \
   --go-grpc_out=. \
   --go-grpc_opt=module=github.com/osvaldoandrade/cefas \
-  pkg/api/proto/cefas.proto
+  pkg/protocol/cefas.proto
 
 echo "generated:"
-ls -1 pkg/api/proto/*.pb.go
+ls -1 pkg/protocol/*.pb.go

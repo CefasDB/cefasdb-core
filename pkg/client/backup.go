@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 // ---------- backups ----------

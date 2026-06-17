@@ -11,7 +11,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/catalog"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/internal/core/index"
 	"github.com/osvaldoandrade/cefas/internal/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 )
 
 func TestGRPCGSIQueryFindsMovedSplitRowsOnce(t *testing.T) {

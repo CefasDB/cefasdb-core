@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
+	cefaspb "github.com/osvaldoandrade/cefas/pkg/protocol"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 	"github.com/osvaldoandrade/cefas/pkg/plugin/bandit"
 	_ "github.com/osvaldoandrade/cefas/pkg/plugin/builtins"

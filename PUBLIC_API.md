@@ -19,8 +19,8 @@ on commit `9af22a9` (post PR 3).
 
 | Package | In-repo importers | External-API status | Action | Rationale |
 |---|---:|---|---|---|
-| `pkg/api/` (empty wrapper) | 0 | n/a — no `.go` files at this level | **FLATTEN** in PR 6 | The directory only exists to hold `proto/`. Hoist `pkg/api/proto/` to `pkg/protocol/` and drop the empty wrapper. |
-| `pkg/api/proto/` | 49 | **KEEP** as the gRPC wire contract | Rename to `pkg/protocol/` in PR 6 | Generated protobuf code that defines the gRPC service surface. Any Go client of cefas builds against it. |
+| ~~`pkg/api/`~~ | 0 | n/a | ✅ DELETED in PR 6 (empty wrapper) | Held only `proto/`; flattened into `pkg/protocol/`. |
+| `pkg/protocol/` | 49 | **KEEP** as the gRPC wire contract | ✅ Renamed from `pkg/api/proto/` in PR 6 | Generated protobuf + the `.proto` source. Any Go client of cefas builds against it. The on-the-wire protobuf package is `cefas.v1` and the Go import alias is `cefaspb`; both are unchanged. |
 | `pkg/client/` | 25 | **KEEP** — the Go SDK | None | The blessed in-process Go client (`Client`, `TableClient`, etc.). Largest documented exported surface; downstream code goes through this. |
 | `pkg/config/` | 5 | **KEEP** — declarative config schema | None | Defines the YAML/env-vars/flag schema for `cefasdb`. Operators may build wrappers that compose `config.Config` values; embedding teams may load it. |
 | `pkg/core/` (top-level) | 0 | move | **MOVE → `internal/core/`** in PR 5 | Top level holds only `doc.go` + two graph/satisfaction tests; no exported types referenced externally. The real content is in sub-packages — see below. |
@@ -40,19 +40,23 @@ on commit `9af22a9` (post PR 3).
 
 ## Summary
 
-After PR 5 + PR 6 land, `pkg/` will contain exactly:
+After PR 5 + PR 6 land, `pkg/` contains exactly:
 
 ```
 pkg/
 ├── client/      ← the Go SDK
 ├── config/      ← config schema for operators
+├── core/        ← deprecated shims (index, model, query) for plugin authors
 ├── ddbjson/     ← DynamoDB JSON wire format
 ├── plugin/      ← third-party plugin SDK + built-ins
 ├── protocol/    ← gRPC wire format (renamed from pkg/api/proto)
 └── types/       ← public DTO vocabulary
 ```
 
-Six packages, each with a clear external contract.
+Six load-bearing packages with clear external contracts, plus
+`pkg/core/` which is the deprecated migration namespace and is
+scheduled for removal in a future minor release once external
+plugin authors have migrated to `internal/core/<X>` directly.
 
 ## Shim policy (informs PR 5)
 

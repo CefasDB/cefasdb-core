@@ -9,7 +9,7 @@ syntax = "proto3";
 
 package cefas.v1;
 
-option go_package = "github.com/osvaldoandrade/cefas/pkg/api/proto;cefaspb";
+option go_package = "github.com/osvaldoandrade/cefas/pkg/protocol;cefaspb";
 
 service Cefas {
   // Schema management.
