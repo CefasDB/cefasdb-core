@@ -15,9 +15,9 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/auth"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
-	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
-	"github.com/osvaldoandrade/cefas/pkg/core/query/mmr"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
+	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
+	"github.com/osvaldoandrade/cefas/internal/core/query/mmr"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
 )
 

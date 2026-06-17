@@ -21,9 +21,9 @@ import (
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	cefaspb "github.com/osvaldoandrade/cefas/pkg/api/proto"
-	cquery "github.com/osvaldoandrade/cefas/pkg/core/query"
+	cquery "github.com/osvaldoandrade/cefas/internal/core/query"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
+	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

@@ -9,9 +9,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
 	"github.com/osvaldoandrade/cefas/pkg/plugin"
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
+	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

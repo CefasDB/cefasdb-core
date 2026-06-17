@@ -7,7 +7,7 @@ import (
 
 	"github.com/osvaldoandrade/cefas/internal/storage"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
 )
 
 const PluginIndexDescriptorVersion = 1

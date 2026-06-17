@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
 )
 
 func cachePluginIndexDescriptor(desc index.Descriptor) {

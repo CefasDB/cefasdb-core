@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/core/index"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/index"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 func TestPluginIndexDescriptorEncodeDecode(t *testing.T) {

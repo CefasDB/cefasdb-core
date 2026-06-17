@@ -18,7 +18,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/catalog/domain"
 	"github.com/osvaldoandrade/cefas/internal/storage"
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

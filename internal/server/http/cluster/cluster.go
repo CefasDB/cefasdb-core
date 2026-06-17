@@ -13,7 +13,7 @@ import (
 	"github.com/osvaldoandrade/cefas/internal/cluster"
 	"github.com/osvaldoandrade/cefas/internal/placement"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 // Cluster is the minimal cluster-management surface this package

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/osvaldoandrade/cefas/internal/placement"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 )
 
 func (m *Manager) ApplyPlacement(ctx context.Context, req placement.PlacementApplyRequest) (placement.PlacementApplyResult, error) {

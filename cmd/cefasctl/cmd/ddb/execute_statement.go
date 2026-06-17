@@ -10,7 +10,7 @@ import (
 	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/output"
 	"github.com/osvaldoandrade/cefas/cmd/cefasctl/internal/runtime"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
+	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
 )
 
 func registerExecuteStatement(root *cobra.Command) {

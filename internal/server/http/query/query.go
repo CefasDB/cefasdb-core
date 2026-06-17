@@ -15,7 +15,7 @@ import (
 	pebble "github.com/osvaldoandrade/cefas/internal/storage/adapter/pebble"
 	"github.com/osvaldoandrade/cefas/internal/tracing"
 	"github.com/osvaldoandrade/cefas/pkg/ddbjson"
-	cefassql "github.com/osvaldoandrade/cefas/pkg/sql"
+	cefassql "github.com/osvaldoandrade/cefas/internal/sql"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

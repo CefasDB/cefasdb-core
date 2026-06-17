@@ -6,7 +6,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 
 	"github.com/osvaldoandrade/cefas/internal/cluster"
-	"github.com/osvaldoandrade/cefas/pkg/core/model"
+	"github.com/osvaldoandrade/cefas/internal/core/model"
 	"github.com/osvaldoandrade/cefas/pkg/types"
 )
 

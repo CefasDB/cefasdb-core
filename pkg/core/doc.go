@@ -1,32 +1,25 @@
-// Package core is the plugin-facing surface every cefas extension
-// composes against. It is the single import root sub-packages live
-// under so plugins never depend on internal/ packages or the
-// engine's concrete types.
+// Package core hosts the deprecated public-API shims for the types
+// third-party plugin code used to import from pkg/core/*.
 //
-// The package itself declares no identifiers; the contract is the
-// union of its sub-packages. Plugins that want to participate in
-// the cefas data plane import only paths rooted here.
+// Deprecated: every sub-package here is a thin alias layer to the
+// canonical implementation at internal/core/<same name>. The shims
+// exist so external plugin authors who pinned to pkg/core/{index,
+// model,query} keep compiling for a migration window. New code
+// should import internal/core/<X> directly. The shims will be
+// removed in a future minor release.
 //
-// Sub-packages:
+// Migration map:
 //
-//   - condition: the Evaluator seam shared by every conditional
-//     write path (PutItem, DeleteItem, UpdateItem,
-//     TransactWriteItems).
-//   - index: the Lifecycle verbs (Create / Describe / Rebuild /
-//     Drop) every plugin-backed secondary index honours.
-//   - model: the stable data-model surface (Item, KeySchema,
-//     AttributeValue, table-level descriptors, value-object IDs).
-//   - query: the planner surface — Statement, Plan, Planner,
-//     ExplainFormat — plus the Top-K and distance-operator
-//     abstractions.
-//   - query/mmr: the Maximal Marginal Relevance diversification
-//     post-rank for TopK candidate sets.
-//   - stream: the change-stream surface plugins subscribe against
-//     to maintain derived state without polling the base table.
-//   - ttl: the TTL surface (Service + Observer) plugins observe
-//     expirations through, without importing storage internals.
+//	pkg/core/index → internal/core/index
+//	pkg/core/model → internal/core/model
+//	pkg/core/query → internal/core/query
 //
-// Import-direction rule: nothing under pkg/core/ may import
-// internal/ or the engine packages (pkg/api, pkg/sql, pkg/client).
-// The coregraph test pins this invariant.
+// Sub-packages that were never on the third-party plugin surface
+// (condition, query/mmr, stream, ttl) moved directly to internal/
+// without a shim.
+//
+// The "no engine imports" invariant for pkg/core/ is still pinned
+// by the coregraph test, with the shim files explicitly exempted —
+// they violate the rule by design, but only as transitional
+// scaffolding.
 package core
