@@ -68,17 +68,6 @@ type Config struct {
 	// across every peer.
 	Shards int
 
-	// ReplicationFactor is the target voter count per shard during
-	// fresh placement bootstrap. Zero preserves the legacy behavior
-	// where every peer is a voter for every shard.
-	ReplicationFactor int
-
-	// WriteConsistency controls data-shard writes when raft is
-	// attached. "one" commits locally and replicates in the background;
-	// "quorum" preserves synchronous raft commits. Shard 0 always uses
-	// quorum because it stores cluster metadata.
-	WriteConsistency string
-
 	// PlacementPath is the node-local cache of the versioned placement
 	// catalog. Empty defaults to Root/placement.json.
 	PlacementPath string
@@ -233,7 +222,7 @@ func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog,
 	if hasExistingShardState(cfg.Root) {
 		strategy = placement.PlacementStrategyLegacyModulo
 	}
-	cat = placement.DefaultPlacementWithReplicationFactor(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy, cfg.ReplicationFactor)
+	cat = placement.DefaultPlacement(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy)
 	if err := placement.SavePlacementFile(path, cat); err != nil {
 		return placement.PlacementCatalog{}, err
 	}
@@ -258,17 +247,6 @@ func hasExistingShardState(root string) bool {
 	return false
 }
 
-type notLeaderReplicator struct {
-	leaderHTTP string
-}
-
-func (r notLeaderReplicator) IsLeader() bool           { return false }
-func (r notLeaderReplicator) Replicate(_ []byte) error { return pebble.ErrNotLeader }
-func (r notLeaderReplicator) ReplicateAsync(_ []byte) error {
-	return pebble.ErrNotLeader
-}
-func (r notLeaderReplicator) LeaderHTTPAddr() string { return r.leaderHTTP }
-
 func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error) {
 	meta, _ := m.shardPlacement(shardID)
 	return m.openShardWithPlacement(ctx, shardID, meta)
@@ -287,13 +265,12 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	}
 
 	st, err := pebble.Open(pebble.Options{
-		Path:             stateDir,
-		FsyncOnCommit:    m.cfg.FsyncOnCommit,
-		Profile:          m.cfg.StorageProfile,
-		Tuning:           m.cfg.StorageTuning,
-		Backpressure:     m.cfg.Backpressure,
-		StreamRetention:  m.cfg.StreamRetention,
-		WriteConsistency: m.writeConsistencyForShard(shardID),
+		Path:            stateDir,
+		FsyncOnCommit:   m.cfg.FsyncOnCommit,
+		Profile:         m.cfg.StorageProfile,
+		Tuning:          m.cfg.StorageTuning,
+		Backpressure:    m.cfg.Backpressure,
+		StreamRetention: m.cfg.StreamRetention,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
@@ -301,20 +278,6 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
 		// Single-node mode (no raft). The pebble.DB stands alone.
-		return &Shard{
-			ID:         shardID,
-			State:      meta.State,
-			Epoch:      meta.Epoch,
-			Ranges:     append([]placement.TokenRange(nil), meta.Ranges...),
-			Voters:     append([]string(nil), meta.Voters...),
-			NonVoters:  append([]string(nil), meta.NonVoters...),
-			LeaderHint: meta.LeaderHint,
-			Storage:    st,
-		}, nil
-	}
-
-	if len(meta.Voters) > 0 && !containsString(meta.Voters, m.cfg.SelfID) {
-		st.AttachReplicator(notLeaderReplicator{leaderHTTP: m.leaderHTTPAddr(meta.LeaderHint)})
 		return &Shard{
 			ID:         shardID,
 			State:      meta.State,
@@ -351,8 +314,8 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		SelfID:        m.cfg.SelfID,
 		BindAddr:      m.cfg.MuxAddr,
 		Bootstrap:     m.cfg.Bootstrap,
-		PeerAddrs:     filterMapToKeys(m.cfg.Peers, meta.Voters),
-		PeerHTTPAddrs: filterMapToKeys(m.cfg.PeerHTTPAddrs, meta.Voters),
+		PeerAddrs:     m.cfg.Peers,
+		PeerHTTPAddrs: m.cfg.PeerHTTPAddrs,
 		HeartbeatMS:   m.cfg.HeartbeatMS,
 		ElectionMS:    m.cfg.ElectionMS,
 		LeaderLeaseMS: m.cfg.LeaderLeaseMS,
@@ -392,42 +355,6 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		RaftStorage: raftStore,
 		Raft:        rdb,
 	}, nil
-}
-
-func (m *Manager) writeConsistencyForShard(shardID uint32) string {
-	if shardID == 0 {
-		return string(pebble.WriteConsistencyQuorum)
-	}
-	if m.cfg.WriteConsistency == "" {
-		return string(pebble.WriteConsistencyOne)
-	}
-	return string(pebble.NormalizeWriteConsistency(m.cfg.WriteConsistency))
-}
-
-func (m *Manager) leaderHTTPAddr(nodeID string) string {
-	if nodeID == "" {
-		return ""
-	}
-	if addr := m.cfg.PeerHTTPAddrs[nodeID]; addr != "" {
-		return addr
-	}
-	if node, ok := m.cat.Nodes[nodeID]; ok {
-		return node.HTTPAddr
-	}
-	return ""
-}
-
-func filterMapToKeys(in map[string]string, keys []string) map[string]string {
-	if len(keys) == 0 {
-		return in
-	}
-	out := make(map[string]string, len(keys))
-	for _, key := range keys {
-		if value, ok := in[key]; ok {
-			out[key] = value
-		}
-	}
-	return out
 }
 
 func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool) {

@@ -184,17 +184,6 @@ func (c *PlacementCatalog) Normalize() {
 // DefaultPlacement builds the deterministic placement every node can
 // derive from the same static peer configuration.
 func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string) PlacementCatalog {
-	return defaultPlacement(shards, selfID, peers, httpPeers, capacity, strategy, 0)
-}
-
-// DefaultPlacementWithReplicationFactor builds a deterministic placement
-// with at most replicationFactor voters per shard. A zero factor keeps
-// the legacy behavior where every peer votes on every shard.
-func DefaultPlacementWithReplicationFactor(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string, replicationFactor int) PlacementCatalog {
-	return defaultPlacement(shards, selfID, peers, httpPeers, capacity, strategy, replicationFactor)
-}
-
-func defaultPlacement(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string, replicationFactor int) PlacementCatalog {
 	if shards <= 0 {
 		shards = 1
 	}
@@ -221,30 +210,20 @@ func defaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 		}
 		nodes[id] = node
 	}
-	allVoters := sortedMapKeys(peers)
-	if len(allVoters) == 0 && selfID != "" {
-		allVoters = []string{selfID}
+	voters := sortedMapKeys(peers)
+	if len(voters) == 0 && selfID != "" {
+		voters = []string{selfID}
 	}
 
 	ranges := splitTokenRanges(shards)
 	placements := make([]ShardPlacement, 0, shards)
 	for i := 0; i < shards; i++ {
-		voters := defaultShardVoters(allVoters, uint32(i), replicationFactor)
-		if i == 0 {
-			// Shard 0 currently carries the metadata catalog. Keep it
-			// everywhere so every node can resolve table descriptors.
-			voters = append([]string(nil), allVoters...)
-		}
-		leaderHint := leaderHintForShard(allVoters, uint32(i))
-		if !containsString(voters, leaderHint) {
-			leaderHint = leaderHintForShard(voters, uint32(i))
-		}
 		sh := ShardPlacement{
 			ID:         uint32(i),
 			State:      ShardStateActive,
 			Epoch:      1,
 			Voters:     append([]string(nil), voters...),
-			LeaderHint: leaderHint,
+			LeaderHint: leaderHintForShard(voters, uint32(i)),
 		}
 		if strategy == PlacementStrategyTokenRange {
 			sh.Ranges = []TokenRange{ranges[i]}
@@ -309,23 +288,6 @@ func BackfillLeaderHints(cat PlacementCatalog) PlacementCatalog {
 		}
 	}
 	return cat
-}
-
-func defaultShardVoters(voters []string, shardID uint32, replicationFactor int) []string {
-	voters = sortedUnique(voters)
-	if len(voters) == 0 {
-		return nil
-	}
-	if replicationFactor <= 0 || replicationFactor >= len(voters) {
-		return append([]string(nil), voters...)
-	}
-	out := make([]string, 0, replicationFactor)
-	start := int(shardID) % len(voters)
-	for i := 0; i < replicationFactor; i++ {
-		out = append(out, voters[(start+i)%len(voters)])
-	}
-	sort.Strings(out)
-	return out
 }
 
 func normalizeLeaderHint(sh ShardPlacement) string {

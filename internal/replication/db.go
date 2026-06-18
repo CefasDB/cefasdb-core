@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sync/atomic"
 	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
@@ -111,23 +110,9 @@ func (c Config) applyTimeout() time.Duration {
 // current raft leader.
 var ErrNotLeader = errors.New("cefas/raft: not leader")
 
-// ErrAsyncApplyQueueFull is returned by best-effort replication when
-// the local async apply queue is saturated. The caller has already
-// committed locally, so this protects the write path from reintroducing
-// Raft backpressure in write-consistency=one mode.
-var ErrAsyncApplyQueueFull = errors.New("cefas/raft: async apply queue full")
-
 // ErrNotFound mirrors pebble.ErrNotFound so callers don't need to
 // import pebble.
 var ErrNotFound = pebbledb.ErrNotFound
-
-type AsyncReplicationStats struct {
-	Submitted     uint64
-	Dropped       uint64
-	ApplyErrors   uint64
-	QueueDepth    int
-	QueueCapacity int
-}
 
 // DB attaches raft replication onto a *pebble.DB the storage layer
 // owns. The storage.DB.AttachReplicator wiring forwards CommitBatch
@@ -153,10 +138,6 @@ type DB struct {
 	// N small log entries and N FSM commits into one.
 	applyCh      chan *applyReq
 	applyStopped chan struct{}
-
-	asyncSubmitted   atomic.Uint64
-	asyncDropped     atomic.Uint64
-	asyncApplyErrors atomic.Uint64
 }
 
 type applyReq struct {
@@ -546,60 +527,6 @@ func (d *DB) Replicate(repr []byte) error {
 	return <-req.done
 }
 
-// ReplicateAsync submits a batch to the raft log without waiting for
-// quorum/apply. It is used by eventual-write mode after the leader has
-// committed the batch locally. Async requests share the same coalescer
-// as Replicate so concurrent local acks collapse into fewer raft.Apply
-// calls instead of hammering Raft with one log append per user batch.
-func (d *DB) ReplicateAsync(repr []byte) error {
-	if !d.IsLeader() {
-		return ErrNotLeader
-	}
-	if len(repr) == 0 {
-		return nil
-	}
-	return d.enqueueAsyncApply(repr)
-}
-
-func (d *DB) enqueueAsyncApply(repr []byte) error {
-	if d == nil || len(repr) == 0 {
-		return nil
-	}
-	cp := append([]byte(nil), repr...)
-	req := &applyReq{repr: cp}
-	select {
-	case <-d.stopCh:
-		return fmt.Errorf("raft: db closing")
-	default:
-	}
-	select {
-	case d.applyCh <- req:
-		d.asyncSubmitted.Add(1)
-		return nil
-	case <-d.stopCh:
-		return fmt.Errorf("raft: db closing")
-	default:
-		d.asyncDropped.Add(1)
-		return ErrAsyncApplyQueueFull
-	}
-}
-
-func (d *DB) AsyncReplicationStats() AsyncReplicationStats {
-	if d == nil {
-		return AsyncReplicationStats{}
-	}
-	stats := AsyncReplicationStats{
-		Submitted:   d.asyncSubmitted.Load(),
-		Dropped:     d.asyncDropped.Load(),
-		ApplyErrors: d.asyncApplyErrors.Load(),
-	}
-	if d.applyCh != nil {
-		stats.QueueDepth = len(d.applyCh)
-		stats.QueueCapacity = cap(d.applyCh)
-	}
-	return stats
-}
-
 // applyLoop merges concurrent Replicate calls into a single raft.Apply.
 // Producer batches are independent (different keys → different
 // payloads), so merge order within a single apply call is irrelevant;
@@ -618,7 +545,7 @@ func (d *DB) applyLoop() {
 			for {
 				select {
 				case req := <-d.applyCh:
-					d.completeApply(req, fmt.Errorf("raft: db closing"))
+					req.done <- fmt.Errorf("raft: db closing")
 				default:
 					return
 				}
@@ -628,7 +555,7 @@ func (d *DB) applyLoop() {
 
 		merged := d.pebble.NewBatch()
 		if err := merged.SetRepr(append([]byte(nil), first.repr...)); err != nil {
-			d.completeApply(first, fmt.Errorf("raft apply: setrepr first: %w", err))
+			first.done <- fmt.Errorf("raft apply: setrepr first: %w", err)
 			_ = merged.Close()
 			continue
 		}
@@ -640,12 +567,12 @@ func (d *DB) applyLoop() {
 			case more := <-d.applyCh:
 				tmp := d.pebble.NewBatch()
 				if err := tmp.SetRepr(append([]byte(nil), more.repr...)); err != nil {
-					d.completeApply(more, fmt.Errorf("raft apply: setrepr merge: %w", err))
+					more.done <- fmt.Errorf("raft apply: setrepr merge: %w", err)
 					_ = tmp.Close()
 					break drain
 				}
 				if err := merged.Apply(tmp, nil); err != nil {
-					d.completeApply(more, fmt.Errorf("raft apply: merge: %w", err))
+					more.done <- fmt.Errorf("raft apply: merge: %w", err)
 					_ = tmp.Close()
 					break drain
 				}
@@ -662,7 +589,7 @@ func (d *DB) applyLoop() {
 		if !d.IsLeader() {
 			_ = merged.Close()
 			for _, r := range reqs {
-				d.completeApply(r, ErrNotLeader)
+				r.done <- ErrNotLeader
 			}
 			continue
 		}
@@ -679,21 +606,8 @@ func (d *DB) applyLoop() {
 			}
 		}
 		for _, r := range reqs {
-			d.completeApply(r, err)
+			r.done <- err
 		}
-	}
-}
-
-func (d *DB) completeApply(req *applyReq, err error) {
-	if req == nil {
-		return
-	}
-	if req.done != nil {
-		req.done <- err
-		return
-	}
-	if err != nil {
-		d.asyncApplyErrors.Add(1)
 	}
 }
 
