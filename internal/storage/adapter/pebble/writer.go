@@ -300,9 +300,26 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 	if err != nil {
 		return nil, err
 	}
+	return d.GetItemByKeyBytes(table, pk, sk)
+}
+
+// GetItemByKeyBytes loads an item when the caller already has canonical
+// PK/SK bytes. It is the point-read fast path for protocol handlers
+// that can parse key bytes without materializing a full Item map.
+func (d *DB) GetItemByKeyBytes(table string, pk, sk []byte) (types.Item, error) {
+	v, err := d.GetEncodedItemByKeyBytes(table, pk, sk)
+	if err != nil {
+		return nil, err
+	}
+	return storage.DecodeItem(v)
+}
+
+// GetEncodedItemByKeyBytes loads an encoded item when the caller already
+// has canonical PK/SK bytes. The returned buffer is owned by the caller.
+func (d *DB) GetEncodedItemByKeyBytes(table string, pk, sk []byte) ([]byte, error) {
 	primaryKey := storage.KeyPrimary(table, pk, sk)
 	if v, ok := d.memoryGet(table, primaryKey); ok {
-		return storage.DecodeItem(v)
+		return v, nil
 	}
 	v, err := d.Get(primaryKey)
 	if errors.Is(err, ErrNotFound) {
@@ -311,7 +328,7 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 	if err != nil {
 		return nil, err
 	}
-	return storage.DecodeItem(v)
+	return v, nil
 }
 
 // QueryByPK returns every item under a single PK. SK ordering is

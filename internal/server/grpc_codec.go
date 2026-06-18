@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 
+	"github.com/CefasDb/cefasdb/internal/storage"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -123,12 +124,54 @@ func pbToItem(in map[string]*cefaspb.AttributeValue) (types.Item, error) {
 	return out, nil
 }
 
+func pbKeyBytes(in map[string]*cefaspb.AttributeValue, ks types.KeySchema) (pk, sk []byte, err error) {
+	pkAttr, ok := in[ks.PK]
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: PK %q", types.ErrMissingKey, ks.PK)
+	}
+	pkValue, err := pbToAttr(pkAttr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("PK %q: %w", ks.PK, err)
+	}
+	pk, err = storage.AttrCanonicalBytes(pkValue)
+	if err != nil {
+		return nil, nil, fmt.Errorf("PK %q: %w", ks.PK, err)
+	}
+	if ks.SK == "" {
+		return pk, nil, nil
+	}
+	skAttr, ok := in[ks.SK]
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: SK %q", types.ErrMissingKey, ks.SK)
+	}
+	skValue, err := pbToAttr(skAttr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SK %q: %w", ks.SK, err)
+	}
+	sk, err = storage.AttrCanonicalBytes(skValue)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SK %q: %w", ks.SK, err)
+	}
+	return pk, sk, nil
+}
+
 func itemToPB(in types.Item) map[string]*cefaspb.AttributeValue {
 	out := make(map[string]*cefaspb.AttributeValue, len(in))
 	for k, v := range in {
 		out[k] = attrToPB(v)
 	}
 	return out
+}
+
+func encodedItemToPB(data []byte) (map[string]*cefaspb.AttributeValue, error) {
+	out := make(map[string]*cefaspb.AttributeValue, 8)
+	if err := storage.VisitItem(data, func(name string, value types.AttributeValue) error {
+		out[name] = attrToPB(value)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func pbToTableDescriptor(td *cefaspb.TableDescriptor) types.TableDescriptor {

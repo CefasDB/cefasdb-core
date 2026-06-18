@@ -176,8 +176,13 @@ func (t *RangeHotspotTracker) RecordOperation(shardID model.ShardID, token uint6
 	if t == nil {
 		return
 	}
-	label := shardID.String()
-	bucket := t.BucketForToken(token)
+	t.recordOperationBucket(shardID.String(), t.BucketForToken(token), op, bytes, latency)
+}
+
+func (t *RangeHotspotTracker) recordOperationBucket(label string, bucket int, op string, bytes uint64, latency time.Duration) {
+	if t == nil {
+		return
+	}
 	now := time.Now()
 
 	t.mu.Lock()
