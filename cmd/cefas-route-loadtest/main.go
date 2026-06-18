@@ -35,6 +35,7 @@ type cfg struct {
 	ReadWorkers       int
 	WriteRate         int64
 	ReadRate          int64
+	ReadTargets       string
 	MixedWrites       bool
 	MixedReads        bool
 	Users             int64
@@ -228,6 +229,7 @@ func parseFlags() cfg {
 	flag.IntVar(&c.ReadWorkers, "read-workers", 64, "concurrent read workers")
 	flag.Int64Var(&c.WriteRate, "write-rate", 15000, "target write units per second; 0 uncapped")
 	flag.Int64Var(&c.ReadRate, "read-rate", 20000, "target read units per second; 0 uncapped")
+	flag.StringVar(&c.ReadTargets, "read-targets", "leader", "read target selection for GetItem: leader or voters")
 	flag.BoolVar(&c.MixedWrites, "mixed-writes", true, "run writes during the mixed-duration phase")
 	flag.BoolVar(&c.MixedReads, "mixed-reads", true, "run reads during the mixed-duration phase")
 	flag.Int64Var(&c.Users, "users", 100000, "distinct partition keys")
@@ -247,6 +249,12 @@ func parseFlags() cfg {
 	}
 	if c.MixedDuration > 0 && !c.MixedWrites && !c.MixedReads {
 		fatal("invalid flags", errors.New("mixed-duration requires mixed-writes or mixed-reads"))
+	}
+	c.ReadTargets = strings.ToLower(strings.TrimSpace(c.ReadTargets))
+	switch c.ReadTargets {
+	case "leader", "voters":
+	default:
+		fatal("invalid flags", fmt.Errorf("read-targets must be leader or voters, got %q", c.ReadTargets))
 	}
 	return c
 }
@@ -501,7 +509,7 @@ func runMixed(ctx context.Context, c cfg, cs *clients, rt *router, keyspace int6
 					}
 					rpcCtx, cancelRPC := context.WithTimeout(phaseCtx, c.RPCTimeout)
 					t0 := time.Now()
-					item, err := getItemWithRetry(rpcCtx, cs, target, c.Table, keyFor(id, c.Users))
+					item, err := getItemWithRetry(rpcCtx, cs, target, c.Table, keyFor(id, c.Users), c.ReadTargets, id)
 					lat := time.Since(t0)
 					cancelRPC()
 					if err != nil {
@@ -630,9 +638,9 @@ func batchWriteWithRetry(ctx context.Context, cs *clients, target routeTarget, t
 	}
 }
 
-func getItemWithRetry(ctx context.Context, cs *clients, target routeTarget, table string, key types.Item) (types.Item, error) {
+func getItemWithRetry(ctx context.Context, cs *clients, target routeTarget, table string, key types.Item, readTargets string, seed int64) (types.Item, error) {
 	var last error
-	for _, node := range retryOrder(target, cs.order) {
+	for _, node := range readOrder(target, cs.order, readTargets, seed) {
 		cli := cs.byNode[node]
 		if cli == nil {
 			continue
@@ -650,6 +658,41 @@ func getItemWithRetry(ctx context.Context, cs *clients, target routeTarget, tabl
 		return nil, last
 	}
 	return nil, fmt.Errorf("shard %d has no reachable client", target.ShardID)
+}
+
+func readOrder(target routeTarget, fallback []string, mode string, seed int64) []string {
+	if mode != "voters" {
+		return retryOrder(target, fallback)
+	}
+	out := make([]string, 0, len(target.Voters)+1)
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	voters := uniqueStrings(target.Voters)
+	if len(voters) > 0 {
+		start := int(seed % int64(len(voters)))
+		if start < 0 {
+			start += len(voters)
+		}
+		for i := 0; i < len(voters); i++ {
+			add(voters[(start+i)%len(voters)])
+		}
+	}
+	add(target.Leader)
+	if len(out) == 0 {
+		for _, id := range fallback {
+			add(id)
+		}
+	}
+	return out
 }
 
 func retryOrder(target routeTarget, fallback []string) []string {
@@ -673,6 +716,19 @@ func retryOrder(target routeTarget, fallback []string) []string {
 		for _, id := range fallback {
 			add(id)
 		}
+	}
+	return out
+}
+
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
 	}
 	return out
 }

@@ -16,6 +16,9 @@ Default matrix:
 - read-only: 512 read workers for 5 minutes
 - mixed: 64 write workers plus 512 read workers for 5 minutes
 - placement: 8 nodes, 24 shards, RF=3 unless `REPLICATION_FACTOR` is overridden
+- read targeting: `READ_TARGETS=leader` by default. Use
+  `READ_TARGETS=voters` to measure eventual reads spread across each shard's
+  voter replicas.
 
 Typical baseline run:
 
@@ -34,6 +37,7 @@ Useful overrides:
 RESULT_DIR=/tmp/cefas-bench/pr-next \
 PROJECT=cefas-pr-next \
 REPLICATION_FACTOR=3 \
+READ_TARGETS=leader \
 scripts/bench/bench_8node_matrix.sh
 ```
 

@@ -32,6 +32,7 @@ PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-30s}"
 RPC_TIMEOUT="${RPC_TIMEOUT:-30s}"
 WRITE_RATE="${WRITE_RATE:-0}"
 READ_RATE="${READ_RATE:-0}"
+READ_TARGETS="${READ_TARGETS:-leader}"
 
 HTTP_PORT_BASE="${HTTP_PORT_BASE:-18280}"
 GRPC_PORT_BASE="${GRPC_PORT_BASE:-9290}"
@@ -277,6 +278,26 @@ status_label() {
   fi
 }
 
+leader_distribution_summary() {
+  local phase_dir="$RESULT_DIR/metrics/cluster_ready"
+  if [[ ! -d "$phase_dir" ]]; then
+    printf 'n/a'
+    return
+  fi
+  local parts=()
+  local i file count
+  for i in $(seq 1 "$NODES"); do
+    file="$phase_dir/node${i}_leaders.prom"
+    if [[ -f "$file" ]]; then
+      count="$(awk 'END {print NR+0}' "$file")"
+    else
+      count="0"
+    fi
+    parts+=("n${i}=${count}")
+  done
+  (IFS=', '; printf '%s' "${parts[*]}")
+}
+
 append_report_rows() {
   local phase="$1"
   local json="$2"
@@ -318,6 +339,8 @@ write_summary() {
     echo "- read workers: \`${READ_WORKERS}\`"
     echo "- write rate: \`${WRITE_RATE}\`"
     echo "- read rate: \`${READ_RATE}\`"
+    echo "- read targets: \`${READ_TARGETS}\`"
+    echo "- leader distribution: \`$(leader_distribution_summary)\`"
     echo "- keep cluster: \`${KEEP_CLUSTER}\`"
     echo
     echo "| Phase | Status | Units | Throughput | Errors | Found | p50 | p95 | p99 |"
@@ -368,6 +391,7 @@ run_phase "smoke" "$ROUTE_BIN" \
   -read-workers 64 \
   -write-rate 0 \
   -read-rate 0 \
+  -read-targets "$READ_TARGETS" \
   -payload-bytes "$PAYLOAD_BYTES" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
@@ -387,6 +411,7 @@ run_phase "write_only" "$ROUTE_BIN" \
   -read-workers "$READ_WORKERS" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
+  -read-targets "$READ_TARGETS" \
   -payload-bytes "$PAYLOAD_BYTES" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
@@ -406,6 +431,7 @@ run_phase "read_seed" "$ROUTE_BIN" \
   -read-workers "$READ_WORKERS" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
+  -read-targets "$READ_TARGETS" \
   -payload-bytes "$PAYLOAD_BYTES" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
@@ -426,6 +452,7 @@ run_phase "read_only" "$ROUTE_BIN" \
   -read-workers "$READ_WORKERS" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
+  -read-targets "$READ_TARGETS" \
   -payload-bytes "$PAYLOAD_BYTES" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
@@ -446,6 +473,7 @@ run_phase "mixed" "$ROUTE_BIN" \
   -read-workers "$READ_WORKERS" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
+  -read-targets "$READ_TARGETS" \
   -payload-bytes "$PAYLOAD_BYTES" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
