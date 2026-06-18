@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/testutil/wait"
 	"github.com/CefasDb/cefasdb/pkg/types"
@@ -16,6 +17,15 @@ import (
 type staticLeader bool
 
 func (s staticLeader) IsLeader() bool { return bool(s) }
+
+type staticLeaderWithCompression struct {
+	staticLeader
+	stats craft.LogCompressionStats
+}
+
+func (s staticLeaderWithCompression) LogCompressionStats() craft.LogCompressionStats {
+	return s.stats
+}
 
 func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 	m := New()
@@ -31,12 +41,21 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go RunStorageCollector(ctx, m, "solo", db, staticLeader(true), time.Millisecond)
+	go RunStorageCollector(ctx, m, "solo", db, staticLeaderWithCompression{
+		staticLeader: true,
+		stats: craft.LogCompressionStats{
+			RawBytes:           100,
+			EncodedBytes:       75,
+			CompressedPayloads: 1,
+		},
+	}, time.Millisecond)
 
 	var body string
 	wait.Eventually(t, func() bool {
 		body = scrapeMetrics(t, m)
 		return strings.Contains(body, `cefas_raft_is_leader{shard="solo"} 1`) &&
+			strings.Contains(body, `cefas_raft_log_encoded_bytes{shard="solo"} 75`) &&
+			strings.Contains(body, `cefas_raft_log_payloads{result="compressed",shard="solo"} 1`) &&
 			strings.Contains(body, `cefas_pebble_read_amp{shard="solo"}`) &&
 			strings.Contains(body, `cefas_pebble_level_files{level="0",shard="solo"}`)
 	}, time.Second, 10*time.Millisecond, "metrics body missing expected storage collector series\n--- got ---\n%s", body)

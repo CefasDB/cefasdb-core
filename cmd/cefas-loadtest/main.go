@@ -155,6 +155,7 @@ func parseFlags() config {
 	flag.Int64Var(&cfg.ReadRate, "read-rate", 0, "target read units per second; 0 means uncapped")
 	flag.Int64Var(&cfg.Users, "users", 100_000, "distinct partition keys")
 	flag.IntVar(&cfg.PayloadBytes, "payload-bytes", 256, "bytes in the payload attribute")
+	flag.StringVar(&cfg.PayloadMode, "payload-mode", runner.PayloadModeRepeat, "payload generation mode: repeat or random")
 	flag.DurationVar(&cfg.RPCTimeout, "rpc-timeout", 30*time.Second, "timeout per RPC")
 	flag.DurationVar(&cfg.Progress, "progress", 5*time.Second, "progress print interval; 0 disables")
 	flag.Int64Var(&cfg.LatencySampleRate, "latency-sample-rate", 1, "record one latency sample every N RPCs")
@@ -190,6 +191,11 @@ func parseFlags() config {
 	if cfg.PayloadBytes < 0 {
 		fatal("invalid flags", "reason", "--payload-bytes must be >= 0")
 	}
+	payloadMode, err := runner.NormalizePayloadMode(cfg.PayloadMode)
+	if err != nil {
+		fatal("invalid flags", "reason", err)
+	}
+	cfg.PayloadMode = payloadMode
 	if cfg.LatencySampleRate <= 0 {
 		fatal("invalid flags", "reason", "--latency-sample-rate must be > 0")
 	}

@@ -21,6 +21,7 @@ func OverlayFlags(
 	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
 	raftHeartbeatTimeout, raftElectionTimeout, raftLeaderLeaseTimeout, raftCommitTimeout, raftApplyTimeout time.Duration,
 	raftSnapshotEntries uint64, raftLogCompression string,
+	raftLogCompressionMinBytes int, raftLogCompressionMinSavingsRatio float64, raftLogCompressionSkipCooldown time.Duration,
 	storageProfile, raftStorageProfile string,
 	storageBlockCache int64, storageMemTableSize uint64, storageMemTableStopWrites int,
 	storageMaxCompactions, storageL0Concurrency, storageL0Threshold int,
@@ -98,6 +99,15 @@ func OverlayFlags(
 	}
 	if raftLogCompression != "" {
 		cfg.Raft.LogCompression = raftLogCompression
+	}
+	if raftLogCompressionMinBytes > 0 {
+		cfg.Raft.LogCompressionMinBytes = raftLogCompressionMinBytes
+	}
+	if raftLogCompressionMinSavingsRatio >= 0 {
+		cfg.Raft.LogCompressionMinSavingsRatio = raftLogCompressionMinSavingsRatio
+	}
+	if raftLogCompressionSkipCooldown >= 0 {
+		cfg.Raft.LogCompressionSkipCooldown = raftLogCompressionSkipCooldown
 	}
 	if storageProfile != "" {
 		cfg.Storage.Profile = storageProfile

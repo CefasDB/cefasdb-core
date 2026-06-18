@@ -3,9 +3,57 @@ package runner
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
+
+const (
+	PayloadModeRepeat = "repeat"
+	PayloadModeRandom = "random"
+)
+
+func NormalizePayloadMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", PayloadModeRepeat:
+		return PayloadModeRepeat, nil
+	case PayloadModeRandom:
+		return PayloadModeRandom, nil
+	default:
+		return "", fmt.Errorf("unsupported payload mode %q", mode)
+	}
+}
+
+func repeatedPayload(bytes int) string {
+	if bytes <= 0 {
+		return ""
+	}
+	return strings.Repeat("x", bytes)
+}
+
+func payloadFor(id int64, bytes int, mode, repeat string) string {
+	if bytes <= 0 {
+		return ""
+	}
+	if mode != PayloadModeRandom {
+		return repeat
+	}
+	return deterministicPayload(id, bytes)
+}
+
+func deterministicPayload(id int64, bytes int) string {
+	out := make([]byte, bytes)
+	x := uint64(id) + 0x9e3779b97f4a7c15
+	for i := range out {
+		x += 0x9e3779b97f4a7c15
+		z := x
+		z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+		z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+		z ^= z >> 31
+		out[i] = byte(33 + z%94)
+	}
+	return string(out)
+}
 
 func makeItem(id, users int64, payload string) types.Item {
 	user := id % users

@@ -47,6 +47,37 @@ func TestCityForCycles(t *testing.T) {
 	}
 }
 
+func TestPayloadModeRandomIsDeterministic(t *testing.T) {
+	t.Parallel()
+	mode, err := NormalizePayloadMode("random")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeat := repeatedPayload(64)
+	first := payloadFor(42, 64, mode, repeat)
+	second := payloadFor(42, 64, mode, repeat)
+	other := payloadFor(43, 64, mode, repeat)
+	if len(first) != 64 {
+		t.Fatalf("payload len = %d, want 64", len(first))
+	}
+	if first != second {
+		t.Fatalf("random payload should be deterministic for same id")
+	}
+	if first == repeat {
+		t.Fatalf("random payload matched repeat payload")
+	}
+	if first == other {
+		t.Fatalf("random payload should differ across ids")
+	}
+}
+
+func TestNormalizePayloadModeRejectsUnknown(t *testing.T) {
+	t.Parallel()
+	if _, err := NormalizePayloadMode("unknown"); err == nil {
+		t.Fatalf("expected error for unknown payload mode")
+	}
+}
+
 func TestPermuteStaysInRange(t *testing.T) {
 	t.Parallel()
 	const modulo int64 = 1000

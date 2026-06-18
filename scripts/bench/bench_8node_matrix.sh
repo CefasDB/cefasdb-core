@@ -27,6 +27,7 @@ BATCH_SIZE="${BATCH_SIZE:-500}"
 WRITE_WORKERS="${WRITE_WORKERS:-64}"
 READ_WORKERS="${READ_WORKERS:-512}"
 PAYLOAD_BYTES="${PAYLOAD_BYTES:-256}"
+PAYLOAD_MODE="${PAYLOAD_MODE:-repeat}"
 LATENCY_SAMPLE_RATE="${LATENCY_SAMPLE_RATE:-100}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-30s}"
 RPC_TIMEOUT="${RPC_TIMEOUT:-30s}"
@@ -314,6 +315,7 @@ write_summary() {
     echo "- server extra args: \`${SERVER_EXTRA_ARGS:-none}\`"
     echo "- batch size: \`${BATCH_SIZE}\`"
     echo "- payload bytes: \`${PAYLOAD_BYTES}\`"
+    echo "- payload mode: \`${PAYLOAD_MODE}\`"
     echo "- write workers: \`${WRITE_WORKERS}\`"
     echo "- read workers: \`${READ_WORKERS}\`"
     echo "- write rate: \`${WRITE_RATE}\`"
@@ -369,6 +371,7 @@ run_phase "smoke" "$ROUTE_BIN" \
   -write-rate 0 \
   -read-rate 0 \
   -payload-bytes "$PAYLOAD_BYTES" \
+  -payload-mode "$PAYLOAD_MODE" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
   -progress "$PROGRESS_INTERVAL" \
@@ -388,6 +391,7 @@ run_phase "write_only" "$ROUTE_BIN" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
   -payload-bytes "$PAYLOAD_BYTES" \
+  -payload-mode "$PAYLOAD_MODE" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
   -progress "$PROGRESS_INTERVAL" \
@@ -407,6 +411,7 @@ run_phase "read_seed" "$ROUTE_BIN" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
   -payload-bytes "$PAYLOAD_BYTES" \
+  -payload-mode "$PAYLOAD_MODE" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
   -progress "$PROGRESS_INTERVAL" \
@@ -427,6 +432,7 @@ run_phase "read_only" "$ROUTE_BIN" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
   -payload-bytes "$PAYLOAD_BYTES" \
+  -payload-mode "$PAYLOAD_MODE" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
   -progress "$PROGRESS_INTERVAL" \
@@ -447,6 +453,7 @@ run_phase "mixed" "$ROUTE_BIN" \
   -write-rate "$WRITE_RATE" \
   -read-rate "$READ_RATE" \
   -payload-bytes "$PAYLOAD_BYTES" \
+  -payload-mode "$PAYLOAD_MODE" \
   -rpc-timeout "$RPC_TIMEOUT" \
   -latency-sample-rate "$LATENCY_SAMPLE_RATE" \
   -progress "$PROGRESS_INTERVAL" \

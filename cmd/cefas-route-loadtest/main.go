@@ -39,6 +39,7 @@ type cfg struct {
 	MixedReads        bool
 	Users             int64
 	PayloadBytes      int
+	PayloadMode       string
 	RPCTimeout        time.Duration
 	Progress          time.Duration
 	LatencySampleRate int64
@@ -118,6 +119,11 @@ type report struct {
 }
 
 var log = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+const (
+	payloadModeRepeat = "repeat"
+	payloadModeRandom = "random"
+)
 
 func main() {
 	c := parseFlags()
@@ -232,6 +238,7 @@ func parseFlags() cfg {
 	flag.BoolVar(&c.MixedReads, "mixed-reads", true, "run reads during the mixed-duration phase")
 	flag.Int64Var(&c.Users, "users", 100000, "distinct partition keys")
 	flag.IntVar(&c.PayloadBytes, "payload-bytes", 256, "bytes in the payload attribute")
+	flag.StringVar(&c.PayloadMode, "payload-mode", payloadModeRepeat, "payload generation mode: repeat or random")
 	flag.DurationVar(&c.RPCTimeout, "rpc-timeout", 30*time.Second, "timeout per RPC")
 	flag.DurationVar(&c.Progress, "progress", 30*time.Second, "progress print interval; 0 disables")
 	flag.Int64Var(&c.LatencySampleRate, "latency-sample-rate", 10, "record one latency sample every N RPCs")
@@ -245,6 +252,11 @@ func parseFlags() cfg {
 	if c.Items < 0 || c.WriteRate < 0 || c.ReadRate < 0 || c.PayloadBytes < 0 {
 		fatal("invalid flags", errors.New("items, rates and payload-bytes must be >= 0"))
 	}
+	payloadMode, err := normalizePayloadMode(c.PayloadMode)
+	if err != nil {
+		fatal("invalid flags", err)
+	}
+	c.PayloadMode = payloadMode
 	if c.MixedDuration > 0 && !c.MixedWrites && !c.MixedReads {
 		fatal("invalid flags", errors.New("mixed-duration requires mixed-writes or mixed-reads"))
 	}
@@ -574,7 +586,7 @@ func writeBatch(ctx context.Context, c cfg, cs *clients, rt *router, rec *phaseR
 		ops    []client.BatchWriteOp
 	}
 	groups := map[uint32]*shardBatch{}
-	payload := strings.Repeat("x", c.PayloadBytes)
+	repeatPayload := repeatedPayload(c.PayloadBytes)
 	for id := start; id < end; id++ {
 		target, err := rt.routeForID(id, c.Users)
 		if err != nil {
@@ -585,6 +597,7 @@ func writeBatch(ctx context.Context, c cfg, cs *clients, rt *router, rec *phaseR
 			group = &shardBatch{target: target}
 			groups[target.ShardID] = group
 		}
+		payload := payloadFor(id, c.PayloadBytes, c.PayloadMode, repeatPayload)
 		group.ops = append(group.ops, client.BatchWriteOp{Put: makeItem(id, c.Users, payload)})
 	}
 	for _, group := range groups {
@@ -821,6 +834,48 @@ func printSummary(s phaseSummary) {
 		fmt.Printf("  latency:    min=%.1fms p50=%.1fms p95=%.1fms p99=%.1fms max=%.1fms samples=%d\n",
 			s.LatencyMinMs, s.LatencyP50Ms, s.LatencyP95Ms, s.LatencyP99Ms, s.LatencyMaxMs, s.LatencySamples)
 	}
+}
+
+func normalizePayloadMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", payloadModeRepeat:
+		return payloadModeRepeat, nil
+	case payloadModeRandom:
+		return payloadModeRandom, nil
+	default:
+		return "", fmt.Errorf("unsupported payload mode %q", mode)
+	}
+}
+
+func repeatedPayload(bytes int) string {
+	if bytes <= 0 {
+		return ""
+	}
+	return strings.Repeat("x", bytes)
+}
+
+func payloadFor(id int64, bytes int, mode, repeat string) string {
+	if bytes <= 0 {
+		return ""
+	}
+	if mode != payloadModeRandom {
+		return repeat
+	}
+	return deterministicPayload(id, bytes)
+}
+
+func deterministicPayload(id int64, bytes int) string {
+	out := make([]byte, bytes)
+	x := uint64(id) + 0x9e3779b97f4a7c15
+	for i := range out {
+		x += 0x9e3779b97f4a7c15
+		z := x
+		z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+		z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+		z ^= z >> 31
+		out[i] = byte(33 + z%94)
+	}
+	return string(out)
 }
 
 func makeItem(id, users int64, payload string) types.Item {

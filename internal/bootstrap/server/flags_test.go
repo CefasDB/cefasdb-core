@@ -63,6 +63,9 @@ type overlayArgs struct {
 	raftApplyTimeout                          time.Duration
 	raftSnapshotEntries                       uint64
 	raftLogCompression                        string
+	raftLogCompressionMinBytes                int
+	raftLogCompressionMinSavingsRatio         float64
+	raftLogCompressionSkipCooldown            time.Duration
 
 	storageProfile, raftStorageProfile string
 	storageBlockCache                  int64
@@ -124,6 +127,8 @@ func zeroArgs() overlayArgs {
 	return overlayArgs{
 		identityClockSkew:                  30 * time.Second,
 		tracingInsecure:                    true,
+		raftLogCompressionMinSavingsRatio:  -1,
+		raftLogCompressionSkipCooldown:     -1,
 		backupSchedulerRetentionKeepLatest: -1,
 	}
 }
@@ -134,6 +139,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers,
 		a.raftHeartbeatTimeout, a.raftElectionTimeout, a.raftLeaderLeaseTimeout, a.raftCommitTimeout, a.raftApplyTimeout,
 		a.raftSnapshotEntries, a.raftLogCompression,
+		a.raftLogCompressionMinBytes, a.raftLogCompressionMinSavingsRatio, a.raftLogCompressionSkipCooldown,
 		a.storageProfile, a.raftStorageProfile,
 		a.storageBlockCache, a.storageMemTableSize, a.storageMemTableStopWrites,
 		a.storageMaxCompactions, a.storageL0Concurrency, a.storageL0Threshold,
@@ -217,6 +223,9 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	args.raftApplyTimeout = 30 * time.Second
 	args.raftSnapshotEntries = 65536
 	args.raftLogCompression = "none"
+	args.raftLogCompressionMinBytes = 2048
+	args.raftLogCompressionMinSavingsRatio = 0.15
+	args.raftLogCompressionSkipCooldown = 2 * time.Second
 	runOverlay(&cfg, args)
 
 	if cfg.Raft.Bind != "127.0.0.1:9001" {
@@ -254,6 +263,15 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	}
 	if cfg.Raft.LogCompression != "none" {
 		t.Errorf("Raft.LogCompression = %q", cfg.Raft.LogCompression)
+	}
+	if cfg.Raft.LogCompressionMinBytes != 2048 {
+		t.Errorf("Raft.LogCompressionMinBytes = %d", cfg.Raft.LogCompressionMinBytes)
+	}
+	if cfg.Raft.LogCompressionMinSavingsRatio != 0.15 {
+		t.Errorf("Raft.LogCompressionMinSavingsRatio = %v", cfg.Raft.LogCompressionMinSavingsRatio)
+	}
+	if cfg.Raft.LogCompressionSkipCooldown != 2*time.Second {
+		t.Errorf("Raft.LogCompressionSkipCooldown = %v", cfg.Raft.LogCompressionSkipCooldown)
 	}
 }
 

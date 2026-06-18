@@ -82,6 +82,7 @@ func TestWriteReportProducesParsableJSON(t *testing.T) {
 		ReadWorkers:       1,
 		Users:             1,
 		PayloadBytes:      8,
+		PayloadMode:       PayloadModeRandom,
 		LatencySampleRate: 1,
 		JSONOutput:        path,
 		Label:             "ut",
@@ -118,6 +119,9 @@ func TestWriteReportProducesParsableJSON(t *testing.T) {
 	}
 	if decoded.Config.WriteDuration != "1s" {
 		t.Fatalf("config.write_duration = %q", decoded.Config.WriteDuration)
+	}
+	if decoded.Config.PayloadMode != PayloadModeRandom {
+		t.Fatalf("config.payload_mode = %q", decoded.Config.PayloadMode)
 	}
 	if len(decoded.Phases) != 1 || decoded.Phases[0].Name != "write" {
 		t.Fatalf("phases off: %+v", decoded.Phases)
