@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
 	codec "github.com/hashicorp/go-msgpack/v2/codec"
@@ -17,10 +19,19 @@ import (
 // on-disk shape is unsurprising.
 //
 // The raft engine never interleaves LogStore writers with itself, so
-// no internal locking is needed; multi-write atomicity uses Pebble
-// batches.
+// multi-write atomicity uses Pebble batches. Internal locking only
+// coordinates best-effort background compaction after large range
+// deletes.
 type logStore struct {
-	pebble *pebbledb.DB
+	pebble             *pebbledb.DB
+	compactRange       func(start, end []byte) error
+	compactMinDeleted  uint64
+	compactCooldown    time.Duration
+	compactMu          sync.Mutex
+	compactWG          sync.WaitGroup
+	compacting         bool
+	closed             bool
+	lastCompactStarted time.Time
 }
 
 var (
@@ -32,13 +43,40 @@ var (
 	msgpackHandle = &codec.MsgpackHandle{}
 )
 
-func newLogStore(p *pebbledb.DB) *logStore { return &logStore{pebble: p} }
+const (
+	logCompactMinDeleted = 4096
+	logCompactCooldown   = 10 * time.Second
+)
+
+func newLogStore(p *pebbledb.DB) *logStore {
+	return &logStore{
+		pebble:            p,
+		compactRange:      func(start, end []byte) error { return p.Compact(start, end, false) },
+		compactMinDeleted: logCompactMinDeleted,
+		compactCooldown:   logCompactCooldown,
+	}
+}
 
 func logKey(index uint64) []byte {
 	out := make([]byte, len(logKeyPrefix)+8)
 	copy(out, logKeyPrefix)
 	binary.BigEndian.PutUint64(out[len(logKeyPrefix):], index)
 	return out
+}
+
+func logKeyAfter(index uint64) []byte {
+	if index == ^uint64(0) {
+		return append([]byte(nil), logKeyPrefixEnd...)
+	}
+	return logKey(index + 1)
+}
+
+func logRangeLength(min, max uint64) uint64 {
+	n := max - min
+	if n != ^uint64(0) {
+		n++
+	}
+	return n
 }
 
 func indexFromKey(key []byte) (uint64, bool) {
@@ -145,14 +183,53 @@ func (s *logStore) DeleteRange(min, max uint64) error {
 	}
 	// Pebble DeleteRange end-key is exclusive; pass max+1 to make
 	// the range inclusive on both ends.
-	end := logKey(max)
-	endNext := make([]byte, len(end))
-	copy(endNext, end)
-	for i := len(endNext) - 1; i >= len(logKeyPrefix); i-- {
-		endNext[i]++
-		if endNext[i] != 0 {
-			break
-		}
+	start := logKey(min)
+	end := logKeyAfter(max)
+	if err := s.pebble.DeleteRange(start, end, pebbledb.NoSync); err != nil {
+		return err
 	}
-	return s.pebble.DeleteRange(logKey(min), endNext, pebbledb.NoSync)
+	s.maybeCompactDeletedRange(start, end, logRangeLength(min, max))
+	return nil
+}
+
+func (s *logStore) maybeCompactDeletedRange(start, end []byte, deleted uint64) {
+	if s == nil || s.compactRange == nil || deleted < s.compactMinDeleted {
+		return
+	}
+
+	now := time.Now()
+	s.compactMu.Lock()
+	defer s.compactMu.Unlock()
+	if s.closed || s.compacting {
+		return
+	}
+	if !s.lastCompactStarted.IsZero() && s.compactCooldown > 0 && now.Sub(s.lastCompactStarted) < s.compactCooldown {
+		return
+	}
+
+	startCopy := append([]byte(nil), start...)
+	endCopy := append([]byte(nil), end...)
+	s.compacting = true
+	s.lastCompactStarted = now
+	s.compactWG.Add(1)
+	go func() {
+		defer func() {
+			_ = recover()
+			s.compactMu.Lock()
+			s.compacting = false
+			s.compactMu.Unlock()
+			s.compactWG.Done()
+		}()
+		_ = s.compactRange(startCopy, endCopy)
+	}()
+}
+
+func (s *logStore) Close() {
+	if s == nil {
+		return
+	}
+	s.compactMu.Lock()
+	s.closed = true
+	s.compactMu.Unlock()
+	s.compactWG.Wait()
 }

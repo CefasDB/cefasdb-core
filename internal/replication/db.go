@@ -122,6 +122,7 @@ var ErrNotFound = pebbledb.ErrNotFound
 type DB struct {
 	pebble        *pebbledb.DB
 	raftPebble    *pebbledb.DB
+	logStore      *logStore
 	raft          *hraft.Raft
 	fsm           *fsm
 	trans         hraft.Transport
@@ -192,6 +193,7 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	}
 
 	logs := newLogStore(raftPDB)
+	d.logStore = logs
 	stable := newStableStore(raftPDB)
 	snaps, err := newSnapshotStore(cfg.Path + "/snapshots")
 	if err != nil {
@@ -309,6 +311,9 @@ func (d *DB) Close() error {
 		if err := d.raft.Shutdown().Error(); err != nil {
 			return fmt.Errorf("raft shutdown: %w", err)
 		}
+	}
+	if d.logStore != nil {
+		d.logStore.Close()
 	}
 	if closer, ok := d.trans.(interface{ Close() error }); ok {
 		_ = closer.Close()
