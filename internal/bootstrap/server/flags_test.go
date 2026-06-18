@@ -81,10 +81,8 @@ type overlayArgs struct {
 	identityJwks, identityIssuer, identityAudience string
 	identityClockSkew                              time.Duration
 
-	shardsN           int
-	replicationFactor int
-	writeConsistency  string
-	muxAddr           string
+	shardsN int
+	muxAddr string
 
 	grpcAddr             string
 	grpcRefl             bool
@@ -137,7 +135,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.backpressureWarnDelay, a.backpressureCritDelay,
 		a.streamRetention, a.streamRetentionMaxBytes,
 		a.identityJwks, a.identityIssuer, a.identityAudience, a.identityClockSkew,
-		a.shardsN, a.replicationFactor, a.writeConsistency, a.muxAddr,
+		a.shardsN, a.muxAddr,
 		a.grpcAddr, a.grpcRefl, a.tlsCert, a.tlsKey, a.mCA,
 		a.metricsOff, a.tracingURL, a.tracingInsecure,
 		a.rebalancerEnabled, a.rebalancerMode, a.rebalancerInterval, a.rebalancerMinInterval,
@@ -235,29 +233,6 @@ func TestOverlayFlags_PeerSetGroup(t *testing.T) {
 	wantHTTP := map[string]string{"a": "http://h1:8080", "b": "http://h2:8080"}
 	if !reflect.DeepEqual(cfg.Cluster.HTTPPeers, wantHTTP) {
 		t.Errorf("Cluster.HTTPPeers = %#v, want %#v", cfg.Cluster.HTTPPeers, wantHTTP)
-	}
-}
-
-func TestOverlayFlags_ClusterShardTopology(t *testing.T) {
-	cfg := baseCfg()
-	args := zeroArgs()
-	args.shardsN = 8
-	args.replicationFactor = 3
-	args.writeConsistency = "quorum"
-	args.muxAddr = "node-a:7000"
-	runOverlay(&cfg, args)
-
-	if cfg.Cluster.Shards != 8 {
-		t.Errorf("Cluster.Shards = %d", cfg.Cluster.Shards)
-	}
-	if cfg.Cluster.ReplicationFactor != 3 {
-		t.Errorf("Cluster.ReplicationFactor = %d", cfg.Cluster.ReplicationFactor)
-	}
-	if cfg.Cluster.WriteConsistency != "quorum" {
-		t.Errorf("Cluster.WriteConsistency = %q", cfg.Cluster.WriteConsistency)
-	}
-	if cfg.Cluster.MuxAddr != "node-a:7000" {
-		t.Errorf("Cluster.MuxAddr = %q", cfg.Cluster.MuxAddr)
 	}
 }
 

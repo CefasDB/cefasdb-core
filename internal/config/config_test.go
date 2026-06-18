@@ -29,9 +29,6 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.BackupScheduler.Enabled || d.BackupScheduler.Interval != time.Hour || d.BackupScheduler.NameTemplate == "" {
 		t.Errorf("backup scheduler defaults not populated: %+v", d.BackupScheduler)
 	}
-	if d.Cluster.WriteConsistency != "one" {
-		t.Errorf("write consistency default = %q", d.Cluster.WriteConsistency)
-	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -53,8 +50,6 @@ http:
   addr: ":18080"
 cluster:
   shards: 3
-  replicationFactor: 2
-  writeConsistency: quorum
   bootstrap: true
   peers:
     n1: 10.0.0.1:9100
@@ -91,7 +86,7 @@ backupScheduler:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTP.Addr != ":18080" || cfg.Cluster.Shards != 3 || cfg.Cluster.ReplicationFactor != 2 || cfg.Cluster.WriteConsistency != "quorum" || !cfg.Cluster.Bootstrap {
+	if cfg.HTTP.Addr != ":18080" || cfg.Cluster.Shards != 3 || !cfg.Cluster.Bootstrap {
 		t.Fatalf("YAML did not override: %+v", cfg)
 	}
 	if cfg.Cluster.Peers["n2"] != "10.0.0.2:9100" {
@@ -120,8 +115,6 @@ backupScheduler:
 func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_HTTP_ADDR", ":19090")
 	t.Setenv("CEFAS_CLUSTER_SHARDS", "4")
-	t.Setenv("CEFAS_CLUSTER_REPLICATION_FACTOR", "3")
-	t.Setenv("CEFAS_CLUSTER_WRITE_CONSISTENCY", "quorum")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
@@ -149,12 +142,6 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Cluster.Shards != 4 {
 		t.Errorf("shards override: %d", cfg.Cluster.Shards)
-	}
-	if cfg.Cluster.ReplicationFactor != 3 {
-		t.Errorf("replication factor override: %d", cfg.Cluster.ReplicationFactor)
-	}
-	if cfg.Cluster.WriteConsistency != "quorum" {
-		t.Errorf("write consistency override: %q", cfg.Cluster.WriteConsistency)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")
