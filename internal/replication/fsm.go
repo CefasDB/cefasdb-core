@@ -48,8 +48,10 @@ func (f *fsm) Apply(log *hraft.Log) any {
 	if log == nil || log.Type != hraft.LogCommand || len(log.Data) == 0 {
 		return nil
 	}
-	repr := make([]byte, len(log.Data))
-	copy(repr, log.Data)
+	repr, err := decodeRaftPayload(log.Data)
+	if err != nil {
+		return fmt.Errorf("fsm apply: decode raft payload: %w", err)
+	}
 
 	if f.publisher != nil {
 		if err := applyAndPublish(f.pebble, repr, log.Index, f.publisher); err != nil {

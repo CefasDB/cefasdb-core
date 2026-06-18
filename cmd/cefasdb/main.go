@@ -58,6 +58,7 @@ func main() {
 		raftCommit    = flag.Duration("raft-commit-timeout", 0, "Raft commit timeout. 0 inherits config/default.")
 		raftApply     = flag.Duration("raft-apply-timeout", 0, "Raft apply timeout per replicated batch. 0 inherits config/default.")
 		raftSnapshots = flag.Uint64("raft-snapshot-entries", 0, "Raft log entries between snapshots. 0 inherits config/default.")
+		raftLogComp   = flag.String("raft-log-compression", "", "Raft log payload compression: snappy or none. Empty inherits config/default.")
 
 		// Storage tuning.
 		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
@@ -157,7 +158,7 @@ func main() {
 	bootstrapserver.OverlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
 		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
 		*raftHeartbeat, *raftElection, *raftLease, *raftCommit, *raftApply,
-		*raftSnapshots,
+		*raftSnapshots, *raftLogComp,
 		*storageProfile, *raftStorageProfile,
 		*storageBlockCache, *storageMemTableSize, *storageMemTableStopWrites,
 		*storageMaxCompactions, *storageL0Concurrency, *storageL0Threshold,
@@ -229,6 +230,7 @@ func main() {
 			CommitMS:          int(cfg.Raft.CommitTimeout / time.Millisecond),
 			ApplyTimeout:      cfg.Raft.ApplyTimeout,
 			SnapshotEntries:   cfg.Raft.SnapshotEntries,
+			LogCompression:    cfg.Raft.LogCompression,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)
@@ -301,6 +303,7 @@ func main() {
 			CommitMS:        int(cfg.Raft.CommitTimeout / time.Millisecond),
 			ApplyTimeout:    cfg.Raft.ApplyTimeout,
 			SnapshotEntries: cfg.Raft.SnapshotEntries,
+			LogCompression:  cfg.Raft.LogCompression,
 		}, db.Raw(), raftStore.Raw())
 		if err != nil {
 			logger.Error("open raft", "err", err)

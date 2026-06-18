@@ -62,6 +62,7 @@ type overlayArgs struct {
 	raftCommitTimeout                         time.Duration
 	raftApplyTimeout                          time.Duration
 	raftSnapshotEntries                       uint64
+	raftLogCompression                        string
 
 	storageProfile, raftStorageProfile string
 	storageBlockCache                  int64
@@ -132,7 +133,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.dataDir, a.httpAddr, a.fsync,
 		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers,
 		a.raftHeartbeatTimeout, a.raftElectionTimeout, a.raftLeaderLeaseTimeout, a.raftCommitTimeout, a.raftApplyTimeout,
-		a.raftSnapshotEntries,
+		a.raftSnapshotEntries, a.raftLogCompression,
 		a.storageProfile, a.raftStorageProfile,
 		a.storageBlockCache, a.storageMemTableSize, a.storageMemTableStopWrites,
 		a.storageMaxCompactions, a.storageL0Concurrency, a.storageL0Threshold,
@@ -215,6 +216,7 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	args.raftCommitTimeout = 100 * time.Millisecond
 	args.raftApplyTimeout = 30 * time.Second
 	args.raftSnapshotEntries = 65536
+	args.raftLogCompression = "none"
 	runOverlay(&cfg, args)
 
 	if cfg.Raft.Bind != "127.0.0.1:9001" {
@@ -249,6 +251,9 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	}
 	if cfg.Raft.SnapshotEntries != 65536 {
 		t.Errorf("Raft.SnapshotEntries = %d", cfg.Raft.SnapshotEntries)
+	}
+	if cfg.Raft.LogCompression != "none" {
+		t.Errorf("Raft.LogCompression = %q", cfg.Raft.LogCompression)
 	}
 }
 

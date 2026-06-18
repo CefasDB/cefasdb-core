@@ -9,6 +9,7 @@ require (
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/codecompany/identity-middleware v0.0.0-20260129011223-c06aafa60c82
 	github.com/golang-jwt/jwt/v5 v5.0.0
+	github.com/golang/snappy v0.0.4
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.7.3
 	github.com/mattn/go-isatty v0.0.20
@@ -54,7 +55,6 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/go-hclog v1.6.2 // indirect

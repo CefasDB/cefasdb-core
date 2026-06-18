@@ -44,6 +44,7 @@ type Config struct {
 	LeaderLeaseMS   int
 	CommitMS        int
 	SnapshotEntries uint64
+	LogCompression  string
 
 	// ApplyTimeout bounds each Replicate call's raft round-trip.
 	ApplyTimeout time.Duration
@@ -171,6 +172,11 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	if cfg.Path == "" {
 		return nil, fmt.Errorf("raft: Path is required (for snapshot dir)")
 	}
+	compression, err := normalizeLogCompression(cfg.LogCompression)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LogCompression = compression
 	raftPDB := pdb
 	if len(raftStores) > 0 && raftStores[0] != nil {
 		raftPDB = raftStores[0]
@@ -594,10 +600,17 @@ func (d *DB) applyLoop() {
 			continue
 		}
 
-		cp := append([]byte(nil), merged.Repr()...)
+		cp, err := encodeRaftPayload(merged.Repr(), d.cfg.LogCompression)
 		_ = merged.Close()
+		if err != nil {
+			err = fmt.Errorf("raft apply: encode payload: %w", err)
+			for _, r := range reqs {
+				r.done <- err
+			}
+			continue
+		}
 		f := d.raft.Apply(cp, d.cfg.applyTimeout())
-		err := f.Error()
+		err = f.Error()
 		if err != nil {
 			err = fmt.Errorf("raft apply: %w", err)
 		} else if resp := f.Response(); resp != nil {

@@ -78,6 +78,7 @@ type Config struct {
 		CommitTimeout      time.Duration `yaml:"commitTimeout"`
 		ApplyTimeout       time.Duration `yaml:"applyTimeout"`
 		SnapshotEntries    uint64        `yaml:"snapshotEntries"`
+		LogCompression     string        `yaml:"logCompression"`
 	} `yaml:"raft"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
@@ -163,6 +164,7 @@ func Defaults() Config {
 	c.Raft.CommitTimeout = 100 * time.Millisecond
 	c.Raft.ApplyTimeout = 30 * time.Second
 	c.Raft.SnapshotEntries = 65536
+	c.Raft.LogCompression = "snappy"
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -304,6 +306,7 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Raft.CommitTimeout = dur("RAFT_COMMIT_TIMEOUT", cfg.Raft.CommitTimeout)
 	cfg.Raft.ApplyTimeout = dur("RAFT_APPLY_TIMEOUT", cfg.Raft.ApplyTimeout)
 	cfg.Raft.SnapshotEntries = unsigned64("RAFT_SNAPSHOT_ENTRIES", cfg.Raft.SnapshotEntries)
+	cfg.Raft.LogCompression = str("RAFT_LOG_COMPRESSION", cfg.Raft.LogCompression)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)
