@@ -8,11 +8,16 @@ import (
 	"time"
 
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 type LeaderGate interface {
 	IsLeader() bool
+}
+
+type AsyncReplicationStatsProvider interface {
+	AsyncReplicationStats() craft.AsyncReplicationStats
 }
 
 // RunShardCollector samples raft leadership + Pebble engine metrics
@@ -45,6 +50,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 						leader = 1.0
 					}
 					m.RaftIsLeader.WithLabelValues(label).Set(leader)
+					collectAsyncReplication(m, label, sh.Raft)
 				}
 				collectPebble(m, label, sh.Storage)
 				collectBackpressure(m, label, sh.Storage)
@@ -83,12 +89,27 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 					v = 1.0
 				}
 				m.RaftIsLeader.WithLabelValues(label).Set(v)
+				if stats, ok := leader.(AsyncReplicationStatsProvider); ok {
+					collectAsyncReplication(m, label, stats)
+				}
 			}
 			collectPebble(m, label, st)
 			collectBackpressure(m, label, st)
 			collectStreamRetention(m, label, st)
 		}
 	}
+}
+
+func collectAsyncReplication(m *Metrics, label string, provider AsyncReplicationStatsProvider) {
+	if m == nil || provider == nil {
+		return
+	}
+	stats := provider.AsyncReplicationStats()
+	m.RaftAsyncSubmitted.WithLabelValues(label).Set(float64(stats.Submitted))
+	m.RaftAsyncDropped.WithLabelValues(label).Set(float64(stats.Dropped))
+	m.RaftAsyncApplyErrors.WithLabelValues(label).Set(float64(stats.ApplyErrors))
+	m.RaftAsyncQueueDepth.WithLabelValues(label).Set(float64(stats.QueueDepth))
+	m.RaftAsyncQueueCap.WithLabelValues(label).Set(float64(stats.QueueCapacity))
 }
 
 func collectPebble(m *Metrics, label string, st *pebble.DB) {

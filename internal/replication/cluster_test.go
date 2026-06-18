@@ -51,6 +51,12 @@ func pickPort(t testing.TB) string {
 // bootstrap path we pass the same Configuration to every node so they
 // agree on initial membership).
 func startCluster(t testing.TB, count int) []*node {
+	return startClusterWithStorageOptions(t, count, func(path string) pebble.Options {
+		return pebble.Options{Path: path}
+	})
+}
+
+func startClusterWithStorageOptions(t testing.TB, count int, storageOptions func(path string) pebble.Options) []*node {
 	t.Helper()
 	ids := make([]string, count)
 	addrs := make([]string, count)
@@ -70,7 +76,11 @@ func startCluster(t testing.TB, count int) []*node {
 	nodes := make([]*node, count)
 	for i := range nodes {
 		dir := t.TempDir()
-		st, err := pebble.Open(pebble.Options{Path: dir + "/state"})
+		opts := pebble.Options{Path: dir + "/state"}
+		if storageOptions != nil {
+			opts = storageOptions(dir + "/state")
+		}
+		st, err := pebble.Open(opts)
 		if err != nil {
 			t.Fatalf("open storage[%d]: %v", i, err)
 		}
@@ -182,6 +192,41 @@ func TestRaftReplicatesAcrossNodes(t *testing.T) {
 		got := waitItem(t, n, "tbl", td.KeySchema, types.Item{"id": sAttr("k1")}, 5*time.Second)
 		if got["data"].S != "hello" {
 			t.Fatalf("follower %s has data=%q, want hello", n.id, got["data"].S)
+		}
+	}
+}
+
+func TestRaftWriteConsistencyOneReplicatesAsyncAcrossNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	nodes := startClusterWithStorageOptions(t, 3, func(path string) pebble.Options {
+		return pebble.Options{Path: path, WriteConsistency: "one"}
+	})
+	defer func() {
+		for _, n := range nodes {
+			n.close()
+		}
+	}()
+
+	leader := waitLeader(t, nodes)
+	td := types.TableDescriptor{Name: "tbl", KeySchema: types.KeySchema{PK: "id"}}
+
+	item := types.Item{"id": sAttr("async-1"), "data": sAttr("eventual")}
+	if err := nodes[leader].storage.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
+		t.Fatalf("put on leader: %v", err)
+	}
+	if stats := nodes[leader].raft.AsyncReplicationStats(); stats.Submitted == 0 {
+		t.Fatalf("async submitted = %d, want > 0", stats.Submitted)
+	}
+
+	for i, n := range nodes {
+		if i == leader {
+			continue
+		}
+		got := waitItem(t, n, "tbl", td.KeySchema, types.Item{"id": sAttr("async-1")}, 5*time.Second)
+		if got["data"].S != "eventual" {
+			t.Fatalf("follower %s has data=%q, want eventual", n.id, got["data"].S)
 		}
 	}
 }
