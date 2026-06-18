@@ -184,6 +184,14 @@ func (c *PlacementCatalog) Normalize() {
 // DefaultPlacement builds the deterministic placement every node can
 // derive from the same static peer configuration.
 func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string) PlacementCatalog {
+	return DefaultPlacementWithReplicationFactor(shards, selfID, peers, httpPeers, capacity, strategy, 0)
+}
+
+// DefaultPlacementWithReplicationFactor builds the deterministic placement
+// with data shards replicated across a rotating voter subset. Shard 0 remains
+// on every peer because it stores cluster/catalog metadata that every API node
+// needs before routing writes to data shards.
+func DefaultPlacementWithReplicationFactor(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string, replicationFactor int) PlacementCatalog {
 	if shards <= 0 {
 		shards = 1
 	}
@@ -214,16 +222,24 @@ func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 	if len(voters) == 0 && selfID != "" {
 		voters = []string{selfID}
 	}
+	dataRF := replicationFactor
+	if dataRF <= 0 || dataRF > len(voters) {
+		dataRF = len(voters)
+	}
 
 	ranges := splitTokenRanges(shards)
 	placements := make([]ShardPlacement, 0, shards)
 	for i := 0; i < shards; i++ {
+		shardVoters := voters
+		if i > 0 && dataRF > 0 && dataRF < len(voters) {
+			shardVoters = rotatingVoters(voters, i, dataRF)
+		}
 		sh := ShardPlacement{
 			ID:         uint32(i),
 			State:      ShardStateActive,
 			Epoch:      1,
-			Voters:     append([]string(nil), voters...),
-			LeaderHint: leaderHintForShard(voters, uint32(i)),
+			Voters:     append([]string(nil), shardVoters...),
+			LeaderHint: leaderHintForShard(shardVoters, uint32(i)),
 		}
 		if strategy == PlacementStrategyTokenRange {
 			sh.Ranges = []TokenRange{ranges[i]}
@@ -241,6 +257,20 @@ func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 	}
 	cat.Normalize()
 	return cat
+}
+
+func rotatingVoters(voters []string, shardIndex, replicationFactor int) []string {
+	voters = sortedUnique(voters)
+	if replicationFactor <= 0 || replicationFactor >= len(voters) {
+		return append([]string(nil), voters...)
+	}
+	out := make([]string, 0, replicationFactor)
+	start := shardIndex % len(voters)
+	for i := 0; i < replicationFactor; i++ {
+		out = append(out, voters[(start+i)%len(voters)])
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedNodeIDs(selfID string, maps ...map[string]string) []string {

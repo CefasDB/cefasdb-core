@@ -94,8 +94,9 @@ func main() {
 		identityClockSkew = flag.Duration("identity-clock-skew", 30*time.Second, "Allowed clock skew on exp/iat checks")
 
 		// Multi-Raft sharding.
-		shardsN = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
-		muxAddr = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
+		shardsN           = flag.Int("shards", 0, "Number of shards (multi-Raft). 0 → single-shard / single-node legacy bootstrap.")
+		replicationFactor = flag.Int("replication-factor", 0, "Number of voters per data shard during fresh multi-Raft placement bootstrap. 0 uses every peer.")
+		muxAddr           = flag.String("mux", "", "Mux TCP address shared by every shard's raft transport (multi-Raft mode).")
 
 		// gRPC flags.
 		grpcAddr       = flag.String("grpc", "", "gRPC listen address (e.g. ':9090'). Empty disables gRPC.")
@@ -164,7 +165,7 @@ func main() {
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
 		*streamRetention, *streamRetentionMaxBytes,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
-		*shardsN, *muxAddr,
+		*shardsN, *replicationFactor, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
 		*metricsOff, *tracingURL, *tracingIns,
 		*rebalancerEnabled, *rebalancerMode, *rebalancerInterval, *rebalancerMinInterval,
@@ -206,24 +207,25 @@ func main() {
 
 	if cfg.Cluster.Shards > 0 {
 		mgr, err = cluster.Open(context.Background(), cluster.Config{
-			Root:            cfg.Data,
-			Shards:          cfg.Cluster.Shards,
-			SelfID:          cfg.Cluster.SelfID,
-			MuxAddr:         cfg.Cluster.MuxAddr,
-			Peers:           cfg.Cluster.Peers,
-			PeerHTTPAddrs:   cfg.Cluster.HTTPPeers,
-			Bootstrap:       cfg.Cluster.Bootstrap,
-			FsyncOnCommit:   cfg.Storage.FsyncOnCommit,
-			StorageProfile:  cfg.Storage.Profile,
-			StorageTuning:   bootstrapserver.StorageTuning(cfg),
-			Backpressure:    bootstrapserver.BackpressureOptions(cfg),
-			StreamRetention: bootstrapserver.StreamRetentionOptions(cfg),
-			RaftProfile:     cfg.Storage.RaftProfile,
-			HeartbeatMS:     int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
-			ElectionMS:      int(cfg.Raft.ElectionTimeout / time.Millisecond),
-			LeaderLeaseMS:   int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
-			CommitMS:        int(cfg.Raft.CommitTimeout / time.Millisecond),
-			ApplyTimeout:    cfg.Raft.ApplyTimeout,
+			Root:              cfg.Data,
+			Shards:            cfg.Cluster.Shards,
+			ReplicationFactor: cfg.Cluster.ReplicationFactor,
+			SelfID:            cfg.Cluster.SelfID,
+			MuxAddr:           cfg.Cluster.MuxAddr,
+			Peers:             cfg.Cluster.Peers,
+			PeerHTTPAddrs:     cfg.Cluster.HTTPPeers,
+			Bootstrap:         cfg.Cluster.Bootstrap,
+			FsyncOnCommit:     cfg.Storage.FsyncOnCommit,
+			StorageProfile:    cfg.Storage.Profile,
+			StorageTuning:     bootstrapserver.StorageTuning(cfg),
+			Backpressure:      bootstrapserver.BackpressureOptions(cfg),
+			StreamRetention:   bootstrapserver.StreamRetentionOptions(cfg),
+			RaftProfile:       cfg.Storage.RaftProfile,
+			HeartbeatMS:       int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
+			ElectionMS:        int(cfg.Raft.ElectionTimeout / time.Millisecond),
+			LeaderLeaseMS:     int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
+			CommitMS:          int(cfg.Raft.CommitTimeout / time.Millisecond),
+			ApplyTimeout:      cfg.Raft.ApplyTimeout,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)

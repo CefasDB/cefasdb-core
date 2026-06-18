@@ -15,6 +15,7 @@ Default matrix:
 - read seed: 300k writes for a stable read keyspace
 - read-only: 512 read workers for 5 minutes
 - mixed: 64 write workers plus 512 read workers for 5 minutes
+- placement: 8 nodes, 24 shards, RF=3 unless `REPLICATION_FACTOR` is overridden
 
 Typical baseline run:
 
@@ -32,7 +33,7 @@ Useful overrides:
 ```bash
 RESULT_DIR=/tmp/cefas-bench/pr-next \
 PROJECT=cefas-pr-next \
-SERVER_EXTRA_ARGS="-replication-factor 3 -write-consistency one" \
+REPLICATION_FACTOR=3 \
 scripts/bench/bench_8node_matrix.sh
 ```
 

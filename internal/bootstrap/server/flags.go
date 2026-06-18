@@ -31,7 +31,7 @@ func OverlayFlags(
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
 	streamRetention time.Duration, streamRetentionMaxBytes int64,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
-	shardsN int, muxAddr string,
+	shardsN, replicationFactor int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
 	metricsOff bool, tracingURL string, tracingInsecure bool,
 	rebalancerEnabled bool, rebalancerMode string, rebalancerInterval, rebalancerMinInterval time.Duration,
@@ -178,6 +178,9 @@ func OverlayFlags(
 	}
 	if shardsN > 0 {
 		cfg.Cluster.Shards = shardsN
+	}
+	if replicationFactor > 0 {
+		cfg.Cluster.ReplicationFactor = replicationFactor
 	}
 	if muxAddr != "" {
 		cfg.Cluster.MuxAddr = muxAddr

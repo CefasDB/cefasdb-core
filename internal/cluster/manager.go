@@ -87,6 +87,10 @@ type Config struct {
 	// same shard count and the same peer set.
 	Peers map[string]string
 
+	// ReplicationFactor limits fresh data-shard placement to this many
+	// voters. Zero keeps the legacy every-peer voter set.
+	ReplicationFactor int
+
 	// PeerHTTPAddrs is the per-peer HTTP URL used to populate
 	// raft.LeaderHTTPAddr() for 307 redirects.
 	PeerHTTPAddrs map[string]string
@@ -230,7 +234,7 @@ func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog,
 	if hasExistingShardState(cfg.Root) {
 		strategy = placement.PlacementStrategyLegacyModulo
 	}
-	cat = placement.DefaultPlacement(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy)
+	cat = placement.DefaultPlacementWithReplicationFactor(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy, cfg.ReplicationFactor)
 	if err := placement.SavePlacementFile(path, cat); err != nil {
 		return placement.PlacementCatalog{}, err
 	}
@@ -313,16 +317,15 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		return nil, fmt.Errorf("raft storage: %w", err)
 	}
 
-	// Build the per-shard raft config. PeerAddrs in our cluster
-	// config map peer-id → mux address; raft sees the SAME address
-	// for every shard because mux demultiplexes by group ID, so we
-	// pass cfg.Peers through verbatim.
+	// Build the per-shard raft config. PeerAddrs are filtered to this
+	// shard's placement voters so replication-factor changes the actual
+	// Raft quorum, not only the catalog metadata.
 	rcfg := craft.Config{
 		Path:          raftDir,
 		SelfID:        m.cfg.SelfID,
 		BindAddr:      m.cfg.MuxAddr,
 		Bootstrap:     m.cfg.Bootstrap,
-		PeerAddrs:     m.cfg.Peers,
+		PeerAddrs:     peersForVoters(m.cfg.Peers, meta.Voters),
 		PeerHTTPAddrs: m.cfg.PeerHTTPAddrs,
 		HeartbeatMS:   m.cfg.HeartbeatMS,
 		ElectionMS:    m.cfg.ElectionMS,
@@ -407,6 +410,22 @@ func storageTuningForShards(shards int, tuning pebble.PebbleTuning) pebble.Pebbl
 		tuning.L0StopWritesThreshold = 128
 	}
 	return tuning
+}
+
+func peersForVoters(peers map[string]string, voters []string) map[string]string {
+	if len(peers) == 0 || len(voters) == 0 {
+		return peers
+	}
+	out := make(map[string]string, len(voters))
+	for _, id := range voters {
+		if addr, ok := peers[id]; ok {
+			out[id] = addr
+		}
+	}
+	if len(out) == 0 {
+		return peers
+	}
+	return out
 }
 
 func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat placement.PlacementCatalog) error {

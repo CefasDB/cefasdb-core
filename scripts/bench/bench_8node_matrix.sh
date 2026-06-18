@@ -12,6 +12,7 @@ KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 
 NODES="${NODES:-8}"
 SHARDS="${SHARDS:-24}"
+REPLICATION_FACTOR="${REPLICATION_FACTOR:-3}"
 STORAGE_PROFILE="${STORAGE_PROFILE:-write-heavy}"
 SERVER_EXTRA_ARGS="${SERVER_EXTRA_ARGS:-}"
 
@@ -139,6 +140,8 @@ YAML
       - "cefas-node-${i}:7000"
       - "-shards"
       - "${SHARDS}"
+      - "-replication-factor"
+      - "${REPLICATION_FACTOR}"
 YAML
       emit_extra_command_args
       cat <<YAML
@@ -306,6 +309,7 @@ write_summary() {
     echo "- image: \`${IMAGE}\`"
     echo "- nodes: \`${NODES}\`"
     echo "- shards: \`${SHARDS}\`"
+    echo "- replication factor: \`${REPLICATION_FACTOR}\`"
     echo "- storage profile: \`${STORAGE_PROFILE}\`"
     echo "- server extra args: \`${SERVER_EXTRA_ARGS:-none}\`"
     echo "- batch size: \`${BATCH_SIZE}\`"

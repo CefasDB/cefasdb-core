@@ -56,6 +56,7 @@ http:
   addr: ":18080"
 cluster:
   shards: 3
+  replicationFactor: 2
   bootstrap: true
   peers:
     n1: 10.0.0.1:9100
@@ -98,7 +99,7 @@ backupScheduler:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTP.Addr != ":18080" || cfg.Cluster.Shards != 3 || !cfg.Cluster.Bootstrap {
+	if cfg.HTTP.Addr != ":18080" || cfg.Cluster.Shards != 3 || cfg.Cluster.ReplicationFactor != 2 || !cfg.Cluster.Bootstrap {
 		t.Fatalf("YAML did not override: %+v", cfg)
 	}
 	if cfg.Cluster.Peers["n2"] != "10.0.0.2:9100" {
@@ -133,6 +134,7 @@ backupScheduler:
 func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_HTTP_ADDR", ":19090")
 	t.Setenv("CEFAS_CLUSTER_SHARDS", "4")
+	t.Setenv("CEFAS_CLUSTER_REPLICATION_FACTOR", "3")
 	t.Setenv("CEFAS_RAFT_HEARTBEAT_TIMEOUT", "2500ms")
 	t.Setenv("CEFAS_RAFT_ELECTION_TIMEOUT", "11s")
 	t.Setenv("CEFAS_RAFT_LEADER_LEASE_TIMEOUT", "1500ms")
@@ -165,6 +167,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Cluster.Shards != 4 {
 		t.Errorf("shards override: %d", cfg.Cluster.Shards)
+	}
+	if cfg.Cluster.ReplicationFactor != 3 {
+		t.Errorf("replication factor override: %d", cfg.Cluster.ReplicationFactor)
 	}
 	if cfg.Raft.HeartbeatTimeout != 2500*time.Millisecond || cfg.Raft.ElectionTimeout != 11*time.Second || cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
 		t.Errorf("raft timeout env not applied: %+v", cfg.Raft)

@@ -76,6 +76,25 @@ func TestStorageTuningForShardsPreservesExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestPeersForVotersFiltersRaftPeerSet(t *testing.T) {
+	peers := map[string]string{
+		"n1": "n1:7000",
+		"n2": "n2:7000",
+		"n3": "n3:7000",
+		"n4": "n4:7000",
+	}
+	got := peersForVoters(peers, []string{"n2", "n4"})
+	want := map[string]string{"n2": "n2:7000", "n4": "n4:7000"}
+	if len(got) != len(want) {
+		t.Fatalf("peersForVoters size = %d, want %d: %v", len(got), len(want), got)
+	}
+	for id, addr := range want {
+		if got[id] != addr {
+			t.Fatalf("peersForVoters[%s] = %q, want %q in %v", id, got[id], addr, got)
+		}
+	}
+}
+
 func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 	mgr := openAuditTestManager(t, 2)
 	defer mgr.Close()
