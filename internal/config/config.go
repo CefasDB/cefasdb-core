@@ -68,9 +68,14 @@ type Config struct {
 		HTTPPeers map[string]string `yaml:"httpPeers"`
 	} `yaml:"cluster"`
 	Raft struct {
-		Bind      string `yaml:"bind"`
-		Path      string `yaml:"path"`
-		StorePath string `yaml:"storePath"`
+		Bind               string        `yaml:"bind"`
+		Path               string        `yaml:"path"`
+		StorePath          string        `yaml:"storePath"`
+		HeartbeatTimeout   time.Duration `yaml:"heartbeatTimeout"`
+		ElectionTimeout    time.Duration `yaml:"electionTimeout"`
+		LeaderLeaseTimeout time.Duration `yaml:"leaderLeaseTimeout"`
+		CommitTimeout      time.Duration `yaml:"commitTimeout"`
+		ApplyTimeout       time.Duration `yaml:"applyTimeout"`
 	} `yaml:"raft"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
@@ -150,6 +155,11 @@ func Defaults() Config {
 	c.BackupScheduler.Interval = time.Hour
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Storage.StreamRetention = 24 * time.Hour
+	c.Raft.HeartbeatTimeout = 2 * time.Second
+	c.Raft.ElectionTimeout = 10 * time.Second
+	c.Raft.LeaderLeaseTimeout = 2 * time.Second
+	c.Raft.CommitTimeout = 100 * time.Millisecond
+	c.Raft.ApplyTimeout = 30 * time.Second
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -284,6 +294,11 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Raft.Bind = str("RAFT_BIND", cfg.Raft.Bind)
 	cfg.Raft.Path = str("RAFT_PATH", cfg.Raft.Path)
 	cfg.Raft.StorePath = str("RAFT_STORE_PATH", cfg.Raft.StorePath)
+	cfg.Raft.HeartbeatTimeout = dur("RAFT_HEARTBEAT_TIMEOUT", cfg.Raft.HeartbeatTimeout)
+	cfg.Raft.ElectionTimeout = dur("RAFT_ELECTION_TIMEOUT", cfg.Raft.ElectionTimeout)
+	cfg.Raft.LeaderLeaseTimeout = dur("RAFT_LEADER_LEASE_TIMEOUT", cfg.Raft.LeaderLeaseTimeout)
+	cfg.Raft.CommitTimeout = dur("RAFT_COMMIT_TIMEOUT", cfg.Raft.CommitTimeout)
+	cfg.Raft.ApplyTimeout = dur("RAFT_APPLY_TIMEOUT", cfg.Raft.ApplyTimeout)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)

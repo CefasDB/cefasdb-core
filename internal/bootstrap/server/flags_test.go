@@ -56,6 +56,11 @@ type overlayArgs struct {
 	raftBind, raftID, raftPath, raftStorePath string
 	raftBootstrap                             bool
 	raftPeers, raftHTTPPeers                  string
+	raftHeartbeatTimeout                      time.Duration
+	raftElectionTimeout                       time.Duration
+	raftLeaderLeaseTimeout                    time.Duration
+	raftCommitTimeout                         time.Duration
+	raftApplyTimeout                          time.Duration
 
 	storageProfile, raftStorageProfile string
 	storageBlockCache                  int64
@@ -124,6 +129,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 	OverlayFlags(cfg,
 		a.dataDir, a.httpAddr, a.fsync,
 		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers,
+		a.raftHeartbeatTimeout, a.raftElectionTimeout, a.raftLeaderLeaseTimeout, a.raftCommitTimeout, a.raftApplyTimeout,
 		a.storageProfile, a.raftStorageProfile,
 		a.storageBlockCache, a.storageMemTableSize, a.storageMemTableStopWrites,
 		a.storageMaxCompactions, a.storageL0Concurrency, a.storageL0Threshold,
@@ -200,6 +206,11 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	args.raftPath = "/var/cefas/raft"
 	args.raftStorePath = "/var/cefas/raft-store"
 	args.raftBootstrap = true
+	args.raftHeartbeatTimeout = 2 * time.Second
+	args.raftElectionTimeout = 10 * time.Second
+	args.raftLeaderLeaseTimeout = 1500 * time.Millisecond
+	args.raftCommitTimeout = 100 * time.Millisecond
+	args.raftApplyTimeout = 30 * time.Second
 	runOverlay(&cfg, args)
 
 	if cfg.Raft.Bind != "127.0.0.1:9001" {
@@ -216,6 +227,21 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	}
 	if !cfg.Cluster.Bootstrap {
 		t.Errorf("Cluster.Bootstrap not set")
+	}
+	if cfg.Raft.HeartbeatTimeout != 2*time.Second {
+		t.Errorf("Raft.HeartbeatTimeout = %v", cfg.Raft.HeartbeatTimeout)
+	}
+	if cfg.Raft.ElectionTimeout != 10*time.Second {
+		t.Errorf("Raft.ElectionTimeout = %v", cfg.Raft.ElectionTimeout)
+	}
+	if cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
+		t.Errorf("Raft.LeaderLeaseTimeout = %v", cfg.Raft.LeaderLeaseTimeout)
+	}
+	if cfg.Raft.CommitTimeout != 100*time.Millisecond {
+		t.Errorf("Raft.CommitTimeout = %v", cfg.Raft.CommitTimeout)
+	}
+	if cfg.Raft.ApplyTimeout != 30*time.Second {
+		t.Errorf("Raft.ApplyTimeout = %v", cfg.Raft.ApplyTimeout)
 	}
 }
 

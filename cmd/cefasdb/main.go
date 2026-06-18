@@ -19,18 +19,18 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/CefasDb/cefasdb/internal/server"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	bootstrapserver "github.com/CefasDb/cefasdb/internal/bootstrap/server"
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/config"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
+	"github.com/CefasDb/cefasdb/internal/server"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	"github.com/CefasDb/cefasdb/internal/config"
 
 	// Side-effect import: every built-in plugin registers against
 	// plugin.Default before the server exposes ListPlugins.
@@ -52,6 +52,11 @@ func main() {
 		raftBootstrap = flag.Bool("raft-bootstrap", false, "Bootstrap a new cluster from -raft-peers (run on the first node only)")
 		raftPeersFlag = flag.String("raft-peers", "", "Comma-separated id=raftAddr peer list, e.g. 'a=127.0.0.1:9001,b=127.0.0.1:9002,c=127.0.0.1:9003'")
 		raftHTTPFlag  = flag.String("raft-http-peers", "", "Comma-separated id=httpURL peer list for 307 redirects, e.g. 'a=http://h1:8080,b=http://h2:8080'")
+		raftHeartbeat = flag.Duration("raft-heartbeat-timeout", 0, "Raft heartbeat timeout. 0 inherits config/default.")
+		raftElection  = flag.Duration("raft-election-timeout", 0, "Raft election timeout. 0 inherits config/default.")
+		raftLease     = flag.Duration("raft-leader-lease-timeout", 0, "Raft leader lease timeout. Must be <= heartbeat timeout. 0 inherits config/default.")
+		raftCommit    = flag.Duration("raft-commit-timeout", 0, "Raft commit timeout. 0 inherits config/default.")
+		raftApply     = flag.Duration("raft-apply-timeout", 0, "Raft apply timeout per replicated batch. 0 inherits config/default.")
 
 		// Storage tuning.
 		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
@@ -149,6 +154,7 @@ func main() {
 	// downstream code paths can read a single source of truth.
 	bootstrapserver.OverlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
 		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
+		*raftHeartbeat, *raftElection, *raftLease, *raftCommit, *raftApply,
 		*storageProfile, *raftStorageProfile,
 		*storageBlockCache, *storageMemTableSize, *storageMemTableStopWrites,
 		*storageMaxCompactions, *storageL0Concurrency, *storageL0Threshold,
@@ -213,6 +219,11 @@ func main() {
 			Backpressure:    bootstrapserver.BackpressureOptions(cfg),
 			StreamRetention: bootstrapserver.StreamRetentionOptions(cfg),
 			RaftProfile:     cfg.Storage.RaftProfile,
+			HeartbeatMS:     int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
+			ElectionMS:      int(cfg.Raft.ElectionTimeout / time.Millisecond),
+			LeaderLeaseMS:   int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
+			CommitMS:        int(cfg.Raft.CommitTimeout / time.Millisecond),
+			ApplyTimeout:    cfg.Raft.ApplyTimeout,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)
@@ -279,6 +290,11 @@ func main() {
 			Bootstrap:     cfg.Cluster.Bootstrap,
 			PeerAddrs:     cfg.Cluster.Peers,
 			PeerHTTPAddrs: cfg.Cluster.HTTPPeers,
+			HeartbeatMS:   int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
+			ElectionMS:    int(cfg.Raft.ElectionTimeout / time.Millisecond),
+			LeaderLeaseMS: int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
+			CommitMS:      int(cfg.Raft.CommitTimeout / time.Millisecond),
+			ApplyTimeout:  cfg.Raft.ApplyTimeout,
 		}, db.Raw(), raftStore.Raw())
 		if err != nil {
 			logger.Error("open raft", "err", err)

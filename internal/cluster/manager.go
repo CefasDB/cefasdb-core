@@ -113,6 +113,7 @@ type Config struct {
 	ElectionMS    int
 	LeaderLeaseMS int
 	CommitMS      int
+	ApplyTimeout  time.Duration
 
 	LogOutput io.Writer
 }
@@ -320,7 +321,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		ElectionMS:    m.cfg.ElectionMS,
 		LeaderLeaseMS: m.cfg.LeaderLeaseMS,
 		CommitMS:      m.cfg.CommitMS,
-		ApplyTimeout:  5 * time.Second,
+		ApplyTimeout:  m.cfg.ApplyTimeout,
 		LogOutput:     m.cfg.LogOutput,
 	}
 	if m.mux != nil {

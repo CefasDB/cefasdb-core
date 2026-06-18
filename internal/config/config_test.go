@@ -29,6 +29,12 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.BackupScheduler.Enabled || d.BackupScheduler.Interval != time.Hour || d.BackupScheduler.NameTemplate == "" {
 		t.Errorf("backup scheduler defaults not populated: %+v", d.BackupScheduler)
 	}
+	if d.Raft.HeartbeatTimeout != 2*time.Second || d.Raft.ElectionTimeout != 10*time.Second || d.Raft.LeaderLeaseTimeout != 2*time.Second {
+		t.Errorf("raft timeout defaults not populated: %+v", d.Raft)
+	}
+	if d.Raft.CommitTimeout != 100*time.Millisecond || d.Raft.ApplyTimeout != 30*time.Second {
+		t.Errorf("raft commit/apply defaults not populated: %+v", d.Raft)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -54,6 +60,12 @@ cluster:
   peers:
     n1: 10.0.0.1:9100
     n2: 10.0.0.2:9100
+raft:
+  heartbeatTimeout: 3s
+  electionTimeout: 12s
+  leaderLeaseTimeout: 1500ms
+  commitTimeout: 125ms
+  applyTimeout: 45s
 identity:
   jwksUrl: https://tikti.example.com/jwks.json
   clockSkew: 45s
@@ -95,6 +107,12 @@ backupScheduler:
 	if cfg.Identity.ClockSkew != 45*time.Second {
 		t.Fatalf("clock skew = %v", cfg.Identity.ClockSkew)
 	}
+	if cfg.Raft.HeartbeatTimeout != 3*time.Second || cfg.Raft.ElectionTimeout != 12*time.Second || cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
+		t.Fatalf("raft timeout config not loaded: %+v", cfg.Raft)
+	}
+	if cfg.Raft.CommitTimeout != 125*time.Millisecond || cfg.Raft.ApplyTimeout != 45*time.Second {
+		t.Fatalf("raft commit/apply config not loaded: %+v", cfg.Raft)
+	}
 	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
 		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
 	}
@@ -115,6 +133,11 @@ backupScheduler:
 func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_HTTP_ADDR", ":19090")
 	t.Setenv("CEFAS_CLUSTER_SHARDS", "4")
+	t.Setenv("CEFAS_RAFT_HEARTBEAT_TIMEOUT", "2500ms")
+	t.Setenv("CEFAS_RAFT_ELECTION_TIMEOUT", "11s")
+	t.Setenv("CEFAS_RAFT_LEADER_LEASE_TIMEOUT", "1500ms")
+	t.Setenv("CEFAS_RAFT_COMMIT_TIMEOUT", "120ms")
+	t.Setenv("CEFAS_RAFT_APPLY_TIMEOUT", "40s")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
@@ -142,6 +165,12 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Cluster.Shards != 4 {
 		t.Errorf("shards override: %d", cfg.Cluster.Shards)
+	}
+	if cfg.Raft.HeartbeatTimeout != 2500*time.Millisecond || cfg.Raft.ElectionTimeout != 11*time.Second || cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
+		t.Errorf("raft timeout env not applied: %+v", cfg.Raft)
+	}
+	if cfg.Raft.CommitTimeout != 120*time.Millisecond || cfg.Raft.ApplyTimeout != 40*time.Second {
+		t.Errorf("raft commit/apply env not applied: %+v", cfg.Raft)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")
