@@ -90,6 +90,7 @@ func main() {
 		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
 		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
 		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
+		storageChangeLogMode     = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -169,7 +170,7 @@ func main() {
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
-		*streamRetention, *streamRetentionMaxBytes,
+		*streamRetention, *streamRetentionMaxBytes, *storageChangeLogMode,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *replicationFactor, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
@@ -226,6 +227,7 @@ func main() {
 			StorageTuning:                 bootstrapserver.StorageTuning(cfg),
 			Backpressure:                  bootstrapserver.BackpressureOptions(cfg),
 			StreamRetention:               bootstrapserver.StreamRetentionOptions(cfg),
+			ChangeLogMode:                 cfg.Storage.ChangeLogMode,
 			RaftProfile:                   cfg.Storage.RaftProfile,
 			HeartbeatMS:                   int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
 			ElectionMS:                    int(cfg.Raft.ElectionTimeout / time.Millisecond),

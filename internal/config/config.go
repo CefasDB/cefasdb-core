@@ -58,6 +58,7 @@ type Config struct {
 		BackpressureCriticalDelay   time.Duration `yaml:"backpressureCriticalDelay"`
 		StreamRetention             time.Duration `yaml:"streamRetention"`
 		StreamRetentionMaxBytes     int64         `yaml:"streamRetentionMaxBytes"`
+		ChangeLogMode               string        `yaml:"changeLogMode"`
 	} `yaml:"storage"`
 	Cluster struct {
 		Shards            int               `yaml:"shards"`
@@ -294,6 +295,7 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.BackpressureCriticalDelay = dur("STORAGE_BACKPRESSURE_CRITICAL_DELAY", cfg.Storage.BackpressureCriticalDelay)
 	cfg.Storage.StreamRetention = dur("STORAGE_STREAM_RETENTION", cfg.Storage.StreamRetention)
 	cfg.Storage.StreamRetentionMaxBytes = integer64("STORAGE_STREAM_RETENTION_MAX_BYTES", cfg.Storage.StreamRetentionMaxBytes)
+	cfg.Storage.ChangeLogMode = str("STORAGE_CHANGELOG_MODE", cfg.Storage.ChangeLogMode)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
 	cfg.Cluster.ReplicationFactor = integer("CLUSTER_REPLICATION_FACTOR", cfg.Cluster.ReplicationFactor)

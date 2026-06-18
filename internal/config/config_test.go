@@ -70,6 +70,8 @@ cluster:
   peers:
     n1: 10.0.0.1:9100
     n2: 10.0.0.2:9100
+storage:
+  changeLogMode: streams-only
 raft:
   heartbeatTimeout: 3s
   electionTimeout: 12s
@@ -121,6 +123,9 @@ backupScheduler:
 	}
 	if cfg.Identity.ClockSkew != 45*time.Second {
 		t.Fatalf("clock skew = %v", cfg.Identity.ClockSkew)
+	}
+	if cfg.Storage.ChangeLogMode != "streams-only" {
+		t.Fatalf("storage changelog mode config not loaded: %+v", cfg.Storage)
 	}
 	if cfg.Raft.HeartbeatTimeout != 3*time.Second || cfg.Raft.ElectionTimeout != 12*time.Second || cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
 		t.Fatalf("raft timeout config not loaded: %+v", cfg.Raft)
@@ -185,6 +190,7 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_KEEP_LATEST", "3")
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_MAX_AGE", "168h")
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_DRY_RUN", "true")
+	t.Setenv("CEFAS_STORAGE_CHANGELOG_MODE", "off")
 
 	cfg := config.Defaults()
 	if err := config.ApplyEnv(&cfg); err != nil {
@@ -213,6 +219,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Raft.LogCompressionMinBytes != 4096 || cfg.Raft.LogCompressionMinSavingsRatio != 0.25 || cfg.Raft.LogCompressionSkipCooldown != 3*time.Second {
 		t.Errorf("raft log compression guardrail env not applied: %+v", cfg.Raft)
+	}
+	if cfg.Storage.ChangeLogMode != "off" {
+		t.Errorf("storage changelog mode env not applied: %+v", cfg.Storage)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")

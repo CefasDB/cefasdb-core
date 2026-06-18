@@ -32,6 +32,7 @@ func OverlayFlags(
 	backpressureWarnReadAmp, backpressureCriticalReadAmp int,
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
 	streamRetention time.Duration, streamRetentionMaxBytes int64,
+	storageChangeLogMode string,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
 	shardsN, replicationFactor int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
@@ -180,6 +181,9 @@ func OverlayFlags(
 	}
 	if streamRetentionMaxBytes > 0 {
 		cfg.Storage.StreamRetentionMaxBytes = streamRetentionMaxBytes
+	}
+	if storageChangeLogMode != "" {
+		cfg.Storage.ChangeLogMode = storageChangeLogMode
 	}
 	if identityJwks != "" {
 		cfg.Identity.JwksURL = identityJwks

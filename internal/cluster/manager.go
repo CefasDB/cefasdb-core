@@ -110,6 +110,7 @@ type Config struct {
 	StorageTuning   pebble.PebbleTuning
 	Backpressure    pebble.BackpressureOptions
 	StreamRetention pebble.StreamRetentionOptions
+	ChangeLogMode   string
 	RaftProfile     string
 	RaftTuning      pebble.PebbleTuning
 
@@ -305,6 +306,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Tuning:          storageTuningForShards(m.cfg.Shards, m.cfg.StorageTuning),
 		Backpressure:    m.cfg.Backpressure,
 		StreamRetention: m.cfg.StreamRetention,
+		ChangeLogMode:   m.cfg.ChangeLogMode,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
