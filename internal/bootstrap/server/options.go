@@ -25,6 +25,7 @@ func StorageOptions(cfg config.Config, path string) pebble.Options {
 		Tuning:          StorageTuning(cfg),
 		Backpressure:    BackpressureOptions(cfg),
 		StreamRetention: StreamRetentionOptions(cfg),
+		ChangeLogMode:   cfg.Storage.ChangeLogMode,
 	}
 }
 

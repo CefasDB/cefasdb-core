@@ -5,8 +5,8 @@ import (
 	"time"
 
 	bootstrapserver "github.com/CefasDb/cefasdb/internal/bootstrap/server"
-	"github.com/CefasDb/cefasdb/internal/rebalance"
 	"github.com/CefasDb/cefasdb/internal/config"
+	"github.com/CefasDb/cefasdb/internal/rebalance"
 )
 
 // fixtureConfig returns a config.Config with non-zero values across
@@ -40,6 +40,7 @@ func fixtureConfig() config.Config {
 
 	c.Storage.StreamRetention = 12 * time.Hour
 	c.Storage.StreamRetentionMaxBytes = 1 << 30
+	c.Storage.ChangeLogMode = "streams-only"
 
 	c.Metrics.HotspotBuckets = 32
 	c.Metrics.HotspotWindow = 90 * time.Second
@@ -96,6 +97,9 @@ func TestStorageOptions(t *testing.T) {
 	}
 	if opts.StreamRetention.Retention != 12*time.Hour {
 		t.Errorf("StreamRetention.Retention = %v", opts.StreamRetention.Retention)
+	}
+	if opts.ChangeLogMode != "streams-only" {
+		t.Errorf("ChangeLogMode = %q", opts.ChangeLogMode)
 	}
 }
 

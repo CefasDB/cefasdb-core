@@ -65,6 +65,17 @@ type streamRetentionRecord struct {
 	Bytes    int64
 }
 
+func (d *DB) shouldAppendChangeRecord(td types.TableDescriptor) bool {
+	switch d.changeLogMode {
+	case ChangeLogModeOff:
+		return false
+	case ChangeLogModeStreamsOnly:
+		return td.StreamSpecification != nil && td.StreamSpecification.StreamEnabled
+	default:
+		return true
+	}
+}
+
 func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeRecord, error) {
 	if rec.Table == "" {
 		return rec, fmt.Errorf("change record table required")

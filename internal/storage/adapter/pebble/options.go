@@ -13,6 +13,10 @@ const (
 	ProfileBalanced   = "balanced"
 	ProfileWriteHeavy = "write-heavy"
 	ProfileRaft       = "raft"
+
+	ChangeLogModeAlways      = "always"
+	ChangeLogModeStreamsOnly = "streams-only"
+	ChangeLogModeOff         = "off"
 )
 
 // PebbleTuning contains explicit Pebble knobs used by benchmark and
@@ -78,6 +82,19 @@ func normalizeProfile(profile string) string {
 		return ProfileRaft
 	default:
 		return ProfileDefault
+	}
+}
+
+func normalizeChangeLogMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", ChangeLogModeAlways:
+		return ChangeLogModeAlways
+	case ChangeLogModeStreamsOnly, "streams", "stream":
+		return ChangeLogModeStreamsOnly
+	case ChangeLogModeOff, "disabled", "none":
+		return ChangeLogModeOff
+	default:
+		return ChangeLogModeAlways
 	}
 }
 

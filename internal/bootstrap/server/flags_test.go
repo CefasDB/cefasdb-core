@@ -87,6 +87,7 @@ type overlayArgs struct {
 
 	streamRetention         time.Duration
 	streamRetentionMaxBytes int64
+	storageChangeLogMode    string
 
 	identityJwks, identityIssuer, identityAudience string
 	identityClockSkew                              time.Duration
@@ -149,7 +150,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.backpressureWarnDebt, a.backpressureCriticalDbt,
 		a.backpressureWarnReadAmp, a.backpressureCritRA,
 		a.backpressureWarnDelay, a.backpressureCritDelay,
-		a.streamRetention, a.streamRetentionMaxBytes,
+		a.streamRetention, a.streamRetentionMaxBytes, a.storageChangeLogMode,
 		a.identityJwks, a.identityIssuer, a.identityAudience, a.identityClockSkew,
 		a.shardsN, a.replicationFactor, a.muxAddr,
 		a.grpcAddr, a.grpcRefl, a.tlsCert, a.tlsKey, a.mCA,
@@ -336,6 +337,7 @@ func TestOverlayFlags_RetentionAndBackup(t *testing.T) {
 	args := zeroArgs()
 	args.streamRetention = 12 * time.Hour
 	args.streamRetentionMaxBytes = 256 << 20
+	args.storageChangeLogMode = "streams-only"
 	args.backupSchedulerEnabled = true
 	args.backupSchedulerInterval = 2 * time.Hour
 	args.backupSchedulerNameTemplate = "nightly-{{timestamp}}"
@@ -350,6 +352,9 @@ func TestOverlayFlags_RetentionAndBackup(t *testing.T) {
 	}
 	if cfg.Storage.StreamRetentionMaxBytes != 256<<20 {
 		t.Errorf("StreamRetentionMaxBytes = %d", cfg.Storage.StreamRetentionMaxBytes)
+	}
+	if cfg.Storage.ChangeLogMode != "streams-only" {
+		t.Errorf("ChangeLogMode = %q", cfg.Storage.ChangeLogMode)
 	}
 	if !cfg.BackupScheduler.Enabled {
 		t.Errorf("BackupScheduler.Enabled not set")

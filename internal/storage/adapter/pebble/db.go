@@ -70,6 +70,10 @@ type Options struct {
 	// StreamRetention bounds the logical DynamoDB Streams retention
 	// window. The physical changelog is preserved for PITR/backup.
 	StreamRetention StreamRetentionOptions
+	// ChangeLogMode controls physical changelog writes. "always" preserves
+	// PITR/backup records for every write; "streams-only" only writes records
+	// for stream-enabled tables; "off" disables changelog writes.
+	ChangeLogMode string
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -98,6 +102,7 @@ type DB struct {
 	changeIndex uint64
 
 	streamRetention StreamRetentionOptions
+	changeLogMode   string
 }
 
 type commitReq struct {
@@ -133,6 +138,7 @@ func Open(opts Options) (*DB, error) {
 		syncOpt:              syncOpt,
 		bp:                   newBackpressureController(opts.Backpressure),
 		streamRetention:      normalizeStreamRetentionOptions(opts.StreamRetention),
+		changeLogMode:        normalizeChangeLogMode(opts.ChangeLogMode),
 		activeBackupRestores: make(map[string]int),
 		memTables:            make(map[string]map[string][]byte),
 		memLoaded:            make(map[string]bool),

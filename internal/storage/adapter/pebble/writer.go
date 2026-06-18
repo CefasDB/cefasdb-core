@@ -152,8 +152,10 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
-		return fmt.Errorf("change log: %w", err)
+	if d.shouldAppendChangeRecord(td) {
+		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
+			return fmt.Errorf("change log: %w", err)
+		}
 	}
 	if err := d.CommitBatch(b); err != nil {
 		return err
@@ -243,8 +245,10 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)); err != nil {
-		return fmt.Errorf("change log: %w", err)
+	if d.shouldAppendChangeRecord(td) {
+		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)); err != nil {
+			return fmt.Errorf("change log: %w", err)
+		}
 	}
 	if err := d.CommitBatch(b); err != nil {
 		return err
@@ -600,8 +604,10 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if isMemoryTable(td) {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
 			}
-			if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)); err != nil {
-				return fmt.Errorf("op %d change log: %w", i, err)
+			if d.shouldAppendChangeRecord(td) {
+				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)); err != nil {
+					return fmt.Errorf("op %d change log: %w", i, err)
+				}
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
@@ -647,8 +653,10 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if isMemoryTable(td) {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), delete: true})
 			}
-			if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)); err != nil {
-				return fmt.Errorf("op %d change log: %w", i, err)
+			if d.shouldAppendChangeRecord(td) {
+				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)); err != nil {
+					return fmt.Errorf("op %d change log: %w", i, err)
+				}
 			}
 			if err := applyIndexOps(b, gsiOps); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
