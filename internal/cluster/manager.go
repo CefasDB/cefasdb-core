@@ -119,6 +119,7 @@ type Config struct {
 	CommitMS        int
 	ApplyTimeout    time.Duration
 	SnapshotEntries uint64
+	LogCompression  string
 
 	LogOutput io.Writer
 }
@@ -351,6 +352,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		CommitMS:        m.cfg.CommitMS,
 		ApplyTimeout:    m.cfg.ApplyTimeout,
 		SnapshotEntries: m.cfg.SnapshotEntries,
+		LogCompression:  m.cfg.LogCompression,
 		LogOutput:       m.cfg.LogOutput,
 	}
 	if m.mux != nil {
