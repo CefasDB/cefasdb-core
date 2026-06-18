@@ -42,6 +42,40 @@ func TestAuditPlacementCatalogReportsGapsAndOverlaps(t *testing.T) {
 	}
 }
 
+func TestStorageTuningForShardsCapsImplicitResources(t *testing.T) {
+	got := storageTuningForShards(24, pebble.PebbleTuning{})
+	if got.BlockCacheSizeBytes < multiShardMinBlockCache || got.BlockCacheSizeBytes > multiShardMaxBlockCache {
+		t.Fatalf("BlockCacheSizeBytes = %d, want clamped multi-shard cache", got.BlockCacheSizeBytes)
+	}
+	if got.MemTableSizeBytes != multiShardMemTableSize {
+		t.Fatalf("MemTableSizeBytes = %d, want %d", got.MemTableSizeBytes, multiShardMemTableSize)
+	}
+	if got.MemTableStopWrites != 4 {
+		t.Fatalf("MemTableStopWrites = %d, want 4", got.MemTableStopWrites)
+	}
+	if got.MaxConcurrentCompactions != 2 || got.L0CompactionConcurrency != 2 {
+		t.Fatalf("compaction tuning = %+v, want per-shard capped defaults", got)
+	}
+}
+
+func TestStorageTuningForShardsPreservesExplicitOverrides(t *testing.T) {
+	in := pebble.PebbleTuning{
+		BlockCacheSizeBytes:      512 << 20,
+		MemTableSizeBytes:        64 << 20,
+		MemTableStopWrites:       8,
+		MaxConcurrentCompactions: 4,
+		L0CompactionConcurrency:  3,
+	}
+	got := storageTuningForShards(24, in)
+	if got.BlockCacheSizeBytes != in.BlockCacheSizeBytes ||
+		got.MemTableSizeBytes != in.MemTableSizeBytes ||
+		got.MemTableStopWrites != in.MemTableStopWrites ||
+		got.MaxConcurrentCompactions != in.MaxConcurrentCompactions ||
+		got.L0CompactionConcurrency != in.L0CompactionConcurrency {
+		t.Fatalf("explicit tuning not preserved: got %+v want %+v", got, in)
+	}
+}
+
 func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 	mgr := openAuditTestManager(t, 2)
 	defer mgr.Close()

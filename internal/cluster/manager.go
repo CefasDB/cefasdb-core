@@ -131,6 +131,13 @@ type Manager struct {
 	shards        []*Shard
 }
 
+const (
+	multiShardBlockCacheBudget = int64(2 << 30)
+	multiShardMinBlockCache    = int64(64 << 20)
+	multiShardMaxBlockCache    = int64(256 << 20)
+	multiShardMemTableSize     = uint64(32 << 20)
+)
+
 // WriteTargets is the routing decision for a mutating request. Primary
 // is the shard that currently owns the key; Mirrors are transition
 // targets that must receive the same write before cutover can complete.
@@ -269,7 +276,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Path:            stateDir,
 		FsyncOnCommit:   m.cfg.FsyncOnCommit,
 		Profile:         m.cfg.StorageProfile,
-		Tuning:          m.cfg.StorageTuning,
+		Tuning:          storageTuningForShards(m.cfg.Shards, m.cfg.StorageTuning),
 		Backpressure:    m.cfg.Backpressure,
 		StreamRetention: m.cfg.StreamRetention,
 	})
@@ -365,6 +372,41 @@ func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool
 		}
 	}
 	return placement.ShardPlacement{ID: shardID, State: placement.ShardStateActive, Epoch: m.cat.Epoch}, false
+}
+
+func storageTuningForShards(shards int, tuning pebble.PebbleTuning) pebble.PebbleTuning {
+	if shards <= 1 {
+		return tuning
+	}
+	if tuning.BlockCacheSizeBytes <= 0 {
+		perShard := multiShardBlockCacheBudget / int64(shards)
+		if perShard < multiShardMinBlockCache {
+			perShard = multiShardMinBlockCache
+		}
+		if perShard > multiShardMaxBlockCache {
+			perShard = multiShardMaxBlockCache
+		}
+		tuning.BlockCacheSizeBytes = perShard
+	}
+	if tuning.MemTableSizeBytes == 0 {
+		tuning.MemTableSizeBytes = multiShardMemTableSize
+	}
+	if tuning.MemTableStopWrites == 0 {
+		tuning.MemTableStopWrites = 4
+	}
+	if tuning.MaxConcurrentCompactions == 0 {
+		tuning.MaxConcurrentCompactions = 2
+	}
+	if tuning.L0CompactionConcurrency == 0 {
+		tuning.L0CompactionConcurrency = 2
+	}
+	if tuning.L0CompactionFileThreshold == 0 {
+		tuning.L0CompactionFileThreshold = 64
+	}
+	if tuning.L0StopWritesThreshold == 0 {
+		tuning.L0StopWritesThreshold = 128
+	}
+	return tuning
 }
 
 func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat placement.PlacementCatalog) error {
