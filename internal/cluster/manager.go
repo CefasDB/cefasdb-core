@@ -164,6 +164,23 @@ func (t WriteTargets) Release() {
 
 var placementSystemKey = []byte(storage.Namespace + "cluster/placement")
 
+// ErrNoLocalReplica means the request routes to a shard that this node
+// does not host as a voter or non-voter replica.
+var ErrNoLocalReplica = errors.New("cluster: no local replica for routed shard")
+
+type NoLocalReplicaError struct {
+	NodeID    string
+	ShardID   uint32
+	Voters    []string
+	NonVoters []string
+}
+
+func (e *NoLocalReplicaError) Error() string {
+	return fmt.Sprintf("cluster: node %s has no local replica for shard %d (voters=%v nonVoters=%v)", e.NodeID, e.ShardID, e.Voters, e.NonVoters)
+}
+
+func (e *NoLocalReplicaError) Is(target error) bool { return target == ErrNoLocalReplica }
+
 // Open brings up every shard. Shards are opened sequentially so a
 // failure in shard k cleanly tears down shards 0..k-1 before
 // returning.
@@ -523,6 +540,66 @@ func (m *Manager) ShardForPK(pkBytes []byte) *Shard {
 		return nil
 	}
 	return sh
+}
+
+// ReadShardForPK selects the local readable replica for a request's PK.
+// It refuses to return an empty local shard when this node is not part
+// of the shard placement; callers must retry against one of the shard's
+// voters instead of treating the local miss as authoritative.
+func (m *Manager) ReadShardForPK(pkBytes []byte, epoch uint64) (*Shard, error) {
+	sh, err := m.RouteForPK(pkBytes, epoch)
+	if err != nil {
+		return nil, err
+	}
+	if !m.hasLocalReplica(sh) {
+		return nil, &NoLocalReplicaError{
+			NodeID:    m.cfg.SelfID,
+			ShardID:   sh.ID,
+			Voters:    append([]string(nil), sh.Voters...),
+			NonVoters: append([]string(nil), sh.NonVoters...),
+		}
+	}
+	return sh, nil
+}
+
+// ReadShards returns all local shard stores needed for a complete
+// scatter read. If any logical shard is not replicated locally, a
+// single-node scatter would return partial results, so the call fails.
+func (m *Manager) ReadShards(epoch uint64) ([]*Shard, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if err := checkRoutingEpoch(epoch, m.cat.Epoch); err != nil {
+		return nil, err
+	}
+	out := make([]*Shard, 0, len(m.shards))
+	for _, sh := range m.shards {
+		if sh == nil {
+			return nil, fmt.Errorf("cluster: routed to missing shard")
+		}
+		if !sh.State.Routable() {
+			return nil, fmt.Errorf("cluster: routed to non-routable shard %d state=%s", sh.ID, sh.State)
+		}
+		if !m.hasLocalReplica(sh) {
+			return nil, &NoLocalReplicaError{
+				NodeID:    m.cfg.SelfID,
+				ShardID:   sh.ID,
+				Voters:    append([]string(nil), sh.Voters...),
+				NonVoters: append([]string(nil), sh.NonVoters...),
+			}
+		}
+		out = append(out, sh)
+	}
+	return out, nil
+}
+
+func (m *Manager) hasLocalReplica(sh *Shard) bool {
+	if sh == nil {
+		return false
+	}
+	if len(sh.Voters) == 0 && len(sh.NonVoters) == 0 {
+		return true
+	}
+	return containsString(sh.Voters, m.cfg.SelfID) || containsString(sh.NonVoters, m.cfg.SelfID)
 }
 
 // RouteForPK selects the shard and verifies an optional caller routing

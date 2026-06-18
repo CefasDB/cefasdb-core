@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
-	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -39,7 +40,7 @@ type Deps struct {
 	// Cat resolves table descriptors. Required.
 	Cat *catalog.Catalog
 	// StorageFor returns the pebble.DB that owns pkBytes. Required.
-	StorageFor func(pkBytes []byte) *pebble.DB
+	StorageFor func(pkBytes []byte) (*pebble.DB, error)
 	// WriteTargetsForPK returns the routed write fan-out for pkBytes.
 	// Required.
 	WriteTargetsForPK func(pkBytes []byte) (WriteTargets, error)
@@ -201,7 +202,12 @@ func (h *Handlers) HandleGetItem(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	item, err := h.deps.StorageFor(pkBytes).GetItem(req.Table, td.KeySchema, keyAttrs)
+	db, err := h.deps.StorageFor(pkBytes)
+	if err != nil {
+		httpx.WriteErr(w, mapReadErr(err), err)
+		return
+	}
+	item, err := db.GetItem(req.Table, td.KeySchema, keyAttrs)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			h.observeRead(pkBytes, nil, started)
@@ -358,7 +364,7 @@ func (h *Handlers) HandleBatchGetItem(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.deps.BatchGetByShard(req.Table, td.KeySchema, keys)
 	if err != nil {
-		httpx.WriteErr(w, http.StatusInternalServerError, err)
+		httpx.WriteErr(w, mapReadErr(err), err)
 		return
 	}
 	out := make([]map[string]ddbjson.Attribute, len(items))
@@ -384,6 +390,17 @@ func (h *Handlers) observeRead(pkBytes []byte, item types.Item, started time.Tim
 		return
 	}
 	h.deps.ObserveRead(pkBytes, item, started)
+}
+
+func mapReadErr(err error) int {
+	switch {
+	case errors.Is(err, cluster.ErrNoLocalReplica):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, cluster.ErrStaleRoute):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func pkBytesFromItem(item types.Item, ks types.KeySchema) ([]byte, error) {

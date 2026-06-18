@@ -7,25 +7,26 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/spatial"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
-	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
-	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // StorageForFunc returns the pebble.DB that owns the supplied
 // partition-key bytes. Single-shard mode always returns the same DB.
-type StorageForFunc func(pkBytes []byte) *pebble.DB
+type StorageForFunc func(pkBytes []byte) (*pebble.DB, error)
 
-// AllShardsFunc enumerates every pebble.DB this server manages so a
-// cross-shard query can scatter-gather.
-type AllShardsFunc func() []*pebble.DB
+// AllShardsFunc enumerates every local shard replica needed for a
+// complete scatter read.
+type AllShardsFunc func() ([]*pebble.DB, error)
 
 // SpatialAllShardsFunc fans a spatial query across every shard and
 // merges the results, honouring the global limit.
@@ -194,7 +195,6 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("pkValue: %w", err))
 		return
 	}
-	queryDB := h.storageFor(pkBytes)
 	var items []types.Item
 	if req.IndexName != "" {
 		items, err = h.queryByIndex(td, req.IndexName, pkVal, pebble.QueryOptions{
@@ -203,12 +203,22 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 			Limit:  req.Limit,
 		})
 	} else if req.SKLow == nil && req.SKHigh == nil {
+		queryDB, err := h.storageFor(pkBytes)
+		if err != nil {
+			httpx.WriteErr(w, mapReadErr(err), err)
+			return
+		}
 		items, err = queryDB.QueryByPK(req.Table, td.KeySchema, pkVal, req.Limit)
 	} else {
+		queryDB, err := h.storageFor(pkBytes)
+		if err != nil {
+			httpx.WriteErr(w, mapReadErr(err), err)
+			return
+		}
 		items, err = queryDB.QueryByPKRange(req.Table, td.KeySchema, pkVal, lo, hi, req.Limit)
 	}
 	if err != nil {
-		httpx.WriteErr(w, http.StatusInternalServerError, err)
+		httpx.WriteErr(w, mapReadErr(err), err)
 		return
 	}
 	if h.observeRange != nil {
@@ -270,7 +280,7 @@ func (h *Handlers) HandleSpatialQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.spatialAllShards(td, req.IndexName, q)
 	if err != nil {
-		status := http.StatusInternalServerError
+		status := mapReadErr(err)
 		if errors.Is(err, types.ErrSpatialNotFound) {
 			status = http.StatusNotFound
 		} else if errors.Is(err, types.ErrInvalidSpatial) {
@@ -411,14 +421,22 @@ func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt)
 // shard that owns the primary PK.
 func (h *Handlers) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	if hasGSI(td, indexName) {
-		return queryGSIAcrossShards(h.allShards(), td, indexName, pkVal, opts)
+		dbs, err := h.allShards()
+		if err != nil {
+			return nil, err
+		}
+		return queryGSIAcrossShards(dbs, td, indexName, pkVal, opts)
 	}
 	if hasLSI(td, indexName) {
 		pkBytes, err := storage.AttrCanonicalBytes(pkVal)
 		if err != nil {
 			return nil, fmt.Errorf("primary PK: %w", err)
 		}
-		return h.storageFor(pkBytes).QueryByLSI(td, indexName, pkVal, opts)
+		db, err := h.storageFor(pkBytes)
+		if err != nil {
+			return nil, err
+		}
+		return db.QueryByLSI(td, indexName, pkVal, opts)
 	}
 	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
 }
@@ -467,6 +485,17 @@ func hasLSI(td types.TableDescriptor, name string) bool {
 		}
 	}
 	return false
+}
+
+func mapReadErr(err error) int {
+	switch {
+	case errors.Is(err, cluster.ErrNoLocalReplica):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, cluster.ErrStaleRoute):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func primaryIdentity(item types.Item, ks types.KeySchema) (string, error) {
