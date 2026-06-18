@@ -39,12 +39,15 @@ type Config struct {
 
 	// Tunable raft timeouts. Zero values fall back to documented
 	// defaults below.
-	HeartbeatMS     int
-	ElectionMS      int
-	LeaderLeaseMS   int
-	CommitMS        int
-	SnapshotEntries uint64
-	LogCompression  string
+	HeartbeatMS                   int
+	ElectionMS                    int
+	LeaderLeaseMS                 int
+	CommitMS                      int
+	SnapshotEntries               uint64
+	LogCompression                string
+	LogCompressionMinBytes        int
+	LogCompressionMinSavingsRatio float64
+	LogCompressionSkipCooldown    time.Duration
 
 	// ApplyTimeout bounds each Replicate call's raft round-trip.
 	ApplyTimeout time.Duration
@@ -121,14 +124,15 @@ var ErrNotFound = pebbledb.ErrNotFound
 // metadata may use a separate Pebble instance to avoid competing with
 // user data compaction.
 type DB struct {
-	pebble        *pebbledb.DB
-	raftPebble    *pebbledb.DB
-	raft          *hraft.Raft
-	fsm           *fsm
-	trans         hraft.Transport
-	cfg           Config
-	publisher     *Publisher
-	snapshotStore hraft.SnapshotStore
+	pebble         *pebbledb.DB
+	raftPebble     *pebbledb.DB
+	raft           *hraft.Raft
+	fsm            *fsm
+	trans          hraft.Transport
+	cfg            Config
+	publisher      *Publisher
+	snapshotStore  hraft.SnapshotStore
+	payloadEncoder *raftPayloadEncoder
 
 	leaderCh chan bool
 	stopCh   chan struct{}
@@ -172,11 +176,14 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	if cfg.Path == "" {
 		return nil, fmt.Errorf("raft: Path is required (for snapshot dir)")
 	}
-	compression, err := normalizeLogCompression(cfg.LogCompression)
+	payloadEncoder, err := newRaftPayloadEncoder(cfg)
 	if err != nil {
 		return nil, err
 	}
-	cfg.LogCompression = compression
+	cfg.LogCompression = payloadEncoder.mode
+	cfg.LogCompressionMinBytes = payloadEncoder.minBytes
+	cfg.LogCompressionMinSavingsRatio = payloadEncoder.minSavingsRatio
+	cfg.LogCompressionSkipCooldown = payloadEncoder.skipCooldown
 	raftPDB := pdb
 	if len(raftStores) > 0 && raftStores[0] != nil {
 		raftPDB = raftStores[0]
@@ -188,13 +195,14 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	}
 
 	d := &DB{
-		pebble:       pdb,
-		raftPebble:   raftPDB,
-		cfg:          cfg,
-		leaderCh:     make(chan bool, 8),
-		stopCh:       make(chan struct{}),
-		applyCh:      make(chan *applyReq, raftApplyChanBuf),
-		applyStopped: make(chan struct{}),
+		pebble:         pdb,
+		raftPebble:     raftPDB,
+		cfg:            cfg,
+		payloadEncoder: payloadEncoder,
+		leaderCh:       make(chan bool, 8),
+		stopCh:         make(chan struct{}),
+		applyCh:        make(chan *applyReq, raftApplyChanBuf),
+		applyStopped:   make(chan struct{}),
 	}
 
 	logs := newLogStore(raftPDB)
@@ -341,6 +349,14 @@ func (d *DB) IsLeader() bool {
 		return false
 	}
 	return d.raft.State() == hraft.Leader
+}
+
+// LogCompressionStats returns cumulative raft log compression counters.
+func (d *DB) LogCompressionStats() LogCompressionStats {
+	if d == nil || d.payloadEncoder == nil {
+		return LogCompressionStats{}
+	}
+	return d.payloadEncoder.Stats()
 }
 
 // LeaderObservation returns a channel that receives true on becoming
@@ -600,7 +616,7 @@ func (d *DB) applyLoop() {
 			continue
 		}
 
-		cp, err := encodeRaftPayload(merged.Repr(), d.cfg.LogCompression)
+		cp, err := d.payloadEncoder.Encode(merged.Repr())
 		_ = merged.Close()
 		if err != nil {
 			err = fmt.Errorf("raft apply: encode payload: %w", err)

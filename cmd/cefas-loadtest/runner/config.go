@@ -27,6 +27,7 @@ type Config struct {
 	ReadRate          int64
 	Users             int64
 	PayloadBytes      int
+	PayloadMode       string
 	RPCTimeout        time.Duration
 	Progress          time.Duration
 	LatencySampleRate int64

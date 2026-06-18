@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/CefasDb/cefasdb/internal/metrics"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
@@ -15,6 +16,13 @@ func TestMetricsHandlerExposesRegisteredSeries(t *testing.T) {
 	m.Observe("PutItem", "events", "ok", 0.0012)
 	m.Observe("GetItem", "events", "notfound", 0.0001)
 	m.AuthRejected("missing_token")
+	m.ObserveRaftLogCompression("0", craft.LogCompressionStats{
+		RawBytes:           1000,
+		EncodedBytes:       700,
+		CompressedPayloads: 3,
+		RawPayloads:        1,
+		SkippedPayloads:    2,
+	})
 	m.ObserveStreamRetention("0", pebble.StreamRetentionStats{
 		Table:           "events",
 		OldestSequence:  2,
@@ -42,6 +50,12 @@ func TestMetricsHandlerExposesRegisteredSeries(t *testing.T) {
 		`cefas_op_total{op="PutItem",outcome="ok",table="events"} 1`,
 		`cefas_op_total{op="GetItem",outcome="notfound",table="events"} 1`,
 		`cefas_auth_rejected_total{reason="missing_token"} 1`,
+		`cefas_raft_log_raw_bytes{shard="0"} 1000`,
+		`cefas_raft_log_encoded_bytes{shard="0"} 700`,
+		`cefas_raft_log_payloads{result="compressed",shard="0"} 3`,
+		`cefas_raft_log_payloads{result="raw",shard="0"} 1`,
+		`cefas_raft_log_payloads{result="skipped",shard="0"} 2`,
+		`cefas_raft_log_compression_savings_ratio{shard="0"} 0.30000000000000004`,
 		`cefas_stream_records_appended{shard="0",table="events"} 5`,
 		`cefas_stream_records_trimmed{shard="0",table="events"} 1`,
 		`cefas_stream_retained_bytes{shard="0",table="events"} 128`,

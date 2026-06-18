@@ -113,13 +113,16 @@ type Config struct {
 	RaftProfile     string
 	RaftTuning      pebble.PebbleTuning
 
-	HeartbeatMS     int
-	ElectionMS      int
-	LeaderLeaseMS   int
-	CommitMS        int
-	ApplyTimeout    time.Duration
-	SnapshotEntries uint64
-	LogCompression  string
+	HeartbeatMS                   int
+	ElectionMS                    int
+	LeaderLeaseMS                 int
+	CommitMS                      int
+	ApplyTimeout                  time.Duration
+	SnapshotEntries               uint64
+	LogCompression                string
+	LogCompressionMinBytes        int
+	LogCompressionMinSavingsRatio float64
+	LogCompressionSkipCooldown    time.Duration
 
 	LogOutput io.Writer
 }
@@ -340,20 +343,23 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	// shard's placement voters so replication-factor changes the actual
 	// Raft quorum, not only the catalog metadata.
 	rcfg := craft.Config{
-		Path:            raftDir,
-		SelfID:          m.cfg.SelfID,
-		BindAddr:        m.cfg.MuxAddr,
-		Bootstrap:       m.cfg.Bootstrap,
-		PeerAddrs:       peersForVoters(m.cfg.Peers, meta.Voters),
-		PeerHTTPAddrs:   m.cfg.PeerHTTPAddrs,
-		HeartbeatMS:     m.cfg.HeartbeatMS,
-		ElectionMS:      m.cfg.ElectionMS,
-		LeaderLeaseMS:   m.cfg.LeaderLeaseMS,
-		CommitMS:        m.cfg.CommitMS,
-		ApplyTimeout:    m.cfg.ApplyTimeout,
-		SnapshotEntries: m.cfg.SnapshotEntries,
-		LogCompression:  m.cfg.LogCompression,
-		LogOutput:       m.cfg.LogOutput,
+		Path:                          raftDir,
+		SelfID:                        m.cfg.SelfID,
+		BindAddr:                      m.cfg.MuxAddr,
+		Bootstrap:                     m.cfg.Bootstrap,
+		PeerAddrs:                     peersForVoters(m.cfg.Peers, meta.Voters),
+		PeerHTTPAddrs:                 m.cfg.PeerHTTPAddrs,
+		HeartbeatMS:                   m.cfg.HeartbeatMS,
+		ElectionMS:                    m.cfg.ElectionMS,
+		LeaderLeaseMS:                 m.cfg.LeaderLeaseMS,
+		CommitMS:                      m.cfg.CommitMS,
+		ApplyTimeout:                  m.cfg.ApplyTimeout,
+		SnapshotEntries:               m.cfg.SnapshotEntries,
+		LogCompression:                m.cfg.LogCompression,
+		LogCompressionMinBytes:        m.cfg.LogCompressionMinBytes,
+		LogCompressionMinSavingsRatio: m.cfg.LogCompressionMinSavingsRatio,
+		LogCompressionSkipCooldown:    m.cfg.LogCompressionSkipCooldown,
+		LogOutput:                     m.cfg.LogOutput,
 	}
 	if m.mux != nil {
 		sl, err := m.mux.RegisterGroup(shardID)

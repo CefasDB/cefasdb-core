@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,7 +44,7 @@ func RunWritePhase(parent context.Context, cfg Config, cli *client.Client) (Phas
 	var errors atomic.Int64
 	var firstErr error
 	var firstErrOnce sync.Once
-	payload := strings.Repeat("x", cfg.PayloadBytes)
+	repeatPayload := repeatedPayload(cfg.PayloadBytes)
 	progressTotal := cfg.Items
 	if cfg.WriteDuration > 0 {
 		progressTotal = 0
@@ -62,6 +61,7 @@ func RunWritePhase(parent context.Context, cfg Config, cli *client.Client) (Phas
 			for job := range jobs {
 				ops := make([]client.BatchWriteOp, 0, job.end-job.start)
 				for id := job.start; id < job.end; id++ {
+					payload := payloadFor(id, cfg.PayloadBytes, cfg.PayloadMode, repeatPayload)
 					ops = append(ops, client.BatchWriteOp{Put: makeItem(id, cfg.Users, payload)})
 				}
 
@@ -255,7 +255,7 @@ func RunMixedPhase(parent context.Context, cfg Config, cli *client.Client, keysp
 	var readErrors atomic.Int64
 	var firstErr error
 	var firstErrOnce sync.Once
-	payload := strings.Repeat("x", cfg.PayloadBytes)
+	repeatPayload := repeatedPayload(cfg.PayloadBytes)
 
 	stopWriteProgress := startProgress("mixed-write", cfg.Progress, &written, 0, started)
 	defer stopWriteProgress()
@@ -270,6 +270,7 @@ func RunMixedPhase(parent context.Context, cfg Config, cli *client.Client, keysp
 			for job := range writeJobs {
 				ops := make([]client.BatchWriteOp, 0, job.end-job.start)
 				for id := job.start; id < job.end; id++ {
+					payload := payloadFor(id, cfg.PayloadBytes, cfg.PayloadMode, repeatPayload)
 					ops = append(ops, client.BatchWriteOp{Put: makeItem(id, cfg.Users, payload)})
 				}
 

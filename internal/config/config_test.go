@@ -41,6 +41,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Raft.LogCompression != "snappy" {
 		t.Errorf("raft log compression default = %q", d.Raft.LogCompression)
 	}
+	if d.Raft.LogCompressionMinBytes != 1024 || d.Raft.LogCompressionMinSavingsRatio != 0.05 || d.Raft.LogCompressionSkipCooldown != time.Second {
+		t.Errorf("raft log compression guardrail defaults not populated: %+v", d.Raft)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -75,6 +78,9 @@ raft:
   applyTimeout: 45s
   snapshotEntries: 131072
   logCompression: none
+  logCompressionMinBytes: 2048
+  logCompressionMinSavingsRatio: 0.2
+  logCompressionSkipCooldown: 2s
 identity:
   jwksUrl: https://tikti.example.com/jwks.json
   clockSkew: 45s
@@ -128,6 +134,9 @@ backupScheduler:
 	if cfg.Raft.LogCompression != "none" {
 		t.Fatalf("raft log compression config not loaded: %+v", cfg.Raft)
 	}
+	if cfg.Raft.LogCompressionMinBytes != 2048 || cfg.Raft.LogCompressionMinSavingsRatio != 0.2 || cfg.Raft.LogCompressionSkipCooldown != 2*time.Second {
+		t.Fatalf("raft log compression guardrail config not loaded: %+v", cfg.Raft)
+	}
 	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
 		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
 	}
@@ -156,6 +165,9 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_RAFT_APPLY_TIMEOUT", "40s")
 	t.Setenv("CEFAS_RAFT_SNAPSHOT_ENTRIES", "262144")
 	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION", "none")
+	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_MIN_BYTES", "4096")
+	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_MIN_SAVINGS_RATIO", "0.25")
+	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_SKIP_COOLDOWN", "3s")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
@@ -198,6 +210,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Raft.LogCompression != "none" {
 		t.Errorf("raft log compression env not applied: %+v", cfg.Raft)
+	}
+	if cfg.Raft.LogCompressionMinBytes != 4096 || cfg.Raft.LogCompressionMinSavingsRatio != 0.25 || cfg.Raft.LogCompressionSkipCooldown != 3*time.Second {
+		t.Errorf("raft log compression guardrail env not applied: %+v", cfg.Raft)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")

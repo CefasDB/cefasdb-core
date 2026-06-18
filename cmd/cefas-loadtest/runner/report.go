@@ -49,6 +49,7 @@ type reportConfig struct {
 	ReadRate          int64   `json:"read_rate,omitempty"`
 	Users             int64   `json:"users"`
 	PayloadBytes      int     `json:"payload_bytes"`
+	PayloadMode       string  `json:"payload_mode"`
 	LatencySampleRate int64   `json:"latency_sample_rate"`
 	StrongRead        bool    `json:"strong_read"`
 	StartedID         int64   `json:"start_id"`
@@ -128,6 +129,7 @@ func WriteReport(cfg Config, target string, startedAt, finishedAt time.Time, pha
 			ReadRate:          cfg.ReadRate,
 			Users:             cfg.Users,
 			PayloadBytes:      cfg.PayloadBytes,
+			PayloadMode:       cfg.PayloadMode,
 			LatencySampleRate: cfg.LatencySampleRate,
 			StrongRead:        cfg.StrongRead,
 			StartedID:         cfg.StartID,

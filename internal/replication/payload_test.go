@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/vfs"
@@ -63,6 +64,45 @@ func TestRaftPayloadCompressionNoneKeepsPayloadRaw(t *testing.T) {
 	}
 }
 
+func TestRaftPayloadCompressionSkipsAfterUnhelpfulPayload(t *testing.T) {
+	repr := deterministicBytes(4096)
+	encoder, err := newRaftPayloadEncoder(Config{
+		LogCompression:             LogCompressionSnappy,
+		LogCompressionMinBytes:     1024,
+		LogCompressionSkipCooldown: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("encoder: %v", err)
+	}
+
+	encoded, err := encoder.Encode(repr)
+	if err != nil {
+		t.Fatalf("encode first: %v", err)
+	}
+	if bytes.HasPrefix(encoded, raftSnappyPayloadMagic) {
+		t.Fatalf("incompressible payload should stay raw")
+	}
+	if !bytes.Equal(encoded, repr) {
+		t.Fatalf("raw payload changed")
+	}
+
+	encoded, err = encoder.Encode(repr)
+	if err != nil {
+		t.Fatalf("encode second: %v", err)
+	}
+	if bytes.HasPrefix(encoded, raftSnappyPayloadMagic) {
+		t.Fatalf("payload should be skipped during cooldown")
+	}
+
+	stats := encoder.Stats()
+	if stats.RawBytes != uint64(len(repr)*2) || stats.EncodedBytes != uint64(len(repr)*2) {
+		t.Fatalf("byte stats = %+v", stats)
+	}
+	if stats.CompressedPayloads != 0 || stats.RawPayloads != 1 || stats.SkippedPayloads != 1 {
+		t.Fatalf("payload stats = %+v", stats)
+	}
+}
+
 func TestFSMApplyCompressedPayload(t *testing.T) {
 	db, err := pebbledb.Open("/test", &pebbledb.Options{FS: vfs.NewMem()})
 	if err != nil {
@@ -96,4 +136,18 @@ func TestFSMApplyCompressedPayload(t *testing.T) {
 	if !bytes.Equal(got, []byte(strings.Repeat("value-", 256))) {
 		t.Fatalf("applied value mismatch")
 	}
+}
+
+func deterministicBytes(n int) []byte {
+	out := make([]byte, n)
+	x := uint64(0x9e3779b97f4a7c15)
+	for i := range out {
+		x += 0x9e3779b97f4a7c15
+		z := x
+		z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+		z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+		z ^= z >> 31
+		out[i] = byte(z)
+	}
+	return out
 }

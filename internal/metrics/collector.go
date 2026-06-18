@@ -8,11 +8,16 @@ import (
 	"time"
 
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 type LeaderGate interface {
 	IsLeader() bool
+}
+
+type raftLogCompressionReporter interface {
+	LogCompressionStats() craft.LogCompressionStats
 }
 
 // RunShardCollector samples raft leadership + Pebble engine metrics
@@ -45,6 +50,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 						leader = 1.0
 					}
 					m.RaftIsLeader.WithLabelValues(label).Set(leader)
+					m.ObserveRaftLogCompression(label, sh.Raft.LogCompressionStats())
 				}
 				collectPebble(m, label, sh.Storage)
 				collectBackpressure(m, label, sh.Storage)
@@ -83,6 +89,9 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 					v = 1.0
 				}
 				m.RaftIsLeader.WithLabelValues(label).Set(v)
+				if reporter, ok := leader.(raftLogCompressionReporter); ok {
+					m.ObserveRaftLogCompression(label, reporter.LogCompressionStats())
+				}
 			}
 			collectPebble(m, label, st)
 			collectBackpressure(m, label, st)

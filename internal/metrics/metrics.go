@@ -22,8 +22,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/core/model"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 )
 
 // Metrics groups every cefas metric instance so the storage / API
@@ -41,6 +42,10 @@ type Metrics struct {
 
 	RaftCommitLagSeconds *prometheus.GaugeVec // shard
 	RaftIsLeader         *prometheus.GaugeVec // shard
+	RaftLogRawBytes      *prometheus.GaugeVec // shard
+	RaftLogEncodedBytes  *prometheus.GaugeVec // shard
+	RaftLogPayloads      *prometheus.GaugeVec // shard, result{compressed,raw,skipped}
+	RaftLogSavingsRatio  *prometheus.GaugeVec // shard
 
 	PebbleReadAmp               *prometheus.GaugeVec // shard
 	PebbleCompactionDebtBytes   *prometheus.GaugeVec // shard
@@ -136,6 +141,22 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		RaftIsLeader: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_raft_is_leader",
 			Help: "1 if this node is the current leader of the shard, else 0.",
+		}, []string{"shard"}),
+		RaftLogRawBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_raft_log_raw_bytes",
+			Help: "Cumulative unencoded raft log payload bytes submitted by this node.",
+		}, []string{"shard"}),
+		RaftLogEncodedBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_raft_log_encoded_bytes",
+			Help: "Cumulative raft log payload bytes after compression guardrails.",
+		}, []string{"shard"}),
+		RaftLogPayloads: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_raft_log_payloads",
+			Help: "Cumulative raft log payload decisions by compression result.",
+		}, []string{"shard", "result"}),
+		RaftLogSavingsRatio: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_raft_log_compression_savings_ratio",
+			Help: "Cumulative raft log byte savings ratio from compression.",
 		}, []string{"shard"}),
 		PebbleReadAmp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_pebble_read_amp",
@@ -293,6 +314,10 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.SpatialCells,
 		m.RaftCommitLagSeconds,
 		m.RaftIsLeader,
+		m.RaftLogRawBytes,
+		m.RaftLogEncodedBytes,
+		m.RaftLogPayloads,
+		m.RaftLogSavingsRatio,
 		m.PebbleReadAmp,
 		m.PebbleCompactionDebtBytes,
 		m.PebbleCompactionsInProgress,
@@ -358,6 +383,25 @@ func (m *Metrics) AuthRejected(reason string) {
 		return
 	}
 	m.AuthRejectedTotal.WithLabelValues(reason).Inc()
+}
+
+func (m *Metrics) ObserveRaftLogCompression(shard string, stats craft.LogCompressionStats) {
+	if m == nil {
+		return
+	}
+	if shard == "" {
+		shard = "0"
+	}
+	m.RaftLogRawBytes.WithLabelValues(shard).Set(float64(stats.RawBytes))
+	m.RaftLogEncodedBytes.WithLabelValues(shard).Set(float64(stats.EncodedBytes))
+	m.RaftLogPayloads.WithLabelValues(shard, "compressed").Set(float64(stats.CompressedPayloads))
+	m.RaftLogPayloads.WithLabelValues(shard, "raw").Set(float64(stats.RawPayloads))
+	m.RaftLogPayloads.WithLabelValues(shard, "skipped").Set(float64(stats.SkippedPayloads))
+	savings := 0.0
+	if stats.RawBytes > 0 && stats.EncodedBytes < stats.RawBytes {
+		savings = 1 - float64(stats.EncodedBytes)/float64(stats.RawBytes)
+	}
+	m.RaftLogSavingsRatio.WithLabelValues(shard).Set(savings)
 }
 
 func (m *Metrics) ObserveStreamRetention(shard string, stats pebble.StreamRetentionStats) {
