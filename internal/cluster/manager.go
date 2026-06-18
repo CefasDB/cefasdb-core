@@ -87,6 +87,10 @@ type Config struct {
 	// same shard count and the same peer set.
 	Peers map[string]string
 
+	// ReplicationFactor limits fresh data-shard placement to this many
+	// voters. Zero keeps the legacy every-peer voter set.
+	ReplicationFactor int
+
 	// PeerHTTPAddrs is the per-peer HTTP URL used to populate
 	// raft.LeaderHTTPAddr() for 307 redirects.
 	PeerHTTPAddrs map[string]string
@@ -109,10 +113,12 @@ type Config struct {
 	RaftProfile     string
 	RaftTuning      pebble.PebbleTuning
 
-	HeartbeatMS   int
-	ElectionMS    int
-	LeaderLeaseMS int
-	CommitMS      int
+	HeartbeatMS     int
+	ElectionMS      int
+	LeaderLeaseMS   int
+	CommitMS        int
+	ApplyTimeout    time.Duration
+	SnapshotEntries uint64
 
 	LogOutput io.Writer
 }
@@ -129,6 +135,13 @@ type Manager struct {
 	mux           *craft.MuxAcceptor
 	shards        []*Shard
 }
+
+const (
+	multiShardBlockCacheBudget = int64(2 << 30)
+	multiShardMinBlockCache    = int64(64 << 20)
+	multiShardMaxBlockCache    = int64(256 << 20)
+	multiShardMemTableSize     = uint64(32 << 20)
+)
 
 // WriteTargets is the routing decision for a mutating request. Primary
 // is the shard that currently owns the key; Mirrors are transition
@@ -222,7 +235,7 @@ func loadOrCreatePlacement(cfg Config, path string) (placement.PlacementCatalog,
 	if hasExistingShardState(cfg.Root) {
 		strategy = placement.PlacementStrategyLegacyModulo
 	}
-	cat = placement.DefaultPlacement(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy)
+	cat = placement.DefaultPlacementWithReplicationFactor(cfg.Shards, cfg.SelfID, cfg.Peers, cfg.PeerHTTPAddrs, cfg.NodeCapacity, strategy, cfg.ReplicationFactor)
 	if err := placement.SavePlacementFile(path, cat); err != nil {
 		return placement.PlacementCatalog{}, err
 	}
@@ -268,7 +281,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Path:            stateDir,
 		FsyncOnCommit:   m.cfg.FsyncOnCommit,
 		Profile:         m.cfg.StorageProfile,
-		Tuning:          m.cfg.StorageTuning,
+		Tuning:          storageTuningForShards(m.cfg.Shards, m.cfg.StorageTuning),
 		Backpressure:    m.cfg.Backpressure,
 		StreamRetention: m.cfg.StreamRetention,
 	})
@@ -305,23 +318,23 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		return nil, fmt.Errorf("raft storage: %w", err)
 	}
 
-	// Build the per-shard raft config. PeerAddrs in our cluster
-	// config map peer-id → mux address; raft sees the SAME address
-	// for every shard because mux demultiplexes by group ID, so we
-	// pass cfg.Peers through verbatim.
+	// Build the per-shard raft config. PeerAddrs are filtered to this
+	// shard's placement voters so replication-factor changes the actual
+	// Raft quorum, not only the catalog metadata.
 	rcfg := craft.Config{
-		Path:          raftDir,
-		SelfID:        m.cfg.SelfID,
-		BindAddr:      m.cfg.MuxAddr,
-		Bootstrap:     m.cfg.Bootstrap,
-		PeerAddrs:     m.cfg.Peers,
-		PeerHTTPAddrs: m.cfg.PeerHTTPAddrs,
-		HeartbeatMS:   m.cfg.HeartbeatMS,
-		ElectionMS:    m.cfg.ElectionMS,
-		LeaderLeaseMS: m.cfg.LeaderLeaseMS,
-		CommitMS:      m.cfg.CommitMS,
-		ApplyTimeout:  5 * time.Second,
-		LogOutput:     m.cfg.LogOutput,
+		Path:            raftDir,
+		SelfID:          m.cfg.SelfID,
+		BindAddr:        m.cfg.MuxAddr,
+		Bootstrap:       m.cfg.Bootstrap,
+		PeerAddrs:       peersForVoters(m.cfg.Peers, meta.Voters),
+		PeerHTTPAddrs:   m.cfg.PeerHTTPAddrs,
+		HeartbeatMS:     m.cfg.HeartbeatMS,
+		ElectionMS:      m.cfg.ElectionMS,
+		LeaderLeaseMS:   m.cfg.LeaderLeaseMS,
+		CommitMS:        m.cfg.CommitMS,
+		ApplyTimeout:    m.cfg.ApplyTimeout,
+		SnapshotEntries: m.cfg.SnapshotEntries,
+		LogOutput:       m.cfg.LogOutput,
 	}
 	if m.mux != nil {
 		sl, err := m.mux.RegisterGroup(shardID)
@@ -364,6 +377,57 @@ func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool
 		}
 	}
 	return placement.ShardPlacement{ID: shardID, State: placement.ShardStateActive, Epoch: m.cat.Epoch}, false
+}
+
+func storageTuningForShards(shards int, tuning pebble.PebbleTuning) pebble.PebbleTuning {
+	if shards <= 1 {
+		return tuning
+	}
+	if tuning.BlockCacheSizeBytes <= 0 {
+		perShard := multiShardBlockCacheBudget / int64(shards)
+		if perShard < multiShardMinBlockCache {
+			perShard = multiShardMinBlockCache
+		}
+		if perShard > multiShardMaxBlockCache {
+			perShard = multiShardMaxBlockCache
+		}
+		tuning.BlockCacheSizeBytes = perShard
+	}
+	if tuning.MemTableSizeBytes == 0 {
+		tuning.MemTableSizeBytes = multiShardMemTableSize
+	}
+	if tuning.MemTableStopWrites == 0 {
+		tuning.MemTableStopWrites = 4
+	}
+	if tuning.MaxConcurrentCompactions == 0 {
+		tuning.MaxConcurrentCompactions = 2
+	}
+	if tuning.L0CompactionConcurrency == 0 {
+		tuning.L0CompactionConcurrency = 2
+	}
+	if tuning.L0CompactionFileThreshold == 0 {
+		tuning.L0CompactionFileThreshold = 64
+	}
+	if tuning.L0StopWritesThreshold == 0 {
+		tuning.L0StopWritesThreshold = 128
+	}
+	return tuning
+}
+
+func peersForVoters(peers map[string]string, voters []string) map[string]string {
+	if len(peers) == 0 || len(voters) == 0 {
+		return peers
+	}
+	out := make(map[string]string, len(voters))
+	for _, id := range voters {
+		if addr, ok := peers[id]; ok {
+			out[id] = addr
+		}
+	}
+	if len(out) == 0 {
+		return peers
+	}
+	return out
 }
 
 func (m *Manager) openMissingShardsForPlacement(ctx context.Context, cat placement.PlacementCatalog) error {

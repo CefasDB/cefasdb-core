@@ -112,9 +112,9 @@ func profileTuning(profile string) PebbleTuning {
 	case ProfileRaft:
 		return PebbleTuning{
 			BlockCacheSizeBytes:       64 << 20,
-			MemTableSizeBytes:         16 << 20,
+			MemTableSizeBytes:         32 << 20,
 			MemTableStopWrites:        4,
-			MaxConcurrentCompactions:  2,
+			MaxConcurrentCompactions:  4,
 			L0CompactionConcurrency:   4,
 			L0CompactionThreshold:     4,
 			L0CompactionFileThreshold: 128,

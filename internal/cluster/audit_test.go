@@ -42,6 +42,59 @@ func TestAuditPlacementCatalogReportsGapsAndOverlaps(t *testing.T) {
 	}
 }
 
+func TestStorageTuningForShardsCapsImplicitResources(t *testing.T) {
+	got := storageTuningForShards(24, pebble.PebbleTuning{})
+	if got.BlockCacheSizeBytes < multiShardMinBlockCache || got.BlockCacheSizeBytes > multiShardMaxBlockCache {
+		t.Fatalf("BlockCacheSizeBytes = %d, want clamped multi-shard cache", got.BlockCacheSizeBytes)
+	}
+	if got.MemTableSizeBytes != multiShardMemTableSize {
+		t.Fatalf("MemTableSizeBytes = %d, want %d", got.MemTableSizeBytes, multiShardMemTableSize)
+	}
+	if got.MemTableStopWrites != 4 {
+		t.Fatalf("MemTableStopWrites = %d, want 4", got.MemTableStopWrites)
+	}
+	if got.MaxConcurrentCompactions != 2 || got.L0CompactionConcurrency != 2 {
+		t.Fatalf("compaction tuning = %+v, want per-shard capped defaults", got)
+	}
+}
+
+func TestStorageTuningForShardsPreservesExplicitOverrides(t *testing.T) {
+	in := pebble.PebbleTuning{
+		BlockCacheSizeBytes:      512 << 20,
+		MemTableSizeBytes:        64 << 20,
+		MemTableStopWrites:       8,
+		MaxConcurrentCompactions: 4,
+		L0CompactionConcurrency:  3,
+	}
+	got := storageTuningForShards(24, in)
+	if got.BlockCacheSizeBytes != in.BlockCacheSizeBytes ||
+		got.MemTableSizeBytes != in.MemTableSizeBytes ||
+		got.MemTableStopWrites != in.MemTableStopWrites ||
+		got.MaxConcurrentCompactions != in.MaxConcurrentCompactions ||
+		got.L0CompactionConcurrency != in.L0CompactionConcurrency {
+		t.Fatalf("explicit tuning not preserved: got %+v want %+v", got, in)
+	}
+}
+
+func TestPeersForVotersFiltersRaftPeerSet(t *testing.T) {
+	peers := map[string]string{
+		"n1": "n1:7000",
+		"n2": "n2:7000",
+		"n3": "n3:7000",
+		"n4": "n4:7000",
+	}
+	got := peersForVoters(peers, []string{"n2", "n4"})
+	want := map[string]string{"n2": "n2:7000", "n4": "n4:7000"}
+	if len(got) != len(want) {
+		t.Fatalf("peersForVoters size = %d, want %d: %v", len(got), len(want), got)
+	}
+	for id, addr := range want {
+		if got[id] != addr {
+			t.Fatalf("peersForVoters[%s] = %q, want %q in %v", id, got[id], addr, got)
+		}
+	}
+}
+
 func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 	mgr := openAuditTestManager(t, 2)
 	defer mgr.Close()

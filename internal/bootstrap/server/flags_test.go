@@ -56,6 +56,12 @@ type overlayArgs struct {
 	raftBind, raftID, raftPath, raftStorePath string
 	raftBootstrap                             bool
 	raftPeers, raftHTTPPeers                  string
+	raftHeartbeatTimeout                      time.Duration
+	raftElectionTimeout                       time.Duration
+	raftLeaderLeaseTimeout                    time.Duration
+	raftCommitTimeout                         time.Duration
+	raftApplyTimeout                          time.Duration
+	raftSnapshotEntries                       uint64
 
 	storageProfile, raftStorageProfile string
 	storageBlockCache                  int64
@@ -81,8 +87,9 @@ type overlayArgs struct {
 	identityJwks, identityIssuer, identityAudience string
 	identityClockSkew                              time.Duration
 
-	shardsN int
-	muxAddr string
+	shardsN           int
+	replicationFactor int
+	muxAddr           string
 
 	grpcAddr             string
 	grpcRefl             bool
@@ -124,6 +131,8 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 	OverlayFlags(cfg,
 		a.dataDir, a.httpAddr, a.fsync,
 		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers,
+		a.raftHeartbeatTimeout, a.raftElectionTimeout, a.raftLeaderLeaseTimeout, a.raftCommitTimeout, a.raftApplyTimeout,
+		a.raftSnapshotEntries,
 		a.storageProfile, a.raftStorageProfile,
 		a.storageBlockCache, a.storageMemTableSize, a.storageMemTableStopWrites,
 		a.storageMaxCompactions, a.storageL0Concurrency, a.storageL0Threshold,
@@ -135,7 +144,7 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.backpressureWarnDelay, a.backpressureCritDelay,
 		a.streamRetention, a.streamRetentionMaxBytes,
 		a.identityJwks, a.identityIssuer, a.identityAudience, a.identityClockSkew,
-		a.shardsN, a.muxAddr,
+		a.shardsN, a.replicationFactor, a.muxAddr,
 		a.grpcAddr, a.grpcRefl, a.tlsCert, a.tlsKey, a.mCA,
 		a.metricsOff, a.tracingURL, a.tracingInsecure,
 		a.rebalancerEnabled, a.rebalancerMode, a.rebalancerInterval, a.rebalancerMinInterval,
@@ -200,6 +209,12 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	args.raftPath = "/var/cefas/raft"
 	args.raftStorePath = "/var/cefas/raft-store"
 	args.raftBootstrap = true
+	args.raftHeartbeatTimeout = 2 * time.Second
+	args.raftElectionTimeout = 10 * time.Second
+	args.raftLeaderLeaseTimeout = 1500 * time.Millisecond
+	args.raftCommitTimeout = 100 * time.Millisecond
+	args.raftApplyTimeout = 30 * time.Second
+	args.raftSnapshotEntries = 65536
 	runOverlay(&cfg, args)
 
 	if cfg.Raft.Bind != "127.0.0.1:9001" {
@@ -217,6 +232,24 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	if !cfg.Cluster.Bootstrap {
 		t.Errorf("Cluster.Bootstrap not set")
 	}
+	if cfg.Raft.HeartbeatTimeout != 2*time.Second {
+		t.Errorf("Raft.HeartbeatTimeout = %v", cfg.Raft.HeartbeatTimeout)
+	}
+	if cfg.Raft.ElectionTimeout != 10*time.Second {
+		t.Errorf("Raft.ElectionTimeout = %v", cfg.Raft.ElectionTimeout)
+	}
+	if cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
+		t.Errorf("Raft.LeaderLeaseTimeout = %v", cfg.Raft.LeaderLeaseTimeout)
+	}
+	if cfg.Raft.CommitTimeout != 100*time.Millisecond {
+		t.Errorf("Raft.CommitTimeout = %v", cfg.Raft.CommitTimeout)
+	}
+	if cfg.Raft.ApplyTimeout != 30*time.Second {
+		t.Errorf("Raft.ApplyTimeout = %v", cfg.Raft.ApplyTimeout)
+	}
+	if cfg.Raft.SnapshotEntries != 65536 {
+		t.Errorf("Raft.SnapshotEntries = %d", cfg.Raft.SnapshotEntries)
+	}
 }
 
 func TestOverlayFlags_PeerSetGroup(t *testing.T) {
@@ -233,6 +266,25 @@ func TestOverlayFlags_PeerSetGroup(t *testing.T) {
 	wantHTTP := map[string]string{"a": "http://h1:8080", "b": "http://h2:8080"}
 	if !reflect.DeepEqual(cfg.Cluster.HTTPPeers, wantHTTP) {
 		t.Errorf("Cluster.HTTPPeers = %#v, want %#v", cfg.Cluster.HTTPPeers, wantHTTP)
+	}
+}
+
+func TestOverlayFlags_ClusterGroup(t *testing.T) {
+	cfg := baseCfg()
+	args := zeroArgs()
+	args.shardsN = 24
+	args.replicationFactor = 3
+	args.muxAddr = "127.0.0.1:7000"
+	runOverlay(&cfg, args)
+
+	if cfg.Cluster.Shards != 24 {
+		t.Errorf("Cluster.Shards = %d", cfg.Cluster.Shards)
+	}
+	if cfg.Cluster.ReplicationFactor != 3 {
+		t.Errorf("Cluster.ReplicationFactor = %d", cfg.Cluster.ReplicationFactor)
+	}
+	if cfg.Cluster.MuxAddr != "127.0.0.1:7000" {
+		t.Errorf("Cluster.MuxAddr = %q", cfg.Cluster.MuxAddr)
 	}
 }
 

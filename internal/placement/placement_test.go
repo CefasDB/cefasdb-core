@@ -27,6 +27,42 @@ func TestDefaultPlacementDistributesLeaderHintsAcrossVoters(t *testing.T) {
 	}
 }
 
+func TestDefaultPlacementWithReplicationFactorRotatesDataVoters(t *testing.T) {
+	cat := DefaultPlacementWithReplicationFactor(
+		5,
+		"n1",
+		map[string]string{
+			"n1": "127.0.0.1:9101",
+			"n2": "127.0.0.1:9102",
+			"n3": "127.0.0.1:9103",
+			"n4": "127.0.0.1:9104",
+		},
+		nil,
+		NodeCapacity{},
+		PlacementStrategyTokenRange,
+		2,
+	)
+
+	if got := cat.Shards[0].Voters; !sameStringsPlacement(got, []string{"n1", "n2", "n3", "n4"}) {
+		t.Fatalf("metadata shard voters = %v, want every peer", got)
+	}
+	want := [][]string{
+		{"n1", "n2", "n3", "n4"},
+		{"n2", "n3"},
+		{"n3", "n4"},
+		{"n1", "n4"},
+		{"n1", "n2"},
+	}
+	for i, sh := range cat.Shards {
+		if !sameStringsPlacement(sh.Voters, want[i]) {
+			t.Fatalf("shard %d voters = %v, want %v", i, sh.Voters, want[i])
+		}
+		if !containsString(sh.Voters, sh.LeaderHint) {
+			t.Fatalf("shard %d leader hint %q is not a voter in %v", sh.ID, sh.LeaderHint, sh.Voters)
+		}
+	}
+}
+
 func TestTransitionPlansAssignLeaderHintToCreatedShard(t *testing.T) {
 	cat := DefaultPlacement(
 		1,
@@ -89,4 +125,16 @@ func TestBackfillLeaderHintsMigratesOlderPlacement(t *testing.T) {
 			t.Fatalf("shard %d leader hint = %q, want %q", sh.ID, sh.LeaderHint, want[i])
 		}
 	}
+}
+
+func sameStringsPlacement(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

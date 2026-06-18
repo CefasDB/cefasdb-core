@@ -19,6 +19,8 @@ func OverlayFlags(
 	cfg *config.Config,
 	dataDir, httpAddr string, fsync bool,
 	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
+	raftHeartbeatTimeout, raftElectionTimeout, raftLeaderLeaseTimeout, raftCommitTimeout, raftApplyTimeout time.Duration,
+	raftSnapshotEntries uint64,
 	storageProfile, raftStorageProfile string,
 	storageBlockCache int64, storageMemTableSize uint64, storageMemTableStopWrites int,
 	storageMaxCompactions, storageL0Concurrency, storageL0Threshold int,
@@ -30,7 +32,7 @@ func OverlayFlags(
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
 	streamRetention time.Duration, streamRetentionMaxBytes int64,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
-	shardsN int, muxAddr string,
+	shardsN, replicationFactor int, muxAddr string,
 	grpcAddr string, grpcRefl bool, tlsCert, tlsKey, mtlsCA string,
 	metricsOff bool, tracingURL string, tracingInsecure bool,
 	rebalancerEnabled bool, rebalancerMode string, rebalancerInterval, rebalancerMinInterval time.Duration,
@@ -75,6 +77,24 @@ func OverlayFlags(
 	if raftHTTPPeers != "" {
 		hp, _ := config.ParsePeers(raftHTTPPeers)
 		cfg.Cluster.HTTPPeers = hp
+	}
+	if raftHeartbeatTimeout > 0 {
+		cfg.Raft.HeartbeatTimeout = raftHeartbeatTimeout
+	}
+	if raftElectionTimeout > 0 {
+		cfg.Raft.ElectionTimeout = raftElectionTimeout
+	}
+	if raftLeaderLeaseTimeout > 0 {
+		cfg.Raft.LeaderLeaseTimeout = raftLeaderLeaseTimeout
+	}
+	if raftCommitTimeout > 0 {
+		cfg.Raft.CommitTimeout = raftCommitTimeout
+	}
+	if raftApplyTimeout > 0 {
+		cfg.Raft.ApplyTimeout = raftApplyTimeout
+	}
+	if raftSnapshotEntries > 0 {
+		cfg.Raft.SnapshotEntries = raftSnapshotEntries
 	}
 	if storageProfile != "" {
 		cfg.Storage.Profile = storageProfile
@@ -162,6 +182,9 @@ func OverlayFlags(
 	}
 	if shardsN > 0 {
 		cfg.Cluster.Shards = shardsN
+	}
+	if replicationFactor > 0 {
+		cfg.Cluster.ReplicationFactor = replicationFactor
 	}
 	if muxAddr != "" {
 		cfg.Cluster.MuxAddr = muxAddr
