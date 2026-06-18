@@ -192,7 +192,7 @@ func (s *GRPCServer) TransactGetItems(ctx context.Context, req *cefaspb.Transact
 		}
 		keys = append(keys, k)
 	}
-	got, err := s.db.BatchGetItem(table, td.KeySchema, keys)
+	got, err := s.batchGetFanOut(table, td.KeySchema, keys)
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}

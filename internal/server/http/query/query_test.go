@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	queryhttp "github.com/CefasDb/cefasdb/internal/server/http/query"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	queryhttp "github.com/CefasDb/cefasdb/internal/server/http/query"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -28,8 +28,8 @@ func newHandlers(t *testing.T) (*queryhttp.Handlers, *pebble.DB, *catalog.Catalo
 		_ = db.Close()
 		t.Fatalf("catalog: %v", err)
 	}
-	storageFor := func(pkBytes []byte) *pebble.DB { return db }
-	allShards := func() []*pebble.DB { return []*pebble.DB{db} }
+	storageFor := func(pkBytes []byte) (*pebble.DB, error) { return db, nil }
+	allShards := func() ([]*pebble.DB, error) { return []*pebble.DB{db}, nil }
 	spatialAllShards := func(td types.TableDescriptor, idxName string, q pebble.SpatialQuery) ([]types.Item, error) {
 		return db.SpatialQueryItems(td, idxName, q)
 	}

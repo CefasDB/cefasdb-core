@@ -17,15 +17,15 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/CefasDb/cefasdb/internal/auth"
-	"github.com/CefasDb/cefasdb/internal/storage"
-	"github.com/CefasDb/cefasdb/internal/tracing"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/roaring"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	"github.com/CefasDb/cefasdb/internal/tracing"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 // pluginIndexBook is the in-memory descriptor cache for plugin-backed
@@ -247,7 +247,10 @@ func (s *GRPCServer) indexItemSourceFor(table string) (func(yield func(model.Ite
 	if err != nil {
 		return nil, 0, mapStorageErr(err)
 	}
-	stores := s.scatterReadStores()
+	stores, err := s.scatterReadStores()
+	if err != nil {
+		return nil, 0, mapStorageErr(err)
+	}
 	if len(stores) == 0 {
 		return nil, 0, status.Error(codes.Unavailable, "no readable shards available")
 	}

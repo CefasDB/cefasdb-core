@@ -13,17 +13,17 @@ import (
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/placement"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
 	"github.com/CefasDb/cefasdb/internal/spatial"
+	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
-	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -76,14 +76,18 @@ func (s *GRPCServer) pluginRegistry() *plugin.Registry {
 	return plugin.Default
 }
 
-func (s *GRPCServer) storageFor(pkBytes []byte) *pebble.DB {
+func (s *GRPCServer) readStorageFor(pkBytes []byte) (*pebble.DB, error) {
 	if s.manager == nil {
-		return s.db
+		return s.db, nil
 	}
-	if shard := s.manager.ShardForPK(pkBytes); shard != nil {
-		return shard.Storage
+	shard, err := s.manager.ReadShardForPK(pkBytes, 0)
+	if err != nil {
+		return nil, err
 	}
-	return s.db
+	if shard.Storage == nil {
+		return nil, fmt.Errorf("cluster: read shard %d has no storage", shard.ID)
+	}
+	return shard.Storage, nil
 }
 
 func (s *GRPCServer) allShards() []*pebble.DB {
@@ -95,6 +99,24 @@ func (s *GRPCServer) allShards() []*pebble.DB {
 		out = append(out, sh.Storage)
 	}
 	return out
+}
+
+func (s *GRPCServer) readShardStores() ([]*pebble.DB, error) {
+	if s.manager == nil {
+		return []*pebble.DB{s.db}, nil
+	}
+	shards, err := s.manager.ReadShards(0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pebble.DB, 0, len(shards))
+	for _, sh := range shards {
+		if sh.Storage == nil {
+			return nil, fmt.Errorf("cluster: read shard %d has no storage", sh.ID)
+		}
+		out = append(out, sh.Storage)
+	}
+	return out, nil
 }
 
 func (s *GRPCServer) compact(table string, lower, upper []byte, parallelize bool) ([]pebble.CompactionResult, error) {
@@ -347,7 +369,11 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	item, err := s.storageFor(pkBytes).GetItem(req.GetTable(), td.KeySchema, key)
+	db, err := s.readStorageFor(pkBytes)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	item, err := db.GetItem(req.GetTable(), td.KeySchema, key)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
@@ -703,15 +729,22 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	if err != nil {
 		return status.Error(codes.InvalidArgument, fmt.Sprintf("pk_value: %v", err))
 	}
-	queryDB := s.storageFor(pkBytes)
 	var items []types.Item
 	limit := int(req.GetLimit())
 	switch {
 	case req.GetIndexName() != "":
 		items, err = s.queryByIndex(td, req.GetIndexName(), pkVal, pebble.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
 	case req.GetSkLow() == nil && req.GetSkHigh() == nil:
+		queryDB, qerr := s.readStorageFor(pkBytes)
+		if qerr != nil {
+			return mapStorageErr(qerr)
+		}
 		items, err = queryDB.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
 	default:
+		queryDB, qerr := s.readStorageFor(pkBytes)
+		if qerr != nil {
+			return mapStorageErr(qerr)
+		}
 		items, err = queryDB.QueryByPKRange(req.GetTable(), td.KeySchema, pkVal, lo, hi, limit)
 	}
 	if err != nil {
@@ -758,12 +791,9 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	}
 	limit := int(req.GetLimit())
 
-	dbs := []*pebble.DB{s.db}
-	if s.manager != nil {
-		dbs = dbs[:0]
-		for _, sh := range s.manager.Shards() {
-			dbs = append(dbs, sh.Storage)
-		}
+	dbs, err := s.readShardStores()
+	if err != nil {
+		return mapStorageErr(err)
 	}
 
 	sent := 0
@@ -841,9 +871,13 @@ func (s *GRPCServer) scatterSpatial(td types.TableDescriptor, idxName string, q 
 	if s.manager == nil {
 		return s.db.SpatialQueryItems(td, idxName, q)
 	}
+	dbs, err := s.readShardStores()
+	if err != nil {
+		return nil, err
+	}
 	var out []types.Item
-	for _, sh := range s.manager.Shards() {
-		got, err := sh.Storage.SpatialQueryItems(td, idxName, q)
+	for _, db := range dbs {
+		got, err := db.SpatialQueryItems(td, idxName, q)
 		if err != nil {
 			return nil, err
 		}
@@ -1299,7 +1333,10 @@ func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []typ
 		if err != nil {
 			return nil, err
 		}
-		db := s.storageFor(pkBytes)
+		db, err := s.readStorageFor(pkBytes)
+		if err != nil {
+			return nil, err
+		}
 		single, err := db.BatchGetItem(table, ks, []types.Item{k})
 		if err != nil {
 			return nil, err
@@ -1870,6 +1907,8 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, cluster.ErrStaleRoute):
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, cluster.ErrNoLocalReplica):
+		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, types.ErrSpatialNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrInvalidSpatial):

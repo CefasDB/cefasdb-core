@@ -8,14 +8,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/CefasDb/cefasdb/internal/cluster"
-	"github.com/CefasDb/cefasdb/internal/placement"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 const annVectorBind = ":vector"
@@ -164,7 +162,10 @@ func (s *GRPCServer) exactScanTopK(table, field string, target model.AttributeVa
 	}
 	seen := make(map[string]struct{})
 	scanned := 0
-	stores := s.scatterReadStores()
+	stores, err := s.scatterReadStores()
+	if err != nil {
+		return nil, 0, mapStorageErr(err)
+	}
 	if len(stores) == 0 {
 		return nil, 0, status.Error(codes.Unavailable, "no readable shards available")
 	}
@@ -208,35 +209,8 @@ func localExactScanTopK(db *pebble.DB, table, field string, target model.Attribu
 	return eng.Result(), len(items), nil
 }
 
-func (s *GRPCServer) scatterReadStores() []*pebble.DB {
-	if s.manager == nil {
-		return []*pebble.DB{s.db}
-	}
-	out := make([]*pebble.DB, 0)
-	seen := map[*pebble.DB]struct{}{}
-	for _, sh := range s.manager.Shards() {
-		if !scatterReadableShard(sh) || sh.Storage == nil {
-			continue
-		}
-		if _, ok := seen[sh.Storage]; ok {
-			continue
-		}
-		out = append(out, sh.Storage)
-		seen[sh.Storage] = struct{}{}
-	}
-	return out
-}
-
-func scatterReadableShard(sh *cluster.Shard) bool {
-	if sh == nil {
-		return false
-	}
-	switch sh.State {
-	case "", placement.ShardStateActive, placement.ShardStateSplitting, placement.ShardStateMoving, placement.ShardStateReadOnly:
-		return true
-	default:
-		return false
-	}
+func (s *GRPCServer) scatterReadStores() ([]*pebble.DB, error) {
+	return s.readShardStores()
 }
 
 func topKRowsToPB(rows []cquery.TopKResult) []*cefaspb.TopKRow {

@@ -20,6 +20,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/cluster"
+	"github.com/CefasDb/cefasdb/internal/metrics"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	craft "github.com/CefasDb/cefasdb/internal/replication"
 	backuphttp "github.com/CefasDb/cefasdb/internal/server/http/backup"
 	clusterhttp "github.com/CefasDb/cefasdb/internal/server/http/cluster"
 	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
@@ -27,12 +33,6 @@ import (
 	streamhttp "github.com/CefasDb/cefasdb/internal/server/http/stream"
 	tablehttp "github.com/CefasDb/cefasdb/internal/server/http/table"
 	"github.com/CefasDb/cefasdb/internal/server/streamcore"
-	"github.com/CefasDb/cefasdb/internal/auth"
-	"github.com/CefasDb/cefasdb/internal/catalog"
-	"github.com/CefasDb/cefasdb/internal/cluster"
-	"github.com/CefasDb/cefasdb/internal/metrics"
-	"github.com/CefasDb/cefasdb/internal/placement"
-	craft "github.com/CefasDb/cefasdb/internal/replication"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
@@ -139,16 +139,20 @@ func New(db *pebble.DB, cat *catalog.Catalog) *Server {
 // routes the actual write/read to the shard that owns the PK.
 func (s *Server) AttachManager(m *cluster.Manager) { s.manager = m }
 
-// storageFor returns the pebble.DB that owns the supplied partition
-// key bytes. Single-shard mode always returns s.db.
-func (s *Server) storageFor(pkBytes []byte) *pebble.DB {
+// readStorageFor returns the local replica that can authoritatively
+// serve an eventual read for the supplied partition key.
+func (s *Server) readStorageFor(pkBytes []byte) (*pebble.DB, error) {
 	if s.manager == nil {
-		return s.db
+		return s.db, nil
 	}
-	if shard := s.manager.ShardForPK(pkBytes); shard != nil {
-		return shard.Storage
+	shard, err := s.manager.ReadShardForPK(pkBytes, 0)
+	if err != nil {
+		return nil, err
 	}
-	return s.db
+	if shard.Storage == nil {
+		return nil, fmt.Errorf("cluster: read shard %d has no storage", shard.ID)
+	}
+	return shard.Storage, nil
 }
 
 // allShards iterates every pebble.DB this server manages. Catalog
@@ -163,6 +167,24 @@ func (s *Server) allShards() []*pebble.DB {
 		out = append(out, sh.Storage)
 	}
 	return out
+}
+
+func (s *Server) readShardStores() ([]*pebble.DB, error) {
+	if s.manager == nil {
+		return []*pebble.DB{s.db}, nil
+	}
+	shards, err := s.manager.ReadShards(0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pebble.DB, 0, len(shards))
+	for _, sh := range shards {
+		if sh.Storage == nil {
+			return nil, fmt.Errorf("cluster: read shard %d has no storage", sh.ID)
+		}
+		out = append(out, sh.Storage)
+	}
+	return out, nil
 }
 
 func (s *Server) compact(table, lowerB64, upperB64 string, parallelize bool) ([]pebble.CompactionResult, error) {
@@ -246,7 +268,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
 	itemHandlers := itemhttp.New(itemhttp.Deps{
 		Cat:               s.cat,
-		StorageFor:        s.storageFor,
+		StorageFor:        s.readStorageFor,
 		WriteTargetsForPK: s.itemWriteTargetsForPK,
 		BatchWriteByShard: s.batchWriteByShard,
 		BatchGetByShard:   s.batchGetByShard,
@@ -258,8 +280,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	queryHandlers := queryhttp.New(
 		s.cat,
 		s.db,
-		s.storageFor,
-		s.allShards,
+		s.readStorageFor,
+		s.readShardStores,
 		s.spatialAllShards,
 		s.ensureStrongRead,
 		s.observeRangeMetric,
@@ -473,7 +495,10 @@ func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.
 		if err != nil {
 			return nil, err
 		}
-		db := s.storageFor(pkBytes)
+		db, err := s.readStorageFor(pkBytes)
+		if err != nil {
+			return nil, err
+		}
 		single, err := db.BatchGetItem(table, ks, []types.Item{k})
 		if err != nil {
 			return nil, err
@@ -498,9 +523,13 @@ func (s *Server) spatialAllShards(td types.TableDescriptor, idxName string, q pe
 	if s.manager == nil {
 		return s.db.SpatialQueryItems(td, idxName, q)
 	}
+	dbs, err := s.readShardStores()
+	if err != nil {
+		return nil, err
+	}
 	var out []types.Item
-	for _, sh := range s.manager.Shards() {
-		got, err := sh.Storage.SpatialQueryItems(td, idxName, q)
+	for _, db := range dbs {
+		got, err := db.SpatialQueryItems(td, idxName, q)
 		if err != nil {
 			return nil, err
 		}

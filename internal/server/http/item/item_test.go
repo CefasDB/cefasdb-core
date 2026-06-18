@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
 	"github.com/CefasDb/cefasdb/internal/catalog"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -44,7 +44,7 @@ func newHandlers(t *testing.T) (*itemhttp.Handlers, *pebble.DB, *catalog.Catalog
 	}
 	deps := itemhttp.Deps{
 		Cat:        cat,
-		StorageFor: func(_ []byte) *pebble.DB { return db },
+		StorageFor: func(_ []byte) (*pebble.DB, error) { return db, nil },
 		WriteTargetsForPK: func(_ []byte) (itemhttp.WriteTargets, error) {
 			return localWriteTargets{db: db}, nil
 		},
