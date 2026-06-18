@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
@@ -21,6 +22,36 @@ type Replicator interface {
 	IsLeader() bool
 	Replicate(repr []byte) error
 	LeaderHTTPAddr() string
+}
+
+// AsyncReplicator is implemented by replication layers that can accept
+// a best-effort background replication request without making the
+// caller wait for quorum.
+type AsyncReplicator interface {
+	ReplicateAsync(repr []byte) error
+}
+
+type WriteConsistency string
+
+const (
+	// WriteConsistencyQuorum preserves the original Raft path: writes
+	// return only after the consensus log commits and applies locally.
+	WriteConsistencyQuorum WriteConsistency = "quorum"
+	// WriteConsistencyOne is the Scylla/Cassandra-like fast path:
+	// the leader commits locally, returns, and replicates best-effort
+	// in the background.
+	WriteConsistencyOne WriteConsistency = "one"
+)
+
+func NormalizeWriteConsistency(raw string) WriteConsistency {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "quorum", "strong", "raft", "linearizable":
+		return WriteConsistencyQuorum
+	case "one", "local", "eventual", "async":
+		return WriteConsistencyOne
+	default:
+		return WriteConsistencyQuorum
+	}
 }
 
 // Compile-time assertion: *DB satisfies the engine boundary
@@ -70,6 +101,9 @@ type Options struct {
 	// StreamRetention bounds the logical DynamoDB Streams retention
 	// window. The physical changelog is preserved for PITR/backup.
 	StreamRetention StreamRetentionOptions
+	// WriteConsistency controls the write path when a Replicator is
+	// attached. Empty defaults to quorum for backwards compatibility.
+	WriteConsistency string
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -85,6 +119,7 @@ type DB struct {
 
 	syncOpt *pebbledb.WriteOptions
 	repl    Replicator
+	wc      WriteConsistency
 	bp      backpressureController
 
 	backupMu             sync.Mutex
@@ -131,6 +166,7 @@ func Open(opts Options) (*DB, error) {
 		stopCh:               make(chan struct{}),
 		stopped:              make(chan struct{}),
 		syncOpt:              syncOpt,
+		wc:                   NormalizeWriteConsistency(opts.WriteConsistency),
 		bp:                   newBackpressureController(opts.Backpressure),
 		streamRetention:      normalizeStreamRetentionOptions(opts.StreamRetention),
 		activeBackupRestores: make(map[string]int),
@@ -160,6 +196,8 @@ func (d *DB) Close() error {
 // and the future Raft snapshot path (pebble.NewSnapshot over the cefas/
 // range). Production code should go through the typed helpers.
 func (d *DB) Raw() *pebbledb.DB { return d.db }
+
+func (d *DB) WriteConsistency() WriteConsistency { return d.wc }
 
 // Metrics returns Pebble's point-in-time engine metrics. The values are
 // intended for observability collectors and diagnostics.
@@ -206,15 +244,12 @@ func (d *DB) Has(key []byte) (bool, error) {
 // through Replicate as a 1-op batch.
 func (d *DB) Set(key, value []byte) error {
 	if d.repl != nil {
-		if !d.repl.IsLeader() {
-			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
-		}
 		b := d.db.NewBatch()
 		defer b.Close()
 		if err := b.Set(key, value, nil); err != nil {
 			return err
 		}
-		return d.repl.Replicate(b.Repr())
+		return d.CommitBatch(b)
 	}
 	return d.db.Set(key, value, d.syncOpt)
 }
@@ -222,15 +257,12 @@ func (d *DB) Set(key, value []byte) error {
 // Delete removes a key.
 func (d *DB) Delete(key []byte) error {
 	if d.repl != nil {
-		if !d.repl.IsLeader() {
-			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
-		}
 		b := d.db.NewBatch()
 		defer b.Close()
 		if err := b.Delete(key, nil); err != nil {
 			return err
 		}
-		return d.repl.Replicate(b.Repr())
+		return d.CommitBatch(b)
 	}
 	return d.db.Delete(key, d.syncOpt)
 }
@@ -248,8 +280,20 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 		if !d.repl.IsLeader() {
 			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
 		}
+		if d.wc == WriteConsistencyOne {
+			repr := append([]byte(nil), b.Repr()...)
+			if err := d.commitLocalBatch(b); err != nil {
+				return err
+			}
+			d.replicateBestEffort(repr)
+			return nil
+		}
 		return d.repl.Replicate(b.Repr())
 	}
+	return d.commitLocalBatch(b)
+}
+
+func (d *DB) commitLocalBatch(b *pebbledb.Batch) error {
 	req := &commitReq{batch: b, done: make(chan error, 1)}
 	select {
 	case d.commitCh <- req:
@@ -257,6 +301,20 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 		return fmt.Errorf("db closed")
 	}
 	return <-req.done
+}
+
+func (d *DB) replicateBestEffort(repr []byte) {
+	if d.repl == nil || len(repr) == 0 {
+		return
+	}
+	repr = append([]byte(nil), repr...)
+	if async, ok := d.repl.(AsyncReplicator); ok {
+		_ = async.ReplicateAsync(repr)
+		return
+	}
+	go func() {
+		_ = d.repl.Replicate(repr)
+	}()
 }
 
 // commitLoop is the single goroutine that owns the Pebble write side. It

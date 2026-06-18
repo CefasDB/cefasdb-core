@@ -60,12 +60,14 @@ type Config struct {
 		StreamRetentionMaxBytes     int64         `yaml:"streamRetentionMaxBytes"`
 	} `yaml:"storage"`
 	Cluster struct {
-		Shards    int               `yaml:"shards"`
-		MuxAddr   string            `yaml:"muxAddr"`
-		SelfID    string            `yaml:"selfId"`
-		Bootstrap bool              `yaml:"bootstrap"`
-		Peers     map[string]string `yaml:"peers"`
-		HTTPPeers map[string]string `yaml:"httpPeers"`
+		Shards            int               `yaml:"shards"`
+		ReplicationFactor int               `yaml:"replicationFactor"`
+		WriteConsistency  string            `yaml:"writeConsistency"`
+		MuxAddr           string            `yaml:"muxAddr"`
+		SelfID            string            `yaml:"selfId"`
+		Bootstrap         bool              `yaml:"bootstrap"`
+		Peers             map[string]string `yaml:"peers"`
+		HTTPPeers         map[string]string `yaml:"httpPeers"`
 	} `yaml:"cluster"`
 	Raft struct {
 		Bind      string `yaml:"bind"`
@@ -150,6 +152,7 @@ func Defaults() Config {
 	c.BackupScheduler.Interval = time.Hour
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Storage.StreamRetention = 24 * time.Hour
+	c.Cluster.WriteConsistency = "one"
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -275,6 +278,8 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.StreamRetentionMaxBytes = integer64("STORAGE_STREAM_RETENTION_MAX_BYTES", cfg.Storage.StreamRetentionMaxBytes)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
+	cfg.Cluster.ReplicationFactor = integer("CLUSTER_REPLICATION_FACTOR", cfg.Cluster.ReplicationFactor)
+	cfg.Cluster.WriteConsistency = str("CLUSTER_WRITE_CONSISTENCY", cfg.Cluster.WriteConsistency)
 	cfg.Cluster.MuxAddr = str("CLUSTER_MUX_ADDR", cfg.Cluster.MuxAddr)
 	cfg.Cluster.SelfID = str("CLUSTER_SELF_ID", cfg.Cluster.SelfID)
 	cfg.Cluster.Bootstrap = boolean("CLUSTER_BOOTSTRAP", cfg.Cluster.Bootstrap)
