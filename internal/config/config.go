@@ -77,6 +77,7 @@ type Config struct {
 		LeaderLeaseTimeout time.Duration `yaml:"leaderLeaseTimeout"`
 		CommitTimeout      time.Duration `yaml:"commitTimeout"`
 		ApplyTimeout       time.Duration `yaml:"applyTimeout"`
+		SnapshotEntries    uint64        `yaml:"snapshotEntries"`
 	} `yaml:"raft"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
@@ -161,6 +162,7 @@ func Defaults() Config {
 	c.Raft.LeaderLeaseTimeout = 2 * time.Second
 	c.Raft.CommitTimeout = 100 * time.Millisecond
 	c.Raft.ApplyTimeout = 30 * time.Second
+	c.Raft.SnapshotEntries = 65536
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -301,6 +303,7 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Raft.LeaderLeaseTimeout = dur("RAFT_LEADER_LEASE_TIMEOUT", cfg.Raft.LeaderLeaseTimeout)
 	cfg.Raft.CommitTimeout = dur("RAFT_COMMIT_TIMEOUT", cfg.Raft.CommitTimeout)
 	cfg.Raft.ApplyTimeout = dur("RAFT_APPLY_TIMEOUT", cfg.Raft.ApplyTimeout)
+	cfg.Raft.SnapshotEntries = unsigned64("RAFT_SNAPSHOT_ENTRIES", cfg.Raft.SnapshotEntries)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)

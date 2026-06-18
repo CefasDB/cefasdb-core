@@ -35,6 +35,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Raft.CommitTimeout != 100*time.Millisecond || d.Raft.ApplyTimeout != 30*time.Second {
 		t.Errorf("raft commit/apply defaults not populated: %+v", d.Raft)
 	}
+	if d.Raft.SnapshotEntries != 65536 {
+		t.Errorf("raft snapshot entries default = %d", d.Raft.SnapshotEntries)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -67,6 +70,7 @@ raft:
   leaderLeaseTimeout: 1500ms
   commitTimeout: 125ms
   applyTimeout: 45s
+  snapshotEntries: 131072
 identity:
   jwksUrl: https://tikti.example.com/jwks.json
   clockSkew: 45s
@@ -114,6 +118,9 @@ backupScheduler:
 	if cfg.Raft.CommitTimeout != 125*time.Millisecond || cfg.Raft.ApplyTimeout != 45*time.Second {
 		t.Fatalf("raft commit/apply config not loaded: %+v", cfg.Raft)
 	}
+	if cfg.Raft.SnapshotEntries != 131072 {
+		t.Fatalf("raft snapshot entries config not loaded: %+v", cfg.Raft)
+	}
 	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
 		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
 	}
@@ -140,6 +147,7 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_RAFT_LEADER_LEASE_TIMEOUT", "1500ms")
 	t.Setenv("CEFAS_RAFT_COMMIT_TIMEOUT", "120ms")
 	t.Setenv("CEFAS_RAFT_APPLY_TIMEOUT", "40s")
+	t.Setenv("CEFAS_RAFT_SNAPSHOT_ENTRIES", "262144")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
@@ -176,6 +184,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Raft.CommitTimeout != 120*time.Millisecond || cfg.Raft.ApplyTimeout != 40*time.Second {
 		t.Errorf("raft commit/apply env not applied: %+v", cfg.Raft)
+	}
+	if cfg.Raft.SnapshotEntries != 262144 {
+		t.Errorf("raft snapshot entries env not applied: %+v", cfg.Raft)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")

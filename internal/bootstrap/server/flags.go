@@ -20,6 +20,7 @@ func OverlayFlags(
 	dataDir, httpAddr string, fsync bool,
 	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
 	raftHeartbeatTimeout, raftElectionTimeout, raftLeaderLeaseTimeout, raftCommitTimeout, raftApplyTimeout time.Duration,
+	raftSnapshotEntries uint64,
 	storageProfile, raftStorageProfile string,
 	storageBlockCache int64, storageMemTableSize uint64, storageMemTableStopWrites int,
 	storageMaxCompactions, storageL0Concurrency, storageL0Threshold int,
@@ -91,6 +92,9 @@ func OverlayFlags(
 	}
 	if raftApplyTimeout > 0 {
 		cfg.Raft.ApplyTimeout = raftApplyTimeout
+	}
+	if raftSnapshotEntries > 0 {
+		cfg.Raft.SnapshotEntries = raftSnapshotEntries
 	}
 	if storageProfile != "" {
 		cfg.Storage.Profile = storageProfile

@@ -57,6 +57,7 @@ func main() {
 		raftLease     = flag.Duration("raft-leader-lease-timeout", 0, "Raft leader lease timeout. Must be <= heartbeat timeout. 0 inherits config/default.")
 		raftCommit    = flag.Duration("raft-commit-timeout", 0, "Raft commit timeout. 0 inherits config/default.")
 		raftApply     = flag.Duration("raft-apply-timeout", 0, "Raft apply timeout per replicated batch. 0 inherits config/default.")
+		raftSnapshots = flag.Uint64("raft-snapshot-entries", 0, "Raft log entries between snapshots. 0 inherits config/default.")
 
 		// Storage tuning.
 		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
@@ -156,6 +157,7 @@ func main() {
 	bootstrapserver.OverlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
 		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
 		*raftHeartbeat, *raftElection, *raftLease, *raftCommit, *raftApply,
+		*raftSnapshots,
 		*storageProfile, *raftStorageProfile,
 		*storageBlockCache, *storageMemTableSize, *storageMemTableStopWrites,
 		*storageMaxCompactions, *storageL0Concurrency, *storageL0Threshold,
@@ -226,6 +228,7 @@ func main() {
 			LeaderLeaseMS:     int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
 			CommitMS:          int(cfg.Raft.CommitTimeout / time.Millisecond),
 			ApplyTimeout:      cfg.Raft.ApplyTimeout,
+			SnapshotEntries:   cfg.Raft.SnapshotEntries,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)
@@ -286,17 +289,18 @@ func main() {
 		}
 		defer raftStore.Close()
 		raftDB, err = craft.Open(context.Background(), craft.Config{
-			Path:          path,
-			SelfID:        cfg.Cluster.SelfID,
-			BindAddr:      cfg.Raft.Bind,
-			Bootstrap:     cfg.Cluster.Bootstrap,
-			PeerAddrs:     cfg.Cluster.Peers,
-			PeerHTTPAddrs: cfg.Cluster.HTTPPeers,
-			HeartbeatMS:   int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
-			ElectionMS:    int(cfg.Raft.ElectionTimeout / time.Millisecond),
-			LeaderLeaseMS: int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
-			CommitMS:      int(cfg.Raft.CommitTimeout / time.Millisecond),
-			ApplyTimeout:  cfg.Raft.ApplyTimeout,
+			Path:            path,
+			SelfID:          cfg.Cluster.SelfID,
+			BindAddr:        cfg.Raft.Bind,
+			Bootstrap:       cfg.Cluster.Bootstrap,
+			PeerAddrs:       cfg.Cluster.Peers,
+			PeerHTTPAddrs:   cfg.Cluster.HTTPPeers,
+			HeartbeatMS:     int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
+			ElectionMS:      int(cfg.Raft.ElectionTimeout / time.Millisecond),
+			LeaderLeaseMS:   int(cfg.Raft.LeaderLeaseTimeout / time.Millisecond),
+			CommitMS:        int(cfg.Raft.CommitTimeout / time.Millisecond),
+			ApplyTimeout:    cfg.Raft.ApplyTimeout,
+			SnapshotEntries: cfg.Raft.SnapshotEntries,
 		}, db.Raw(), raftStore.Raw())
 		if err != nil {
 			logger.Error("open raft", "err", err)

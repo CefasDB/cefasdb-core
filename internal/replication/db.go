@@ -96,7 +96,7 @@ func (c Config) snapshotThreshold() uint64 {
 	if c.SnapshotEntries > 0 {
 		return c.SnapshotEntries
 	}
-	return 8192
+	return 65536
 }
 
 func (c Config) applyTimeout() time.Duration {

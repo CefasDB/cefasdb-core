@@ -113,11 +113,12 @@ type Config struct {
 	RaftProfile     string
 	RaftTuning      pebble.PebbleTuning
 
-	HeartbeatMS   int
-	ElectionMS    int
-	LeaderLeaseMS int
-	CommitMS      int
-	ApplyTimeout  time.Duration
+	HeartbeatMS     int
+	ElectionMS      int
+	LeaderLeaseMS   int
+	CommitMS        int
+	ApplyTimeout    time.Duration
+	SnapshotEntries uint64
 
 	LogOutput io.Writer
 }
@@ -321,18 +322,19 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	// shard's placement voters so replication-factor changes the actual
 	// Raft quorum, not only the catalog metadata.
 	rcfg := craft.Config{
-		Path:          raftDir,
-		SelfID:        m.cfg.SelfID,
-		BindAddr:      m.cfg.MuxAddr,
-		Bootstrap:     m.cfg.Bootstrap,
-		PeerAddrs:     peersForVoters(m.cfg.Peers, meta.Voters),
-		PeerHTTPAddrs: m.cfg.PeerHTTPAddrs,
-		HeartbeatMS:   m.cfg.HeartbeatMS,
-		ElectionMS:    m.cfg.ElectionMS,
-		LeaderLeaseMS: m.cfg.LeaderLeaseMS,
-		CommitMS:      m.cfg.CommitMS,
-		ApplyTimeout:  m.cfg.ApplyTimeout,
-		LogOutput:     m.cfg.LogOutput,
+		Path:            raftDir,
+		SelfID:          m.cfg.SelfID,
+		BindAddr:        m.cfg.MuxAddr,
+		Bootstrap:       m.cfg.Bootstrap,
+		PeerAddrs:       peersForVoters(m.cfg.Peers, meta.Voters),
+		PeerHTTPAddrs:   m.cfg.PeerHTTPAddrs,
+		HeartbeatMS:     m.cfg.HeartbeatMS,
+		ElectionMS:      m.cfg.ElectionMS,
+		LeaderLeaseMS:   m.cfg.LeaderLeaseMS,
+		CommitMS:        m.cfg.CommitMS,
+		ApplyTimeout:    m.cfg.ApplyTimeout,
+		SnapshotEntries: m.cfg.SnapshotEntries,
+		LogOutput:       m.cfg.LogOutput,
 	}
 	if m.mux != nil {
 		sl, err := m.mux.RegisterGroup(shardID)
