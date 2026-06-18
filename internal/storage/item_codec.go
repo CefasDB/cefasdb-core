@@ -73,41 +73,78 @@ func EncodeItem(item types.Item) ([]byte, error) {
 
 // DecodeItem reverses EncodeItem.
 func DecodeItem(data []byte) (types.Item, error) {
+	n, p, err := decodeItemHeader(data)
+	if err != nil {
+		return nil, err
+	}
+	out := make(types.Item, n)
+	for i := uint64(0); i < n; i++ {
+		name, av, rest, err := readItemAttribute(p)
+		if err != nil {
+			return nil, err
+		}
+		p = rest
+		out[name] = av
+	}
+	return out, nil
+}
+
+// VisitItem decodes an item and calls visit for each attribute without
+// materializing a types.Item map. Hot protocol paths use it to translate
+// encoded storage bytes directly into their response shape.
+func VisitItem(data []byte, visit func(name string, value types.AttributeValue) error) error {
+	n, p, err := decodeItemHeader(data)
+	if err != nil {
+		return err
+	}
+	for i := uint64(0); i < n; i++ {
+		name, av, rest, err := readItemAttribute(p)
+		if err != nil {
+			return err
+		}
+		p = rest
+		if err := visit(name, av); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeItemHeader(data []byte) (uint64, []byte, error) {
 	if len(data) < 4 {
-		return nil, fmt.Errorf("decode item: short buffer")
+		return 0, nil, fmt.Errorf("decode item: short buffer")
 	}
 	if binary.BigEndian.Uint16(data[:2]) != itemMagic {
-		return nil, fmt.Errorf("decode item: bad magic")
+		return 0, nil, fmt.Errorf("decode item: bad magic")
 	}
 	if data[2] != itemVersion {
-		return nil, fmt.Errorf("decode item: unsupported version %d", data[2])
+		return 0, nil, fmt.Errorf("decode item: unsupported version %d", data[2])
 	}
 	p := data[3:]
 
 	n, p, err := readUvarint(p)
 	if err != nil {
-		return nil, fmt.Errorf("decode item count: %w", err)
+		return 0, nil, fmt.Errorf("decode item count: %w", err)
 	}
-	out := make(types.Item, n)
-	for i := uint64(0); i < n; i++ {
-		nameLen, rest, err := readUvarint(p)
-		if err != nil {
-			return nil, fmt.Errorf("decode attr name len: %w", err)
-		}
-		p = rest
-		if uint64(len(p)) < nameLen {
-			return nil, fmt.Errorf("decode attr name: short")
-		}
-		name := string(p[:nameLen])
-		p = p[nameLen:]
-		var av types.AttributeValue
-		av, p, err = readAttr(p)
-		if err != nil {
-			return nil, fmt.Errorf("decode attr %q: %w", name, err)
-		}
-		out[name] = av
+	return n, p, nil
+}
+
+func readItemAttribute(p []byte) (string, types.AttributeValue, []byte, error) {
+	nameLen, rest, err := readUvarint(p)
+	if err != nil {
+		return "", types.AttributeValue{}, nil, fmt.Errorf("decode attr name len: %w", err)
 	}
-	return out, nil
+	p = rest
+	if uint64(len(p)) < nameLen {
+		return "", types.AttributeValue{}, nil, fmt.Errorf("decode attr name: short")
+	}
+	name := string(p[:nameLen])
+	p = p[nameLen:]
+	av, p, err := readAttr(p)
+	if err != nil {
+		return "", types.AttributeValue{}, nil, fmt.Errorf("decode attr %q: %w", name, err)
+	}
+	return name, av, p, nil
 }
 
 func appendAttr(buf []byte, av types.AttributeValue) ([]byte, error) {

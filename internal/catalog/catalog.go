@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/CefasDb/cefasdb/internal/catalog/domain"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -142,6 +142,23 @@ func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	c.tables[fresh.Name] = domain.CloneTableDescriptor(fresh)
 	c.mu.Unlock()
 	return domain.CloneTableDescriptor(fresh), nil
+}
+
+// KeySchema returns the immutable primary key schema for a table
+// without cloning the full descriptor on cache hits. Hot read paths
+// only need PK/SK names, not the whole index/stream descriptor surface.
+func (c *Catalog) KeySchema(name string) (types.KeySchema, error) {
+	c.mu.RLock()
+	td, ok := c.tables[name]
+	c.mu.RUnlock()
+	if ok {
+		return td.KeySchema, nil
+	}
+	td, err := c.Describe(name)
+	if err != nil {
+		return types.KeySchema{}, err
+	}
+	return td.KeySchema, nil
 }
 
 // List returns descriptors of every known table.

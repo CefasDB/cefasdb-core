@@ -357,15 +357,11 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 			return nil, err
 		}
 	}
-	td, err := s.cat.Describe(req.GetTable())
+	ks, err := s.cat.KeySchema(req.GetTable())
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	key, err := pbToItem(req.GetKey())
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	pkBytes, skBytes, err := pbKeyBytes(req.GetKey(), ks)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -373,7 +369,7 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	item, err := db.GetItem(req.GetTable(), td.KeySchema, key)
+	rawItem, err := db.GetEncodedItemByKeyBytes(req.GetTable(), pkBytes, skBytes)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
@@ -381,8 +377,12 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 		}
 		return nil, mapStorageErr(err)
 	}
-	s.observeRangeMetric(rangeMetricRead, pkBytes, estimatedItemBytes(item), started)
-	return &cefaspb.GetItemResponse{Found: true, Item: itemToPB(item)}, nil
+	pbItem, err := encodedItemToPB(rawItem)
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(rawItem)), started)
+	return &cefaspb.GetItemResponse{Found: true, Item: pbItem}, nil
 }
 
 func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequest) (*cefaspb.UpdateItemResponse, error) {

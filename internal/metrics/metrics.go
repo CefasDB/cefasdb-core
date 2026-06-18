@@ -16,6 +16,7 @@ package metrics
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -78,6 +79,8 @@ type Metrics struct {
 	RangeCompactionDebt  *prometheus.GaugeVec     // shard, bucket
 	RangeThrottleState   *prometheus.GaugeVec     // shard, bucket
 	RangeHotspotRegistry *RangeHotspotTracker
+	rangeHandleMu        sync.RWMutex
+	rangeHandles         map[rangeMetricKey]rangeMetricHandles
 
 	StreamRecordsAppended         *prometheus.GaugeVec   // shard, table
 	StreamRecordsTrimmed          *prometheus.GaugeVec   // shard, table
@@ -89,6 +92,18 @@ type Metrics struct {
 	StreamIteratorCreationFailure *prometheus.CounterVec // table, reason
 	StreamTrimmedErrors           *prometheus.CounterVec // table, op
 	StreamExpiredIteratorErrors   *prometheus.CounterVec // table, op
+}
+
+type rangeMetricKey struct {
+	shard  string
+	bucket string
+	op     string
+}
+
+type rangeMetricHandles struct {
+	ops     prometheus.Counter
+	bytes   prometheus.Counter
+	latency prometheus.Observer
 }
 
 // New builds a Metrics with every collector pre-registered against a
@@ -265,6 +280,7 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 			Help: "Shard write throttle state projected onto bounded token buckets: 0 normal, 1 warning, 2 critical.",
 		}, []string{"shard", "bucket"}),
 		RangeHotspotRegistry: NewRangeHotspotTracker(hotspots),
+		rangeHandles:         make(map[rangeMetricKey]rangeMetricHandles),
 		StreamRecordsAppended: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_stream_records_appended",
 			Help: "Cumulative DynamoDB Streams records appended, reconstructed from persisted stream retention state.",
@@ -505,14 +521,38 @@ func (m *Metrics) ObserveRangeOperation(shardID model.ShardID, token uint64, op 
 	bucket := m.RangeHotspotRegistry.BucketForToken(token)
 	bucketLabel := bucketLabel(bucket)
 	label := shardID.String()
-	m.RangeOpsTotal.WithLabelValues(label, bucketLabel, op).Inc()
+	handles := m.rangeMetricHandles(label, bucketLabel, op)
+	handles.ops.Inc()
 	if bytes > 0 {
-		m.RangeBytesTotal.WithLabelValues(label, bucketLabel, op).Add(float64(bytes))
+		handles.bytes.Add(float64(bytes))
 	}
 	if latency > 0 {
-		m.RangeLatencySeconds.WithLabelValues(label, bucketLabel, op).Observe(latency.Seconds())
+		handles.latency.Observe(latency.Seconds())
 	}
-	m.RangeHotspotRegistry.RecordOperation(shardID, token, op, bytes, latency)
+	m.RangeHotspotRegistry.recordOperationBucket(label, bucket, op, bytes, latency)
+}
+
+func (m *Metrics) rangeMetricHandles(label, bucket, op string) rangeMetricHandles {
+	key := rangeMetricKey{shard: label, bucket: bucket, op: op}
+	m.rangeHandleMu.RLock()
+	handles, ok := m.rangeHandles[key]
+	m.rangeHandleMu.RUnlock()
+	if ok {
+		return handles
+	}
+
+	m.rangeHandleMu.Lock()
+	defer m.rangeHandleMu.Unlock()
+	if handles, ok = m.rangeHandles[key]; ok {
+		return handles
+	}
+	handles = rangeMetricHandles{
+		ops:     m.RangeOpsTotal.WithLabelValues(label, bucket, op),
+		bytes:   m.RangeBytesTotal.WithLabelValues(label, bucket, op),
+		latency: m.RangeLatencySeconds.WithLabelValues(label, bucket, op),
+	}
+	m.rangeHandles[key] = handles
+	return handles
 }
 
 // ObserveRangePressure records shard-level storage pressure on every
