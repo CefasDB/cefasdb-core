@@ -22,8 +22,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/CefasDb/cefasdb/internal/core/model"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/internal/core/model"
 )
 
 // Metrics groups every cefas metric instance so the storage / API
@@ -41,11 +41,6 @@ type Metrics struct {
 
 	RaftCommitLagSeconds *prometheus.GaugeVec // shard
 	RaftIsLeader         *prometheus.GaugeVec // shard
-	RaftAsyncSubmitted   *prometheus.GaugeVec // shard
-	RaftAsyncDropped     *prometheus.GaugeVec // shard
-	RaftAsyncApplyErrors *prometheus.GaugeVec // shard
-	RaftAsyncQueueDepth  *prometheus.GaugeVec // shard
-	RaftAsyncQueueCap    *prometheus.GaugeVec // shard
 
 	PebbleReadAmp               *prometheus.GaugeVec // shard
 	PebbleCompactionDebtBytes   *prometheus.GaugeVec // shard
@@ -141,26 +136,6 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		RaftIsLeader: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_raft_is_leader",
 			Help: "1 if this node is the current leader of the shard, else 0.",
-		}, []string{"shard"}),
-		RaftAsyncSubmitted: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "cefas_raft_async_replication_submitted",
-			Help: "Cumulative best-effort replication requests accepted by the async queue.",
-		}, []string{"shard"}),
-		RaftAsyncDropped: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "cefas_raft_async_replication_dropped",
-			Help: "Cumulative best-effort replication requests dropped before raft apply.",
-		}, []string{"shard"}),
-		RaftAsyncApplyErrors: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "cefas_raft_async_replication_apply_errors",
-			Help: "Cumulative async replication requests that failed after entering the apply coalescer.",
-		}, []string{"shard"}),
-		RaftAsyncQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "cefas_raft_async_replication_queue_depth",
-			Help: "Current depth of the best-effort replication apply queue.",
-		}, []string{"shard"}),
-		RaftAsyncQueueCap: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "cefas_raft_async_replication_queue_capacity",
-			Help: "Capacity of the best-effort replication apply queue.",
 		}, []string{"shard"}),
 		PebbleReadAmp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_pebble_read_amp",
@@ -318,11 +293,6 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.SpatialCells,
 		m.RaftCommitLagSeconds,
 		m.RaftIsLeader,
-		m.RaftAsyncSubmitted,
-		m.RaftAsyncDropped,
-		m.RaftAsyncApplyErrors,
-		m.RaftAsyncQueueDepth,
-		m.RaftAsyncQueueCap,
 		m.PebbleReadAmp,
 		m.PebbleCompactionDebtBytes,
 		m.PebbleCompactionsInProgress,
