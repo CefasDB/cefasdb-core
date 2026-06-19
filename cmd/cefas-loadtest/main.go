@@ -25,11 +25,12 @@ func fatal(msg string, args ...any) {
 }
 
 type config struct {
-	addr        string
-	addrs       string
-	token       string
-	plaintext   bool
-	createTable bool
+	addr           string
+	addrs          string
+	token          string
+	plaintext      bool
+	createTable    bool
+	routeReadNodes string
 	runner.Config
 }
 
@@ -41,23 +42,34 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	opts := []client.Option{
+	baseOpts := []client.Option{
 		client.WithDialOption(grpc.WithDefaultCallOptions(
 			grpc.MaxCallSendMsgSize(128<<20),
 			grpc.MaxCallRecvMsgSize(128<<20),
 		)),
 	}
 	if cfg.plaintext {
-		opts = append(opts, client.WithPlaintext())
+		baseOpts = append(baseOpts, client.WithPlaintext())
 	}
 	if cfg.token != "" {
-		opts = append(opts, client.WithBearer(cfg.token))
+		baseOpts = append(baseOpts, client.WithBearer(cfg.token))
+	}
+	opts := append([]client.Option(nil), baseOpts...)
+	var routeEndpoints map[string]string
+	if cfg.RouteAwareReads {
+		var err error
+		routeEndpoints, err = parseNodeEndpoints(cfg.routeReadNodes)
+		if err != nil {
+			fatal("parse route-aware read nodes", "err", err)
+		}
+		cfg.RouteAwareReadNodes = len(routeEndpoints)
+		opts = append(opts, client.WithRouteAwareReads(routeEndpoints))
 	}
 
 	addr := cfg.addr
 	if cfg.addrs != "" {
 		var err error
-		addr, err = selectLeader(ctx, cfg.addrs, opts)
+		addr, err = selectLeader(ctx, cfg.addrs, baseOpts)
 		if err != nil {
 			fatal("select leader", "err", err)
 		}
@@ -125,8 +137,11 @@ func main() {
 		}
 	}
 
+	routeStats := cli.RouteAwareReadStats()
+	printRouteAwareStats(routeStats)
+
 	if cfg.JSONOutput != "" {
-		if err := runner.WriteReport(cfg.Config, addr, startedAt, time.Now(), phases); err != nil {
+		if err := runner.WriteReport(cfg.Config, addr, startedAt, time.Now(), phases, routeStats); err != nil {
 			fatal("write json report", "err", err)
 		}
 		fmt.Printf("json report: %s\n", cfg.JSONOutput)
@@ -141,6 +156,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.token, "token", "", "bearer token")
 	flag.BoolVar(&cfg.plaintext, "plaintext", true, "use plaintext gRPC")
 	flag.BoolVar(&cfg.createTable, "create-table", true, "create the table if it does not exist")
+	flag.BoolVar(&cfg.RouteAwareReads, "route-aware-reads", false, "enable token-aware eventual reads using -route-aware-read-nodes")
+	flag.StringVar(&cfg.routeReadNodes, "route-aware-read-nodes", "", "comma-separated nodeID=gRPC address map for token-aware eventual reads")
 	flag.Int64Var(&cfg.Items, "items", 1_000_000, "items to write")
 	flag.Int64Var(&cfg.StartID, "start-id", 0, "first numeric item id to write")
 	flag.Int64Var(&cfg.Keyspace, "keyspace", 0, "existing keyspace for read-only tests; defaults to --items")
@@ -199,7 +216,47 @@ func parseFlags() config {
 	if cfg.LatencySampleRate <= 0 {
 		fatal("invalid flags", "reason", "--latency-sample-rate must be > 0")
 	}
+	if cfg.routeReadNodes != "" {
+		cfg.RouteAwareReads = true
+	}
+	if cfg.RouteAwareReads && strings.TrimSpace(cfg.routeReadNodes) == "" {
+		fatal("invalid flags", "reason", "--route-aware-reads requires --route-aware-read-nodes")
+	}
 	return cfg
+}
+
+func parseNodeEndpoints(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, addr, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(id) == "" || strings.TrimSpace(addr) == "" {
+			return nil, fmt.Errorf("bad node mapping %q", part)
+		}
+		out[strings.TrimSpace(id)] = strings.TrimSpace(addr)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no route-aware read nodes configured")
+	}
+	return out, nil
+}
+
+func printRouteAwareStats(stats client.RouteAwareReadStats) {
+	if stats.Attempts == 0 && stats.Refreshes == 0 {
+		return
+	}
+	fmt.Printf("\nroute-aware reads\n")
+	fmt.Printf("  attempts:   %d\n", stats.Attempts)
+	fmt.Printf("  successes:  %d\n", stats.Successes)
+	fmt.Printf("  refreshes:  %d\n", stats.Refreshes)
+	fmt.Printf("  retries:    %d\n", stats.Retries)
+	fmt.Printf("  stale:      %d\n", stats.StaleRoutes)
+	fmt.Printf("  no-local:   %d\n", stats.NoLocalReplica)
+	fmt.Printf("  leader:     %d\n", stats.LeaderServed)
+	fmt.Printf("  follower:   %d\n", stats.FollowerServed)
 }
 
 func selectLeader(ctx context.Context, addrs string, opts []client.Option) (string, error) {

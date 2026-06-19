@@ -142,6 +142,13 @@ func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 	if err != nil {
 		return ClusterStatus{}, err
 	}
+	return clusterStatusFromPB(resp), nil
+}
+
+func clusterStatusFromPB(resp *cefaspb.ClusterStatusResponse) ClusterStatus {
+	if resp == nil {
+		return ClusterStatus{}
+	}
 	return ClusterStatus{
 		Mode:              resp.GetMode(),
 		IsLeader:          resp.GetIsLeader(),
@@ -156,7 +163,7 @@ func (c *Client) Status(ctx context.Context) (ClusterStatus, error) {
 		Nodes:             nodeDescriptorsFromPB(resp.GetNodes()),
 		HotRanges:         rangeHotspotsFromPB(resp.GetHotRanges()),
 		BackupScheduler:   scheduledBackupStatusFromPB(resp.GetBackupScheduler()),
-	}, nil
+	}
 }
 
 func scheduledBackupStatusFromPB(in *cefaspb.ScheduledBackupStatus) *ScheduledBackupStatus {

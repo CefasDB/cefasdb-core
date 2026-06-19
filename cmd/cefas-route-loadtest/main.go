@@ -25,26 +25,27 @@ import (
 )
 
 type cfg struct {
-	Nodes             string
-	Table             string
-	Items             int64
-	Keyspace          int64
-	MixedDuration     time.Duration
-	BatchSize         int
-	Workers           int
-	ReadWorkers       int
-	WriteRate         int64
-	ReadRate          int64
-	MixedWrites       bool
-	MixedReads        bool
-	Users             int64
-	PayloadBytes      int
-	PayloadMode       string
-	RPCTimeout        time.Duration
-	Progress          time.Duration
-	LatencySampleRate int64
-	JSONOutput        string
-	Label             string
+	Nodes                 string
+	Table                 string
+	Items                 int64
+	Keyspace              int64
+	MixedDuration         time.Duration
+	BatchSize             int
+	Workers               int
+	ReadWorkers           int
+	WriteRate             int64
+	ReadRate              int64
+	MixedWrites           bool
+	MixedReads            bool
+	Users                 int64
+	PayloadBytes          int
+	PayloadMode           string
+	RPCTimeout            time.Duration
+	Progress              time.Duration
+	LatencySampleRate     int64
+	ClientRouteAwareReads bool
+	JSONOutput            string
+	Label                 string
 }
 
 type tokenRange struct {
@@ -70,9 +71,10 @@ type routeTarget struct {
 }
 
 type clients struct {
-	byNode map[string]*client.Client
-	addrs  map[string]string
-	order  []string
+	byNode          map[string]*client.Client
+	addrs           map[string]string
+	order           []string
+	routeReadClient *client.Client
 }
 
 type batchJob struct {
@@ -109,13 +111,14 @@ type phaseSummary struct {
 }
 
 type report struct {
-	Label     string            `json:"label"`
-	StartedAt string            `json:"started_at"`
-	EndedAt   string            `json:"ended_at"`
-	Config    cfg               `json:"config"`
-	NodeAddrs map[string]string `json:"node_addrs"`
-	Shards    []shardRoute      `json:"shards"`
-	Phases    []phaseSummary    `json:"phases"`
+	Label           string                      `json:"label"`
+	StartedAt       string                      `json:"started_at"`
+	EndedAt         string                      `json:"ended_at"`
+	Config          cfg                         `json:"config"`
+	NodeAddrs       map[string]string           `json:"node_addrs"`
+	Shards          []shardRoute                `json:"shards"`
+	Phases          []phaseSummary              `json:"phases"`
+	RouteAwareReads *client.RouteAwareReadStats `json:"route_aware_reads,omitempty"`
 }
 
 var log = slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -135,7 +138,7 @@ func main() {
 	if err != nil {
 		fatal("parse nodes", err)
 	}
-	cs, err := dialClients(ctx, nodeAddrs)
+	cs, err := dialClients(ctx, nodeAddrs, c.ClientRouteAwareReads)
 	if err != nil {
 		fatal("dial clients", err)
 	}
@@ -199,14 +202,20 @@ func main() {
 	}
 
 	if c.JSONOutput != "" {
+		var routeStats *client.RouteAwareReadStats
+		if c.ClientRouteAwareReads && cs.routeReadClient != nil {
+			stats := cs.routeReadClient.RouteAwareReadStats()
+			routeStats = &stats
+		}
 		rep := report{
-			Label:     c.Label,
-			StartedAt: started.UTC().Format(time.RFC3339),
-			EndedAt:   time.Now().UTC().Format(time.RFC3339),
-			Config:    c,
-			NodeAddrs: nodeAddrs,
-			Shards:    shards,
-			Phases:    phases,
+			Label:           c.Label,
+			StartedAt:       started.UTC().Format(time.RFC3339),
+			EndedAt:         time.Now().UTC().Format(time.RFC3339),
+			Config:          c,
+			NodeAddrs:       nodeAddrs,
+			Shards:          shards,
+			Phases:          phases,
+			RouteAwareReads: routeStats,
 		}
 		raw, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {
@@ -242,6 +251,7 @@ func parseFlags() cfg {
 	flag.DurationVar(&c.RPCTimeout, "rpc-timeout", 30*time.Second, "timeout per RPC")
 	flag.DurationVar(&c.Progress, "progress", 30*time.Second, "progress print interval; 0 disables")
 	flag.Int64Var(&c.LatencySampleRate, "latency-sample-rate", 10, "record one latency sample every N RPCs")
+	flag.BoolVar(&c.ClientRouteAwareReads, "client-route-aware-reads", false, "serve mixed/read phases through the Go client route-aware eventual-read path")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -282,7 +292,7 @@ func parseNodeAddrs(raw string) (map[string]string, error) {
 	return out, nil
 }
 
-func dialClients(ctx context.Context, addrs map[string]string) (*clients, error) {
+func dialClients(ctx context.Context, addrs map[string]string, routeAwareReads bool) (*clients, error) {
 	out := &clients{byNode: map[string]*client.Client{}, addrs: addrs}
 	for id := range addrs {
 		out.order = append(out.order, id)
@@ -303,10 +313,29 @@ func dialClients(ctx context.Context, addrs map[string]string) (*clients, error)
 		}
 		out.byNode[id] = cli
 	}
+	if routeAwareReads {
+		addr := addrs[out.order[0]]
+		cli, err := client.Dial(ctx, addr,
+			client.WithPlaintext(),
+			client.WithRouteAwareReads(addrs),
+			client.WithDialOption(grpc.WithDefaultCallOptions(
+				grpc.MaxCallSendMsgSize(128<<20),
+				grpc.MaxCallRecvMsgSize(128<<20),
+			)),
+		)
+		if err != nil {
+			out.close()
+			return nil, fmt.Errorf("route-aware reads %s=%s: %w", out.order[0], addr, err)
+		}
+		out.routeReadClient = cli
+	}
 	return out, nil
 }
 
 func (c *clients) close() {
+	if c.routeReadClient != nil {
+		_ = c.routeReadClient.Close()
+	}
 	for _, cli := range c.byNode {
 		_ = cli.Close()
 	}
@@ -505,15 +534,9 @@ func runMixed(ctx context.Context, c cfg, cs *clients, rt *router, keyspace int6
 				defer readWG.Done()
 				for seq := range readJobs {
 					id := permute(seq, keyspace)
-					target, err := rt.routeForID(id, c.Users)
-					if err != nil {
-						readRec.errors.Add(1)
-						setErr(err)
-						return
-					}
 					rpcCtx, cancelRPC := context.WithTimeout(phaseCtx, c.RPCTimeout)
 					t0 := time.Now()
-					item, err := getItemWithRetry(rpcCtx, cs, target, c.Table, keyFor(id, c.Users))
+					item, err := readItem(rpcCtx, c, cs, rt, id)
 					lat := time.Since(t0)
 					cancelRPC()
 					if err != nil {
@@ -578,6 +601,18 @@ func runMixed(ctx context.Context, c cfg, cs *clients, rt *router, keyspace int6
 	writeWG.Wait()
 	readWG.Wait()
 	return writeRec.summary(), readRec.summary(), found.Load(), firstErr
+}
+
+func readItem(ctx context.Context, c cfg, cs *clients, rt *router, id int64) (types.Item, error) {
+	key := keyFor(id, c.Users)
+	if c.ClientRouteAwareReads && cs.routeReadClient != nil {
+		return cs.routeReadClient.GetItem(ctx, c.Table, key)
+	}
+	target, err := rt.routeForID(id, c.Users)
+	if err != nil {
+		return nil, err
+	}
+	return getItemWithRetry(ctx, cs, target, c.Table, key)
 }
 
 func writeBatch(ctx context.Context, c cfg, cs *clients, rt *router, rec *phaseRecorder, start, end int64) error {

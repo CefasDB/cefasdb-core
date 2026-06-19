@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -15,9 +16,10 @@ import (
 
 // QueryBuilder collects Query parameters fluently.
 type QueryBuilder struct {
-	c     *Client
-	table string
-	req   *cefaspb.QueryRequest
+	c          *Client
+	table      string
+	req        *cefaspb.QueryRequest
+	routeAware *bool
 }
 
 // Query opens a builder for the given table. Call PK / SK / Limit /
@@ -62,9 +64,24 @@ func (b *QueryBuilder) Strong() *QueryBuilder {
 	return b
 }
 
+// RouteAware overrides token-aware eventual-read routing for this query.
+func (b *QueryBuilder) RouteAware(enabled bool) *QueryBuilder {
+	b.routeAware = &enabled
+	return b
+}
+
 // Run executes the query and collects all results. For large result
 // sets prefer Stream.
 func (b *QueryBuilder) Run(ctx context.Context) ([]types.Item, error) {
+	if b.c.routeReads != nil && routeAwareOverride(b.routeAware) {
+		pkBytes, ok, err := pkBytesForQuery(b.req)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return b.c.routeAwareQueryRun(ctx, b.req, pkBytes)
+		}
+	}
 	stream, err := b.c.stub.Query(b.c.withAuth(ctx), b.req)
 	if err != nil {
 		return nil, err
@@ -85,7 +102,123 @@ func (b *QueryBuilder) Run(ctx context.Context) ([]types.Item, error) {
 // Stream returns the underlying server-streaming RPC for callers that
 // want to iterate results lazily.
 func (b *QueryBuilder) Stream(ctx context.Context) (grpc.ServerStreamingClient[cefaspb.Item], error) {
+	if b.c.routeReads != nil && routeAwareOverride(b.routeAware) {
+		pkBytes, ok, err := pkBytesForQuery(b.req)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return b.c.routeAwareQueryStream(ctx, b.req, pkBytes)
+		}
+	}
 	return b.c.stub.Query(b.c.withAuth(ctx), b.req)
+}
+
+func (c *Client) routeAwareQueryRun(ctx context.Context, req *cefaspb.QueryRequest, pkBytes []byte) ([]types.Item, error) {
+	c.routeReads.attempts.Add(1)
+	if err := c.ensureRoutePlacement(ctx, false); err != nil {
+		return nil, err
+	}
+
+	var last error
+	refreshed := false
+	for {
+		target, token, err := c.routeReads.routeForPK(pkBytes)
+		if err != nil {
+			return nil, err
+		}
+		candidates, err := c.routeReads.candidatesForTarget(target, token, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range candidates {
+			start := node.begin()
+			stream, err := node.stub.Query(c.withAuth(ctx), req)
+			if err != nil {
+				node.finish(start, err)
+				last = err
+				if !c.routeReads.observeRetry(err) {
+					return nil, err
+				}
+				continue
+			}
+			out, err := collectQueryStream(stream)
+			node.finish(start, err)
+			if err == nil {
+				c.routeReads.successes.Add(1)
+				c.routeReads.observeServedBy(target, node.id)
+				return out, nil
+			}
+			last = err
+			if len(out) > 0 || !c.routeReads.observeRetry(err) {
+				return nil, err
+			}
+		}
+		if refreshed {
+			break
+		}
+		if err := c.ensureRoutePlacement(ctx, true); err != nil {
+			return nil, err
+		}
+		refreshed = true
+	}
+	return nil, last
+}
+
+func (c *Client) routeAwareQueryStream(ctx context.Context, req *cefaspb.QueryRequest, pkBytes []byte) (grpc.ServerStreamingClient[cefaspb.Item], error) {
+	c.routeReads.attempts.Add(1)
+	if err := c.ensureRoutePlacement(ctx, false); err != nil {
+		return nil, err
+	}
+
+	var last error
+	refreshed := false
+	for {
+		target, token, err := c.routeReads.routeForPK(pkBytes)
+		if err != nil {
+			return nil, err
+		}
+		candidates, err := c.routeReads.candidatesForTarget(target, token, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range candidates {
+			start := node.begin()
+			stream, err := node.stub.Query(c.withAuth(ctx), req)
+			node.finish(start, err)
+			if err == nil {
+				c.routeReads.successes.Add(1)
+				c.routeReads.observeServedBy(target, node.id)
+				return stream, nil
+			}
+			last = err
+			if !c.routeReads.observeRetry(err) {
+				return nil, err
+			}
+		}
+		if refreshed {
+			break
+		}
+		if err := c.ensureRoutePlacement(ctx, true); err != nil {
+			return nil, err
+		}
+		refreshed = true
+	}
+	return nil, last
+}
+
+func collectQueryStream(stream grpc.ServerStreamingClient[cefaspb.Item]) ([]types.Item, error) {
+	var out []types.Item
+	for {
+		item, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, itemFromPB(item.GetAttributes()))
+	}
 }
 
 // ---------- scan ----------
