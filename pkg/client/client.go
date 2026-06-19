@@ -20,16 +20,18 @@ type Client struct {
 	conn   *grpc.ClientConn
 	stub   cefaspb.CefasClient
 	bearer string
+	route  *routeAwareReads
 }
 
 // Option configures a Client at Dial time.
 type Option func(*config)
 
 type config struct {
-	bearer    string
-	tls       *tls.Config
-	plaintext bool
-	dialOpts  []grpc.DialOption
+	bearer              string
+	tls                 *tls.Config
+	plaintext           bool
+	dialOpts            []grpc.DialOption
+	routeAwareEndpoints map[string]string
 }
 
 // WithBearer adds an "Authorization: Bearer <token>" metadata header
@@ -76,6 +78,15 @@ func WithDialOption(o grpc.DialOption) Option {
 	return func(c *config) { c.dialOpts = append(c.dialOpts, o) }
 }
 
+// WithRouteAwareReads enables token-aware eventual reads. nodeEndpoints maps
+// placement node IDs to gRPC endpoints. Strong reads keep the leader/barrier
+// path and do not use this routing path.
+func WithRouteAwareReads(nodeEndpoints map[string]string) Option {
+	return func(c *config) {
+		c.routeAwareEndpoints = copyStringMap(nodeEndpoints)
+	}
+}
+
 // Dial opens a connection to a cefas server.
 func Dial(ctx context.Context, addr string, opts ...Option) (*Client, error) {
 	cfg := &config{}
@@ -96,11 +107,29 @@ func Dial(ctx context.Context, addr string, opts ...Option) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cefas: dial %s: %w", addr, err)
 	}
-	return &Client{conn: conn, stub: cefaspb.NewCefasClient(conn), bearer: cfg.bearer}, nil
+	c := &Client{conn: conn, stub: cefaspb.NewCefasClient(conn), bearer: cfg.bearer}
+	if len(cfg.routeAwareEndpoints) > 0 {
+		route, err := newRouteAwareReads(cfg.routeAwareEndpoints, dialOpts)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		c.route = route
+	}
+	return c, nil
 }
 
 // Close releases the underlying gRPC connection.
-func (c *Client) Close() error { return c.conn.Close() }
+func (c *Client) Close() error {
+	var first error
+	if c.route != nil {
+		first = c.route.close()
+	}
+	if err := c.conn.Close(); first == nil {
+		first = err
+	}
+	return first
+}
 
 // withAuth augments outgoing metadata with the bearer token (when set).
 func (c *Client) withAuth(ctx context.Context) context.Context {

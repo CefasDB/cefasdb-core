@@ -15,9 +15,10 @@ import (
 
 // QueryBuilder collects Query parameters fluently.
 type QueryBuilder struct {
-	c     *Client
-	table string
-	req   *cefaspb.QueryRequest
+	c          *Client
+	table      string
+	req        *cefaspb.QueryRequest
+	routeAware *bool
 }
 
 // Query opens a builder for the given table. Call PK / SK / Limit /
@@ -62,10 +63,16 @@ func (b *QueryBuilder) Strong() *QueryBuilder {
 	return b
 }
 
+// RouteAware overrides token-aware eventual-read routing for this query.
+func (b *QueryBuilder) RouteAware(enabled bool) *QueryBuilder {
+	b.routeAware = &enabled
+	return b
+}
+
 // Run executes the query and collects all results. For large result
 // sets prefer Stream.
 func (b *QueryBuilder) Run(ctx context.Context) ([]types.Item, error) {
-	stream, err := b.c.stub.Query(b.c.withAuth(ctx), b.req)
+	stream, err := b.Stream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +92,11 @@ func (b *QueryBuilder) Run(ctx context.Context) ([]types.Item, error) {
 // Stream returns the underlying server-streaming RPC for callers that
 // want to iterate results lazily.
 func (b *QueryBuilder) Stream(ctx context.Context) (grpc.ServerStreamingClient[cefaspb.Item], error) {
+	if routeAwareEnabled(b.c.route, b.routeAware) && b.req.GetConsistency() != cefaspb.Consistency_CONSISTENCY_STRONG {
+		if stream, handled, err := b.c.routeAwareQuery(ctx, b.req); handled {
+			return stream, err
+		}
+	}
 	return b.c.stub.Query(b.c.withAuth(ctx), b.req)
 }
 

@@ -33,7 +33,8 @@ func (c *Client) PutItem(ctx context.Context, table string, item types.Item, opt
 
 // GetOptions toggles consistency.
 type GetOptions struct {
-	Strong bool
+	Strong     bool
+	RouteAware *bool
 }
 
 // GetItem returns the item, or (nil, nil) when the key is absent.
@@ -45,6 +46,11 @@ func (c *Client) GetItem(ctx context.Context, table string, key types.Item, opts
 	cons := cefaspb.Consistency_CONSISTENCY_EVENTUAL
 	if o.Strong {
 		cons = cefaspb.Consistency_CONSISTENCY_STRONG
+	}
+	if cons == cefaspb.Consistency_CONSISTENCY_EVENTUAL && routeAwareEnabled(c.route, o.RouteAware) {
+		if item, handled, err := c.routeAwareGetItem(ctx, table, key); handled {
+			return item, err
+		}
 	}
 	resp, err := c.stub.GetItem(c.withAuth(ctx), &cefaspb.GetItemRequest{
 		Table:       table,
@@ -150,8 +156,22 @@ func (c *Client) BatchWriteItem(ctx context.Context, table string, ops []BatchWr
 	return err
 }
 
+// BatchGetOptions controls route-aware reads for BatchGetItem.
+type BatchGetOptions struct {
+	RouteAware *bool
+}
+
 // BatchGetItem fetches multiple items by primary key.
-func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.Item) ([]types.Item, error) {
+func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.Item, opts ...BatchGetOptions) ([]types.Item, error) {
+	var o BatchGetOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	if routeAwareEnabled(c.route, o.RouteAware) {
+		if items, handled, err := c.routeAwareBatchGetItem(ctx, table, keys); handled {
+			return items, err
+		}
+	}
 	pbKeys := make([]*cefaspb.KeyMap, 0, len(keys))
 	for _, k := range keys {
 		pbKeys = append(pbKeys, &cefaspb.KeyMap{Attributes: itemAttrMap(k)})
