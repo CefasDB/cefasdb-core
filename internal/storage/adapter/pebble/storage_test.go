@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cespare/xxhash/v2"
+	pebbledb "github.com/cockroachdb/pebble"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
@@ -40,8 +41,25 @@ func TestPrimaryTokenFromKey(t *testing.T) {
 	if want := xxhash.Sum64(pk); got != want {
 		t.Fatalf("token = %d, want %d", got, want)
 	}
+	table, ok := storage.PrimaryTableFromKey(key)
+	if !ok {
+		t.Fatal("expected primary table")
+	}
+	if table != "events" {
+		t.Fatalf("table = %q, want events", table)
+	}
+	tableBytes, ok := storage.PrimaryTableBytesFromKey(key)
+	if !ok {
+		t.Fatal("expected primary table bytes")
+	}
+	if string(tableBytes) != "events" {
+		t.Fatalf("table bytes = %q, want events", tableBytes)
+	}
 	if _, ok := storage.PrimaryTokenFromKey(storage.KeyCatalog("events")); ok {
 		t.Fatal("catalog key reported as primary")
+	}
+	if _, ok := storage.PrimaryTableFromKey(storage.KeyCatalog("events")); ok {
+		t.Fatal("catalog key reported as primary table")
 	}
 }
 
@@ -86,6 +104,128 @@ func TestPutGetDelete(t *testing.T) {
 	})
 	if err != types.ErrItemNotFound {
 		t.Fatalf("expected ErrItemNotFound after Delete, got %v", err)
+	}
+}
+
+func TestGetItemCacheInvalidatesAfterWrites(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{Name: "cache_items", KeySchema: types.KeySchema{PK: "id"}}
+	key := types.Item{"id": sAttr("k")}
+
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("k"), "v": sAttr("one")}, pebble.PutOptions{}); err != nil {
+		t.Fatalf("put one: %v", err)
+	}
+	got, err := db.GetItem(td.Name, td.KeySchema, key)
+	if err != nil {
+		t.Fatalf("get one: %v", err)
+	}
+	if got["v"].S != "one" {
+		t.Fatalf("v = %q, want one", got["v"].S)
+	}
+
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("k"), "v": sAttr("two")}, pebble.PutOptions{}); err != nil {
+		t.Fatalf("put two: %v", err)
+	}
+	got, err = db.GetItem(td.Name, td.KeySchema, key)
+	if err != nil {
+		t.Fatalf("get two: %v", err)
+	}
+	if got["v"].S != "two" {
+		t.Fatalf("v = %q, want two", got["v"].S)
+	}
+
+	if err := db.BatchWriteItem(td, []pebble.BatchOp{{
+		Op:   pebble.BatchOpPut,
+		Item: types.Item{"id": sAttr("k"), "v": sAttr("three")},
+	}}); err != nil {
+		t.Fatalf("batch put: %v", err)
+	}
+	got, err = db.GetItem(td.Name, td.KeySchema, key)
+	if err != nil {
+		t.Fatalf("get three: %v", err)
+	}
+	if got["v"].S != "three" {
+		t.Fatalf("v = %q, want three", got["v"].S)
+	}
+
+	if err := db.BatchWriteItem(td, []pebble.BatchOp{{
+		Op:  pebble.BatchOpDelete,
+		Key: key,
+	}}); err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	if _, err := db.GetItem(td.Name, td.KeySchema, key); err != types.ErrItemNotFound {
+		t.Fatalf("get after batch delete = %v, want ErrItemNotFound", err)
+	}
+
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("k"), "v": sAttr("four")}, pebble.PutOptions{}); err != nil {
+		t.Fatalf("put four: %v", err)
+	}
+	if _, err := db.GetItem(td.Name, td.KeySchema, key); err != nil {
+		t.Fatalf("get four: %v", err)
+	}
+	if err := db.DeleteItem(td.Name, td.KeySchema, key); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := db.GetItem(td.Name, td.KeySchema, key); err != types.ErrItemNotFound {
+		t.Fatalf("get after delete = %v, want ErrItemNotFound", err)
+	}
+}
+
+func TestObserveAppliedBatchInvalidatesGetItemCache(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{Name: "observed_items", KeySchema: types.KeySchema{PK: "id"}}
+	keyAttrs := types.Item{"id": sAttr("k")}
+	if err := db.PutItemWith(td, types.Item{"id": sAttr("k"), "v": sAttr("one")}, pebble.PutOptions{}); err != nil {
+		t.Fatalf("put one: %v", err)
+	}
+	if _, err := db.GetItem(td.Name, td.KeySchema, keyAttrs); err != nil {
+		t.Fatalf("warm cache: %v", err)
+	}
+
+	pk, err := storage.AttrCanonicalBytes(sAttr("k"))
+	if err != nil {
+		t.Fatalf("pk bytes: %v", err)
+	}
+	primaryKey := storage.KeyPrimary(td.Name, pk, nil)
+	updated, err := storage.EncodeItem(types.Item{"id": sAttr("k"), "v": sAttr("two")})
+	if err != nil {
+		t.Fatalf("encode updated: %v", err)
+	}
+	b := db.Raw().NewBatch()
+	if err := b.Set(primaryKey, updated, nil); err != nil {
+		t.Fatalf("raw set: %v", err)
+	}
+	repr := append([]byte(nil), b.Repr()...)
+	db.ObservePendingBatch(repr)
+	if err := b.Commit(pebbledb.NoSync); err != nil {
+		t.Fatalf("raw commit: %v", err)
+	}
+	_ = b.Close()
+	db.ObserveAppliedBatch(repr)
+
+	got, err := db.GetItem(td.Name, td.KeySchema, keyAttrs)
+	if err != nil {
+		t.Fatalf("get observed update: %v", err)
+	}
+	if got["v"].S != "two" {
+		t.Fatalf("v = %q, want two", got["v"].S)
+	}
+
+	del := db.Raw().NewBatch()
+	if err := del.Delete(primaryKey, nil); err != nil {
+		t.Fatalf("raw delete: %v", err)
+	}
+	repr = append([]byte(nil), del.Repr()...)
+	db.ObservePendingBatch(repr)
+	if err := del.Commit(pebbledb.NoSync); err != nil {
+		t.Fatalf("raw delete commit: %v", err)
+	}
+	_ = del.Close()
+	db.ObserveAppliedBatch(repr)
+
+	if _, err := db.GetItem(td.Name, td.KeySchema, keyAttrs); err != types.ErrItemNotFound {
+		t.Fatalf("get observed delete = %v, want ErrItemNotFound", err)
 	}
 }
 
@@ -279,6 +419,30 @@ func BenchmarkGetItem(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		k := types.Item{"id": sAttr(fmt.Sprintf("k%d", i%10_000))}
 		if _, err := db.GetItem("bench", ks, k); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBatchWritePlainTable(b *testing.B) {
+	db := openTestDB(b)
+	td := types.TableDescriptor{Name: "bench_batch", KeySchema: types.KeySchema{PK: "id"}}
+	const batchSize = 500
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops := make([]pebble.BatchOp, batchSize)
+		base := i * batchSize
+		for j := range ops {
+			ops[j] = pebble.BatchOp{
+				Op: pebble.BatchOpPut,
+				Item: types.Item{
+					"id":   sAttr(fmt.Sprintf("k%d", base+j)),
+					"data": sAttr("payload"),
+				},
+			}
+		}
+		if err := db.BatchWriteItem(td, ops); err != nil {
 			b.Fatal(err)
 		}
 	}

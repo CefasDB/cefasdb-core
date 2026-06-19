@@ -52,6 +52,13 @@ type Config struct {
 	// ApplyTimeout bounds each Replicate call's raft round-trip.
 	ApplyTimeout time.Duration
 
+	// ApplyObserver is called after the FSM successfully applies a committed
+	// pebble.Batch.Repr to the local data store.
+	ApplyObserver func(repr []byte, itemCacheTables []string)
+	// ApplyPrepareObserver is called immediately before the FSM applies a
+	// committed pebble.Batch.Repr to the local data store.
+	ApplyPrepareObserver func(repr []byte, itemCacheTables []string)
+
 	// LogOutput is the destination for raft's internal logs. Defaults
 	// to os.Stderr; tests pass io.Discard to keep output quiet.
 	LogOutput interface {
@@ -146,8 +153,9 @@ type DB struct {
 }
 
 type applyReq struct {
-	repr []byte
-	done chan error
+	repr            []byte
+	itemCacheTables []string
+	done            chan error
 }
 
 const (
@@ -211,7 +219,7 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	if err != nil {
 		return nil, fmt.Errorf("snapshot store: %w", err)
 	}
-	d.fsm = newFSM(pdb)
+	d.fsm = newFSM(pdb, cfg.ApplyPrepareObserver, cfg.ApplyObserver)
 	d.snapshotStore = snaps
 
 	var t hraft.Transport
@@ -530,7 +538,7 @@ func (d *DB) Barrier(timeout time.Duration) error {
 // Replicates queue on applyCh and the loop merges up to raftMergeBatch
 // into a single raft.Apply. Each caller still gets its own done
 // channel and an independent error.
-func (d *DB) Replicate(repr []byte) error {
+func (d *DB) Replicate(repr []byte, itemCacheTables []string) error {
 	if !d.IsLeader() {
 		return ErrNotLeader
 	}
@@ -538,8 +546,9 @@ func (d *DB) Replicate(repr []byte) error {
 		return nil
 	}
 	req := &applyReq{
-		repr: repr,
-		done: make(chan error, 1),
+		repr:            repr,
+		itemCacheTables: append([]string(nil), itemCacheTables...),
+		done:            make(chan error, 1),
 	}
 	select {
 	case d.applyCh <- req:
@@ -582,6 +591,7 @@ func (d *DB) applyLoop() {
 			continue
 		}
 		reqs := []*applyReq{first}
+		itemCacheTables := append([]string(nil), first.itemCacheTables...)
 
 	drain:
 		for len(reqs) < raftMergeBatch {
@@ -600,6 +610,7 @@ func (d *DB) applyLoop() {
 				}
 				_ = tmp.Close()
 				reqs = append(reqs, more)
+				itemCacheTables = append(itemCacheTables, more.itemCacheTables...)
 			default:
 				break drain
 			}
@@ -616,7 +627,7 @@ func (d *DB) applyLoop() {
 			continue
 		}
 
-		cp, err := d.payloadEncoder.Encode(merged.Repr())
+		cp, err := d.payloadEncoder.Encode(merged.Repr(), itemCacheTables)
 		_ = merged.Close()
 		if err != nil {
 			err = fmt.Errorf("raft apply: encode payload: %w", err)

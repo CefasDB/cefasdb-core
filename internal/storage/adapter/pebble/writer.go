@@ -92,19 +92,20 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		return fmt.Errorf("condition: %w", err)
 	}
 
-	// Read prior under a snapshot so GSI maintenance and the condition
-	// see a consistent view of the row at the moment we plan the
-	// write. The snapshot is cheap (it's just a sequence number in
-	// Pebble) and we drop it immediately after planning.
-	prior, err := d.snapshotGet(primaryKey)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("read prior: %w", err)
-	}
+	appendChange := d.shouldAppendChangeRecord(td)
 	var priorItem types.Item
-	if prior != nil {
-		priorItem, err = storage.DecodeItem(prior)
-		if err != nil {
-			return fmt.Errorf("decode prior: %w", err)
+	if writeNeedsPriorItem(td, !cond.IsZero(), appendChange) {
+		// Read prior under a snapshot only when a condition, changelog,
+		// index, or TTL plan needs it.
+		prior, err := d.snapshotGet(primaryKey)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("read prior: %w", err)
+		}
+		if prior != nil {
+			priorItem, err = storage.DecodeItem(prior)
+			if err != nil {
+				return fmt.Errorf("decode prior: %w", err)
+			}
 		}
 	}
 
@@ -118,21 +119,9 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		}
 	}
 
-	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, item)
+	gsiOps, lsiOps, spatialOps, ttlOps, err := planWriteMaintenance(td, priorItem, item)
 	if err != nil {
-		return fmt.Errorf("plan gsi: %w", err)
-	}
-	lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, item)
-	if err != nil {
-		return fmt.Errorf("plan lsi: %w", err)
-	}
-	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, item)
-	if err != nil {
-		return fmt.Errorf("plan spatial: %w", err)
-	}
-	ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, item)
-	if err != nil {
-		return fmt.Errorf("plan ttl: %w", err)
+		return err
 	}
 
 	b := d.Batch()
@@ -152,12 +141,12 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if d.shouldAppendChangeRecord(td) {
+	if appendChange {
 		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
 	}
-	if err := d.CommitBatch(b); err != nil {
+	if err := d.commitBatchWithItemCacheKeys(b, [][]byte{primaryKey}, []string{td.Name}); err != nil {
 		return err
 	}
 	if isMemoryTable(td) {
@@ -188,15 +177,18 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 		return fmt.Errorf("condition: %w", err)
 	}
 
-	prior, err := d.snapshotGet(primaryKey)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("read prior: %w", err)
-	}
+	appendChange := d.shouldAppendChangeRecord(td)
 	var priorItem types.Item
-	if prior != nil {
-		priorItem, err = storage.DecodeItem(prior)
-		if err != nil {
-			return fmt.Errorf("decode prior: %w", err)
+	if writeNeedsPriorItem(td, !cond.IsZero(), appendChange) {
+		prior, err := d.snapshotGet(primaryKey)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("read prior: %w", err)
+		}
+		if prior != nil {
+			priorItem, err = storage.DecodeItem(prior)
+			if err != nil {
+				return fmt.Errorf("decode prior: %w", err)
+			}
 		}
 	}
 
@@ -210,22 +202,9 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 		}
 	}
 
-	// Plan every secondary delta from priorItem → nil.
-	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
+	gsiOps, lsiOps, spatialOps, ttlOps, err := planWriteMaintenance(td, priorItem, nil)
 	if err != nil {
-		return fmt.Errorf("plan gsi: %w", err)
-	}
-	lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
-	if err != nil {
-		return fmt.Errorf("plan lsi: %w", err)
-	}
-	spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
-	if err != nil {
-		return fmt.Errorf("plan spatial: %w", err)
-	}
-	ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, nil)
-	if err != nil {
-		return fmt.Errorf("plan ttl: %w", err)
+		return err
 	}
 
 	b := d.Batch()
@@ -245,12 +224,12 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if err := applyIndexOps(b, ttlOps); err != nil {
 		return err
 	}
-	if d.shouldAppendChangeRecord(td) {
+	if appendChange {
 		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
 	}
-	if err := d.CommitBatch(b); err != nil {
+	if err := d.commitBatchWithItemCacheKeys(b, [][]byte{primaryKey}, []string{td.Name}); err != nil {
 		return err
 	}
 	if isMemoryTable(td) {
@@ -293,6 +272,55 @@ func applyIndexOps(b *pebbledb.Batch, ops []storage.IndexOp) error {
 	return nil
 }
 
+func writeNeedsPriorItem(td types.TableDescriptor, hasCondition, appendChange bool) bool {
+	return hasCondition || appendChange || writeNeedsIndexMaintenance(td)
+}
+
+func writeNeedsIndexMaintenance(td types.TableDescriptor) bool {
+	return len(td.GSIs) > 0 ||
+		len(td.LSIs) > 0 ||
+		len(td.SpatialIndexes) > 0 ||
+		td.TTLAttribute != ""
+}
+
+func planWriteMaintenance(td types.TableDescriptor, prior, next types.Item) (
+	gsiOps []storage.IndexOp,
+	lsiOps []storage.IndexOp,
+	spatialOps []storage.IndexOp,
+	ttlOps []storage.IndexOp,
+	err error,
+) {
+	if len(td.GSIs) > 0 {
+		gsiOps, err = storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, prior, next)
+		if err != nil {
+			err = fmt.Errorf("plan gsi: %w", err)
+			return
+		}
+	}
+	if len(td.LSIs) > 0 {
+		lsiOps, err = storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, prior, next)
+		if err != nil {
+			err = fmt.Errorf("plan lsi: %w", err)
+			return
+		}
+	}
+	if len(td.SpatialIndexes) > 0 {
+		spatialOps, err = planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, prior, next)
+		if err != nil {
+			err = fmt.Errorf("plan spatial: %w", err)
+			return
+		}
+	}
+	if td.TTLAttribute != "" {
+		ttlOps, err = planTTL(td.Name, td.KeySchema, td.TTLAttribute, prior, next)
+		if err != nil {
+			err = fmt.Errorf("plan ttl: %w", err)
+			return
+		}
+	}
+	return
+}
+
 // GetItem loads an item by its key attributes. Returns ErrItemNotFound
 // when the key is absent.
 func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (types.Item, error) {
@@ -321,6 +349,10 @@ func (d *DB) GetEncodedItemByKeyBytes(table string, pk, sk []byte) ([]byte, erro
 	if v, ok := d.memoryGet(table, primaryKey); ok {
 		return v, nil
 	}
+	if v, ok := d.items.get(primaryKey); ok {
+		return v, nil
+	}
+	cacheEpoch := d.items.mutationEpoch()
 	v, err := d.Get(primaryKey)
 	if errors.Is(err, ErrNotFound) {
 		return nil, types.ErrItemNotFound
@@ -328,6 +360,7 @@ func (d *DB) GetEncodedItemByKeyBytes(table string, pk, sk []byte) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+	d.items.setIfEpoch(primaryKey, v, cacheEpoch)
 	return v, nil
 }
 
@@ -557,10 +590,11 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 // same batch — this is exactly the read-your-writes consistency
 // callers expect from a "batch" operation.
 //
-// Note: BatchWriteItem reads the prior version of each touched item
-// under a single snapshot, so within-batch reordering of writes on the
-// same primary key is undefined. Callers should not include two ops
-// targeting the same key in a single batch.
+// Note: when index maintenance or changelog records require old values,
+// BatchWriteItem reads the prior version of each touched item under a
+// single snapshot. Within-batch reordering of writes on the same primary
+// key is undefined. Callers should not include two ops targeting the same
+// key in a single batch.
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	if len(ops) == 0 {
 		return nil
@@ -568,8 +602,14 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
-	snap := d.db.NewSnapshot()
-	defer snap.Close()
+	appendChange := d.shouldAppendChangeRecord(td)
+	needsPrior := writeNeedsPriorItem(td, false, appendChange)
+	memoryTable := isMemoryTable(td)
+	var snap *pebbledb.Snapshot
+	if needsPrior {
+		snap = d.db.NewSnapshot()
+		defer snap.Close()
+	}
 
 	b := d.Batch()
 	defer b.Close()
@@ -579,6 +619,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 		delete bool
 	}
 	var memDeltas []memDelta
+	itemCacheKeys := make([][]byte, 0, len(ops))
 
 	for i, op := range ops {
 		switch op.Op {
@@ -595,33 +636,25 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 				return fmt.Errorf("op %d encode: %w", i, err)
 			}
 			primaryKey := storage.KeyPrimary(td.Name, pk, sk)
-			priorItem, err := readSnapshotItem(snap, primaryKey)
-			if err != nil {
-				return fmt.Errorf("op %d prior: %w", i, err)
+			var priorItem types.Item
+			if needsPrior {
+				priorItem, err = readSnapshotItem(snap, primaryKey)
+				if err != nil {
+					return fmt.Errorf("op %d prior: %w", i, err)
+				}
 			}
-			gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, op.Item)
+			gsiOps, lsiOps, spatialOps, ttlOps, err := planWriteMaintenance(td, priorItem, op.Item)
 			if err != nil {
-				return fmt.Errorf("op %d gsi: %w", i, err)
-			}
-			lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, op.Item)
-			if err != nil {
-				return fmt.Errorf("op %d lsi: %w", i, err)
-			}
-			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, op.Item)
-			if err != nil {
-				return fmt.Errorf("op %d spatial: %w", i, err)
-			}
-			ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, op.Item)
-			if err != nil {
-				return fmt.Errorf("op %d ttl: %w", i, err)
+				return fmt.Errorf("op %d: %w", i, err)
 			}
 			if err := b.Set(primaryKey, enc, nil); err != nil {
 				return err
 			}
-			if isMemoryTable(td) {
+			itemCacheKeys = append(itemCacheKeys, primaryKey)
+			if memoryTable {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
 			}
-			if d.shouldAppendChangeRecord(td) {
+			if appendChange {
 				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}
@@ -644,33 +677,25 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
 			primaryKey := storage.KeyPrimary(td.Name, pk, sk)
-			priorItem, err := readSnapshotItem(snap, primaryKey)
-			if err != nil {
-				return fmt.Errorf("op %d prior: %w", i, err)
+			var priorItem types.Item
+			if needsPrior {
+				priorItem, err = readSnapshotItem(snap, primaryKey)
+				if err != nil {
+					return fmt.Errorf("op %d prior: %w", i, err)
+				}
 			}
-			gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, nil)
+			gsiOps, lsiOps, spatialOps, ttlOps, err := planWriteMaintenance(td, priorItem, nil)
 			if err != nil {
-				return fmt.Errorf("op %d gsi: %w", i, err)
-			}
-			lsiOps, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, priorItem, nil)
-			if err != nil {
-				return fmt.Errorf("op %d lsi: %w", i, err)
-			}
-			spatialOps, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, priorItem, nil)
-			if err != nil {
-				return fmt.Errorf("op %d spatial: %w", i, err)
-			}
-			ttlOps, err := planTTL(td.Name, td.KeySchema, td.TTLAttribute, priorItem, nil)
-			if err != nil {
-				return fmt.Errorf("op %d ttl: %w", i, err)
+				return fmt.Errorf("op %d: %w", i, err)
 			}
 			if err := b.Delete(primaryKey, nil); err != nil {
 				return err
 			}
-			if isMemoryTable(td) {
+			itemCacheKeys = append(itemCacheKeys, primaryKey)
+			if memoryTable {
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), delete: true})
 			}
-			if d.shouldAppendChangeRecord(td) {
+			if appendChange {
 				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}
@@ -691,10 +716,10 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			return fmt.Errorf("op %d: unknown kind %d", i, op.Op)
 		}
 	}
-	if err := d.CommitBatch(b); err != nil {
+	if err := d.commitBatchWithItemCacheKeys(b, itemCacheKeys, []string{td.Name}); err != nil {
 		return err
 	}
-	if isMemoryTable(td) {
+	if memoryTable {
 		for _, delta := range memDeltas {
 			if delta.delete {
 				d.memoryDelete(td.Name, delta.key)

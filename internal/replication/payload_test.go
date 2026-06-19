@@ -64,6 +64,25 @@ func TestRaftPayloadCompressionNoneKeepsPayloadRaw(t *testing.T) {
 	}
 }
 
+func TestRaftPayloadMetadataRoundTrip(t *testing.T) {
+	repr := []byte(strings.Repeat("payload-", 2048))
+	encoded, err := encodeRaftPayloadWithTables(repr, []string{"t1", "t2", "t1"}, LogCompressionSnappy)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	decoded, err := decodeRaftPayloadWithMetadata(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !bytes.Equal(decoded.Repr, repr) {
+		t.Fatalf("decoded repr mismatch")
+	}
+	if got, want := strings.Join(decoded.ItemCacheTables, ","), "t1,t2"; got != want {
+		t.Fatalf("tables = %q, want %q", got, want)
+	}
+}
+
 func TestRaftPayloadCompressionSkipsAfterUnhelpfulPayload(t *testing.T) {
 	repr := deterministicBytes(4096)
 	encoder, err := newRaftPayloadEncoder(Config{
@@ -75,7 +94,7 @@ func TestRaftPayloadCompressionSkipsAfterUnhelpfulPayload(t *testing.T) {
 		t.Fatalf("encoder: %v", err)
 	}
 
-	encoded, err := encoder.Encode(repr)
+	encoded, err := encoder.Encode(repr, nil)
 	if err != nil {
 		t.Fatalf("encode first: %v", err)
 	}
@@ -86,7 +105,7 @@ func TestRaftPayloadCompressionSkipsAfterUnhelpfulPayload(t *testing.T) {
 		t.Fatalf("raw payload changed")
 	}
 
-	encoded, err = encoder.Encode(repr)
+	encoded, err = encoder.Encode(repr, nil)
 	if err != nil {
 		t.Fatalf("encode second: %v", err)
 	}
@@ -123,7 +142,7 @@ func TestFSMApplyCompressedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	resp := newFSM(db).Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
+	resp := newFSM(db, nil, nil).Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
 	if resp != nil {
 		t.Fatalf("apply response = %v", resp)
 	}

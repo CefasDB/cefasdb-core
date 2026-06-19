@@ -169,6 +169,34 @@ func PrimaryTokenFromKey(key []byte) (uint64, bool) {
 	return binary.BigEndian.Uint64(key[tokenStart : tokenStart+8]), true
 }
 
+// PrimaryTableFromKey extracts the table name from a primary-row storage key.
+// It returns false for catalog, index, TTL, and malformed keys.
+func PrimaryTableFromKey(key []byte) (string, bool) {
+	table, ok := PrimaryTableBytesFromKey(key)
+	if !ok {
+		return "", false
+	}
+	return string(table), true
+}
+
+// PrimaryTableBytesFromKey extracts the table name bytes from a primary-row
+// storage key. The returned slice aliases key.
+func PrimaryTableBytesFromKey(key []byte) ([]byte, bool) {
+	if !bytes.HasPrefix(key, []byte(pTables)) {
+		return nil, false
+	}
+	rest := key[len(pTables):]
+	pos := bytes.Index(rest, []byte(SegPrimary))
+	if pos <= 0 {
+		return nil, false
+	}
+	tokenStart := len(pTables) + pos + len(SegPrimary)
+	if len(key) < tokenStart+8 {
+		return nil, false
+	}
+	return rest[:pos], true
+}
+
 // PrefixPrimaryByPK returns the [lower, upper) bound covering every SK
 // under a single PK — used for Query without an SK condition.
 func PrefixPrimaryByPK(table string, pkSerialized []byte) (lower, upper []byte) {

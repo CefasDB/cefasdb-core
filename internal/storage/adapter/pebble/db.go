@@ -19,7 +19,7 @@ import (
 // In Phase 1 nothing implements this; in Phase 4 the raft.DB wires in.
 type Replicator interface {
 	IsLeader() bool
-	Replicate(repr []byte) error
+	Replicate(repr []byte, itemCacheTables []string) error
 	LeaderHTTPAddr() string
 }
 
@@ -90,6 +90,7 @@ type DB struct {
 	syncOpt *pebbledb.WriteOptions
 	repl    Replicator
 	bp      backpressureController
+	items   *itemCache
 
 	backupMu             sync.Mutex
 	activeBackupRestores map[string]int
@@ -106,8 +107,10 @@ type DB struct {
 }
 
 type commitReq struct {
-	batch *pebbledb.Batch
-	done  chan error
+	batch           *pebbledb.Batch
+	done            chan error
+	itemCacheKeys   [][]byte
+	itemCacheTables []string
 }
 
 const (
@@ -137,6 +140,7 @@ func Open(opts Options) (*DB, error) {
 		stopped:              make(chan struct{}),
 		syncOpt:              syncOpt,
 		bp:                   newBackpressureController(opts.Backpressure),
+		items:                newItemCache(defaultItemCacheEntries),
 		streamRetention:      normalizeStreamRetentionOptions(opts.StreamRetention),
 		changeLogMode:        normalizeChangeLogMode(opts.ChangeLogMode),
 		activeBackupRestores: make(map[string]int),
@@ -220,9 +224,18 @@ func (d *DB) Set(key, value []byte) error {
 		if err := b.Set(key, value, nil); err != nil {
 			return err
 		}
-		return d.repl.Replicate(b.Repr())
+		return d.repl.Replicate(b.Repr(), primaryKeyTables(key))
 	}
-	return d.db.Set(key, value, d.syncOpt)
+	if _, ok := storage.PrimaryTokenFromKey(key); ok {
+		d.items.delete(key)
+	}
+	if err := d.db.Set(key, value, d.syncOpt); err != nil {
+		return err
+	}
+	if _, ok := storage.PrimaryTokenFromKey(key); ok {
+		d.items.delete(key)
+	}
+	return nil
 }
 
 // Delete removes a key.
@@ -236,9 +249,18 @@ func (d *DB) Delete(key []byte) error {
 		if err := b.Delete(key, nil); err != nil {
 			return err
 		}
-		return d.repl.Replicate(b.Repr())
+		return d.repl.Replicate(b.Repr(), primaryKeyTables(key))
 	}
-	return d.db.Delete(key, d.syncOpt)
+	if _, ok := storage.PrimaryTokenFromKey(key); ok {
+		d.items.delete(key)
+	}
+	if err := d.db.Delete(key, d.syncOpt); err != nil {
+		return err
+	}
+	if _, ok := storage.PrimaryTokenFromKey(key); ok {
+		d.items.delete(key)
+	}
+	return nil
 }
 
 // Batch returns a fresh Pebble batch. Caller MUST Close it after either
@@ -250,13 +272,22 @@ func (d *DB) Batch() *pebbledb.Batch { return d.db.NewBatch() }
 // flows through Replicate (the FSM applies it on every node, including
 // this one). Caller still owns b and must Close it after this returns.
 func (d *DB) CommitBatch(b *pebbledb.Batch) error {
+	return d.commitBatchWithItemCacheKeys(b, nil, nil)
+}
+
+func (d *DB) commitBatchWithItemCacheKeys(b *pebbledb.Batch, itemCacheKeys [][]byte, itemCacheTables []string) error {
 	if d.repl != nil {
 		if !d.repl.IsLeader() {
 			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
 		}
-		return d.repl.Replicate(b.Repr())
+		return d.repl.Replicate(b.Repr(), itemCacheTables)
 	}
-	req := &commitReq{batch: b, done: make(chan error, 1)}
+	req := &commitReq{
+		batch:           b,
+		done:            make(chan error, 1),
+		itemCacheKeys:   itemCacheKeys,
+		itemCacheTables: itemCacheTables,
+	}
 	select {
 	case d.commitCh <- req:
 	case <-d.stopCh:
@@ -292,6 +323,8 @@ func (d *DB) commitLoop() {
 			continue
 		}
 		reqs := []*commitReq{first}
+		itemCacheTables := append([]string(nil), first.itemCacheTables...)
+		hasGenericCacheMutation := len(first.itemCacheKeys) == 0
 
 	drain:
 		for len(reqs) < maxMergeBatch {
@@ -302,17 +335,66 @@ func (d *DB) commitLoop() {
 					break drain
 				}
 				reqs = append(reqs, more)
+				itemCacheTables = append(itemCacheTables, more.itemCacheTables...)
+				if len(more.itemCacheKeys) == 0 {
+					hasGenericCacheMutation = true
+				}
 			default:
 				break drain
 			}
 		}
 
+		var repr []byte
+		if hasGenericCacheMutation && d.items.hasEntries() {
+			repr = merged.Repr()
+			d.ObservePendingBatch(repr)
+		} else if len(itemCacheTables) > 0 {
+			if d.items.hasAnyTable(itemCacheTables) {
+				d.items.deleteKeysForTables(itemCacheKeysFromRequests(reqs), itemCacheTables)
+			} else {
+				d.items.markMutation()
+			}
+		}
 		err := merged.Commit(d.syncOpt)
+		if err == nil {
+			if repr != nil {
+				d.ObserveAppliedBatch(repr)
+			} else if len(itemCacheTables) > 0 {
+				if d.items.hasAnyTable(itemCacheTables) {
+					d.items.deleteKeysForTables(itemCacheKeysFromRequests(reqs), itemCacheTables)
+				} else {
+					d.items.markMutation()
+				}
+			}
+		}
 		_ = merged.Close()
 		for _, r := range reqs {
 			r.done <- err
 		}
 	}
+}
+
+func itemCacheKeysFromRequests(reqs []*commitReq) [][]byte {
+	var total int
+	for _, req := range reqs {
+		total += len(req.itemCacheKeys)
+	}
+	if total == 0 {
+		return nil
+	}
+	keys := make([][]byte, 0, total)
+	for _, req := range reqs {
+		keys = append(keys, req.itemCacheKeys...)
+	}
+	return keys
+}
+
+func primaryKeyTables(key []byte) []string {
+	table, ok := storage.PrimaryTableFromKey(key)
+	if !ok {
+		return nil
+	}
+	return []string{table}
 }
 
 // Iter returns a new iterator scoped to [lower, upper). Caller MUST Close.

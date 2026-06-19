@@ -23,14 +23,18 @@ import (
 // Snapshot() before returning the FSMSnapshot — the iterator sees a
 // stable view even as new entries land.
 type fsm struct {
-	pebble    *pebbledb.DB
-	publisher *Publisher // nil when no CDC subscribers ever attached
+	pebble        *pebbledb.DB
+	publisher     *Publisher // nil when no CDC subscribers ever attached
+	applyPrepare  func(repr []byte, itemCacheTables []string)
+	applyObserver func(repr []byte, itemCacheTables []string)
 	// applyIndex tracks the most recent log index for the CDC event
 	// stamps. The raft engine hands us the log via Apply(*Log) so we
 	// pull it from there.
 }
 
-func newFSM(pebble *pebbledb.DB) *fsm { return &fsm{pebble: pebble} }
+func newFSM(pebble *pebbledb.DB, prepare, observe func([]byte, []string)) *fsm {
+	return &fsm{pebble: pebble, applyPrepare: prepare, applyObserver: observe}
+}
 
 // AttachPublisher wires a Publisher onto the FSM. After this call
 // every committed batch emits ChangeEvents for the cefas/ keys it
@@ -48,14 +52,21 @@ func (f *fsm) Apply(log *hraft.Log) any {
 	if log == nil || log.Type != hraft.LogCommand || len(log.Data) == 0 {
 		return nil
 	}
-	repr, err := decodeRaftPayload(log.Data)
+	payload, err := decodeRaftPayloadWithMetadata(log.Data)
 	if err != nil {
 		return fmt.Errorf("fsm apply: decode raft payload: %w", err)
 	}
+	repr := payload.Repr
 
 	if f.publisher != nil {
+		if f.applyPrepare != nil {
+			f.applyPrepare(repr, payload.ItemCacheTables)
+		}
 		if err := applyAndPublish(f.pebble, repr, log.Index, f.publisher); err != nil {
 			return fmt.Errorf("fsm apply (cdc): %w", err)
+		}
+		if f.applyObserver != nil {
+			f.applyObserver(repr, payload.ItemCacheTables)
 		}
 		return nil
 	}
@@ -65,8 +76,14 @@ func (f *fsm) Apply(log *hraft.Log) any {
 	if err := batch.SetRepr(repr); err != nil {
 		return fmt.Errorf("fsm apply: SetRepr: %w", err)
 	}
+	if f.applyPrepare != nil {
+		f.applyPrepare(repr, payload.ItemCacheTables)
+	}
 	if err := batch.Commit(pebbledb.NoSync); err != nil {
 		return fmt.Errorf("fsm apply: commit: %w", err)
+	}
+	if f.applyObserver != nil {
+		f.applyObserver(repr, payload.ItemCacheTables)
 	}
 	return nil
 }
@@ -85,6 +102,9 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	defer rc.Close()
 	if err := readSnapshot(rc, f.pebble); err != nil {
 		return fmt.Errorf("fsm restore: %w", err)
+	}
+	if f.applyObserver != nil {
+		f.applyObserver(nil, nil)
 	}
 	return nil
 }

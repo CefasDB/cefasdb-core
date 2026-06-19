@@ -361,6 +361,8 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		LogCompressionMinBytes:        m.cfg.LogCompressionMinBytes,
 		LogCompressionMinSavingsRatio: m.cfg.LogCompressionMinSavingsRatio,
 		LogCompressionSkipCooldown:    m.cfg.LogCompressionSkipCooldown,
+		ApplyPrepareObserver:          st.ObservePendingBatchWithTables,
+		ApplyObserver:                 st.ObserveAppliedBatchWithTables,
 		LogOutput:                     m.cfg.LogOutput,
 	}
 	if m.mux != nil {
