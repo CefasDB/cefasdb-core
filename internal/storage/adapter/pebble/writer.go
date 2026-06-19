@@ -587,10 +587,11 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 // same batch — this is exactly the read-your-writes consistency
 // callers expect from a "batch" operation.
 //
-// Note: BatchWriteItem reads the prior version of each touched item
-// under a single snapshot, so within-batch reordering of writes on the
-// same primary key is undefined. Callers should not include two ops
-// targeting the same key in a single batch.
+// Note: When BatchWriteItem needs prior reads (for indexes, TTL,
+// spatial indexes, or change-log records), it reads the prior version
+// of each touched item under a single snapshot, so within-batch
+// reordering of writes on the same primary key is undefined. Callers
+// should not include two ops targeting the same key in a single batch.
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	if len(ops) == 0 {
 		return nil
