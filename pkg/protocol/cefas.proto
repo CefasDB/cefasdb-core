@@ -906,6 +906,7 @@ message ShardPlacement {
   repeated string voters = 5;
   repeated string non_voters = 6;
   string leader_hint     = 7;
+  string actual_leader   = 8;
 }
 
 message RangeHotspotSummary {

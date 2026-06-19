@@ -64,13 +64,14 @@ type TokenRange struct {
 // ShardPlacement describes the token ownership and Raft membership
 // for one shard.
 type ShardPlacement struct {
-	ID         uint32
-	Ranges     []TokenRange
-	State      string
-	Epoch      uint64
-	Voters     []string
-	NonVoters  []string
-	LeaderHint string
+	ID           uint32
+	Ranges       []TokenRange
+	State        string
+	Epoch        uint64
+	Voters       []string
+	NonVoters    []string
+	LeaderHint   string
+	ActualLeader string
 }
 
 // RangeHotspotSummary is the per-bucket traffic and latency snapshot
@@ -199,13 +200,14 @@ func shardPlacementsFromPB(in []*cefaspb.ShardPlacement) []ShardPlacement {
 	out := make([]ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, ShardPlacement{
-			ID:         sh.GetId(),
-			Ranges:     tokenRangesFromPB(sh.GetRanges()),
-			State:      sh.GetState(),
-			Epoch:      sh.GetEpoch(),
-			Voters:     append([]string(nil), sh.GetVoters()...),
-			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
-			LeaderHint: sh.GetLeaderHint(),
+			ID:           sh.GetId(),
+			Ranges:       tokenRangesFromPB(sh.GetRanges()),
+			State:        sh.GetState(),
+			Epoch:        sh.GetEpoch(),
+			Voters:       append([]string(nil), sh.GetVoters()...),
+			NonVoters:    append([]string(nil), sh.GetNonVoters()...),
+			LeaderHint:   sh.GetLeaderHint(),
+			ActualLeader: sh.GetActualLeader(),
 		})
 	}
 	return out
@@ -320,13 +322,14 @@ func shardPlacementsToPB(in []ShardPlacement) []*cefaspb.ShardPlacement {
 	out := make([]*cefaspb.ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, &cefaspb.ShardPlacement{
-			Id:         sh.ID,
-			Ranges:     tokenRangesToPB(sh.Ranges),
-			State:      sh.State,
-			Epoch:      sh.Epoch,
-			Voters:     append([]string(nil), sh.Voters...),
-			NonVoters:  append([]string(nil), sh.NonVoters...),
-			LeaderHint: sh.LeaderHint,
+			Id:           sh.ID,
+			Ranges:       tokenRangesToPB(sh.Ranges),
+			State:        sh.State,
+			Epoch:        sh.Epoch,
+			Voters:       append([]string(nil), sh.Voters...),
+			NonVoters:    append([]string(nil), sh.NonVoters...),
+			LeaderHint:   sh.LeaderHint,
+			ActualLeader: sh.ActualLeader,
 		})
 	}
 	return out

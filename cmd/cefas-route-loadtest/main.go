@@ -53,10 +53,12 @@ type tokenRange struct {
 }
 
 type shardRoute struct {
-	ID         uint32       `json:"id"`
-	Ranges     []tokenRange `json:"ranges"`
-	Voters     []string     `json:"voters"`
-	LeaderHint string       `json:"leader_hint"`
+	ID           uint32       `json:"id"`
+	Ranges       []tokenRange `json:"ranges"`
+	Voters       []string     `json:"voters"`
+	LeaderHint   string       `json:"leader_hint"`
+	ActualLeader string       `json:"actual_leader,omitempty"`
+	Leader       string       `json:"leader"`
 }
 
 type router struct {
@@ -151,9 +153,9 @@ func main() {
 	}
 	fmt.Printf("placement: shards=%d strategy=%s version=%d epoch=%d\n", status.ShardCount, status.PlacementStrategy, status.PlacementVersion, status.RoutingEpoch)
 	for _, sh := range shards {
-		fmt.Printf("shard %d leader=%s ranges=%v\n", sh.ID, sh.LeaderHint, sh.Ranges)
-		if _, ok := cs.byNode[sh.LeaderHint]; !ok {
-			fatal("missing node address", fmt.Errorf("leader %q has no configured endpoint", sh.LeaderHint))
+		fmt.Printf("shard %d leader=%s hint=%s ranges=%v\n", sh.ID, sh.Leader, sh.LeaderHint, sh.Ranges)
+		if _, ok := cs.byNode[sh.Leader]; !ok {
+			fatal("missing node address", fmt.Errorf("leader %q has no configured endpoint", sh.Leader))
 		}
 	}
 
@@ -337,22 +339,27 @@ func routerFromStatus(st client.ClusterStatus) (*router, []shardRoute, error) {
 	}
 	shards := make([]shardRoute, 0, len(st.Shards))
 	for _, sh := range st.Shards {
-		leader := sh.LeaderHint
+		leader := sh.ActualLeader
+		if leader == "" {
+			leader = sh.LeaderHint
+		}
 		if leader == "" && len(sh.Voters) > 0 {
 			leader = sh.Voters[0]
 		}
 		if leader == "" {
-			return nil, nil, fmt.Errorf("shard %d has no leader hint or voters", sh.ID)
+			return nil, nil, fmt.Errorf("shard %d has no actual leader, leader hint, or voters", sh.ID)
 		}
 		ranges := make([]tokenRange, 0, len(sh.Ranges))
 		for _, r := range sh.Ranges {
 			ranges = append(ranges, tokenRange{Start: r.Start, End: r.End})
 		}
 		shards = append(shards, shardRoute{
-			ID:         sh.ID,
-			Ranges:     ranges,
-			Voters:     append([]string(nil), sh.Voters...),
-			LeaderHint: leader,
+			ID:           sh.ID,
+			Ranges:       ranges,
+			Voters:       append([]string(nil), sh.Voters...),
+			LeaderHint:   sh.LeaderHint,
+			ActualLeader: sh.ActualLeader,
+			Leader:       leader,
 		})
 	}
 	return &router{shards: shards}, shards, nil
@@ -362,7 +369,7 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 	if len(shards) == 0 {
 		return errors.New("no shards")
 	}
-	leader := shards[0].LeaderHint
+	leader := shards[0].Leader
 	cli := cs.byNode[leader]
 	if cli == nil {
 		return fmt.Errorf("metadata shard leader %q has no client", leader)
@@ -705,7 +712,7 @@ func (r *router) routeForID(id, users int64) (routeTarget, error) {
 			if contains(rng, token) {
 				return routeTarget{
 					ShardID: sh.ID,
-					Leader:  sh.LeaderHint,
+					Leader:  sh.Leader,
 					Voters:  append([]string(nil), sh.Voters...),
 				}, nil
 			}

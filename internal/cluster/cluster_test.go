@@ -378,6 +378,16 @@ func TestMultiShardCluster(t *testing.T) {
 	}
 	t.Logf("leaders: shard0=n%d shard1=n%d", leaderOfShard[0], leaderOfShard[1])
 
+	wait.Eventually(t, func() bool {
+		leaders := mgrs[0].ShardLeaders()
+		for shardID, nodeIdx := range leaderOfShard {
+			if leaders[uint32(shardID)] != fmt.Sprintf("n%d", nodeIdx) {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "manager did not report actual shard leaders")
+
 	// Find two keys that route to different shards.
 	td := types.TableDescriptor{Name: "events", KeySchema: types.KeySchema{PK: "id"}}
 	router := mgrs[0].Router()

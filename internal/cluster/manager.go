@@ -406,6 +406,30 @@ func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool
 	return placement.ShardPlacement{ID: shardID, State: placement.ShardStateActive, Epoch: m.cat.Epoch}, false
 }
 
+// ShardLeaders returns this node's current view of each shard's Raft
+// leader. Missing entries mean the leader is not known locally yet.
+func (m *Manager) ShardLeaders() map[uint32]string {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	shards := append([]*Shard(nil), m.shards...)
+	m.mu.RUnlock()
+
+	out := make(map[uint32]string, len(shards))
+	for _, sh := range shards {
+		if sh == nil || sh.Raft == nil {
+			continue
+		}
+		leaderID, _ := sh.Raft.LeaderInfo()
+		if leaderID == "" {
+			continue
+		}
+		out[sh.ID] = leaderID
+	}
+	return out
+}
+
 func storageTuningForShards(shards int, tuning pebble.PebbleTuning) pebble.PebbleTuning {
 	if shards <= 1 {
 		return tuning

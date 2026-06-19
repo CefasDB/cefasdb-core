@@ -1371,7 +1371,7 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 		resp.PlacementVersion = placement.Version
 		resp.ShardCount = int32(len(placement.Shards))
 		resp.PlacementStrategy = placement.Strategy
-		resp.Shards = pbShardPlacements(placement.Shards)
+		resp.Shards = pbShardPlacements(placement.Shards, s.manager.ShardLeaders())
 		resp.Nodes = pbNodeDescriptors(sortedPlacementNodes(placement))
 	}
 	if s.metrics != nil {
@@ -1416,17 +1416,18 @@ func scheduledBackupStatusToPB(status pebble.ScheduledBackupStatus) *cefaspb.Sch
 	}
 }
 
-func pbShardPlacements(in []placement.ShardPlacement) []*cefaspb.ShardPlacement {
+func pbShardPlacements(in []placement.ShardPlacement, leaders map[uint32]string) []*cefaspb.ShardPlacement {
 	out := make([]*cefaspb.ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, &cefaspb.ShardPlacement{
-			Id:         sh.ID,
-			Ranges:     pbTokenRanges(sh.Ranges),
-			State:      string(sh.State),
-			Epoch:      sh.Epoch,
-			Voters:     append([]string(nil), sh.Voters...),
-			NonVoters:  append([]string(nil), sh.NonVoters...),
-			LeaderHint: sh.LeaderHint,
+			Id:           sh.ID,
+			Ranges:       pbTokenRanges(sh.Ranges),
+			State:        string(sh.State),
+			Epoch:        sh.Epoch,
+			Voters:       append([]string(nil), sh.Voters...),
+			NonVoters:    append([]string(nil), sh.NonVoters...),
+			LeaderHint:   sh.LeaderHint,
+			ActualLeader: leaders[sh.ID],
 		})
 	}
 	return out
@@ -1687,7 +1688,7 @@ func pbPlacementCatalog(cat placement.PlacementCatalog) *cefaspb.PlacementCatalo
 		Version:       cat.Version,
 		Epoch:         cat.Epoch,
 		Strategy:      cat.Strategy,
-		Shards:        pbShardPlacements(cat.Shards),
+		Shards:        pbShardPlacements(cat.Shards, nil),
 		Nodes:         pbNodeDescriptors(sortedPlacementNodes(cat)),
 		UpdatedAtUnix: cat.UpdatedAtUnix,
 	}
