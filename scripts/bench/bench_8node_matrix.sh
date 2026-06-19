@@ -30,6 +30,8 @@ PAYLOAD_BYTES="${PAYLOAD_BYTES:-256}"
 PAYLOAD_MODE="${PAYLOAD_MODE:-repeat}"
 LATENCY_SAMPLE_RATE="${LATENCY_SAMPLE_RATE:-100}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-30s}"
+PHASE_SAMPLE_INTERVAL="${PHASE_SAMPLE_INTERVAL:-0}"
+PHASE_SAMPLE_FILTER="${PHASE_SAMPLE_FILTER:-^(cefas_pebble_|cefas_backpressure_|cefas_raft_|cefas_op_|go_memstats_|process_)}"
 RPC_TIMEOUT="${RPC_TIMEOUT:-30s}"
 WRITE_RATE="${WRITE_RATE:-0}"
 READ_RATE="${READ_RATE:-0}"
@@ -192,7 +194,23 @@ cleanup_cluster() {
   compose down -v >/dev/null 2>&1 || true
 }
 
-trap cleanup_cluster EXIT
+ACTIVE_SAMPLER_PID=""
+
+stop_phase_sampler() {
+  local pid="${1:-}"
+  if [[ -z "$pid" ]]; then
+    return
+  fi
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+}
+
+cleanup() {
+  stop_phase_sampler "${ACTIVE_SAMPLER_PID:-}"
+  cleanup_cluster
+}
+
+trap cleanup EXIT
 
 wait_for_cluster() {
   local attempt ready leaders
@@ -240,6 +258,59 @@ capture_snapshot() {
   done
 }
 
+capture_phase_sample_once() {
+  local phase="$1"
+  local seq="$2"
+  local out="$RESULT_DIR/metrics/${phase}_series"
+  local ts
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$out"
+  {
+    echo "phase=${phase}"
+    echo "sample=${seq}"
+    echo "run_id=${RUN_ID}"
+    echo "commit=$(git rev-parse --short HEAD)"
+    echo "captured_at=${ts}"
+    echo
+    compose ps || true
+  } > "$out/${seq}_${ts}_compose_ps.txt"
+
+  compose ps -q | xargs docker stats --no-stream --format \
+    'name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} net={{.NetIO}} block={{.BlockIO}} pids={{.PIDs}}' \
+    > "$out/${seq}_${ts}_docker_stats.txt" 2>/dev/null || true
+
+  local i
+  for i in $(seq 1 "$NODES"); do
+    local port=$((HTTP_PORT_BASE + i))
+    curl -fsS "http://localhost:${port}/metrics" \
+      | awk -v re="$PHASE_SAMPLE_FILTER" '$0 ~ re {print}' \
+      > "$out/${seq}_${ts}_node${i}.prom" 2>/dev/null || true
+  done
+}
+
+start_phase_sampler() {
+  local phase="$1"
+  ACTIVE_SAMPLER_PID=""
+  if [[ "$PHASE_SAMPLE_INTERVAL" == "0" || -z "$PHASE_SAMPLE_INTERVAL" ]]; then
+    return
+  fi
+  if ! [[ "$PHASE_SAMPLE_INTERVAL" =~ ^[0-9]+$ ]] || [[ "$PHASE_SAMPLE_INTERVAL" -le 0 ]]; then
+    echo "PHASE_SAMPLE_INTERVAL must be a positive integer number of seconds, or 0 to disable sampling" >&2
+    exit 2
+  fi
+
+  capture_phase_sample_once "$phase" "0000"
+  (
+    seq_n=1
+    while true; do
+      sleep "$PHASE_SAMPLE_INTERVAL" || exit 0
+      capture_phase_sample_once "$phase" "$(printf '%04d' "$seq_n")"
+      seq_n=$((seq_n + 1))
+    done
+  ) &
+  ACTIVE_SAMPLER_PID="$!"
+}
+
 record_status() {
   local phase="$1"
   local status="$2"
@@ -252,10 +323,13 @@ run_phase() {
   local log="$RESULT_DIR/logs/${phase}.log"
   echo "== ${phase} =="
   capture_snapshot "${phase}_before"
+  start_phase_sampler "$phase"
   set +e
   "$@" 2>&1 | tee "$log"
   local status=${PIPESTATUS[0]}
   set -e
+  stop_phase_sampler "$ACTIVE_SAMPLER_PID"
+  ACTIVE_SAMPLER_PID=""
   record_status "$phase" "$status"
   capture_snapshot "${phase}_after"
   if [[ "$status" -ne 0 ]]; then
@@ -301,6 +375,83 @@ append_report_rows() {
   ' "$json" >> "$SUMMARY_FILE"
 }
 
+phase_sample_interval_label() {
+  if [[ "$PHASE_SAMPLE_INTERVAL" == "0" || -z "$PHASE_SAMPLE_INTERVAL" ]]; then
+    printf 'disabled'
+  else
+    printf '%ss' "$PHASE_SAMPLE_INTERVAL"
+  fi
+}
+
+phase_sample_file_count() {
+  local phase="$1"
+  local dir="$RESULT_DIR/metrics/${phase}_series"
+  if [[ ! -d "$dir" ]]; then
+    printf '0'
+    return
+  fi
+  find "$dir" -type f -name '*.prom' | wc -l | tr -d ' '
+}
+
+phase_sample_metric_max() {
+  local phase="$1"
+  local metric="$2"
+  local dir="$RESULT_DIR/metrics/${phase}_series"
+  if [[ ! -d "$dir" ]]; then
+    printf 'n/a'
+    return
+  fi
+  local files=("$dir"/*.prom)
+  if [[ ! -e "${files[0]}" ]]; then
+    printf 'n/a'
+    return
+  fi
+  awk -v metric="$metric" '
+    $1 == metric || index($1, metric "{") == 1 {
+      value = $NF + 0
+      if (!seen || value > max) {
+        max = value
+        seen = 1
+      }
+    }
+    END {
+      if (!seen) {
+        printf "n/a"
+      } else if (max == int(max)) {
+        printf "%.0f", max
+      } else {
+        printf "%.2f", max
+      }
+    }
+  ' "${files[@]}"
+}
+
+append_phase_sample_summary() {
+  if [[ "$PHASE_SAMPLE_INTERVAL" == "0" || -z "$PHASE_SAMPLE_INTERVAL" ]]; then
+    return
+  fi
+  {
+    echo
+    echo "Phase samples:"
+    echo
+    echo "| Phase | Prom files | Max read amp | Max L0 files | Max compaction debt bytes | Max compactions in progress | Max backpressure state |"
+    echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"
+  } >> "$SUMMARY_FILE"
+
+  local phase
+  for phase in smoke write_only read_seed read_only mixed; do
+    printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+      "$phase" \
+      "$(phase_sample_file_count "$phase")" \
+      "$(phase_sample_metric_max "$phase" "cefas_pebble_read_amp")" \
+      "$(phase_sample_metric_max "$phase" "cefas_pebble_l0_files")" \
+      "$(phase_sample_metric_max "$phase" "cefas_pebble_compaction_debt_bytes")" \
+      "$(phase_sample_metric_max "$phase" "cefas_pebble_compactions_in_progress")" \
+      "$(phase_sample_metric_max "$phase" "cefas_backpressure_state")" \
+      >> "$SUMMARY_FILE"
+  done
+}
+
 write_summary() {
   {
     echo "# Cefas 8-node benchmark ${RUN_ID}"
@@ -320,6 +471,7 @@ write_summary() {
     echo "- read workers: \`${READ_WORKERS}\`"
     echo "- write rate: \`${WRITE_RATE}\`"
     echo "- read rate: \`${READ_RATE}\`"
+    echo "- phase sample interval: \`$(phase_sample_interval_label)\`"
     echo "- keep cluster: \`${KEEP_CLUSTER}\`"
     echo
     echo "| Phase | Status | Units | Throughput | Errors | Found | p50 | p95 | p99 |"
@@ -330,6 +482,7 @@ write_summary() {
   append_report_rows "read_seed" "$RESULT_DIR/reports/read_seed_${RUN_ID}.json"
   append_report_rows "read_only" "$RESULT_DIR/reports/read_only_${RUN_ID}.json"
   append_report_rows "mixed" "$RESULT_DIR/reports/mixed_${RUN_ID}.json"
+  append_phase_sample_summary
   {
     echo
     echo "Artifacts:"

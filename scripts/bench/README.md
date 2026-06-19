@@ -53,3 +53,16 @@ SHARDS=8 \
 ALLOW_FAILURES=1 \
 scripts/bench/bench_8node_matrix.sh
 ```
+
+Continuous phase sampling:
+
+```bash
+PHASE_SAMPLE_INTERVAL=15 \
+ALLOW_FAILURES=1 \
+scripts/bench/bench_8node_matrix.sh
+```
+
+When enabled, each phase writes timestamped Prometheus and Docker stats samples
+under `metrics/<phase>_series/`. The summary also includes per-phase maxima for
+read amplification, L0 files, compaction debt, compactions in progress, and
+backpressure state.
