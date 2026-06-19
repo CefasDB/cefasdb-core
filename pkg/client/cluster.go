@@ -125,6 +125,36 @@ type MembershipOptions struct {
 	AllShards bool
 }
 
+// LeaderRebalanceOptions controls one explicit leader rebalance pass.
+type LeaderRebalanceOptions struct {
+	DryRun           bool
+	IncludeShardZero bool
+	MaxConcurrent    int
+	TimeoutMS        int
+}
+
+// LeaderRebalanceShardResult is the per-shard outcome from a leader
+// rebalance pass.
+type LeaderRebalanceShardResult struct {
+	ShardID       uint32
+	CurrentLeader string
+	DesiredLeader string
+	Status        string
+	Detail        string
+}
+
+// LeaderRebalanceResult summarizes one explicit leader rebalance pass.
+type LeaderRebalanceResult struct {
+	DryRun           bool
+	IncludeShardZero bool
+	MaxConcurrent    int
+	Planned          int
+	Transferred      int
+	Skipped          int
+	Failed           int
+	Shards           []LeaderRebalanceShardResult
+}
+
 // PlacementCatalog is the cluster-wide placement snapshot — shards,
 // nodes, the placement epoch, and the strategy that produced it.
 type PlacementCatalog struct {
@@ -303,6 +333,52 @@ func (c *Client) RemoveServerWithOptions(ctx context.Context, id string, opts Me
 	}
 	_, err := c.stub.RemoveServer(c.withAuth(ctx), req)
 	return err
+}
+
+// RebalanceLeaders asks the connected node to transfer any locally-led
+// shard whose actual leader does not match its placement leader hint.
+// Shards led by other nodes are reported as skipped.
+func (c *Client) RebalanceLeaders(ctx context.Context, opts LeaderRebalanceOptions) (LeaderRebalanceResult, error) {
+	resp, err := c.stub.RebalanceLeaders(c.withAuth(ctx), &cefaspb.RebalanceLeadersRequest{
+		DryRun:           opts.DryRun,
+		IncludeShardZero: opts.IncludeShardZero,
+		MaxConcurrent:    int32(opts.MaxConcurrent),
+		TimeoutMs:        int32(opts.TimeoutMS),
+	})
+	if err != nil {
+		return LeaderRebalanceResult{}, err
+	}
+	return leaderRebalanceResultFromPB(resp), nil
+}
+
+func leaderRebalanceResultFromPB(in *cefaspb.RebalanceLeadersResponse) LeaderRebalanceResult {
+	if in == nil {
+		return LeaderRebalanceResult{}
+	}
+	return LeaderRebalanceResult{
+		DryRun:           in.GetDryRun(),
+		IncludeShardZero: in.GetIncludeShardZero(),
+		MaxConcurrent:    int(in.GetMaxConcurrent()),
+		Planned:          int(in.GetPlanned()),
+		Transferred:      int(in.GetTransferred()),
+		Skipped:          int(in.GetSkipped()),
+		Failed:           int(in.GetFailed()),
+		Shards:           leaderRebalanceShardResultsFromPB(in.GetShards()),
+	}
+}
+
+func leaderRebalanceShardResultsFromPB(in []*cefaspb.LeaderRebalanceShardResult) []LeaderRebalanceShardResult {
+	out := make([]LeaderRebalanceShardResult, 0, len(in))
+	for _, sh := range in {
+		out = append(out, LeaderRebalanceShardResult{
+			ShardID:       sh.GetShardId(),
+			CurrentLeader: sh.GetCurrentLeader(),
+			DesiredLeader: sh.GetDesiredLeader(),
+			Status:        sh.GetStatus(),
+			Detail:        sh.GetDetail(),
+		})
+	}
+	return out
 }
 
 func placementCatalogToPB(in PlacementCatalog) *cefaspb.PlacementCatalog {

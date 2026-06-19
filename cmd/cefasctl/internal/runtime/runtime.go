@@ -141,7 +141,24 @@ func Dial(ctx context.Context) (*client.Client, clicfg.Profile, error) {
 	if err != nil {
 		return nil, p, err
 	}
+	return dialProfile(ctx, p)
+}
 
+// DialEndpoint is Dial with an explicit endpoint override. It keeps the
+// active profile's auth and TLS settings, which lets commands fan out
+// to several cluster nodes without changing the global session.
+func DialEndpoint(ctx context.Context, endpoint string) (*client.Client, clicfg.Profile, error) {
+	p, err := ResolveProfile(ctx)
+	if err != nil {
+		return nil, p, err
+	}
+	if endpoint != "" {
+		p.Endpoint = endpoint
+	}
+	return dialProfile(ctx, p)
+}
+
+func dialProfile(ctx context.Context, p clicfg.Profile) (*client.Client, clicfg.Profile, error) {
 	token, err := clicfg.ResolveToken(p)
 	if err != nil {
 		return nil, p, err

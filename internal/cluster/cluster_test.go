@@ -465,6 +465,134 @@ func TestMultiShardCluster(t *testing.T) {
 	}
 }
 
+func TestRebalanceLeadersTransfersLocalMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	const nodes = 3
+	const shards = 2
+	const shardID = uint32(1)
+
+	muxAddrs := make([]string, nodes)
+	httpAddrs := make([]string, nodes)
+	for i := range muxAddrs {
+		muxAddrs[i] = pickPort(t)
+		httpAddrs[i] = "http://" + pickPort(t)
+	}
+	peers := map[string]string{}
+	httpPeers := map[string]string{}
+	for i := 0; i < nodes; i++ {
+		peers[fmt.Sprintf("n%d", i)] = muxAddrs[i]
+		httpPeers[fmt.Sprintf("n%d", i)] = httpAddrs[i]
+	}
+
+	mgrs := make([]*cluster.Manager, nodes)
+	defer func() {
+		for _, m := range mgrs {
+			if m != nil {
+				_ = m.Close()
+			}
+		}
+	}()
+
+	for i := 0; i < nodes; i++ {
+		mgr, err := cluster.Open(context.Background(), cluster.Config{
+			Root:                            t.TempDir(),
+			Shards:                          shards,
+			SelfID:                          fmt.Sprintf("n%d", i),
+			MuxAddr:                         muxAddrs[i],
+			Peers:                           peers,
+			PeerHTTPAddrs:                   httpPeers,
+			Bootstrap:                       true,
+			HeartbeatMS:                     50,
+			ElectionMS:                      150,
+			LeaderLeaseMS:                   50,
+			CommitMS:                        10,
+			DisableLeaderHintReconciliation: true,
+			LogOutput:                       io.Discard,
+		})
+		if err != nil {
+			t.Fatalf("open mgr[%d]: %v", i, err)
+		}
+		mgrs[i] = mgr
+	}
+
+	cat := mgrs[0].Placement()
+	desiredLeader := cat.Shards[shardID].LeaderHint
+	desiredIdx := nodeIndex(t, desiredLeader)
+	targetIdx := 0
+	if targetIdx == desiredIdx {
+		targetIdx = 1
+	}
+	targetLeader := fmt.Sprintf("n%d", targetIdx)
+
+	currentIdx := waitManagerShardLeader(t, mgrs, shardID)
+	if currentIdx != targetIdx {
+		currentShard, _ := mgrs[currentIdx].Shard(shardID)
+		if err := currentShard.Raft.TransferLeadership(targetLeader, muxAddrs[targetIdx], 5*time.Second); err != nil {
+			t.Fatalf("transfer shard %d to %s: %v", shardID, targetLeader, err)
+		}
+		wait.Eventually(t, func() bool {
+			sh, _ := mgrs[targetIdx].Shard(shardID)
+			return sh != nil && sh.Raft != nil && sh.Raft.IsLeader()
+		}, 10*time.Second, 50*time.Millisecond, "shard %d did not transfer to %s", shardID, targetLeader)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := mgrs[targetIdx].RebalanceLeaders(ctx, cluster.LeaderRebalanceOptions{
+		MaxConcurrent:   1,
+		TransferTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("rebalance leaders: %v", err)
+	}
+	shardResult := findLeaderRebalanceResult(t, result.Shards, shardID)
+	if shardResult.Status != cluster.LeaderRebalanceStatusTransferred {
+		t.Fatalf("shard %d status = %q detail = %q", shardID, shardResult.Status, shardResult.Detail)
+	}
+	wait.Eventually(t, func() bool {
+		sh, _ := mgrs[desiredIdx].Shard(shardID)
+		return sh != nil && sh.Raft != nil && sh.Raft.IsLeader()
+	}, 10*time.Second, 50*time.Millisecond, "shard %d did not rebalance to %s", shardID, desiredLeader)
+}
+
+func waitManagerShardLeader(t *testing.T, mgrs []*cluster.Manager, shardID uint32) int {
+	t.Helper()
+	leaderIdx := -1
+	wait.Eventually(t, func() bool {
+		for nodeIdx, mgr := range mgrs {
+			sh, _ := mgr.Shard(shardID)
+			if sh != nil && sh.Raft != nil && sh.Raft.IsLeader() {
+				leaderIdx = nodeIdx
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 50*time.Millisecond, "shard %d never elected a leader", shardID)
+	return leaderIdx
+}
+
+func nodeIndex(t *testing.T, nodeID string) int {
+	t.Helper()
+	var idx int
+	if _, err := fmt.Sscanf(nodeID, "n%d", &idx); err != nil {
+		t.Fatalf("parse node id %q: %v", nodeID, err)
+	}
+	return idx
+}
+
+func findLeaderRebalanceResult(t *testing.T, in []cluster.LeaderRebalanceShardResult, shardID uint32) cluster.LeaderRebalanceShardResult {
+	t.Helper()
+	for _, sh := range in {
+		if sh.ShardID == shardID {
+			return sh
+		}
+	}
+	t.Fatalf("missing rebalance result for shard %d: %+v", shardID, in)
+	return cluster.LeaderRebalanceShardResult{}
+}
+
 func hasPrefix(t testing.TB, db *pebble.DB, prefix []byte) bool {
 	t.Helper()
 	upper := append([]byte(nil), prefix...)

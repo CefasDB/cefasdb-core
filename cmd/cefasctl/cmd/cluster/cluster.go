@@ -25,6 +25,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(statusCmd())
 	c.AddCommand(addVoterCmd())
 	c.AddCommand(removeServerCmd())
+	c.AddCommand(rebalanceLeadersCmd())
 	c.AddCommand(planCmd())
 	c.AddCommand(applyCmd())
 	c.AddCommand(splitCmd())
@@ -198,6 +199,97 @@ Example:
 	}
 	_ = c.MarkFlagRequired("id")
 	return c
+}
+
+func rebalanceLeadersCmd() *cobra.Command {
+	var (
+		dryRun           bool
+		includeShardZero bool
+		maxConcurrent    int
+		timeoutMS        int
+		yes              bool
+		nodeEndpoints    []string
+	)
+	c := &cobra.Command{
+		Use:   "rebalance-leaders",
+		Short: "Transfer locally-led shards to their placement leader hints",
+		Long: `Plans or applies Raft leadership transfers for shards whose
+actual leader differs from the placement leader hint.
+
+By default the command operates on the connected endpoint. Repeat
+--node-endpoint to fan out across known node gRPC endpoints. Shards
+currently led by another node are reported as skipped by that endpoint.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !dryRun && !yes {
+				return fmt.Errorf("--yes is required when --dry-run=false")
+			}
+			ctx := cmd.Context()
+			opts := client.LeaderRebalanceOptions{
+				DryRun:           dryRun,
+				IncludeShardZero: includeShardZero,
+				MaxConcurrent:    maxConcurrent,
+				TimeoutMS:        timeoutMS,
+			}
+			if len(nodeEndpoints) == 0 {
+				cli, profile, err := runtime.Dial(ctx)
+				if err != nil {
+					return err
+				}
+				defer cli.Close()
+				result, err := cli.RebalanceLeaders(ctx, opts)
+				if err != nil {
+					return fmt.Errorf("rebalance leaders: %w", err)
+				}
+				fm, err := output.Validate(profile.Output)
+				if err != nil {
+					return err
+				}
+				return output.New(cmd.OutOrStdout(), fm).Object(result)
+			}
+			results := make([]leaderRebalanceEndpointResult, 0, len(nodeEndpoints))
+			var profileOutput string
+			for _, endpoint := range nodeEndpoints {
+				cli, profile, err := runtime.DialEndpoint(ctx, endpoint)
+				if err != nil {
+					return err
+				}
+				result, callErr := cli.RebalanceLeaders(ctx, opts)
+				closeErr := cli.Close()
+				if callErr != nil {
+					return fmt.Errorf("rebalance leaders %s: %w", endpoint, callErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("close %s: %w", endpoint, closeErr)
+				}
+				if profileOutput == "" {
+					profileOutput = profile.Output
+				}
+				results = append(results, leaderRebalanceEndpointResult{
+					Endpoint: endpoint,
+					Result:   result,
+				})
+			}
+			fm, err := output.Validate(profileOutput)
+			if err != nil {
+				return err
+			}
+			return output.New(cmd.OutOrStdout(), fm).Object(map[string]any{"Endpoints": results})
+		},
+	}
+	f := c.Flags()
+	f.BoolVar(&dryRun, "dry-run", true, "Plan transfers without applying them")
+	f.BoolVar(&includeShardZero, "include-shard-zero", false, "Allow transferring shard 0 leadership")
+	f.IntVar(&maxConcurrent, "max-concurrent", 1, "Maximum concurrent local leadership transfers")
+	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Timeout per leadership transfer in milliseconds")
+	f.BoolVar(&yes, "yes", false, "Confirm applying transfers when --dry-run=false")
+	f.StringArrayVar(&nodeEndpoints, "node-endpoint", nil, "gRPC node endpoint to invoke; repeat to fan out across nodes")
+	return c
+}
+
+type leaderRebalanceEndpointResult struct {
+	Endpoint string
+	Result   client.LeaderRebalanceResult
 }
 
 func planCmd() *cobra.Command {
