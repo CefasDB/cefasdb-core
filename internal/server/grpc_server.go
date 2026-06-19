@@ -1555,6 +1555,28 @@ func (s *GRPCServer) RemoveServer(ctx context.Context, req *cefaspb.RemoveServer
 	return &cefaspb.RemoveServerResponse{}, nil
 }
 
+func (s *GRPCServer) RebalanceLeaders(ctx context.Context, req *cefaspb.RebalanceLeadersRequest) (*cefaspb.RebalanceLeadersResponse, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "RebalanceLeaders")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeClusterAdmin); err != nil {
+		return nil, err
+	}
+	if s.manager == nil {
+		return nil, status.Error(codes.FailedPrecondition, "cluster manager not configured")
+	}
+	timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
+	result, err := s.manager.RebalanceLeaders(ctx, cluster.LeaderRebalanceOptions{
+		DryRun:           req.GetDryRun(),
+		IncludeShardZero: req.GetIncludeShardZero(),
+		MaxConcurrent:    int(req.GetMaxConcurrent()),
+		TransferTimeout:  timeout,
+	})
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return pbRebalanceLeadersResponse(result), nil
+}
+
 func (s *GRPCServer) PlanPlacement(ctx context.Context, req *cefaspb.PlanPlacementRequest) (*cefaspb.PlanPlacementResponse, error) {
 	ctx, span := tracing.Tracer().Start(ctx, "PlanPlacement")
 	defer span.End()
@@ -1589,6 +1611,33 @@ func (s *GRPCServer) ApplyPlacement(ctx context.Context, req *cefaspb.ApplyPlace
 		return nil, mapStorageErr(err)
 	}
 	return &cefaspb.ApplyPlacementResponse{Result: pbPlacementApplyResult(result)}, nil
+}
+
+func pbRebalanceLeadersResponse(in cluster.LeaderRebalanceResult) *cefaspb.RebalanceLeadersResponse {
+	return &cefaspb.RebalanceLeadersResponse{
+		DryRun:           in.DryRun,
+		IncludeShardZero: in.IncludeShardZero,
+		MaxConcurrent:    int32(in.MaxConcurrent),
+		Planned:          int32(in.Planned),
+		Transferred:      int32(in.Transferred),
+		Skipped:          int32(in.Skipped),
+		Failed:           int32(in.Failed),
+		Shards:           pbLeaderRebalanceShardResults(in.Shards),
+	}
+}
+
+func pbLeaderRebalanceShardResults(in []cluster.LeaderRebalanceShardResult) []*cefaspb.LeaderRebalanceShardResult {
+	out := make([]*cefaspb.LeaderRebalanceShardResult, 0, len(in))
+	for _, sh := range in {
+		out = append(out, &cefaspb.LeaderRebalanceShardResult{
+			ShardId:       sh.ShardID,
+			CurrentLeader: sh.CurrentLeader,
+			DesiredLeader: sh.DesiredLeader,
+			Status:        sh.Status,
+			Detail:        sh.Detail,
+		})
+	}
+	return out
 }
 
 func (s *GRPCServer) FinalizeSplit(ctx context.Context, req *cefaspb.FinalizeSplitRequest) (*cefaspb.FinalizeSplitResponse, error) {

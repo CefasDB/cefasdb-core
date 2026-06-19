@@ -125,6 +125,8 @@ type Config struct {
 	LogCompressionMinSavingsRatio float64
 	LogCompressionSkipCooldown    time.Duration
 
+	DisableLeaderHintReconciliation bool
+
 	LogOutput io.Writer
 }
 
@@ -241,7 +243,9 @@ func Open(ctx context.Context, cfg Config) (*Manager, error) {
 	if err := mgr.RefreshPlacement(); err != nil {
 		fmt.Fprintf(cfg.LogOutput, "cluster: placement refresh skipped: %v\n", err)
 	}
-	mgr.startLeaderHintReconciliation()
+	if !cfg.DisableLeaderHintReconciliation {
+		mgr.startLeaderHintReconciliation()
+	}
 	return mgr, nil
 }
 
