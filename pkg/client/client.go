@@ -17,19 +17,21 @@ import (
 
 // Client is a typed cefas gRPC client. Safe for concurrent use.
 type Client struct {
-	conn   *grpc.ClientConn
-	stub   cefaspb.CefasClient
-	bearer string
+	conn       *grpc.ClientConn
+	stub       cefaspb.CefasClient
+	bearer     string
+	routeReads *routeAwareReads
 }
 
 // Option configures a Client at Dial time.
 type Option func(*config)
 
 type config struct {
-	bearer    string
-	tls       *tls.Config
-	plaintext bool
-	dialOpts  []grpc.DialOption
+	bearer             string
+	tls                *tls.Config
+	plaintext          bool
+	dialOpts           []grpc.DialOption
+	routeReadEndpoints map[string]string
 }
 
 // WithBearer adds an "Authorization: Bearer <token>" metadata header
@@ -76,6 +78,24 @@ func WithDialOption(o grpc.DialOption) Option {
 	return func(c *config) { c.dialOpts = append(c.dialOpts, o) }
 }
 
+// WithRouteAwareReads enables token-aware eventual reads. nodeEndpoints
+// maps placement node IDs to their gRPC endpoints.
+func WithRouteAwareReads(nodeEndpoints map[string]string) Option {
+	return func(c *config) {
+		if len(nodeEndpoints) == 0 {
+			c.routeReadEndpoints = nil
+			return
+		}
+		c.routeReadEndpoints = make(map[string]string, len(nodeEndpoints))
+		for id, endpoint := range nodeEndpoints {
+			if id == "" || endpoint == "" {
+				continue
+			}
+			c.routeReadEndpoints[id] = endpoint
+		}
+	}
+}
+
 // Dial opens a connection to a cefas server.
 func Dial(ctx context.Context, addr string, opts ...Option) (*Client, error) {
 	cfg := &config{}
@@ -96,11 +116,29 @@ func Dial(ctx context.Context, addr string, opts ...Option) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cefas: dial %s: %w", addr, err)
 	}
-	return &Client{conn: conn, stub: cefaspb.NewCefasClient(conn), bearer: cfg.bearer}, nil
+	c := &Client{conn: conn, stub: cefaspb.NewCefasClient(conn), bearer: cfg.bearer}
+	if len(cfg.routeReadEndpoints) > 0 {
+		routeReads, err := newRouteAwareReads(cfg.routeReadEndpoints, dialOpts)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		c.routeReads = routeReads
+	}
+	return c, nil
 }
 
 // Close releases the underlying gRPC connection.
-func (c *Client) Close() error { return c.conn.Close() }
+func (c *Client) Close() error {
+	var err error
+	if c.routeReads != nil {
+		err = c.routeReads.close()
+	}
+	if cerr := c.conn.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
 
 // withAuth augments outgoing metadata with the bearer token (when set).
 func (c *Client) withAuth(ctx context.Context) context.Context {

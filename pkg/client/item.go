@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
@@ -33,7 +34,8 @@ func (c *Client) PutItem(ctx context.Context, table string, item types.Item, opt
 
 // GetOptions toggles consistency.
 type GetOptions struct {
-	Strong bool
+	Strong     bool
+	RouteAware *bool
 }
 
 // GetItem returns the item, or (nil, nil) when the key is absent.
@@ -46,11 +48,15 @@ func (c *Client) GetItem(ctx context.Context, table string, key types.Item, opts
 	if o.Strong {
 		cons = cefaspb.Consistency_CONSISTENCY_STRONG
 	}
-	resp, err := c.stub.GetItem(c.withAuth(ctx), &cefaspb.GetItemRequest{
+	req := &cefaspb.GetItemRequest{
 		Table:       table,
 		Key:         itemAttrMap(key),
 		Consistency: cons,
-	})
+	}
+	if !o.Strong && c.routeReads != nil && routeAwareOverride(o.RouteAware) {
+		return c.routeAwareGetItem(ctx, table, key, req)
+	}
+	resp, err := c.stub.GetItem(c.withAuth(ctx), req)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +64,58 @@ func (c *Client) GetItem(ctx context.Context, table string, key types.Item, opts
 		return nil, nil
 	}
 	return itemFromPB(resp.GetItem()), nil
+}
+
+func (c *Client) routeAwareGetItem(ctx context.Context, table string, key types.Item, req *cefaspb.GetItemRequest) (types.Item, error) {
+	c.routeReads.attempts.Add(1)
+	pkBytes, err := c.pkBytesForKey(ctx, table, key)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureRoutePlacement(ctx, false); err != nil {
+		return nil, err
+	}
+
+	var last error
+	refreshed := false
+	for {
+		target, token, err := c.routeReads.routeForPK(pkBytes)
+		if err != nil {
+			return nil, err
+		}
+		candidates, err := c.routeReads.candidatesForTarget(target, token, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range candidates {
+			start := node.begin()
+			resp, err := node.stub.GetItem(c.withAuth(ctx), req)
+			node.finish(start, err)
+			if err == nil {
+				c.routeReads.successes.Add(1)
+				c.routeReads.observeServedBy(target, node.id)
+				if !resp.GetFound() {
+					return nil, nil
+				}
+				return itemFromPB(resp.GetItem()), nil
+			}
+			last = err
+			if !c.routeReads.observeRetry(err) {
+				return nil, err
+			}
+		}
+		if refreshed {
+			break
+		}
+		if err := c.ensureRoutePlacement(ctx, true); err != nil {
+			return nil, err
+		}
+		refreshed = true
+	}
+	if last != nil {
+		return nil, last
+	}
+	return nil, fmt.Errorf("route-aware reads: shard has no reachable candidates")
 }
 
 // UpdateOptions carries the aws-shaped UpdateItem accessories.
@@ -150,13 +208,28 @@ func (c *Client) BatchWriteItem(ctx context.Context, table string, ops []BatchWr
 	return err
 }
 
+type BatchGetOptions struct {
+	RouteAware *bool
+}
+
 // BatchGetItem fetches multiple items by primary key.
-func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.Item) ([]types.Item, error) {
+func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.Item, opts ...BatchGetOptions) ([]types.Item, error) {
+	var o BatchGetOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	if c.routeReads != nil && routeAwareOverride(o.RouteAware) {
+		return c.routeAwareBatchGetItem(ctx, table, keys)
+	}
+	return c.batchGetItemWithStub(ctx, c.stub, table, keys)
+}
+
+func (c *Client) batchGetItemWithStub(ctx context.Context, stub cefaspb.CefasClient, table string, keys []types.Item) ([]types.Item, error) {
 	pbKeys := make([]*cefaspb.KeyMap, 0, len(keys))
 	for _, k := range keys {
 		pbKeys = append(pbKeys, &cefaspb.KeyMap{Attributes: itemAttrMap(k)})
 	}
-	resp, err := c.stub.BatchGetItem(c.withAuth(ctx), &cefaspb.BatchGetItemRequest{Table: table, Keys: pbKeys})
+	resp, err := stub.BatchGetItem(c.withAuth(ctx), &cefaspb.BatchGetItemRequest{Table: table, Keys: pbKeys})
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +240,100 @@ func (c *Client) BatchGetItem(ctx context.Context, table string, keys []types.It
 			continue
 		}
 		out[i] = itemFromPB(it.GetAttributes())
+	}
+	return out, nil
+}
+
+func (c *Client) routeAwareBatchGetItem(ctx context.Context, table string, keys []types.Item) ([]types.Item, error) {
+	c.routeReads.attempts.Add(1)
+	if len(keys) == 0 {
+		c.routeReads.successes.Add(1)
+		return []types.Item{}, nil
+	}
+	pkBytes := make([][]byte, len(keys))
+	for i, key := range keys {
+		b, err := c.pkBytesForKey(ctx, table, key)
+		if err != nil {
+			return nil, fmt.Errorf("key %d: %w", i, err)
+		}
+		pkBytes[i] = b
+	}
+	if err := c.ensureRoutePlacement(ctx, false); err != nil {
+		return nil, err
+	}
+
+	var last error
+	refreshed := false
+	for {
+		out, err := c.routeAwareBatchGetAttempt(ctx, table, keys, pkBytes)
+		if err == nil {
+			c.routeReads.successes.Add(1)
+			return out, nil
+		}
+		last = err
+		if !c.routeReads.observeRetry(err) || refreshed {
+			break
+		}
+		if err := c.ensureRoutePlacement(ctx, true); err != nil {
+			return nil, err
+		}
+		refreshed = true
+	}
+	return nil, last
+}
+
+func (c *Client) routeAwareBatchGetAttempt(ctx context.Context, table string, keys []types.Item, pkBytes [][]byte) ([]types.Item, error) {
+	type group struct {
+		node           *routeNode
+		leaderServed   int
+		followerServed int
+		indexes        []int
+		keys           []types.Item
+	}
+	groups := map[string]*group{}
+	order := []string{}
+	for i, b := range pkBytes {
+		target, token, err := c.routeReads.routeForPK(b)
+		if err != nil {
+			return nil, err
+		}
+		candidates, err := c.routeReads.candidatesForTarget(target, token, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		node := candidates[0]
+		g := groups[node.id]
+		if g == nil {
+			g = &group{node: node}
+			groups[node.id] = g
+			order = append(order, node.id)
+		}
+		if target.leader != "" && target.leader == node.id {
+			g.leaderServed++
+		} else {
+			g.followerServed++
+		}
+		g.indexes = append(g.indexes, i)
+		g.keys = append(g.keys, keys[i])
+	}
+
+	out := make([]types.Item, len(keys))
+	for _, nodeID := range order {
+		g := groups[nodeID]
+		start := g.node.begin()
+		items, err := c.batchGetItemWithStub(ctx, g.node.stub, table, g.keys)
+		g.node.finish(start, err)
+		if err != nil {
+			return nil, err
+		}
+		c.routeReads.leaderServed.Add(uint64(g.leaderServed))
+		c.routeReads.followerServed.Add(uint64(g.followerServed))
+		for i, item := range items {
+			if i >= len(g.indexes) {
+				break
+			}
+			out[g.indexes[i]] = item
+		}
 	}
 	return out, nil
 }
