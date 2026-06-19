@@ -16,6 +16,9 @@ Default matrix:
 - read-only: 512 read workers for 5 minutes
 - mixed: 64 write workers plus 512 read workers for 5 minutes
 - placement: 8 nodes, 24 shards, RF=3 unless `REPLICATION_FACTOR` is overridden
+- storage changelog: server default `streams-only`; use
+  `SERVER_EXTRA_ARGS="-storage-changelog-mode always"` when measuring the
+  full physical changelog/PITR path
 
 Typical baseline run:
 

@@ -29,6 +29,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.BackupScheduler.Enabled || d.BackupScheduler.Interval != time.Hour || d.BackupScheduler.NameTemplate == "" {
 		t.Errorf("backup scheduler defaults not populated: %+v", d.BackupScheduler)
 	}
+	if d.Storage.ChangeLogMode != "streams-only" {
+		t.Errorf("storage changelog mode default = %q, want streams-only", d.Storage.ChangeLogMode)
+	}
 	if d.Raft.HeartbeatTimeout != 2*time.Second || d.Raft.ElectionTimeout != 10*time.Second || d.Raft.LeaderLeaseTimeout != 2*time.Second {
 		t.Errorf("raft timeout defaults not populated: %+v", d.Raft)
 	}

@@ -162,6 +162,7 @@ func Defaults() Config {
 	c.BackupScheduler.Interval = time.Hour
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Storage.StreamRetention = 24 * time.Hour
+	c.Storage.ChangeLogMode = "streams-only"
 	c.Raft.HeartbeatTimeout = 2 * time.Second
 	c.Raft.ElectionTimeout = 10 * time.Second
 	c.Raft.LeaderLeaseTimeout = 2 * time.Second
