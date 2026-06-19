@@ -450,15 +450,11 @@ func (s *Server) batchWriteByShard(td types.TableDescriptor, ops []pebble.BatchO
 		}
 	}
 	started := time.Now()
-	for db, group := range primaryBuckets {
-		if err := db.BatchWriteItem(td, group); err != nil {
-			return err
-		}
+	if err := batchWriteBuckets(td, primaryBuckets); err != nil {
+		return err
 	}
-	for db, group := range mirrorBuckets {
-		if err := db.BatchWriteItem(td, group); err != nil {
-			return err
-		}
+	if err := batchWriteBuckets(td, mirrorBuckets); err != nil {
+		return err
 	}
 	for _, obs := range observations {
 		s.observeRangeMetric(rangeMetricWrite, obs.pkBytes, obs.approxBytes, started)

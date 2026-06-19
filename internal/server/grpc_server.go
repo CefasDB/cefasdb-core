@@ -631,15 +631,11 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.Bat
 		}
 		pluginPlans = append(pluginPlans, pluginPlan)
 	}
-	for db, group := range primaryBuckets {
-		if err := db.BatchWriteItem(td, group); err != nil {
-			return err
-		}
+	if err := batchWriteBuckets(td, primaryBuckets); err != nil {
+		return err
 	}
-	for db, group := range mirrorBuckets {
-		if err := db.BatchWriteItem(td, group); err != nil {
-			return err
-		}
+	if err := batchWriteBuckets(td, mirrorBuckets); err != nil {
+		return err
 	}
 	for _, pluginPlan := range pluginPlans {
 		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
