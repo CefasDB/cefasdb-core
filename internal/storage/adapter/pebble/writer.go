@@ -3,6 +3,7 @@ package pebble
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
 
@@ -87,6 +88,10 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		return fmt.Errorf("encode item: %w", err)
 	}
 
+	if d.putItemCanSkipPrior(td, opts.Condition) {
+		return d.putPrimaryWithoutPrior(td, primaryKey, encoded)
+	}
+
 	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
@@ -156,6 +161,31 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
+	}
+	if err := d.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		d.memorySet(td.Name, primaryKey, encoded)
+	}
+	return d.refreshStreamRetentionAfterWrite(td)
+}
+
+func (d *DB) putItemCanSkipPrior(td types.TableDescriptor, condition string) bool {
+	if strings.TrimSpace(condition) != "" {
+		return false
+	}
+	if len(td.GSIs) > 0 || len(td.LSIs) > 0 || len(td.SpatialIndexes) > 0 || td.TTLAttribute != "" {
+		return false
+	}
+	return !d.shouldAppendChangeRecord(td)
+}
+
+func (d *DB) putPrimaryWithoutPrior(td types.TableDescriptor, primaryKey, encoded []byte) error {
+	b := d.Batch()
+	defer b.Close()
+	if err := b.Set(primaryKey, encoded, nil); err != nil {
+		return fmt.Errorf("batch set primary: %w", err)
 	}
 	if err := d.CommitBatch(b); err != nil {
 		return err
@@ -557,16 +587,20 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 // same batch — this is exactly the read-your-writes consistency
 // callers expect from a "batch" operation.
 //
-// Note: BatchWriteItem reads the prior version of each touched item
-// under a single snapshot, so within-batch reordering of writes on the
-// same primary key is undefined. Callers should not include two ops
-// targeting the same key in a single batch.
+// Note: When BatchWriteItem needs prior reads (for indexes, TTL,
+// spatial indexes, or change-log records), it reads the prior version
+// of each touched item under a single snapshot, so within-batch
+// reordering of writes on the same primary key is undefined. Callers
+// should not include two ops targeting the same key in a single batch.
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	if len(ops) == 0 {
 		return nil
 	}
 	if err := d.checkWritePressure(); err != nil {
 		return err
+	}
+	if d.batchPutItemsCanSkipPrior(td, ops) {
+		return d.batchPutItemsWithoutPrior(td, ops)
 	}
 	snap := d.db.NewSnapshot()
 	defer snap.Close()
@@ -701,6 +735,57 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			} else {
 				d.memorySet(td.Name, delta.key, delta.value)
 			}
+		}
+	}
+	return d.refreshStreamRetentionAfterWrite(td)
+}
+
+func (d *DB) batchPutItemsCanSkipPrior(td types.TableDescriptor, ops []BatchOp) bool {
+	if !d.putItemCanSkipPrior(td, "") {
+		return false
+	}
+	for _, op := range ops {
+		if op.Op != BatchOpPut {
+			return false
+		}
+	}
+	return true
+}
+
+func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) error {
+	b := d.Batch()
+	defer b.Close()
+	type memDelta struct {
+		key   []byte
+		value []byte
+	}
+	var memDeltas []memDelta
+	for i, op := range ops {
+		if err := validateDescriptorItem(td, op.Item); err != nil {
+			return fmt.Errorf("op %d: %w", i, err)
+		}
+		pk, sk, err := extractKeyBytes(op.Item, td.KeySchema)
+		if err != nil {
+			return fmt.Errorf("op %d: %w", i, err)
+		}
+		enc, err := storage.EncodeItem(op.Item)
+		if err != nil {
+			return fmt.Errorf("op %d encode: %w", i, err)
+		}
+		primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+		if err := b.Set(primaryKey, enc, nil); err != nil {
+			return err
+		}
+		if isMemoryTable(td) {
+			memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
+		}
+	}
+	if err := d.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		for _, delta := range memDeltas {
+			d.memorySet(td.Name, delta.key, delta.value)
 		}
 	}
 	return d.refreshStreamRetentionAfterWrite(td)
