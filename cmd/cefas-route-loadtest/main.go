@@ -54,10 +54,13 @@ type tokenRange struct {
 }
 
 type shardRoute struct {
-	ID         uint32       `json:"id"`
-	Ranges     []tokenRange `json:"ranges"`
-	Voters     []string     `json:"voters"`
-	LeaderHint string       `json:"leader_hint"`
+	ID             uint32       `json:"id"`
+	Ranges         []tokenRange `json:"ranges"`
+	Voters         []string     `json:"voters"`
+	LeaderHint     string       `json:"leader_hint"`
+	ActualLeader   string       `json:"actual_leader,omitempty"`
+	DesiredLeader  string       `json:"desired_leader,omitempty"`
+	LeaderMismatch bool         `json:"leader_mismatch,omitempty"`
 }
 
 type router struct {
@@ -154,7 +157,7 @@ func main() {
 	}
 	fmt.Printf("placement: shards=%d strategy=%s version=%d epoch=%d\n", status.ShardCount, status.PlacementStrategy, status.PlacementVersion, status.RoutingEpoch)
 	for _, sh := range shards {
-		fmt.Printf("shard %d leader=%s ranges=%v\n", sh.ID, sh.LeaderHint, sh.Ranges)
+		fmt.Printf("shard %d leader=%s actual=%s desired=%s mismatch=%t ranges=%v\n", sh.ID, sh.LeaderHint, sh.ActualLeader, sh.DesiredLeader, sh.LeaderMismatch, sh.Ranges)
 		if _, ok := cs.byNode[sh.LeaderHint]; !ok {
 			fatal("missing node address", fmt.Errorf("leader %q has no configured endpoint", sh.LeaderHint))
 		}
@@ -373,15 +376,22 @@ func routerFromStatus(st client.ClusterStatus) (*router, []shardRoute, error) {
 		if leader == "" {
 			return nil, nil, fmt.Errorf("shard %d has no leader hint or voters", sh.ID)
 		}
+		desired := sh.DesiredLeader
+		if desired == "" {
+			desired = leader
+		}
 		ranges := make([]tokenRange, 0, len(sh.Ranges))
 		for _, r := range sh.Ranges {
 			ranges = append(ranges, tokenRange{Start: r.Start, End: r.End})
 		}
 		shards = append(shards, shardRoute{
-			ID:         sh.ID,
-			Ranges:     ranges,
-			Voters:     append([]string(nil), sh.Voters...),
-			LeaderHint: leader,
+			ID:             sh.ID,
+			Ranges:         ranges,
+			Voters:         append([]string(nil), sh.Voters...),
+			LeaderHint:     leader,
+			ActualLeader:   sh.ActualLeader,
+			DesiredLeader:  desired,
+			LeaderMismatch: sh.LeaderMismatch,
 		})
 	}
 	return &router{shards: shards}, shards, nil

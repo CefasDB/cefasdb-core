@@ -56,7 +56,7 @@ require_cmd go
 require_cmd curl
 require_cmd jq
 
-mkdir -p "$RESULT_DIR" "$RESULT_DIR/logs" "$RESULT_DIR/reports" "$RESULT_DIR/metrics" "$RESULT_DIR/status"
+mkdir -p "$RESULT_DIR" "$RESULT_DIR/logs" "$RESULT_DIR/reports" "$RESULT_DIR/metrics" "$RESULT_DIR/status" "$RESULT_DIR/cluster-status"
 
 node_map() {
   local out=""
@@ -249,6 +249,7 @@ capture_snapshot() {
   } > "$out/compose_ps.txt"
 
   compose ps -q | xargs docker stats --no-stream > "$out/docker_stats.txt" 2>/dev/null || true
+  capture_cluster_status "$phase"
 
   local i
   for i in $(seq 1 "$NODES"); do
@@ -256,6 +257,17 @@ capture_snapshot() {
     curl -fsS "http://localhost:${port}/metrics" > "$out/node${i}.prom" 2>/dev/null || true
     awk '/cefas_raft_is_leader\{/ && $NF == 1 {print}' "$out/node${i}.prom" > "$out/node${i}_leaders.prom" || true
     awk '/cefas_backpressure_state|cefas_pebble_compaction_debt_bytes|cefas_raft_/ {print}' "$out/node${i}.prom" > "$out/node${i}_storage_raft.prom" || true
+  done
+}
+
+capture_cluster_status() {
+  local phase="$1"
+  local out="$RESULT_DIR/cluster-status/${phase}"
+  mkdir -p "$out"
+  local i
+  for i in $(seq 1 "$NODES"); do
+    local port=$((HTTP_PORT_BASE + i))
+    curl -fsS "http://localhost:${port}/v1/cluster/status" > "$out/node${i}.json" 2>/dev/null || true
   done
 }
 
@@ -459,6 +471,57 @@ append_phase_sample_summary() {
   done
 }
 
+leader_status_file() {
+  local snapshot="$1"
+  local dir="$RESULT_DIR/cluster-status/${snapshot}"
+  if [[ ! -d "$dir" ]]; then
+    return 1
+  fi
+  find "$dir" -type f -name 'node*.json' -size +0 -print | sort | head -n 1
+}
+
+append_leader_distribution_row() {
+  local snapshot="$1"
+  local file
+  file="$(leader_status_file "$snapshot" || true)"
+  if [[ -z "$file" ]]; then
+    printf '| %s | n/a | n/a | n/a |\n' "$snapshot" >> "$SUMMARY_FILE"
+    return
+  fi
+  jq -r --arg snapshot "$snapshot" '
+    def counts($field):
+      ([.shards[]? | select((.id // 0) != 0) | (.[$field] // "") | select(. != "")]
+        | sort
+        | group_by(.)
+        | map("\(.[0])=\(length)")
+        | join(", ")) as $value
+      | if $value == "" then "n/a" else $value end;
+    ([.shards[]? | select((.id // 0) != 0 and (.leaderMismatch // false))] | length) as $mismatches
+    | "| \($snapshot) | \(counts("actualLeader")) | \(counts("desiredLeader")) | \($mismatches) |"
+  ' "$file" >> "$SUMMARY_FILE" 2>/dev/null || printf '| %s | n/a | n/a | n/a |\n' "$snapshot" >> "$SUMMARY_FILE"
+}
+
+append_leader_distribution_summary() {
+  {
+    echo
+    echo "Leader distribution:"
+    echo
+    echo "| Snapshot | Actual data-shard leaders | Desired data-shard leaders | Mismatches |"
+    echo "| --- | --- | --- | ---: |"
+  } >> "$SUMMARY_FILE"
+  local snapshot
+  for snapshot in \
+    cluster_ready \
+    smoke_before smoke_after \
+    write_only_before write_only_after \
+    read_seed_before read_seed_after \
+    read_only_before read_only_after \
+    mixed_before mixed_after \
+    final; do
+    append_leader_distribution_row "$snapshot"
+  done
+}
+
 write_summary() {
   {
     echo "# Cefas 8-node benchmark ${RUN_ID}"
@@ -490,6 +553,7 @@ write_summary() {
   append_report_rows "read_seed" "$RESULT_DIR/reports/read_seed_${RUN_ID}.json"
   append_report_rows "read_only" "$RESULT_DIR/reports/read_only_${RUN_ID}.json"
   append_report_rows "mixed" "$RESULT_DIR/reports/mixed_${RUN_ID}.json"
+  append_leader_distribution_summary
   append_phase_sample_summary
   {
     echo
@@ -498,6 +562,7 @@ write_summary() {
     echo "- reports: \`${RESULT_DIR}/reports\`"
     echo "- logs: \`${RESULT_DIR}/logs\`"
     echo "- metrics: \`${RESULT_DIR}/metrics\`"
+    echo "- cluster status: \`${RESULT_DIR}/cluster-status\`"
   } >> "$SUMMARY_FILE"
 }
 

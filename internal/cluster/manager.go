@@ -57,6 +57,15 @@ type Shard struct {
 	Raft        *craft.DB
 }
 
+// ShardLeadership is a runtime snapshot comparing the desired
+// placement leader with the leader currently observed by Raft.
+type ShardLeadership struct {
+	ShardID        uint32
+	ActualLeader   string
+	DesiredLeader  string
+	LeaderMismatch bool
+}
+
 // Config bundles every input needed to bring up a multi-Raft node.
 type Config struct {
 	// Root is the parent directory for shard state. The manager
@@ -541,6 +550,54 @@ func (m *Manager) Shards() []*Shard {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return append([]*Shard(nil), m.shards...)
+}
+
+// ShardLeadership returns per-shard leadership observed by this node.
+// It is status-only data; callers should not persist it in placement.
+func (m *Manager) ShardLeadership() map[uint32]ShardLeadership {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make(map[uint32]ShardLeadership, len(m.cat.Shards))
+	for _, meta := range m.cat.Shards {
+		out[meta.ID] = ShardLeadership{
+			ShardID:       meta.ID,
+			DesiredLeader: meta.LeaderHint,
+		}
+	}
+	for _, sh := range m.shards {
+		if sh == nil {
+			continue
+		}
+		st := out[sh.ID]
+		st.ShardID = sh.ID
+		if st.DesiredLeader == "" {
+			st.DesiredLeader = sh.LeaderHint
+		}
+		if sh.Raft != nil {
+			id, _ := sh.Raft.LeaderInfo()
+			st.ActualLeader = id
+		} else if len(sh.Voters) <= 1 && containsString(sh.Voters, m.cfg.SelfID) {
+			st.ActualLeader = m.cfg.SelfID
+		}
+		st.LeaderMismatch = st.ActualLeader != "" && st.DesiredLeader != "" && st.ActualLeader != st.DesiredLeader
+		out[sh.ID] = st
+	}
+	return out
+}
+
+// ShardPlacementsWithLeadership returns placement shards enriched with
+// runtime leadership observations for status and benchmark reporting.
+func (m *Manager) ShardPlacementsWithLeadership() []placement.ShardPlacement {
+	cat := m.Placement()
+	leadership := m.ShardLeadership()
+	for i := range cat.Shards {
+		st := leadership[cat.Shards[i].ID]
+		cat.Shards[i].ActualLeader = st.ActualLeader
+		cat.Shards[i].DesiredLeader = st.DesiredLeader
+		cat.Shards[i].LeaderMismatch = st.LeaderMismatch
+	}
+	return cat.Shards
 }
 
 // ShardForPK selects the shard that owns a request's PK.

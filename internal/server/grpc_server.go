@@ -1367,7 +1367,7 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 		resp.PlacementVersion = placement.Version
 		resp.ShardCount = int32(len(placement.Shards))
 		resp.PlacementStrategy = placement.Strategy
-		resp.Shards = pbShardPlacements(placement.Shards)
+		resp.Shards = pbShardPlacements(s.manager.ShardPlacementsWithLeadership())
 		resp.Nodes = pbNodeDescriptors(sortedPlacementNodes(placement))
 	}
 	if s.metrics != nil {
@@ -1416,13 +1416,16 @@ func pbShardPlacements(in []placement.ShardPlacement) []*cefaspb.ShardPlacement 
 	out := make([]*cefaspb.ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, &cefaspb.ShardPlacement{
-			Id:         sh.ID,
-			Ranges:     pbTokenRanges(sh.Ranges),
-			State:      string(sh.State),
-			Epoch:      sh.Epoch,
-			Voters:     append([]string(nil), sh.Voters...),
-			NonVoters:  append([]string(nil), sh.NonVoters...),
-			LeaderHint: sh.LeaderHint,
+			Id:             sh.ID,
+			Ranges:         pbTokenRanges(sh.Ranges),
+			State:          string(sh.State),
+			Epoch:          sh.Epoch,
+			Voters:         append([]string(nil), sh.Voters...),
+			NonVoters:      append([]string(nil), sh.NonVoters...),
+			LeaderHint:     sh.LeaderHint,
+			ActualLeader:   sh.ActualLeader,
+			DesiredLeader:  sh.DesiredLeader,
+			LeaderMismatch: sh.LeaderMismatch,
 		})
 	}
 	return out
@@ -1760,13 +1763,16 @@ func placementShardsFromPB(in []*cefaspb.ShardPlacement) []placement.ShardPlacem
 	out := make([]placement.ShardPlacement, 0, len(in))
 	for _, sh := range in {
 		out = append(out, placement.ShardPlacement{
-			ID:         sh.GetId(),
-			Ranges:     placementTokenRangesFromPB(sh.GetRanges()),
-			State:      placement.ShardState(sh.GetState()),
-			Epoch:      sh.GetEpoch(),
-			Voters:     append([]string(nil), sh.GetVoters()...),
-			NonVoters:  append([]string(nil), sh.GetNonVoters()...),
-			LeaderHint: sh.GetLeaderHint(),
+			ID:             sh.GetId(),
+			Ranges:         placementTokenRangesFromPB(sh.GetRanges()),
+			State:          placement.ShardState(sh.GetState()),
+			Epoch:          sh.GetEpoch(),
+			Voters:         append([]string(nil), sh.GetVoters()...),
+			NonVoters:      append([]string(nil), sh.GetNonVoters()...),
+			LeaderHint:     sh.GetLeaderHint(),
+			ActualLeader:   sh.GetActualLeader(),
+			DesiredLeader:  sh.GetDesiredLeader(),
+			LeaderMismatch: sh.GetLeaderMismatch(),
 		})
 	}
 	return out

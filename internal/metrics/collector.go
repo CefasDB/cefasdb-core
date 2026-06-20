@@ -42,8 +42,16 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			leadership := mgr.ShardLeadership()
 			for _, sh := range mgr.Shards() {
 				label := fmt.Sprintf("%d", sh.ID)
+				if st, ok := leadership[sh.ID]; ok {
+					mismatch := 0.0
+					if st.LeaderMismatch {
+						mismatch = 1.0
+					}
+					m.RaftLeaderMismatch.WithLabelValues(label).Set(mismatch)
+				}
 				if sh.Raft != nil {
 					leader := 0.0
 					if sh.Raft.IsLeader() {

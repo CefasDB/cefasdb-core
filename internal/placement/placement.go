@@ -102,13 +102,16 @@ type NodeDescriptor struct {
 // ShardPlacement describes one logical shard's token ownership and
 // Raft membership intent.
 type ShardPlacement struct {
-	ID         uint32       `json:"id"`
-	Ranges     []TokenRange `json:"ranges,omitempty"`
-	State      ShardState   `json:"state"`
-	Epoch      uint64       `json:"epoch"`
-	Voters     []string     `json:"voters,omitempty"`
-	NonVoters  []string     `json:"nonVoters,omitempty"`
-	LeaderHint string       `json:"leaderHint,omitempty"`
+	ID             uint32       `json:"id"`
+	Ranges         []TokenRange `json:"ranges,omitempty"`
+	State          ShardState   `json:"state"`
+	Epoch          uint64       `json:"epoch"`
+	Voters         []string     `json:"voters,omitempty"`
+	NonVoters      []string     `json:"nonVoters,omitempty"`
+	LeaderHint     string       `json:"leaderHint,omitempty"`
+	ActualLeader   string       `json:"actualLeader,omitempty"`
+	DesiredLeader  string       `json:"desiredLeader,omitempty"`
+	LeaderMismatch bool         `json:"leaderMismatch,omitempty"`
 }
 
 // PlacementCatalog is the cluster-wide routing contract. Epoch changes
@@ -154,6 +157,9 @@ func (c *PlacementCatalog) Normalize() {
 		c.UpdatedAtUnix = time.Now().Unix()
 	}
 	for i := range c.Shards {
+		c.Shards[i].ActualLeader = ""
+		c.Shards[i].DesiredLeader = ""
+		c.Shards[i].LeaderMismatch = false
 		if c.Shards[i].State == "" {
 			c.Shards[i].State = ShardStateActive
 		}

@@ -43,6 +43,7 @@ type Metrics struct {
 
 	RaftCommitLagSeconds *prometheus.GaugeVec // shard
 	RaftIsLeader         *prometheus.GaugeVec // shard
+	RaftLeaderMismatch   *prometheus.GaugeVec // shard
 	RaftLogRawBytes      *prometheus.GaugeVec // shard
 	RaftLogEncodedBytes  *prometheus.GaugeVec // shard
 	RaftLogPayloads      *prometheus.GaugeVec // shard, result{compressed,raw,skipped}
@@ -156,6 +157,10 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		RaftIsLeader: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_raft_is_leader",
 			Help: "1 if this node is the current leader of the shard, else 0.",
+		}, []string{"shard"}),
+		RaftLeaderMismatch: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_raft_leader_mismatch",
+			Help: "1 if the observed raft leader differs from the placement leader hint for the shard, else 0.",
 		}, []string{"shard"}),
 		RaftLogRawBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_raft_log_raw_bytes",
@@ -330,6 +335,7 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.SpatialCells,
 		m.RaftCommitLagSeconds,
 		m.RaftIsLeader,
+		m.RaftLeaderMismatch,
 		m.RaftLogRawBytes,
 		m.RaftLogEncodedBytes,
 		m.RaftLogPayloads,

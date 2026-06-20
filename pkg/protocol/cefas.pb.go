@@ -8161,16 +8161,19 @@ func (x *NodeDescriptor) GetLastSeenUnix() int64 {
 }
 
 type ShardPlacement struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Ranges        []*TokenRange          `protobuf:"bytes,2,rep,name=ranges,proto3" json:"ranges,omitempty"`
-	State         string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
-	Epoch         uint64                 `protobuf:"varint,4,opt,name=epoch,proto3" json:"epoch,omitempty"`
-	Voters        []string               `protobuf:"bytes,5,rep,name=voters,proto3" json:"voters,omitempty"`
-	NonVoters     []string               `protobuf:"bytes,6,rep,name=non_voters,json=nonVoters,proto3" json:"non_voters,omitempty"`
-	LeaderHint    string                 `protobuf:"bytes,7,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ranges         []*TokenRange          `protobuf:"bytes,2,rep,name=ranges,proto3" json:"ranges,omitempty"`
+	State          string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	Epoch          uint64                 `protobuf:"varint,4,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	Voters         []string               `protobuf:"bytes,5,rep,name=voters,proto3" json:"voters,omitempty"`
+	NonVoters      []string               `protobuf:"bytes,6,rep,name=non_voters,json=nonVoters,proto3" json:"non_voters,omitempty"`
+	LeaderHint     string                 `protobuf:"bytes,7,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	ActualLeader   string                 `protobuf:"bytes,8,opt,name=actual_leader,json=actualLeader,proto3" json:"actual_leader,omitempty"`
+	DesiredLeader  string                 `protobuf:"bytes,9,opt,name=desired_leader,json=desiredLeader,proto3" json:"desired_leader,omitempty"`
+	LeaderMismatch bool                   `protobuf:"varint,10,opt,name=leader_mismatch,json=leaderMismatch,proto3" json:"leader_mismatch,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ShardPlacement) Reset() {
@@ -8250,6 +8253,27 @@ func (x *ShardPlacement) GetLeaderHint() string {
 		return x.LeaderHint
 	}
 	return ""
+}
+
+func (x *ShardPlacement) GetActualLeader() string {
+	if x != nil {
+		return x.ActualLeader
+	}
+	return ""
+}
+
+func (x *ShardPlacement) GetDesiredLeader() string {
+	if x != nil {
+		return x.DesiredLeader
+	}
+	return ""
+}
+
+func (x *ShardPlacement) GetLeaderMismatch() bool {
+	if x != nil {
+		return x.LeaderMismatch
+	}
+	return false
 }
 
 type RangeHotspotSummary struct {
@@ -12689,7 +12713,7 @@ const file_cefas_proto_rawDesc = "" +
 	"\thttp_addr\x18\x03 \x01(\tR\bhttpAddr\x12\x14\n" +
 	"\x05state\x18\x04 \x01(\tR\x05state\x122\n" +
 	"\bcapacity\x18\x05 \x01(\v2\x16.cefas.v1.NodeCapacityR\bcapacity\x12$\n" +
-	"\x0elast_seen_unix\x18\x06 \x01(\x03R\flastSeenUnix\"\xd2\x01\n" +
+	"\x0elast_seen_unix\x18\x06 \x01(\x03R\flastSeenUnix\"\xc7\x02\n" +
 	"\x0eShardPlacement\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12,\n" +
 	"\x06ranges\x18\x02 \x03(\v2\x14.cefas.v1.TokenRangeR\x06ranges\x12\x14\n" +
@@ -12699,7 +12723,11 @@ const file_cefas_proto_rawDesc = "" +
 	"\n" +
 	"non_voters\x18\x06 \x03(\tR\tnonVoters\x12\x1f\n" +
 	"\vleader_hint\x18\a \x01(\tR\n" +
-	"leaderHint\"\xd6\x04\n" +
+	"leaderHint\x12#\n" +
+	"\ractual_leader\x18\b \x01(\tR\factualLeader\x12%\n" +
+	"\x0edesired_leader\x18\t \x01(\tR\rdesiredLeader\x12'\n" +
+	"\x0fleader_mismatch\x18\n" +
+	" \x01(\bR\x0eleaderMismatch\"\xd6\x04\n" +
 	"\x13RangeHotspotSummary\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\tR\ashardId\x12\x16\n" +
 	"\x06bucket\x18\x02 \x01(\x05R\x06bucket\x12!\n" +

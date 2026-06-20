@@ -1,6 +1,9 @@
 package placement
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestDefaultPlacementDistributesLeaderHintsAcrossVoters(t *testing.T) {
 	cat := DefaultPlacement(
@@ -124,6 +127,28 @@ func TestBackfillLeaderHintsMigratesOlderPlacement(t *testing.T) {
 		if sh.LeaderHint != want[i] {
 			t.Fatalf("shard %d leader hint = %q, want %q", sh.ID, sh.LeaderHint, want[i])
 		}
+	}
+}
+
+func TestEncodePlacementDropsRuntimeLeadershipFields(t *testing.T) {
+	cat := DefaultPlacement(1, "n1", nil, nil, NodeCapacity{}, PlacementStrategyTokenRange)
+	cat.Shards[0].ActualLeader = "n2"
+	cat.Shards[0].DesiredLeader = "n1"
+	cat.Shards[0].LeaderMismatch = true
+
+	raw, err := EncodePlacement(cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("actualLeader")) || bytes.Contains(raw, []byte("desiredLeader")) || bytes.Contains(raw, []byte("leaderMismatch")) {
+		t.Fatalf("runtime leadership fields leaked into encoded placement: %s", raw)
+	}
+	parsed, err := ParsePlacement(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Shards[0].ActualLeader != "" || parsed.Shards[0].DesiredLeader != "" || parsed.Shards[0].LeaderMismatch {
+		t.Fatalf("runtime leadership fields survived parse: %+v", parsed.Shards[0])
 	}
 }
 

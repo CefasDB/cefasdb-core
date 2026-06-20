@@ -95,6 +95,44 @@ func TestPeersForVotersFiltersRaftPeerSet(t *testing.T) {
 	}
 }
 
+func TestShardPlacementsWithLeadershipAddsRuntimeFields(t *testing.T) {
+	mgr := &Manager{
+		cfg: Config{SelfID: "n1"},
+		cat: placement.PlacementCatalog{
+			Version:  1,
+			Epoch:    1,
+			Strategy: placement.PlacementStrategyTokenRange,
+			Shards: []placement.ShardPlacement{{
+				ID:         0,
+				State:      placement.ShardStateActive,
+				Epoch:      1,
+				Ranges:     []placement.TokenRange{{Start: 0, End: 0}},
+				Voters:     []string{"n1"},
+				LeaderHint: "n1",
+			}},
+		},
+		shards: []*Shard{{
+			ID:         0,
+			State:      placement.ShardStateActive,
+			Epoch:      1,
+			Ranges:     []placement.TokenRange{{Start: 0, End: 0}},
+			Voters:     []string{"n1"},
+			LeaderHint: "n1",
+		}},
+	}
+
+	shards := mgr.ShardPlacementsWithLeadership()
+	if len(shards) != 1 {
+		t.Fatalf("shards = %d, want 1", len(shards))
+	}
+	if shards[0].ActualLeader != "n1" || shards[0].DesiredLeader != "n1" || shards[0].LeaderMismatch {
+		t.Fatalf("leadership = actual %q desired %q mismatch %t", shards[0].ActualLeader, shards[0].DesiredLeader, shards[0].LeaderMismatch)
+	}
+	if mgr.cat.Shards[0].ActualLeader != "" || mgr.cat.Shards[0].DesiredLeader != "" || mgr.cat.Shards[0].LeaderMismatch {
+		t.Fatalf("runtime leadership leaked into manager catalog: %+v", mgr.cat.Shards[0])
+	}
+}
+
 func TestAuditPlacementDetectsOrphanedPrimaryKeys(t *testing.T) {
 	mgr := openAuditTestManager(t, 2)
 	defer mgr.Close()

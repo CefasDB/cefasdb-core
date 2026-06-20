@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/cluster"
-	"github.com/CefasDb/cefasdb/internal/placement"
-	"github.com/CefasDb/cefasdb/internal/tracing"
 	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	"github.com/CefasDb/cefasdb/internal/tracing"
 )
 
 // Cluster is the minimal cluster-management surface this package
@@ -96,7 +96,7 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.PlacementVersion = cat.Version
 		resp.ShardCount = len(cat.Shards)
 		resp.PlacementStrategy = cat.Strategy
-		resp.Shards = append([]placement.ShardPlacement(nil), cat.Shards...)
+		resp.Shards = h.manager.ShardPlacementsWithLeadership()
 		resp.Nodes = sortedPlacementNodes(cat)
 	}
 	if h.extraStatus != nil {
