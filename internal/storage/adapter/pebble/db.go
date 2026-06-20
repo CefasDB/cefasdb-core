@@ -74,6 +74,8 @@ type Options struct {
 	// PITR/backup records for every write; "streams-only" only writes records
 	// for stream-enabled tables; "off" disables changelog writes.
 	ChangeLogMode string
+	// Lanes configures the read/write worker lanes above this Pebble handle.
+	Lanes LaneOptions
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -90,6 +92,7 @@ type DB struct {
 	syncOpt *pebbledb.WriteOptions
 	repl    Replicator
 	bp      backpressureController
+	lanes   *dbLanes
 
 	backupMu             sync.Mutex
 	activeBackupRestores map[string]int
@@ -137,6 +140,7 @@ func Open(opts Options) (*DB, error) {
 		stopped:              make(chan struct{}),
 		syncOpt:              syncOpt,
 		bp:                   newBackpressureController(opts.Backpressure),
+		lanes:                newDBLanes(opts.Lanes),
 		streamRetention:      normalizeStreamRetentionOptions(opts.StreamRetention),
 		changeLogMode:        normalizeChangeLogMode(opts.ChangeLogMode),
 		activeBackupRestores: make(map[string]int),
@@ -159,6 +163,9 @@ func (d *DB) Close() error {
 	}
 	close(d.stopCh)
 	<-d.stopped
+	if d.lanes != nil {
+		d.lanes.Close()
+	}
 	return d.db.Close()
 }
 
@@ -182,6 +189,16 @@ func (d *DB) Metrics() pebbledb.Metrics {
 
 // Get returns the value at key. Returns (nil, ErrNotFound) on miss.
 func (d *DB) Get(key []byte) ([]byte, error) {
+	var out []byte
+	err := d.runRead(func() error {
+		var err error
+		out, err = d.getNoLane(key)
+		return err
+	})
+	return out, err
+}
+
+func (d *DB) getNoLane(key []byte) ([]byte, error) {
 	v, closer, err := d.db.Get(key)
 	if err == pebbledb.ErrNotFound {
 		return nil, ErrNotFound
@@ -197,6 +214,16 @@ func (d *DB) Get(key []byte) ([]byte, error) {
 
 // Has reports membership without copying the value.
 func (d *DB) Has(key []byte) (bool, error) {
+	var ok bool
+	err := d.runRead(func() error {
+		var err error
+		ok, err = d.hasNoLane(key)
+		return err
+	})
+	return ok, err
+}
+
+func (d *DB) hasNoLane(key []byte) (bool, error) {
 	_, closer, err := d.db.Get(key)
 	if err == pebbledb.ErrNotFound {
 		return false, nil
@@ -222,7 +249,9 @@ func (d *DB) Set(key, value []byte) error {
 		}
 		return d.repl.Replicate(b.Repr())
 	}
-	return d.db.Set(key, value, d.syncOpt)
+	return d.runWrite(func() error {
+		return d.db.Set(key, value, d.syncOpt)
+	})
 }
 
 // Delete removes a key.
@@ -238,7 +267,9 @@ func (d *DB) Delete(key []byte) error {
 		}
 		return d.repl.Replicate(b.Repr())
 	}
-	return d.db.Delete(key, d.syncOpt)
+	return d.runWrite(func() error {
+		return d.db.Delete(key, d.syncOpt)
+	})
 }
 
 // Batch returns a fresh Pebble batch. Caller MUST Close it after either
@@ -256,13 +287,35 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 		}
 		return d.repl.Replicate(b.Repr())
 	}
-	req := &commitReq{batch: b, done: make(chan error, 1)}
-	select {
-	case d.commitCh <- req:
-	case <-d.stopCh:
-		return fmt.Errorf("db closed")
+	return d.runWrite(func() error {
+		req := &commitReq{batch: b, done: make(chan error, 1)}
+		select {
+		case d.commitCh <- req:
+		case <-d.stopCh:
+			return fmt.Errorf("db closed")
+		}
+		return <-req.done
+	})
+}
+
+// ApplyCommittedBatch applies a batch that has already been committed through
+// the replication layer. It intentionally bypasses CommitBatch so followers and
+// the leader FSM do not feed an already-committed Raft entry back into Raft.
+func (d *DB) ApplyCommittedBatch(repr []byte) error {
+	if len(repr) == 0 {
+		return nil
 	}
-	return <-req.done
+	return d.runWrite(func() error {
+		batch := d.db.NewBatch()
+		defer batch.Close()
+		if err := batch.SetRepr(append([]byte(nil), repr...)); err != nil {
+			return fmt.Errorf("fsm apply: SetRepr: %w", err)
+		}
+		if err := batch.Commit(pebbledb.NoSync); err != nil {
+			return fmt.Errorf("fsm apply: commit: %w", err)
+		}
+		return nil
+	})
 }
 
 // commitLoop is the single goroutine that owns the Pebble write side. It

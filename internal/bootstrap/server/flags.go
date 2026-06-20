@@ -26,6 +26,8 @@ func OverlayFlags(
 	storageBlockCache int64, storageMemTableSize uint64, storageMemTableStopWrites int,
 	storageMaxCompactions, storageL0Concurrency, storageL0Threshold int,
 	storageL0FileThreshold, storageL0Stop, storageBytesPerSync, storageWALBytesPerSync int,
+	storageLanes string, storageLaneReadWorkers, storageLaneWriteWorkers int,
+	storageLaneReadQueue, storageLaneWriteQueue int,
 	backpressureEnabled, backpressureReject bool,
 	backpressureWarnL0, backpressureCriticalL0 int64,
 	backpressureWarnDebt, backpressureCriticalDebt uint64,
@@ -145,6 +147,21 @@ func OverlayFlags(
 	}
 	if storageWALBytesPerSync > 0 {
 		cfg.Storage.WALBytesPerSync = storageWALBytesPerSync
+	}
+	if storageLanes != "" {
+		cfg.Storage.Lanes = storageLanes
+	}
+	if storageLaneReadWorkers > 0 {
+		cfg.Storage.LaneReadWorkers = storageLaneReadWorkers
+	}
+	if storageLaneWriteWorkers > 0 {
+		cfg.Storage.LaneWriteWorkers = storageLaneWriteWorkers
+	}
+	if storageLaneReadQueue > 0 {
+		cfg.Storage.LaneReadQueue = storageLaneReadQueue
+	}
+	if storageLaneWriteQueue > 0 {
+		cfg.Storage.LaneWriteQueue = storageLaneWriteQueue
 	}
 	if backpressureEnabled {
 		cfg.Storage.BackpressureEnabled = true

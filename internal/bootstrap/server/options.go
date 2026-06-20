@@ -8,10 +8,10 @@ package server
 import (
 	"time"
 
+	"github.com/CefasDb/cefasdb/internal/config"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	"github.com/CefasDb/cefasdb/internal/config"
 )
 
 // StorageOptions assembles the pebble.Options struct that pebble.Open
@@ -24,6 +24,7 @@ func StorageOptions(cfg config.Config, path string) pebble.Options {
 		Profile:         cfg.Storage.Profile,
 		Tuning:          StorageTuning(cfg),
 		Backpressure:    BackpressureOptions(cfg),
+		Lanes:           pebble.MetadataLaneOptions(StorageLaneOptions(cfg)),
 		StreamRetention: StreamRetentionOptions(cfg),
 		ChangeLogMode:   cfg.Storage.ChangeLogMode,
 	}
@@ -43,6 +44,16 @@ func StorageTuning(cfg config.Config) pebble.PebbleTuning {
 		L0StopWritesThreshold:     cfg.Storage.L0StopWritesThreshold,
 		BytesPerSync:              cfg.Storage.BytesPerSync,
 		WALBytesPerSync:           cfg.Storage.WALBytesPerSync,
+	}
+}
+
+func StorageLaneOptions(cfg config.Config) pebble.LaneOptions {
+	return pebble.LaneOptions{
+		Mode:         cfg.Storage.Lanes,
+		ReadWorkers:  cfg.Storage.LaneReadWorkers,
+		WriteWorkers: cfg.Storage.LaneWriteWorkers,
+		ReadQueue:    cfg.Storage.LaneReadQueue,
+		WriteQueue:   cfg.Storage.LaneWriteQueue,
 	}
 }
 

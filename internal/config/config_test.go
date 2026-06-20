@@ -44,6 +44,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Raft.LogCompressionMinBytes != 1024 || d.Raft.LogCompressionMinSavingsRatio != 0.05 || d.Raft.LogCompressionSkipCooldown != time.Second {
 		t.Errorf("raft log compression guardrail defaults not populated: %+v", d.Raft)
 	}
+	if d.Storage.Lanes != "auto" {
+		t.Errorf("storage lanes default = %q", d.Storage.Lanes)
+	}
 }
 
 func TestLoadFileMissingReturnsDefaults(t *testing.T) {
@@ -72,6 +75,11 @@ cluster:
     n2: 10.0.0.2:9100
 storage:
   changeLogMode: streams-only
+  lanes: off
+  laneReadWorkers: 4
+  laneWriteWorkers: 3
+  laneReadQueue: 128
+  laneWriteQueue: 64
 raft:
   heartbeatTimeout: 3s
   electionTimeout: 12s
@@ -126,6 +134,9 @@ backupScheduler:
 	}
 	if cfg.Storage.ChangeLogMode != "streams-only" {
 		t.Fatalf("storage changelog mode config not loaded: %+v", cfg.Storage)
+	}
+	if cfg.Storage.Lanes != "off" || cfg.Storage.LaneReadWorkers != 4 || cfg.Storage.LaneWriteWorkers != 3 || cfg.Storage.LaneReadQueue != 128 || cfg.Storage.LaneWriteQueue != 64 {
+		t.Fatalf("storage lanes config not loaded: %+v", cfg.Storage)
 	}
 	if cfg.Raft.HeartbeatTimeout != 3*time.Second || cfg.Raft.ElectionTimeout != 12*time.Second || cfg.Raft.LeaderLeaseTimeout != 1500*time.Millisecond {
 		t.Fatalf("raft timeout config not loaded: %+v", cfg.Raft)
@@ -191,6 +202,11 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_MAX_AGE", "168h")
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_DRY_RUN", "true")
 	t.Setenv("CEFAS_STORAGE_CHANGELOG_MODE", "off")
+	t.Setenv("CEFAS_STORAGE_LANES", "on")
+	t.Setenv("CEFAS_STORAGE_LANE_READ_WORKERS", "5")
+	t.Setenv("CEFAS_STORAGE_LANE_WRITE_WORKERS", "4")
+	t.Setenv("CEFAS_STORAGE_LANE_READ_QUEUE", "256")
+	t.Setenv("CEFAS_STORAGE_LANE_WRITE_QUEUE", "128")
 
 	cfg := config.Defaults()
 	if err := config.ApplyEnv(&cfg); err != nil {
@@ -222,6 +238,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Storage.ChangeLogMode != "off" {
 		t.Errorf("storage changelog mode env not applied: %+v", cfg.Storage)
+	}
+	if cfg.Storage.Lanes != "on" || cfg.Storage.LaneReadWorkers != 5 || cfg.Storage.LaneWriteWorkers != 4 || cfg.Storage.LaneReadQueue != 256 || cfg.Storage.LaneWriteQueue != 128 {
+		t.Errorf("storage lanes env not applied: %+v", cfg.Storage)
 	}
 	if cfg.Metrics.Enabled {
 		t.Errorf("metrics disable not applied")

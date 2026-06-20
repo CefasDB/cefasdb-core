@@ -78,6 +78,11 @@ type overlayArgs struct {
 	storageL0Stop                      int
 	storageBytesPerSync                int
 	storageWALBytesPerSync             int
+	storageLanes                       string
+	storageLaneReadWorkers             int
+	storageLaneWriteWorkers            int
+	storageLaneReadQueue               int
+	storageLaneWriteQueue              int
 
 	backpressureEnabled, backpressureReject       bool
 	backpressureWarnL0, backpressureCriticalL0    int64
@@ -145,6 +150,8 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.storageBlockCache, a.storageMemTableSize, a.storageMemTableStopWrites,
 		a.storageMaxCompactions, a.storageL0Concurrency, a.storageL0Threshold,
 		a.storageL0FileThreshold, a.storageL0Stop, a.storageBytesPerSync, a.storageWALBytesPerSync,
+		a.storageLanes, a.storageLaneReadWorkers, a.storageLaneWriteWorkers,
+		a.storageLaneReadQueue, a.storageLaneWriteQueue,
 		a.backpressureEnabled, a.backpressureReject,
 		a.backpressureWarnL0, a.backpressureCriticalL0,
 		a.backpressureWarnDebt, a.backpressureCriticalDbt,
@@ -189,6 +196,11 @@ func TestOverlayFlags_StorageGroup(t *testing.T) {
 	args.storageBlockCache = 1 << 30
 	args.storageMemTableSize = 64 << 20
 	args.storageL0Threshold = 8
+	args.storageLanes = "off"
+	args.storageLaneReadWorkers = 4
+	args.storageLaneWriteWorkers = 3
+	args.storageLaneReadQueue = 128
+	args.storageLaneWriteQueue = 64
 	args.fsync = true
 	runOverlay(&cfg, args)
 
@@ -206,6 +218,15 @@ func TestOverlayFlags_StorageGroup(t *testing.T) {
 	}
 	if !cfg.Storage.FsyncOnCommit {
 		t.Errorf("FsyncOnCommit not set")
+	}
+	if cfg.Storage.Lanes != "off" {
+		t.Errorf("Lanes = %q", cfg.Storage.Lanes)
+	}
+	if cfg.Storage.LaneReadWorkers != 4 || cfg.Storage.LaneWriteWorkers != 3 {
+		t.Errorf("lane workers = read %d write %d", cfg.Storage.LaneReadWorkers, cfg.Storage.LaneWriteWorkers)
+	}
+	if cfg.Storage.LaneReadQueue != 128 || cfg.Storage.LaneWriteQueue != 64 {
+		t.Errorf("lane queues = read %d write %d", cfg.Storage.LaneReadQueue, cfg.Storage.LaneWriteQueue)
 	}
 }
 

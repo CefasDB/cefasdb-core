@@ -32,7 +32,7 @@ LATENCY_SAMPLE_RATE="${LATENCY_SAMPLE_RATE:-100}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-30s}"
 CLIENT_ROUTE_AWARE_READS="${CLIENT_ROUTE_AWARE_READS:-0}"
 PHASE_SAMPLE_INTERVAL="${PHASE_SAMPLE_INTERVAL:-0}"
-PHASE_SAMPLE_FILTER="${PHASE_SAMPLE_FILTER:-^(cefas_pebble_|cefas_backpressure_|cefas_raft_|cefas_op_|go_memstats_|process_)}"
+PHASE_SAMPLE_FILTER="${PHASE_SAMPLE_FILTER:-^(cefas_pebble_|cefas_storage_lane_|cefas_backpressure_|cefas_raft_|cefas_op_|go_memstats_|process_)}"
 RPC_TIMEOUT="${RPC_TIMEOUT:-30s}"
 WRITE_RATE="${WRITE_RATE:-0}"
 READ_RATE="${READ_RATE:-0}"
@@ -441,19 +441,21 @@ append_phase_sample_summary() {
     echo
     echo "Phase samples:"
     echo
-    echo "| Phase | Prom files | Max read amp | Max L0 files | Max compaction debt bytes | Max compactions in progress | Max backpressure state |"
-    echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"
+    echo "| Phase | Prom files | Max read amp | Max L0 files | Max compaction debt bytes | Max compactions in progress | Max lane queue | Max lane active | Max backpressure state |"
+    echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
   } >> "$SUMMARY_FILE"
 
   local phase
   for phase in smoke write_only read_seed read_only mixed; do
-    printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+    printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
       "$phase" \
       "$(phase_sample_file_count "$phase")" \
       "$(phase_sample_metric_max "$phase" "cefas_pebble_read_amp")" \
       "$(phase_sample_metric_max "$phase" "cefas_pebble_l0_files")" \
       "$(phase_sample_metric_max "$phase" "cefas_pebble_compaction_debt_bytes")" \
       "$(phase_sample_metric_max "$phase" "cefas_pebble_compactions_in_progress")" \
+      "$(phase_sample_metric_max "$phase" "cefas_storage_lane_queue_depth")" \
+      "$(phase_sample_metric_max "$phase" "cefas_storage_lane_active_workers")" \
       "$(phase_sample_metric_max "$phase" "cefas_backpressure_state")" \
       >> "$SUMMARY_FILE"
   done

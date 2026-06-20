@@ -26,6 +26,11 @@ func fixtureConfig() config.Config {
 	c.Storage.L0StopWritesThreshold = 32
 	c.Storage.BytesPerSync = 1 << 20
 	c.Storage.WALBytesPerSync = 512 << 10
+	c.Storage.Lanes = "on"
+	c.Storage.LaneReadWorkers = 4
+	c.Storage.LaneWriteWorkers = 3
+	c.Storage.LaneReadQueue = 128
+	c.Storage.LaneWriteQueue = 64
 
 	c.Storage.BackpressureEnabled = true
 	c.Storage.BackpressureRejectCritical = true
@@ -101,6 +106,9 @@ func TestStorageOptions(t *testing.T) {
 	if opts.ChangeLogMode != "streams-only" {
 		t.Errorf("ChangeLogMode = %q", opts.ChangeLogMode)
 	}
+	if opts.Lanes.Mode != "on" {
+		t.Errorf("Lanes.Mode = %q", opts.Lanes.Mode)
+	}
 }
 
 func TestStorageTuning(t *testing.T) {
@@ -163,6 +171,20 @@ func TestStorageTuning(t *testing.T) {
 			tc.mut(&cfg)
 			tc.want(t, cfg)
 		})
+	}
+}
+
+func TestStorageLaneOptions(t *testing.T) {
+	cfg := fixtureConfig()
+	got := bootstrapserver.StorageLaneOptions(cfg)
+	if got.Mode != "on" {
+		t.Errorf("Mode = %q", got.Mode)
+	}
+	if got.ReadWorkers != 4 || got.WriteWorkers != 3 {
+		t.Errorf("workers = read %d write %d", got.ReadWorkers, got.WriteWorkers)
+	}
+	if got.ReadQueue != 128 || got.WriteQueue != 64 {
+		t.Errorf("queues = read %d write %d", got.ReadQueue, got.WriteQueue)
 	}
 }
 

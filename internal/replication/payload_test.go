@@ -123,7 +123,7 @@ func TestFSMApplyCompressedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	resp := newFSM(db).Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
+	resp := newFSM(db, nil).Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
 	if resp != nil {
 		t.Fatalf("apply response = %v", resp)
 	}
@@ -135,6 +135,89 @@ func TestFSMApplyCompressedPayload(t *testing.T) {
 	defer closer.Close()
 	if !bytes.Equal(got, []byte(strings.Repeat("value-", 256))) {
 		t.Fatalf("applied value mismatch")
+	}
+}
+
+type recordingApplier struct {
+	repr []byte
+}
+
+func (r *recordingApplier) ApplyCommittedBatch(repr []byte) error {
+	r.repr = append([]byte(nil), repr...)
+	return nil
+}
+
+func TestFSMApplyUsesCommittedApplier(t *testing.T) {
+	db, err := pebbledb.Open("/test", &pebbledb.Options{FS: vfs.NewMem()})
+	if err != nil {
+		t.Fatalf("open pebble: %v", err)
+	}
+	defer db.Close()
+
+	batch := db.NewBatch()
+	if err := batch.Set([]byte("cefas/table/T/item/2"), []byte("value"), nil); err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	repr := append([]byte(nil), batch.Repr()...)
+	if err := batch.Close(); err != nil {
+		t.Fatalf("batch close: %v", err)
+	}
+	encoded, err := encodeRaftPayload(repr, LogCompressionSnappy)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	applier := &recordingApplier{}
+	resp := newFSM(db, applier).Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
+	if resp != nil {
+		t.Fatalf("apply response = %v", resp)
+	}
+	if !bytes.Equal(applier.repr, repr) {
+		t.Fatalf("applier repr mismatch")
+	}
+	if _, closer, err := db.Get([]byte("cefas/table/T/item/2")); err == nil {
+		_ = closer.Close()
+		t.Fatalf("raw pebble was modified despite committed applier")
+	} else if err != pebbledb.ErrNotFound {
+		t.Fatalf("get raw key: %v", err)
+	}
+}
+
+func TestFSMApplyWithPublisherUsesCommittedApplier(t *testing.T) {
+	db, err := pebbledb.Open("/test", &pebbledb.Options{FS: vfs.NewMem()})
+	if err != nil {
+		t.Fatalf("open pebble: %v", err)
+	}
+	defer db.Close()
+
+	batch := db.NewBatch()
+	if err := batch.Set([]byte("cefas/table/T/item/3"), []byte("value"), nil); err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	repr := append([]byte(nil), batch.Repr()...)
+	if err := batch.Close(); err != nil {
+		t.Fatalf("batch close: %v", err)
+	}
+	encoded, err := encodeRaftPayload(repr, LogCompressionSnappy)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	applier := &recordingApplier{}
+	fsm := newFSM(db, applier)
+	fsm.AttachPublisher(NewPublisher(8))
+	resp := fsm.Apply(&hraft.Log{Index: 1, Type: hraft.LogCommand, Data: encoded})
+	if resp != nil {
+		t.Fatalf("apply response = %v", resp)
+	}
+	if !bytes.Equal(applier.repr, repr) {
+		t.Fatalf("applier repr mismatch")
+	}
+	if _, closer, err := db.Get([]byte("cefas/table/T/item/3")); err == nil {
+		_ = closer.Close()
+		t.Fatalf("raw pebble was modified despite committed applier")
+	} else if err != pebbledb.ErrNotFound {
+		t.Fatalf("get raw key: %v", err)
 	}
 }
 

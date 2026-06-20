@@ -24,13 +24,16 @@ import (
 // stable view even as new entries land.
 type fsm struct {
 	pebble    *pebbledb.DB
+	applier   CommittedBatchApplier
 	publisher *Publisher // nil when no CDC subscribers ever attached
 	// applyIndex tracks the most recent log index for the CDC event
 	// stamps. The raft engine hands us the log via Apply(*Log) so we
 	// pull it from there.
 }
 
-func newFSM(pebble *pebbledb.DB) *fsm { return &fsm{pebble: pebble} }
+func newFSM(pebble *pebbledb.DB, applier CommittedBatchApplier) *fsm {
+	return &fsm{pebble: pebble, applier: applier}
+}
 
 // AttachPublisher wires a Publisher onto the FSM. After this call
 // every committed batch emits ChangeEvents for the cefas/ keys it
@@ -54,8 +57,15 @@ func (f *fsm) Apply(log *hraft.Log) any {
 	}
 
 	if f.publisher != nil {
-		if err := applyAndPublish(f.pebble, repr, log.Index, f.publisher); err != nil {
+		if err := applyAndPublish(f.pebble, repr, log.Index, f.publisher, f.applier); err != nil {
 			return fmt.Errorf("fsm apply (cdc): %w", err)
+		}
+		return nil
+	}
+
+	if f.applier != nil {
+		if err := f.applier.ApplyCommittedBatch(repr); err != nil {
+			return fmt.Errorf("fsm apply: %w", err)
 		}
 		return nil
 	}

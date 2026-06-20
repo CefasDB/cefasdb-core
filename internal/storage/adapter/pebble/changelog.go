@@ -251,7 +251,7 @@ func cloneChangeAttr(in types.AttributeValue) types.AttributeValue {
 }
 
 func (d *DB) loadChangeIndexLocked() (uint64, error) {
-	raw, err := d.Get(storage.ChangeCounterKey)
+	raw, err := d.getNoLane(storage.ChangeCounterKey)
 	if errors.Is(err, ErrNotFound) {
 		return 0, nil
 	}
