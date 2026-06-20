@@ -109,6 +109,7 @@ type Config struct {
 	StorageProfile  string
 	StorageTuning   pebble.PebbleTuning
 	Backpressure    pebble.BackpressureOptions
+	StorageLanes    pebble.LaneOptions
 	StreamRetention pebble.StreamRetentionOptions
 	ChangeLogMode   string
 	RaftProfile     string
@@ -305,6 +306,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Profile:         m.cfg.StorageProfile,
 		Tuning:          storageTuningForShards(m.cfg.Shards, m.cfg.StorageTuning),
 		Backpressure:    m.cfg.Backpressure,
+		Lanes:           pebble.DataLaneOptions(m.cfg.StorageLanes),
 		StreamRetention: m.cfg.StreamRetention,
 		ChangeLogMode:   m.cfg.ChangeLogMode,
 	})
@@ -356,6 +358,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		LeaderLeaseMS:                 m.cfg.LeaderLeaseMS,
 		CommitMS:                      m.cfg.CommitMS,
 		ApplyTimeout:                  m.cfg.ApplyTimeout,
+		CommittedApplier:              st,
 		SnapshotEntries:               m.cfg.SnapshotEntries,
 		LogCompression:                m.cfg.LogCompression,
 		LogCompressionMinBytes:        m.cfg.LogCompressionMinBytes,

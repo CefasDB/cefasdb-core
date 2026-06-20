@@ -62,6 +62,12 @@ type Metrics struct {
 	PebbleLevelSublevels        *prometheus.GaugeVec // shard, level
 	PebbleLevelScore            *prometheus.GaugeVec // shard, level
 
+	StorageLaneQueueDepth       *prometheus.GaugeVec // shard, lane
+	StorageLaneActiveWorkers    *prometheus.GaugeVec // shard, lane
+	StorageLaneWorkers          *prometheus.GaugeVec // shard, lane
+	StorageLaneOpsTotal         *prometheus.GaugeVec // shard, lane
+	StorageLaneQueueWaitSeconds *prometheus.GaugeVec // shard, lane
+
 	BackpressureState  *prometheus.GaugeVec // shard
 	BackpressureReason *prometheus.GaugeVec // shard, reason
 
@@ -225,6 +231,26 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 			Name: "cefas_pebble_level_score",
 			Help: "Pebble compaction score per level.",
 		}, []string{"shard", "level"}),
+		StorageLaneQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_storage_lane_queue_depth",
+			Help: "Queued operations waiting for a storage lane worker.",
+		}, []string{"shard", "lane"}),
+		StorageLaneActiveWorkers: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_storage_lane_active_workers",
+			Help: "Storage lane workers currently executing operations.",
+		}, []string{"shard", "lane"}),
+		StorageLaneWorkers: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_storage_lane_workers",
+			Help: "Configured worker count for a storage lane.",
+		}, []string{"shard", "lane"}),
+		StorageLaneOpsTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_storage_lane_ops_total",
+			Help: "Cumulative operations executed by a storage lane.",
+		}, []string{"shard", "lane"}),
+		StorageLaneQueueWaitSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_storage_lane_queue_wait_seconds_total",
+			Help: "Cumulative seconds spent waiting in a storage lane queue.",
+		}, []string{"shard", "lane"}),
 		BackpressureState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_backpressure_state",
 			Help: "Write backpressure state for the shard: 0 normal, 1 warning, 2 critical.",
@@ -347,6 +373,11 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.PebbleLevelBytes,
 		m.PebbleLevelSublevels,
 		m.PebbleLevelScore,
+		m.StorageLaneQueueDepth,
+		m.StorageLaneActiveWorkers,
+		m.StorageLaneWorkers,
+		m.StorageLaneOpsTotal,
+		m.StorageLaneQueueWaitSeconds,
 		m.BackpressureState,
 		m.BackpressureReason,
 		m.AuthRejectedTotal,

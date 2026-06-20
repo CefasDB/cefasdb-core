@@ -114,7 +114,7 @@ func (p *Publisher) SubscriberCount() int {
 // applyAndPublish replays a serialized batch against the local
 // Pebble store while collecting the (key, op) pairs the FSM emits to
 // its publisher. Used by fsm.Apply when a publisher is attached.
-func applyAndPublish(db *pebbledb.DB, repr []byte, raftIndex uint64, pub *Publisher) error {
+func applyAndPublish(db *pebbledb.DB, repr []byte, raftIndex uint64, pub *Publisher, applier CommittedBatchApplier) error {
 	batch := db.NewBatch()
 	defer batch.Close()
 	if err := batch.SetRepr(repr); err != nil {
@@ -154,8 +154,14 @@ func applyAndPublish(db *pebbledb.DB, repr []byte, raftIndex uint64, pub *Publis
 		}
 	}
 
-	if err := batch.Commit(pebbledb.NoSync); err != nil {
-		return err
+	if applier != nil {
+		if err := applier.ApplyCommittedBatch(repr); err != nil {
+			return err
+		}
+	} else {
+		if err := batch.Commit(pebbledb.NoSync); err != nil {
+			return err
+		}
 	}
 	for _, ev := range events {
 		pub.publish(ev)

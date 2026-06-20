@@ -53,10 +53,12 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 					m.ObserveRaftLogCompression(label, sh.Raft.LogCompressionStats())
 				}
 				collectPebble(m, label, sh.Storage)
+				collectStorageLanes(m, label, sh.Storage)
 				collectBackpressure(m, label, sh.Storage)
 				collectStreamRetention(m, label, sh.Storage)
 				if sh.RaftStorage != nil {
 					collectPebble(m, label+":raft", sh.RaftStorage)
+					collectStorageLanes(m, label+":raft", sh.RaftStorage)
 					collectBackpressure(m, label+":raft", sh.RaftStorage)
 				}
 			}
@@ -94,6 +96,7 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 				}
 			}
 			collectPebble(m, label, st)
+			collectStorageLanes(m, label, st)
 			collectBackpressure(m, label, st)
 			collectStreamRetention(m, label, st)
 		}
@@ -125,6 +128,22 @@ func collectPebble(m *Metrics, label string, st *pebble.DB) {
 		if level == 0 {
 			m.PebbleL0Files.WithLabelValues(label).Set(float64(lm.NumFiles))
 		}
+	}
+}
+
+func collectStorageLanes(m *Metrics, label string, st *pebble.DB) {
+	if m == nil || st == nil {
+		return
+	}
+	for _, snap := range st.LaneStats() {
+		if snap.Lane == "" {
+			continue
+		}
+		m.StorageLaneQueueDepth.WithLabelValues(label, snap.Lane).Set(float64(snap.QueueDepth))
+		m.StorageLaneActiveWorkers.WithLabelValues(label, snap.Lane).Set(float64(snap.Active))
+		m.StorageLaneWorkers.WithLabelValues(label, snap.Lane).Set(float64(snap.Workers))
+		m.StorageLaneOpsTotal.WithLabelValues(label, snap.Lane).Set(float64(snap.Ops))
+		m.StorageLaneQueueWaitSeconds.WithLabelValues(label, snap.Lane).Set(float64(snap.QueueWaitNs) / float64(time.Second))
 	}
 }
 

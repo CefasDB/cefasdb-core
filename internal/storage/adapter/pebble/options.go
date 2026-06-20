@@ -14,6 +14,10 @@ const (
 	ProfileWriteHeavy = "write-heavy"
 	ProfileRaft       = "raft"
 
+	LaneModeAuto = "auto"
+	LaneModeOn   = "on"
+	LaneModeOff  = "off"
+
 	ChangeLogModeAlways      = "always"
 	ChangeLogModeStreamsOnly = "streams-only"
 	ChangeLogModeOff         = "off"
@@ -32,6 +36,18 @@ type PebbleTuning struct {
 	L0StopWritesThreshold     int
 	BytesPerSync              int
 	WALBytesPerSync           int
+}
+
+// LaneOptions configures the read/write worker lanes that sit above Pebble.
+// They are intended for multi-shard data stores where caller goroutines should
+// not all enter Pebble's read and write paths directly. Mode "auto" is resolved
+// by the bootstrap layer: data shards enable it, raft metadata stores do not.
+type LaneOptions struct {
+	Mode         string
+	ReadWorkers  int
+	WriteWorkers int
+	ReadQueue    int
+	WriteQueue   int
 }
 
 // BackpressureOptions throttles caller-facing writes before the LSM reaches
@@ -96,6 +112,33 @@ func normalizeChangeLogMode(mode string) string {
 	default:
 		return ChangeLogModeAlways
 	}
+}
+
+func NormalizeLaneMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", LaneModeAuto:
+		return LaneModeAuto
+	case LaneModeOn, "enabled", "true", "1":
+		return LaneModeOn
+	case LaneModeOff, "disabled", "false", "0":
+		return LaneModeOff
+	default:
+		return LaneModeAuto
+	}
+}
+
+func DataLaneOptions(opts LaneOptions) LaneOptions {
+	if NormalizeLaneMode(opts.Mode) == LaneModeAuto {
+		opts.Mode = LaneModeOn
+	}
+	return opts
+}
+
+func MetadataLaneOptions(opts LaneOptions) LaneOptions {
+	if NormalizeLaneMode(opts.Mode) == LaneModeAuto {
+		opts.Mode = LaneModeOff
+	}
+	return opts
 }
 
 func profileTuning(profile string) PebbleTuning {

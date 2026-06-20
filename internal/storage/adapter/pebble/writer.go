@@ -337,21 +337,39 @@ func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (typ
 // PK/SK bytes. It is the point-read fast path for protocol handlers
 // that can parse key bytes without materializing a full Item map.
 func (d *DB) GetItemByKeyBytes(table string, pk, sk []byte) (types.Item, error) {
-	v, err := d.GetEncodedItemByKeyBytes(table, pk, sk)
+	var item types.Item
+	err := d.runRead(func() error {
+		v, err := d.getEncodedItemByKeyBytesNoLane(table, pk, sk)
+		if err != nil {
+			return err
+		}
+		item, err = storage.DecodeItem(v)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	return storage.DecodeItem(v)
+	return item, nil
 }
 
 // GetEncodedItemByKeyBytes loads an encoded item when the caller already
 // has canonical PK/SK bytes. The returned buffer is owned by the caller.
 func (d *DB) GetEncodedItemByKeyBytes(table string, pk, sk []byte) ([]byte, error) {
+	var out []byte
+	err := d.runRead(func() error {
+		var err error
+		out, err = d.getEncodedItemByKeyBytesNoLane(table, pk, sk)
+		return err
+	})
+	return out, err
+}
+
+func (d *DB) getEncodedItemByKeyBytesNoLane(table string, pk, sk []byte) ([]byte, error) {
 	primaryKey := storage.KeyPrimary(table, pk, sk)
 	if v, ok := d.memoryGet(table, primaryKey); ok {
 		return v, nil
 	}
-	v, err := d.Get(primaryKey)
+	v, err := d.getNoLane(primaryKey)
 	if errors.Is(err, ErrNotFound) {
 		return nil, types.ErrItemNotFound
 	}
@@ -796,16 +814,30 @@ func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) 
 // are represented as nil entries.
 func (d *DB) BatchGetItem(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
 	out := make([]types.Item, len(keys))
-	for i, ka := range keys {
-		item, err := d.GetItem(table, ks, ka)
-		if errors.Is(err, types.ErrItemNotFound) {
-			out[i] = nil
-			continue
+	err := d.runRead(func() error {
+		for i, ka := range keys {
+			pk, sk, err := extractKeyBytes(ka, ks)
+			if err != nil {
+				return fmt.Errorf("key %d: %w", i, err)
+			}
+			v, err := d.getEncodedItemByKeyBytesNoLane(table, pk, sk)
+			if errors.Is(err, types.ErrItemNotFound) {
+				out[i] = nil
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("key %d: %w", i, err)
+			}
+			item, err := storage.DecodeItem(v)
+			if err != nil {
+				return fmt.Errorf("key %d decode: %w", i, err)
+			}
+			out[i] = item
 		}
-		if err != nil {
-			return nil, fmt.Errorf("key %d: %w", i, err)
-		}
-		out[i] = item
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

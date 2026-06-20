@@ -76,6 +76,11 @@ func main() {
 		storageL0Stop             = flag.Int("storage-l0-stop-writes-threshold", 0, "Pebble L0StopWritesThreshold. 0 inherits selected profile.")
 		storageBytesPerSync       = flag.Int("storage-bytes-per-sync", 0, "Pebble BytesPerSync. 0 inherits selected profile.")
 		storageWALBytesPerSync    = flag.Int("storage-wal-bytes-per-sync", 0, "Pebble WALBytesPerSync. 0 inherits selected profile.")
+		storageLanes              = flag.String("storage-lanes", "", "Storage read/write lanes: auto, on, or off. Empty inherits config/default.")
+		storageLaneReadWorkers    = flag.Int("storage-lane-read-workers", 0, "Read lane worker count. 0 inherits default.")
+		storageLaneWriteWorkers   = flag.Int("storage-lane-write-workers", 0, "Write lane worker count. 0 inherits default.")
+		storageLaneReadQueue      = flag.Int("storage-lane-read-queue", 0, "Read lane queue capacity. 0 inherits default.")
+		storageLaneWriteQueue     = flag.Int("storage-lane-write-queue", 0, "Write lane queue capacity. 0 inherits default.")
 
 		// Adaptive write backpressure.
 		backpressureEnabled      = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
@@ -167,6 +172,8 @@ func main() {
 		*storageBlockCache, *storageMemTableSize, *storageMemTableStopWrites,
 		*storageMaxCompactions, *storageL0Concurrency, *storageL0Threshold,
 		*storageL0FileThreshold, *storageL0Stop, *storageBytesPerSync, *storageWALBytesPerSync,
+		*storageLanes, *storageLaneReadWorkers, *storageLaneWriteWorkers,
+		*storageLaneReadQueue, *storageLaneWriteQueue,
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
@@ -226,6 +233,7 @@ func main() {
 			StorageProfile:                cfg.Storage.Profile,
 			StorageTuning:                 bootstrapserver.StorageTuning(cfg),
 			Backpressure:                  bootstrapserver.BackpressureOptions(cfg),
+			StorageLanes:                  bootstrapserver.StorageLaneOptions(cfg),
 			StreamRetention:               bootstrapserver.StreamRetentionOptions(cfg),
 			ChangeLogMode:                 cfg.Storage.ChangeLogMode,
 			RaftProfile:                   cfg.Storage.RaftProfile,
@@ -315,6 +323,7 @@ func main() {
 			LogCompressionMinBytes:        cfg.Raft.LogCompressionMinBytes,
 			LogCompressionMinSavingsRatio: cfg.Raft.LogCompressionMinSavingsRatio,
 			LogCompressionSkipCooldown:    cfg.Raft.LogCompressionSkipCooldown,
+			CommittedApplier:              db,
 		}, db.Raw(), raftStore.Raw())
 		if err != nil {
 			logger.Error("open raft", "err", err)

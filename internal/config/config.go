@@ -46,6 +46,11 @@ type Config struct {
 		L0StopWritesThreshold       int           `yaml:"l0StopWritesThreshold"`
 		BytesPerSync                int           `yaml:"bytesPerSync"`
 		WALBytesPerSync             int           `yaml:"walBytesPerSync"`
+		Lanes                       string        `yaml:"lanes"`
+		LaneReadWorkers             int           `yaml:"laneReadWorkers"`
+		LaneWriteWorkers            int           `yaml:"laneWriteWorkers"`
+		LaneReadQueue               int           `yaml:"laneReadQueue"`
+		LaneWriteQueue              int           `yaml:"laneWriteQueue"`
 		BackpressureEnabled         bool          `yaml:"backpressureEnabled"`
 		BackpressureRejectCritical  bool          `yaml:"backpressureRejectCritical"`
 		BackpressureWarningL0Files  int64         `yaml:"backpressureWarningL0Files"`
@@ -161,6 +166,7 @@ func Defaults() Config {
 	c.Rebalancer.ApplyTimeout = 5 * time.Second
 	c.BackupScheduler.Interval = time.Hour
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
+	c.Storage.Lanes = "auto"
 	c.Storage.StreamRetention = 24 * time.Hour
 	c.Raft.HeartbeatTimeout = 2 * time.Second
 	c.Raft.ElectionTimeout = 10 * time.Second
@@ -283,6 +289,11 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.L0StopWritesThreshold = integer("STORAGE_L0_STOP_WRITES_THRESHOLD", cfg.Storage.L0StopWritesThreshold)
 	cfg.Storage.BytesPerSync = integer("STORAGE_BYTES_PER_SYNC", cfg.Storage.BytesPerSync)
 	cfg.Storage.WALBytesPerSync = integer("STORAGE_WAL_BYTES_PER_SYNC", cfg.Storage.WALBytesPerSync)
+	cfg.Storage.Lanes = str("STORAGE_LANES", cfg.Storage.Lanes)
+	cfg.Storage.LaneReadWorkers = integer("STORAGE_LANE_READ_WORKERS", cfg.Storage.LaneReadWorkers)
+	cfg.Storage.LaneWriteWorkers = integer("STORAGE_LANE_WRITE_WORKERS", cfg.Storage.LaneWriteWorkers)
+	cfg.Storage.LaneReadQueue = integer("STORAGE_LANE_READ_QUEUE", cfg.Storage.LaneReadQueue)
+	cfg.Storage.LaneWriteQueue = integer("STORAGE_LANE_WRITE_QUEUE", cfg.Storage.LaneWriteQueue)
 	cfg.Storage.BackpressureEnabled = boolean("STORAGE_BACKPRESSURE_ENABLED", cfg.Storage.BackpressureEnabled)
 	cfg.Storage.BackpressureRejectCritical = boolean("STORAGE_BACKPRESSURE_REJECT_CRITICAL", cfg.Storage.BackpressureRejectCritical)
 	cfg.Storage.BackpressureWarningL0Files = integer64("STORAGE_BACKPRESSURE_WARNING_L0_FILES", cfg.Storage.BackpressureWarningL0Files)

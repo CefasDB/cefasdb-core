@@ -64,6 +64,14 @@ type Config struct {
 	// shard shares one OS-level port. Single-Raft mode leaves this
 	// nil and Open builds its own NewTCPTransport on BindAddr.
 	StreamLayer hraft.StreamLayer
+
+	// CommittedApplier applies an already-committed raft log payload into the
+	// data store. When nil, the FSM applies directly to the raw Pebble handle.
+	CommittedApplier CommittedBatchApplier
+}
+
+type CommittedBatchApplier interface {
+	ApplyCommittedBatch(repr []byte) error
 }
 
 func (c Config) heartbeat() time.Duration {
@@ -211,7 +219,7 @@ func Open(ctx context.Context, cfg Config, pdb *pebbledb.DB, raftStores ...*pebb
 	if err != nil {
 		return nil, fmt.Errorf("snapshot store: %w", err)
 	}
-	d.fsm = newFSM(pdb)
+	d.fsm = newFSM(pdb, cfg.CommittedApplier)
 	d.snapshotStore = snaps
 
 	var t hraft.Transport

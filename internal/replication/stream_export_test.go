@@ -8,5 +8,5 @@ import (
 // so the cdc tests can drive it without spinning up a full raft
 // instance.
 func ApplyAndPublishForTest(db *pebbledb.DB, repr []byte, raftIndex uint64, pub *Publisher) error {
-	return applyAndPublish(db, repr, raftIndex, pub)
+	return applyAndPublish(db, repr, raftIndex, pub, nil)
 }
