@@ -471,34 +471,48 @@ append_phase_sample_summary() {
   done
 }
 
-leader_status_file() {
+leader_status_files() {
   local snapshot="$1"
   local dir="$RESULT_DIR/cluster-status/${snapshot}"
   if [[ ! -d "$dir" ]]; then
     return 1
   fi
-  find "$dir" -type f -name 'node*.json' -size +0 -print | sort | head -n 1
+  find "$dir" -type f -name 'node*.json' -size +0 -print | sort
 }
 
 append_leader_distribution_row() {
   local snapshot="$1"
-  local file
-  file="$(leader_status_file "$snapshot" || true)"
-  if [[ -z "$file" ]]; then
+  local files=()
+  mapfile -t files < <(leader_status_files "$snapshot" || true)
+  if [[ "${#files[@]}" -eq 0 ]]; then
     printf '| %s | n/a | n/a | n/a |\n' "$snapshot" >> "$SUMMARY_FILE"
     return
   fi
   jq -r --arg snapshot "$snapshot" '
+    def aggregate:
+      [.[].shards[]? | select((.id // 0) != 0)]
+      | sort_by(.id)
+      | group_by(.id)
+      | map({
+          id: .[0].id,
+          actualLeader: ([.[] | (.actualLeader // "") | select(. != "")] | first // ""),
+          desiredLeader: ([.[] | ((.desiredLeader // .leaderHint // "") | select(. != ""))] | first // ""),
+          leaderMismatch: (([.[] | select(.leaderMismatch // false)] | length) > 0)
+        });
     def counts($field):
-      ([.shards[]? | select((.id // 0) != 0) | (.[$field] // "") | select(. != "")]
+      ([.[] | (.[$field] // "") | select(. != "")]
         | sort
         | group_by(.)
         | map("\(.[0])=\(length)")
         | join(", ")) as $value
       | if $value == "" then "n/a" else $value end;
-    ([.shards[]? | select((.id // 0) != 0 and (.leaderMismatch // false))] | length) as $mismatches
+    (aggregate) as $shards
+    | ([ $shards[]
+        | select((.leaderMismatch // false) or ((.actualLeader // "") != "" and (.desiredLeader // "") != "" and .actualLeader != .desiredLeader))
+      ] | length) as $mismatches
+    | $shards
     | "| \($snapshot) | \(counts("actualLeader")) | \(counts("desiredLeader")) | \($mismatches) |"
-  ' "$file" >> "$SUMMARY_FILE" 2>/dev/null || printf '| %s | n/a | n/a | n/a |\n' "$snapshot" >> "$SUMMARY_FILE"
+  ' "${files[@]}" >> "$SUMMARY_FILE" 2>/dev/null || printf '| %s | n/a | n/a | n/a |\n' "$snapshot" >> "$SUMMARY_FILE"
 }
 
 append_leader_distribution_summary() {

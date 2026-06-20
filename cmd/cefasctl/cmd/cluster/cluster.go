@@ -4,9 +4,11 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -207,31 +209,54 @@ func rebalanceLeadersCmd() *cobra.Command {
 		includeShardZero bool
 		maxConcurrent    int
 		timeoutMS        int
+		nodeEndpoints    string
 	)
 	c := &cobra.Command{
 		Use:   "rebalance-leaders",
 		Short: "Transfer shard leaders toward placement leader hints",
 		Long: `Transfers locally-led shards whose current Raft leader differs from
-the placement leader hint. Shard 0 is skipped by default because it carries
-metadata/catalog state.
+the placement leader hint. Pass --node-endpoints to orchestrate the same local
+operation across every node and aggregate the cluster-wide result. Shard 0 is
+skipped by default because it carries metadata/catalog state.
 
 Example:
   cefas cluster rebalance-leaders --dry-run
+  cefas cluster rebalance-leaders --dry-run --node-endpoints n1=127.0.0.1:9291,n2=127.0.0.1:9292
   cefas cluster rebalance-leaders --max-concurrent 2 --timeout-ms 5000`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			req := client.RebalanceLeadersRequest{
+				DryRun:           dryRun,
+				IncludeShardZero: includeShardZero,
+				MaxConcurrent:    maxConcurrent,
+				TimeoutMS:        timeoutMS,
+			}
+			if strings.TrimSpace(nodeEndpoints) != "" {
+				endpoints, err := parseNodeEndpointMap(nodeEndpoints)
+				if err != nil {
+					return err
+				}
+				profile, err := runtime.ResolveProfile(ctx)
+				if err != nil {
+					return err
+				}
+				result, err := rebalanceLeadersAcrossNodes(ctx, endpoints, req)
+				if err != nil {
+					return err
+				}
+				fm, err := output.Validate(profile.Output)
+				if err != nil {
+					return err
+				}
+				return output.New(cmd.OutOrStdout(), fm).Object(result)
+			}
 			cli, profile, err := runtime.Dial(ctx)
 			if err != nil {
 				return err
 			}
 			defer cli.Close()
-			result, err := cli.RebalanceLeaders(ctx, client.RebalanceLeadersRequest{
-				DryRun:           dryRun,
-				IncludeShardZero: includeShardZero,
-				MaxConcurrent:    maxConcurrent,
-				TimeoutMS:        timeoutMS,
-			})
+			result, err := cli.RebalanceLeaders(ctx, req)
 			if err != nil {
 				return fmt.Errorf("rebalance leaders: %w", err)
 			}
@@ -247,7 +272,211 @@ Example:
 	f.BoolVar(&includeShardZero, "include-shard-zero", false, "Allow transferring metadata shard 0")
 	f.IntVar(&maxConcurrent, "max-concurrent", 1, "Maximum concurrent leadership transfers")
 	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-transfer timeout in milliseconds")
+	f.StringVar(&nodeEndpoints, "node-endpoints", "", "Comma-separated nodeID=gRPC endpoint map for cluster-wide orchestration")
 	return c
+}
+
+type rebalanceLeadersClusterResult struct {
+	DryRun           bool
+	IncludeShardZero bool
+	MaxConcurrent    int
+	TimeoutMS        int
+	NodeEndpoints    map[string]string
+	NodeResults      []rebalanceLeadersNodeResult
+	Before           []client.ShardLeadershipStatus
+	After            []client.ShardLeadershipStatus
+	BeforeCounts     []client.LeaderCount
+	AfterCounts      []client.LeaderCount
+	Planned          int
+	Transferred      int
+	Skipped          int
+	Failed           int
+	NodePlanned      int
+	NodeTransferred  int
+	NodeSkipped      int
+	NodeFailed       int
+}
+
+type rebalanceLeadersNodeResult struct {
+	NodeID   string
+	Endpoint string
+	Result   client.RebalanceLeadersResult
+}
+
+func rebalanceLeadersAcrossNodes(ctx context.Context, endpoints map[string]string, req client.RebalanceLeadersRequest) (rebalanceLeadersClusterResult, error) {
+	result := rebalanceLeadersClusterResult{
+		DryRun:           req.DryRun,
+		IncludeShardZero: req.IncludeShardZero,
+		MaxConcurrent:    req.MaxConcurrent,
+		TimeoutMS:        req.TimeoutMS,
+		NodeEndpoints:    copyStringMap(endpoints),
+	}
+	nodeIDs := sortedStringKeys(endpoints)
+	for _, nodeID := range nodeIDs {
+		endpoint := endpoints[nodeID]
+		cli, err := dialEndpoint(ctx, endpoint)
+		if err != nil {
+			return result, fmt.Errorf("rebalance leaders %s=%s: %w", nodeID, endpoint, err)
+		}
+		nodeResult, err := cli.RebalanceLeaders(ctx, req)
+		cerr := cli.Close()
+		if err != nil {
+			return result, fmt.Errorf("rebalance leaders %s=%s: %w", nodeID, endpoint, err)
+		}
+		if cerr != nil {
+			return result, fmt.Errorf("rebalance leaders %s=%s close: %w", nodeID, endpoint, cerr)
+		}
+		result.NodeResults = append(result.NodeResults, rebalanceLeadersNodeResult{
+			NodeID:   nodeID,
+			Endpoint: endpoint,
+			Result:   nodeResult,
+		})
+		result.NodePlanned += nodeResult.Planned
+		result.NodeTransferred += nodeResult.Transferred
+		result.NodeSkipped += nodeResult.Skipped
+		result.NodeFailed += nodeResult.Failed
+	}
+	result.Before = mergeShardLeadershipStatuses(result.NodeResults, func(r client.RebalanceLeadersResult) []client.ShardLeadershipStatus {
+		return r.Before
+	})
+	result.After = mergeShardLeadershipStatuses(result.NodeResults, func(r client.RebalanceLeadersResult) []client.ShardLeadershipStatus {
+		return r.After
+	})
+	result.BeforeCounts = leaderCountsFromStatuses(result.Before)
+	result.AfterCounts = leaderCountsFromStatuses(result.After)
+	result.Planned, result.Transferred, result.Skipped, result.Failed = aggregateLeaderRebalanceSteps(result.NodeResults)
+	return result, nil
+}
+
+func dialEndpoint(ctx context.Context, endpoint string) (*client.Client, error) {
+	opts := runtime.Flags
+	if s := runtime.FromContext(ctx); s != nil {
+		opts = s.Options()
+	}
+	opts.Endpoint = endpoint
+	cli, _, err := runtime.Dial(runtime.WithSession(ctx, runtime.NewSession(opts)))
+	return cli, err
+}
+
+func parseNodeEndpointMap(raw string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		nodeID, endpoint, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(endpoint) == "" {
+			return nil, fmt.Errorf("bad node endpoint mapping %q", part)
+		}
+		out[strings.TrimSpace(nodeID)] = strings.TrimSpace(endpoint)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no node endpoints configured")
+	}
+	return out, nil
+}
+
+func mergeShardLeadershipStatuses(nodes []rebalanceLeadersNodeResult, selectStatuses func(client.RebalanceLeadersResult) []client.ShardLeadershipStatus) []client.ShardLeadershipStatus {
+	byShard := map[uint32]client.ShardLeadershipStatus{}
+	for _, node := range nodes {
+		for _, st := range selectStatuses(node.Result) {
+			current := byShard[st.ShardID]
+			current.ShardID = st.ShardID
+			if current.ActualLeader == "" && st.ActualLeader != "" {
+				current.ActualLeader = st.ActualLeader
+			}
+			if current.DesiredLeader == "" && st.DesiredLeader != "" {
+				current.DesiredLeader = st.DesiredLeader
+			}
+			current.LeaderMismatch = current.LeaderMismatch || st.LeaderMismatch
+			byShard[st.ShardID] = current
+		}
+	}
+	out := make([]client.ShardLeadershipStatus, 0, len(byShard))
+	for _, st := range byShard {
+		st.LeaderMismatch = st.LeaderMismatch || (st.ActualLeader != "" && st.DesiredLeader != "" && st.ActualLeader != st.DesiredLeader)
+		out = append(out, st)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ShardID < out[j].ShardID })
+	return out
+}
+
+func leaderCountsFromStatuses(statuses []client.ShardLeadershipStatus) []client.LeaderCount {
+	counts := map[string]int{}
+	for _, st := range statuses {
+		if st.ShardID == 0 || st.ActualLeader == "" {
+			continue
+		}
+		counts[st.ActualLeader]++
+	}
+	out := make([]client.LeaderCount, 0, len(counts))
+	for nodeID, count := range counts {
+		out = append(out, client.LeaderCount{NodeID: nodeID, Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NodeID < out[j].NodeID })
+	return out
+}
+
+func aggregateLeaderRebalanceSteps(nodes []rebalanceLeadersNodeResult) (planned, transferred, skipped, failed int) {
+	statusByShard := map[uint32]string{}
+	for _, node := range nodes {
+		for _, step := range node.Result.Steps {
+			prev := statusByShard[step.ShardID]
+			statusByShard[step.ShardID] = strongerLeaderRebalanceStatus(prev, step.Status)
+		}
+	}
+	for _, status := range statusByShard {
+		switch status {
+		case "planned":
+			planned++
+		case "transferred":
+			transferred++
+		case "failed":
+			failed++
+		default:
+			skipped++
+		}
+	}
+	return planned, transferred, skipped, failed
+}
+
+func strongerLeaderRebalanceStatus(a, b string) string {
+	rank := func(status string) int {
+		switch status {
+		case "transferred":
+			return 4
+		case "failed":
+			return 3
+		case "planned":
+			return 2
+		case "skipped":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
+
+func sortedStringKeys(in map[string]string) []string {
+	out := make([]string, 0, len(in))
+	for key := range in {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func planCmd() *cobra.Command {
