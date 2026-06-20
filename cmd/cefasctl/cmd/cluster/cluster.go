@@ -25,6 +25,7 @@ func Register(root *cobra.Command) {
 	c.AddCommand(statusCmd())
 	c.AddCommand(addVoterCmd())
 	c.AddCommand(removeServerCmd())
+	c.AddCommand(rebalanceLeadersCmd())
 	c.AddCommand(planCmd())
 	c.AddCommand(applyCmd())
 	c.AddCommand(splitCmd())
@@ -197,6 +198,55 @@ Example:
 		shardSet = cmd.Flags().Changed("shard")
 	}
 	_ = c.MarkFlagRequired("id")
+	return c
+}
+
+func rebalanceLeadersCmd() *cobra.Command {
+	var (
+		dryRun           bool
+		includeShardZero bool
+		maxConcurrent    int
+		timeoutMS        int
+	)
+	c := &cobra.Command{
+		Use:   "rebalance-leaders",
+		Short: "Transfer shard leaders toward placement leader hints",
+		Long: `Transfers locally-led shards whose current Raft leader differs from
+the placement leader hint. Shard 0 is skipped by default because it carries
+metadata/catalog state.
+
+Example:
+  cefas cluster rebalance-leaders --dry-run
+  cefas cluster rebalance-leaders --max-concurrent 2 --timeout-ms 5000`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			cli, profile, err := runtime.Dial(ctx)
+			if err != nil {
+				return err
+			}
+			defer cli.Close()
+			result, err := cli.RebalanceLeaders(ctx, client.RebalanceLeadersRequest{
+				DryRun:           dryRun,
+				IncludeShardZero: includeShardZero,
+				MaxConcurrent:    maxConcurrent,
+				TimeoutMS:        timeoutMS,
+			})
+			if err != nil {
+				return fmt.Errorf("rebalance leaders: %w", err)
+			}
+			fm, err := output.Validate(profile.Output)
+			if err != nil {
+				return err
+			}
+			return output.New(cmd.OutOrStdout(), fm).Object(result)
+		},
+	}
+	f := c.Flags()
+	f.BoolVar(&dryRun, "dry-run", false, "Plan leader transfers without applying them")
+	f.BoolVar(&includeShardZero, "include-shard-zero", false, "Allow transferring metadata shard 0")
+	f.IntVar(&maxConcurrent, "max-concurrent", 1, "Maximum concurrent leadership transfers")
+	f.IntVar(&timeoutMS, "timeout-ms", 5000, "Per-transfer timeout in milliseconds")
 	return c
 }
 

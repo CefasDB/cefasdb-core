@@ -43,33 +43,18 @@ func (m *Manager) startLeaderHintReconciliation() {
 // same reconciliation runs on every node during startup, so whichever
 // process currently leads a shard performs the handoff.
 func (m *Manager) ApplyLeaderHints(ctx context.Context) error {
-	cat := m.Placement()
 	var errs []error
-	for _, meta := range cat.Shards {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !transferableLeaderHint(meta) {
-			continue
-		}
-		sh, ok := m.Shard(meta.ID)
-		if !ok || sh == nil || sh.Raft == nil {
-			continue
-		}
-		leaderID, _ := sh.Raft.LeaderInfo()
-		if leaderID == "" || leaderID == meta.LeaderHint {
-			continue
-		}
-		if !sh.Raft.IsLeader() {
-			continue
-		}
-		addr := leaderHintRaftAddr(cat, meta.LeaderHint)
-		if addr == "" {
-			errs = append(errs, fmt.Errorf("shard %d: leader hint %q has no raft address", meta.ID, meta.LeaderHint))
-			continue
-		}
-		if err := sh.Raft.TransferLeadership(meta.LeaderHint, addr, leaderHintTransferTimeout); err != nil {
-			errs = append(errs, fmt.Errorf("shard %d: transfer leadership to %q: %w", meta.ID, meta.LeaderHint, err))
+	result, err := m.RebalanceLeaders(ctx, LeaderRebalanceRequest{
+		IncludeShardZero: true,
+		MaxConcurrent:    1,
+		Timeout:          leaderHintTransferTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	for _, step := range result.Steps {
+		if step.Status == "failed" {
+			errs = append(errs, fmt.Errorf("shard %d: %s: %s", step.ShardID, step.Reason, step.Detail))
 		}
 	}
 	return errors.Join(errs...)

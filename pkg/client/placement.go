@@ -134,6 +134,51 @@ type RangeMoveFinalizeResult struct {
 	Placement          PlacementCatalog
 }
 
+type RebalanceLeadersRequest struct {
+	DryRun           bool
+	IncludeShardZero bool
+	MaxConcurrent    int
+	TimeoutMS        int
+}
+
+type ShardLeadershipStatus struct {
+	ShardID        uint32
+	ActualLeader   string
+	DesiredLeader  string
+	LeaderMismatch bool
+}
+
+type LeaderCount struct {
+	NodeID string
+	Count  int
+}
+
+type LeaderRebalanceStep struct {
+	ShardID       uint32
+	CurrentLeader string
+	DesiredLeader string
+	TargetLeader  string
+	Status        string
+	Reason        string
+	Detail        string
+}
+
+type RebalanceLeadersResult struct {
+	DryRun           bool
+	IncludeShardZero bool
+	MaxConcurrent    int
+	TimeoutMS        int
+	Before           []ShardLeadershipStatus
+	After            []ShardLeadershipStatus
+	BeforeCounts     []LeaderCount
+	AfterCounts      []LeaderCount
+	Steps            []LeaderRebalanceStep
+	Planned          int
+	Transferred      int
+	Skipped          int
+	Failed           int
+}
+
 // PlanPlacement asks the server to compute a placement plan for the
 // reshape described by req without applying it.
 func (c *Client) PlanPlacement(ctx context.Context, req PlacementPlanRequest) (PlacementPlan, error) {
@@ -212,6 +257,19 @@ func (c *Client) FinalizeRangeMove(ctx context.Context, req RangeMoveFinalizeReq
 		return RangeMoveFinalizeResult{}, err
 	}
 	return rangeMoveFinalizeResultFromPB(resp.GetResult()), nil
+}
+
+func (c *Client) RebalanceLeaders(ctx context.Context, req RebalanceLeadersRequest) (RebalanceLeadersResult, error) {
+	resp, err := c.stub.RebalanceLeaders(c.withAuth(ctx), &cefaspb.RebalanceLeadersRequest{
+		DryRun:           req.DryRun,
+		IncludeShardZero: req.IncludeShardZero,
+		MaxConcurrent:    int32(req.MaxConcurrent),
+		TimeoutMs:        int32(req.TimeoutMS),
+	})
+	if err != nil {
+		return RebalanceLeadersResult{}, err
+	}
+	return rebalanceLeadersResultFromPB(resp), nil
 }
 
 func placementPlanToPB(in PlacementPlan) *cefaspb.PlacementPlan {
@@ -330,6 +388,67 @@ func rangeMoveFinalizeResultFromPB(in *cefaspb.FinalizeRangeMoveResult) RangeMov
 		Phase:              in.GetPhase(),
 		Placement:          placementCatalogFromPB(in.GetPlacement()),
 	}
+}
+
+func rebalanceLeadersResultFromPB(in *cefaspb.RebalanceLeadersResponse) RebalanceLeadersResult {
+	if in == nil {
+		return RebalanceLeadersResult{}
+	}
+	return RebalanceLeadersResult{
+		DryRun:           in.GetDryRun(),
+		IncludeShardZero: in.GetIncludeShardZero(),
+		MaxConcurrent:    int(in.GetMaxConcurrent()),
+		TimeoutMS:        int(in.GetTimeoutMs()),
+		Before:           shardLeadershipStatusesFromPB(in.GetBefore()),
+		After:            shardLeadershipStatusesFromPB(in.GetAfter()),
+		BeforeCounts:     leaderCountsFromPB(in.GetBeforeCounts()),
+		AfterCounts:      leaderCountsFromPB(in.GetAfterCounts()),
+		Steps:            leaderRebalanceStepsFromPB(in.GetSteps()),
+		Planned:          int(in.GetPlanned()),
+		Transferred:      int(in.GetTransferred()),
+		Skipped:          int(in.GetSkipped()),
+		Failed:           int(in.GetFailed()),
+	}
+}
+
+func shardLeadershipStatusesFromPB(in []*cefaspb.ShardLeadershipStatus) []ShardLeadershipStatus {
+	out := make([]ShardLeadershipStatus, 0, len(in))
+	for _, st := range in {
+		out = append(out, ShardLeadershipStatus{
+			ShardID:        st.GetShardId(),
+			ActualLeader:   st.GetActualLeader(),
+			DesiredLeader:  st.GetDesiredLeader(),
+			LeaderMismatch: st.GetLeaderMismatch(),
+		})
+	}
+	return out
+}
+
+func leaderCountsFromPB(in []*cefaspb.LeaderCount) []LeaderCount {
+	out := make([]LeaderCount, 0, len(in))
+	for _, count := range in {
+		out = append(out, LeaderCount{
+			NodeID: count.GetNodeId(),
+			Count:  int(count.GetCount()),
+		})
+	}
+	return out
+}
+
+func leaderRebalanceStepsFromPB(in []*cefaspb.LeaderRebalanceStep) []LeaderRebalanceStep {
+	out := make([]LeaderRebalanceStep, 0, len(in))
+	for _, step := range in {
+		out = append(out, LeaderRebalanceStep{
+			ShardID:       step.GetShardId(),
+			CurrentLeader: step.GetCurrentLeader(),
+			DesiredLeader: step.GetDesiredLeader(),
+			TargetLeader:  step.GetTargetLeader(),
+			Status:        step.GetStatus(),
+			Reason:        step.GetReason(),
+			Detail:        step.GetDetail(),
+		})
+	}
+	return out
 }
 
 func placementApplyStepsFromPB(in []*cefaspb.PlacementApplyStep) []PlacementApplyStep {

@@ -118,6 +118,12 @@ var ErrNotLeader = errors.New("cefas/raft: not leader")
 // import pebble.
 var ErrNotFound = pebbledb.ErrNotFound
 
+// IsLeadershipTransferInProgress reports whether hashicorp/raft is
+// already processing another user-triggered leadership transfer.
+func IsLeadershipTransferInProgress(err error) bool {
+	return errors.Is(err, hraft.ErrLeadershipTransferInProgress)
+}
+
 // DB attaches raft replication onto a *pebble.DB the storage layer
 // owns. The storage.DB.AttachReplicator wiring forwards CommitBatch
 // to DB.Replicate so writes flow through the raft log. Raft log/stable
@@ -371,6 +377,29 @@ func (d *DB) LeaderInfo() (id, addr string) {
 	}
 	rawAddr, rawID := d.raft.LeaderWithID()
 	return string(rawID), string(rawAddr)
+}
+
+// VoterAddress returns the current Raft configuration address for a
+// voting server ID. The bool is false when the ID is absent or present
+// only as a non-voter.
+func (d *DB) VoterAddress(id string) (string, bool, error) {
+	if d == nil || d.raft == nil {
+		return "", false, fmt.Errorf("raft: not initialised")
+	}
+	f := d.raft.GetConfiguration()
+	if err := f.Error(); err != nil {
+		return "", false, err
+	}
+	for _, srv := range f.Configuration().Servers {
+		if string(srv.ID) != id {
+			continue
+		}
+		if srv.Suffrage != hraft.Voter {
+			return "", false, nil
+		}
+		return string(srv.Address), true, nil
+	}
+	return "", false, nil
 }
 
 // AttachPublisher wires a CDC Publisher onto the FSM. After this

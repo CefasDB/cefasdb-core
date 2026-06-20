@@ -59,6 +59,7 @@ service Cefas {
   rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
   rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
+  rpc RebalanceLeaders(RebalanceLeadersRequest) returns (RebalanceLeadersResponse);
   rpc PlanPlacement(PlanPlacementRequest) returns (PlanPlacementResponse);
   rpc ApplyPlacement(ApplyPlacementRequest) returns (ApplyPlacementResponse);
   rpc FinalizeSplit(FinalizeSplitRequest) returns (FinalizeSplitResponse);
@@ -947,6 +948,51 @@ message RemoveServerRequest {
   bool   all_shards  = 4;
 }
 message RemoveServerResponse {}
+
+message RebalanceLeadersRequest {
+  bool dry_run            = 1;
+  bool include_shard_zero = 2;
+  int32 max_concurrent    = 3;
+  int32 timeout_ms        = 4;
+}
+
+message ShardLeadershipStatus {
+  uint32 shard_id        = 1;
+  string actual_leader   = 2;
+  string desired_leader  = 3;
+  bool leader_mismatch   = 4;
+}
+
+message LeaderCount {
+  string node_id = 1;
+  int32 count    = 2;
+}
+
+message LeaderRebalanceStep {
+  uint32 shard_id       = 1;
+  string current_leader = 2;
+  string desired_leader = 3;
+  string target_leader  = 4;
+  string status         = 5;
+  string reason         = 6;
+  string detail         = 7;
+}
+
+message RebalanceLeadersResponse {
+  bool dry_run            = 1;
+  bool include_shard_zero = 2;
+  int32 max_concurrent    = 3;
+  int32 timeout_ms        = 4;
+  repeated ShardLeadershipStatus before = 5;
+  repeated ShardLeadershipStatus after  = 6;
+  repeated LeaderCount before_counts    = 7;
+  repeated LeaderCount after_counts     = 8;
+  repeated LeaderRebalanceStep steps    = 9;
+  int32 planned     = 10;
+  int32 transferred = 11;
+  int32 skipped     = 12;
+  int32 failed      = 13;
+}
 
 message PlacementCatalog {
   uint64 version       = 1;

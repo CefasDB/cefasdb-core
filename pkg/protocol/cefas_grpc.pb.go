@@ -51,6 +51,7 @@ const (
 	Cefas_ClusterStatus_FullMethodName          = "/cefas.v1.Cefas/ClusterStatus"
 	Cefas_AddVoter_FullMethodName               = "/cefas.v1.Cefas/AddVoter"
 	Cefas_RemoveServer_FullMethodName           = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_RebalanceLeaders_FullMethodName       = "/cefas.v1.Cefas/RebalanceLeaders"
 	Cefas_PlanPlacement_FullMethodName          = "/cefas.v1.Cefas/PlanPlacement"
 	Cefas_ApplyPlacement_FullMethodName         = "/cefas.v1.Cefas/ApplyPlacement"
 	Cefas_FinalizeSplit_FullMethodName          = "/cefas.v1.Cefas/FinalizeSplit"
@@ -130,6 +131,7 @@ type CefasClient interface {
 	ClusterStatus(ctx context.Context, in *ClusterStatusRequest, opts ...grpc.CallOption) (*ClusterStatusResponse, error)
 	AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error)
 	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
+	RebalanceLeaders(ctx context.Context, in *RebalanceLeadersRequest, opts ...grpc.CallOption) (*RebalanceLeadersResponse, error)
 	PlanPlacement(ctx context.Context, in *PlanPlacementRequest, opts ...grpc.CallOption) (*PlanPlacementResponse, error)
 	ApplyPlacement(ctx context.Context, in *ApplyPlacementRequest, opts ...grpc.CallOption) (*ApplyPlacementResponse, error)
 	FinalizeSplit(ctx context.Context, in *FinalizeSplitRequest, opts ...grpc.CallOption) (*FinalizeSplitResponse, error)
@@ -462,6 +464,16 @@ func (c *cefasClient) RemoveServer(ctx context.Context, in *RemoveServerRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RemoveServerResponse)
 	err := c.cc.Invoke(ctx, Cefas_RemoveServer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) RebalanceLeaders(ctx context.Context, in *RebalanceLeadersRequest, opts ...grpc.CallOption) (*RebalanceLeadersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RebalanceLeadersResponse)
+	err := c.cc.Invoke(ctx, Cefas_RebalanceLeaders_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -869,6 +881,7 @@ type CefasServer interface {
 	ClusterStatus(context.Context, *ClusterStatusRequest) (*ClusterStatusResponse, error)
 	AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error)
 	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
+	RebalanceLeaders(context.Context, *RebalanceLeadersRequest) (*RebalanceLeadersResponse, error)
 	PlanPlacement(context.Context, *PlanPlacementRequest) (*PlanPlacementResponse, error)
 	ApplyPlacement(context.Context, *ApplyPlacementRequest) (*ApplyPlacementResponse, error)
 	FinalizeSplit(context.Context, *FinalizeSplitRequest) (*FinalizeSplitResponse, error)
@@ -1004,6 +1017,9 @@ func (UnimplementedCefasServer) AddVoter(context.Context, *AddVoterRequest) (*Ad
 }
 func (UnimplementedCefasServer) RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoveServer not implemented")
+}
+func (UnimplementedCefasServer) RebalanceLeaders(context.Context, *RebalanceLeadersRequest) (*RebalanceLeadersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RebalanceLeaders not implemented")
 }
 func (UnimplementedCefasServer) PlanPlacement(context.Context, *PlanPlacementRequest) (*PlanPlacementResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PlanPlacement not implemented")
@@ -1553,6 +1569,24 @@ func _Cefas_RemoveServer_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CefasServer).RemoveServer(ctx, req.(*RemoveServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_RebalanceLeaders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RebalanceLeadersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RebalanceLeaders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RebalanceLeaders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RebalanceLeaders(ctx, req.(*RebalanceLeadersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2249,6 +2283,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveServer",
 			Handler:    _Cefas_RemoveServer_Handler,
+		},
+		{
+			MethodName: "RebalanceLeaders",
+			Handler:    _Cefas_RebalanceLeaders_Handler,
 		},
 		{
 			MethodName: "PlanPlacement",
