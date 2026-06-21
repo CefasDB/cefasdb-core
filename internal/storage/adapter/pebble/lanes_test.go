@@ -28,10 +28,13 @@ func openLaneTestDB(t testing.TB) *pebble.DB {
 func TestReadWriteLanesServePointReadsAndWrites(t *testing.T) {
 	db := openLaneTestDB(t)
 
-	// Set/Delete/Get/Has stay on the lane (small independent ops the
-	// lane was designed to throttle). CommitBatch deliberately bypasses
-	// the write lane after #428 so the group-commit coalescer is not
-	// capped by lane.write.workers; covered by TestCommitBatchBypassesWriteLane.
+	// Set/Delete keep the write lane (small independent ops the lane
+	// was designed to throttle). CommitBatch bypasses it after #428 —
+	// see TestCommitBatchBypassesWriteLane.
+	// Get/Has bypass the read lane after #434 — see
+	// TestGetHasBypassesReadLane. Reads still flow through the lane
+	// for Iter/Scan/Query paths; Get/Has prove correctness, not lane
+	// accounting.
 	if err := db.Set([]byte("k1"), []byte("v1")); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -54,11 +57,32 @@ func TestReadWriteLanesServePointReadsAndWrites(t *testing.T) {
 	}
 
 	stats := laneStatsByName(db.LaneStats())
-	if stats["read"].Ops == 0 {
-		t.Fatalf("read lane did not record operations: %+v", stats["read"])
-	}
 	if stats["write"].Ops == 0 {
 		t.Fatalf("write lane did not record operations: %+v", stats["write"])
+	}
+}
+
+// TestGetHasBypassesReadLane pins the #434 contract: Get / Has are
+// point reads that pay the lane round-trip more than they pay Pebble
+// itself, so they skip the lane entirely. Long-running readers (Iter,
+// Scan, Query) still use it for tail-latency isolation.
+func TestGetHasBypassesReadLane(t *testing.T) {
+	db := openLaneTestDB(t)
+	if err := db.Set([]byte("k"), []byte("v")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	before := laneStatsByName(db.LaneStats())["read"].Ops
+
+	if _, err := db.Get([]byte("k")); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if _, err := db.Has([]byte("k")); err != nil {
+		t.Fatalf("Has: %v", err)
+	}
+
+	after := laneStatsByName(db.LaneStats())["read"].Ops
+	if after != before {
+		t.Fatalf("Get/Has must not increment read lane Ops: before=%d after=%d", before, after)
 	}
 }
 
