@@ -2,17 +2,39 @@ package pebble
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 const (
-	defaultLaneReadWorkers  = 8
 	defaultLaneWriteWorkers = 8
-	defaultLaneReadQueue    = 4096
 	defaultLaneWriteQueue   = 2048
+
+	// Read lane floors. The actual defaults scale with GOMAXPROCS via
+	// defaultLaneReadWorkers / defaultLaneReadQueue below — the prior
+	// hardcoded 8 capped a 24-shard / 512-reader bench at 192 in-flight
+	// reads and starved mixed-read.
+	minLaneReadWorkers = 16
+	minLaneReadQueue   = 4096
 )
+
+func defaultLaneReadWorkers() int {
+	n := runtime.GOMAXPROCS(0) * 2
+	if n < minLaneReadWorkers {
+		return minLaneReadWorkers
+	}
+	return n
+}
+
+func defaultLaneReadQueue() int {
+	n := runtime.GOMAXPROCS(0) * 256
+	if n < minLaneReadQueue {
+		return minLaneReadQueue
+	}
+	return n
+}
 
 type laneJob struct {
 	enqueued time.Time
@@ -57,7 +79,7 @@ func newDBLanes(opts LaneOptions) *dbLanes {
 	}
 	readWorkers := opts.ReadWorkers
 	if readWorkers <= 0 {
-		readWorkers = defaultLaneReadWorkers
+		readWorkers = defaultLaneReadWorkers()
 	}
 	writeWorkers := opts.WriteWorkers
 	if writeWorkers <= 0 {
@@ -65,7 +87,7 @@ func newDBLanes(opts LaneOptions) *dbLanes {
 	}
 	readQueue := opts.ReadQueue
 	if readQueue <= 0 {
-		readQueue = defaultLaneReadQueue
+		readQueue = defaultLaneReadQueue()
 	}
 	writeQueue := opts.WriteQueue
 	if writeQueue <= 0 {
