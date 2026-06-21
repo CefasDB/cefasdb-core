@@ -131,7 +131,15 @@ type commitReq struct {
 }
 
 const (
-	maxMergeBatch = 64
+	// defaultMergeBatch is the starting cap. The commit loop adapts in
+	// [minMergeBatch, maxMergeBatchCap] based on observed queue pressure
+	// — see commitLoop.
+	defaultMergeBatch = 64
+	minMergeBatch     = 16
+	maxMergeBatchCap  = 256
+	mergeStepUp       = 32
+	mergeStepDown     = 8
+
 	commitChanBuf = 1024
 )
 
@@ -342,10 +350,18 @@ func (d *DB) ApplyCommittedBatch(repr []byte) error {
 }
 
 // commitLoop is the single goroutine that owns the Pebble write side. It
-// merges up to maxMergeBatch concurrent requests into one Pebble Commit
+// merges up to mergeLimit concurrent requests into one Pebble Commit
 // to collapse commitPipeline mutex contention. Same pattern as codeq.
+//
+// mergeLimit adapts after every commit: if the drain saturated the
+// current limit and commitCh is more than 3/4 full, raise by
+// mergeStepUp (capped at maxMergeBatchCap) to amortize fsync/WAL over
+// more callers; if the drain pulled less than a quarter of the limit,
+// lower by mergeStepDown (floored at minMergeBatch) to keep tail
+// latency bounded under light load.
 func (d *DB) commitLoop() {
 	defer close(d.stopped)
+	mergeLimit := defaultMergeBatch
 	for {
 		var first *commitReq
 		select {
@@ -370,7 +386,7 @@ func (d *DB) commitLoop() {
 		reqs := []*commitReq{first}
 
 	drain:
-		for len(reqs) < maxMergeBatch {
+		for len(reqs) < mergeLimit {
 			select {
 			case more := <-d.commitCh:
 				if err := merged.Apply(more.batch, nil); err != nil {
@@ -380,6 +396,24 @@ func (d *DB) commitLoop() {
 				reqs = append(reqs, more)
 			default:
 				break drain
+			}
+		}
+
+		// Adapt mergeLimit for the next iteration. Hysteresis: only
+		// step up when the drain fully saturated the current cap and
+		// the channel is genuinely backed up; only step down when the
+		// drain barely picked anything.
+		if len(reqs) >= mergeLimit && len(d.commitCh) >= cap(d.commitCh)*3/4 {
+			if mergeLimit+mergeStepUp <= maxMergeBatchCap {
+				mergeLimit += mergeStepUp
+			} else {
+				mergeLimit = maxMergeBatchCap
+			}
+		} else if len(reqs) <= mergeLimit/4 {
+			if mergeLimit-mergeStepDown >= minMergeBatch {
+				mergeLimit -= mergeStepDown
+			} else {
+				mergeLimit = minMergeBatch
 			}
 		}
 
