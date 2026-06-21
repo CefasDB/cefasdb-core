@@ -64,6 +64,29 @@ if [[ ${#baseline_dirs[@]} -eq 0 || ${#candidate_dirs[@]} -eq 0 ]]; then
   usage
 fi
 
+# fmt_rate renders a throughput like 88046 → "88.0K/s"; 1234567 → "1.23M/s".
+fmt_rate() {
+  awk -v v="$1" 'BEGIN{
+    if (v >= 1e6) { printf "%.2fM/s", v/1e6 }
+    else if (v >= 1e3) { printf "%.1fK/s", v/1e3 }
+    else { printf "%.0f/s", v }
+  }'
+}
+
+# fmt_lat renders a millisecond latency with sensible precision.
+fmt_lat() {
+  awk -v v="$1" 'BEGIN{
+    if (v >= 100) { printf "%.0fms", v }
+    else if (v >= 10) { printf "%.1fms", v }
+    else { printf "%.2fms", v }
+  }'
+}
+
+# fmt_pct renders a percentage with sign and 2 decimal places.
+fmt_pct() {
+  awk -v v="$1" 'BEGIN{ printf "%+.2f%%", v }'
+}
+
 require_dir() {
   local d="$1"
   if [[ ! -d "$d" ]]; then
@@ -142,8 +165,8 @@ if [[ "$SHOW_RUNS" == "1" ]]; then
   echo
 fi
 
-printf '| Run / Phase | Baseline thr/s | Candidate thr/s | Δ%% thr | Baseline p95 | Candidate p95 | Δ%% p95 | Baseline p99 | Candidate p99 | Δ%% p99 | Errors B/C |\n'
-printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+printf '| Run / Phase | Throughput (baseline → candidate) | p95 ms (baseline → candidate) | p99 ms (baseline → candidate) | Errors B/C |\n'
+printf '| --- | ---: | ---: | ---: | ---: |\n'
 
 rows_tsv="$(
   jq -r --arg targets "$TARGETS" '
@@ -176,8 +199,12 @@ worst_regression="0"
 if [[ -n "$rows_tsv" ]]; then
   while IFS=$'\t' read -r key bthr cthr dthr bp95 cp95 d95 bp99 cp99 d99 errs is_target; do
     [[ -z "$key" ]] && continue
-    printf '| %s | %.0f | %.0f | %+.2f%% | %.2f | %.2f | %+.2f%% | %.2f | %.2f | %+.2f%% | %s |\n' \
-      "$key" "$bthr" "$cthr" "$dthr" "$bp95" "$cp95" "$d95" "$bp99" "$cp99" "$d99" "$errs"
+    printf '| %s | %s → %s (%s) | %s → %s (%s) | %s → %s (%s) | %s |\n' \
+      "$key" \
+      "$(fmt_rate "$bthr")" "$(fmt_rate "$cthr")" "$(fmt_pct "$dthr")" \
+      "$(fmt_lat "$bp95")" "$(fmt_lat "$cp95")" "$(fmt_pct "$d95")" \
+      "$(fmt_lat "$bp99")" "$(fmt_lat "$cp99")" "$(fmt_pct "$d99")" \
+      "$errs"
     if [[ "$is_target" == "true" ]]; then
       if awk -v d="$dthr" -v w="$worst_regression" 'BEGIN{exit !(d < w)}'; then
         worst_regression="$dthr"

@@ -44,6 +44,7 @@ type cfg struct {
 	Progress              time.Duration
 	LatencySampleRate     int64
 	ClientRouteAwareReads bool
+	WithStream            bool
 	JSONOutput            string
 	Label                 string
 }
@@ -252,6 +253,7 @@ func parseFlags() cfg {
 	flag.DurationVar(&c.Progress, "progress", 30*time.Second, "progress print interval; 0 disables")
 	flag.Int64Var(&c.LatencySampleRate, "latency-sample-rate", 10, "record one latency sample every N RPCs")
 	flag.BoolVar(&c.ClientRouteAwareReads, "client-route-aware-reads", false, "serve mixed/read phases through the Go client route-aware eventual-read path")
+	flag.BoolVar(&c.WithStream, "with-stream", false, "create the bench table with StreamSpecification enabled (NEW_AND_OLD_IMAGES) so write paths exercise the changelog + retention loop; required to validate Wave 1+ retention/changelog initiatives")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -398,10 +400,17 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 	}
 	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err := cli.CreateTable(rpcCtx, types.TableDescriptor{
+	td := types.TableDescriptor{
 		Name:      c.Table,
 		KeySchema: types.KeySchema{PK: "pk", SK: "sk"},
-	})
+	}
+	if c.WithStream {
+		td.StreamSpecification = &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeNewAndOldImages,
+		}
+	}
+	err := cli.CreateTable(rpcCtx, td)
 	if err == nil {
 		fmt.Printf("created table: %s via %s\n", c.Table, leader)
 		return warmTable(ctx, c, cs)
