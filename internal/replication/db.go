@@ -538,6 +538,12 @@ func (d *DB) Barrier(timeout time.Duration) error {
 // Replicates queue on applyCh and the loop merges up to raftMergeBatch
 // into a single raft.Apply. Each caller still gets its own done
 // channel and an independent error.
+//
+// Ownership: the caller MUST NOT mutate repr until Replicate returns.
+// applyLoop hands repr straight to pebble.Batch.SetRepr (no defensive
+// copy) and pebble's batch contract guarantees the slice is safe to
+// reuse only after Apply returns; the caller blocks on <-req.done so
+// the window is respected by construction.
 func (d *DB) Replicate(repr []byte) error {
 	if !d.IsLeader() {
 		return ErrNotLeader
@@ -584,7 +590,10 @@ func (d *DB) applyLoop() {
 		}
 
 		merged := d.pebble.NewBatch()
-		if err := merged.SetRepr(append([]byte(nil), first.repr...)); err != nil {
+		// SetRepr keeps a reference to first.repr; Pebble's Apply only
+		// appends to merged.data and never mutates the source, so the
+		// caller's slice stays intact while it waits on req.done.
+		if err := merged.SetRepr(first.repr); err != nil {
 			first.done <- fmt.Errorf("raft apply: setrepr first: %w", err)
 			_ = merged.Close()
 			continue
@@ -596,7 +605,7 @@ func (d *DB) applyLoop() {
 			select {
 			case more := <-d.applyCh:
 				tmp := d.pebble.NewBatch()
-				if err := tmp.SetRepr(append([]byte(nil), more.repr...)); err != nil {
+				if err := tmp.SetRepr(more.repr); err != nil {
 					more.done <- fmt.Errorf("raft apply: setrepr merge: %w", err)
 					_ = tmp.Close()
 					break drain

@@ -64,13 +64,13 @@ func BenchmarkApplyLoopMergeMicro(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				merged := d.NewBatch()
 				// First payload — same shape as applyLoop "first" path.
-				if err := merged.SetRepr(append([]byte(nil), reprs[0]...)); err != nil {
+				if err := merged.SetRepr(reprs[0]); err != nil {
 					b.Fatalf("setrepr first: %v", err)
 				}
 				// Remaining payloads — same shape as the drain loop.
 				for j := 1; j < mergeSize; j++ {
 					tmp := d.NewBatch()
-					if err := tmp.SetRepr(append([]byte(nil), reprs[j]...)); err != nil {
+					if err := tmp.SetRepr(reprs[j]); err != nil {
 						b.Fatalf("setrepr merge: %v", err)
 					}
 					if err := merged.Apply(tmp, nil); err != nil {
