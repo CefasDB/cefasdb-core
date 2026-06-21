@@ -24,7 +24,7 @@ func TestRouterReturnsErrorForUncoveredToken(t *testing.T) {
 				{ID: 0, State: placement.ShardStateActive, Epoch: 42, Ranges: []placement.TokenRange{{Start: 0, End: 100}}},
 			},
 		},
-		ranges: []routeRange{
+		normalRanges: []routeRange{
 			{shardID: 0, rng: placement.TokenRange{Start: 0, End: 100}},
 		},
 	}
@@ -56,7 +56,7 @@ func TestRouterShardForPKPropagatesUncoveredError(t *testing.T) {
 				{ID: 0, State: placement.ShardStateActive, Epoch: 7, Ranges: []placement.TokenRange{{Start: 1, End: 2}}},
 			},
 		},
-		ranges: []routeRange{
+		normalRanges: []routeRange{
 			{shardID: 0, rng: placement.TokenRange{Start: 1, End: 2}},
 		},
 	}

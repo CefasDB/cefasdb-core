@@ -93,13 +93,15 @@ func managerForReadTest(t *testing.T, cat placement.PlacementCatalog, selfID str
 	}
 	for _, meta := range cat.Shards {
 		mgr.shards = append(mgr.shards, &Shard{
-			ID:         meta.ID,
-			State:      meta.State,
-			Epoch:      meta.Epoch,
-			Ranges:     append([]placement.TokenRange(nil), meta.Ranges...),
-			Voters:     append([]string(nil), meta.Voters...),
-			NonVoters:  append([]string(nil), meta.NonVoters...),
-			LeaderHint: meta.LeaderHint,
+			ID:              meta.ID,
+			State:           meta.State,
+			Epoch:           meta.Epoch,
+			Ranges:          append([]placement.TokenRange(nil), meta.Ranges...),
+			Voters:          append([]string(nil), meta.Voters...),
+			NonVoters:       append([]string(nil), meta.NonVoters...),
+			LeaderHint:      meta.LeaderHint,
+			IsLocalVoter:    containsString(meta.Voters, selfID),
+			IsLocalNonVoter: containsString(meta.NonVoters, selfID),
 		})
 	}
 	return mgr

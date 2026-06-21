@@ -44,17 +44,24 @@ type ShardConfig struct {
 
 // Shard is the per-shard handle owned by Manager: one pebble.DB
 // (with raft attached) per shard.
+//
+// IsLocalVoter / IsLocalNonVoter snapshot the membership decision made
+// when the shard is opened: do Voters / NonVoters contain this node's
+// SelfID? hasLocalReplica reads these instead of doing a linear
+// string-comparison scan on every scatter-read.
 type Shard struct {
-	ID          uint32
-	State       placement.ShardState
-	Epoch       uint64
-	Ranges      []placement.TokenRange
-	Voters      []string
-	NonVoters   []string
-	LeaderHint  string
-	Storage     *pebble.DB
-	RaftStorage *pebble.DB
-	Raft        *craft.DB
+	ID              uint32
+	State           placement.ShardState
+	Epoch           uint64
+	Ranges          []placement.TokenRange
+	Voters          []string
+	NonVoters       []string
+	LeaderHint      string
+	IsLocalVoter    bool
+	IsLocalNonVoter bool
+	Storage         *pebble.DB
+	RaftStorage     *pebble.DB
+	Raft            *craft.DB
 }
 
 // Config bundles every input needed to bring up a multi-Raft node.
@@ -319,14 +326,16 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
 		// Single-node mode (no raft). The pebble.DB stands alone.
 		return &Shard{
-			ID:         shardID,
-			State:      meta.State,
-			Epoch:      meta.Epoch,
-			Ranges:     append([]placement.TokenRange(nil), meta.Ranges...),
-			Voters:     append([]string(nil), meta.Voters...),
-			NonVoters:  append([]string(nil), meta.NonVoters...),
-			LeaderHint: meta.LeaderHint,
-			Storage:    st,
+			ID:              shardID,
+			State:           meta.State,
+			Epoch:           meta.Epoch,
+			Ranges:          append([]placement.TokenRange(nil), meta.Ranges...),
+			Voters:          append([]string(nil), meta.Voters...),
+			NonVoters:       append([]string(nil), meta.NonVoters...),
+			LeaderHint:      meta.LeaderHint,
+			IsLocalVoter:    containsString(meta.Voters, m.cfg.SelfID),
+			IsLocalNonVoter: containsString(meta.NonVoters, m.cfg.SelfID),
+			Storage:         st,
 		}, nil
 	}
 
@@ -389,16 +398,18 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 	}
 	st.AttachReplicator(rdb)
 	return &Shard{
-		ID:          shardID,
-		State:       meta.State,
-		Epoch:       meta.Epoch,
-		Ranges:      append([]placement.TokenRange(nil), meta.Ranges...),
-		Voters:      append([]string(nil), meta.Voters...),
-		NonVoters:   append([]string(nil), meta.NonVoters...),
-		LeaderHint:  meta.LeaderHint,
-		Storage:     st,
-		RaftStorage: raftStore,
-		Raft:        rdb,
+		ID:              shardID,
+		State:           meta.State,
+		Epoch:           meta.Epoch,
+		Ranges:          append([]placement.TokenRange(nil), meta.Ranges...),
+		Voters:          append([]string(nil), meta.Voters...),
+		NonVoters:       append([]string(nil), meta.NonVoters...),
+		LeaderHint:      meta.LeaderHint,
+		IsLocalVoter:    containsString(meta.Voters, m.cfg.SelfID),
+		IsLocalNonVoter: containsString(meta.NonVoters, m.cfg.SelfID),
+		Storage:         st,
+		RaftStorage:     raftStore,
+		Raft:            rdb,
 	}, nil
 }
 
@@ -614,7 +625,7 @@ func (m *Manager) hasLocalReplica(sh *Shard) bool {
 	if len(sh.Voters) == 0 && len(sh.NonVoters) == 0 {
 		return true
 	}
-	return containsString(sh.Voters, m.cfg.SelfID) || containsString(sh.NonVoters, m.cfg.SelfID)
+	return sh.IsLocalVoter || sh.IsLocalNonVoter
 }
 
 // RouteForPK selects the shard and verifies an optional caller routing
