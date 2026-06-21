@@ -121,6 +121,54 @@ func BenchmarkDecodeChangeRecord(b *testing.B) {
 	}
 }
 
+// BenchmarkEncodeChangeRecordBinary measures the binary-v1 codec
+// introduced by #431. Comparison point: BenchmarkEncodeChangeRecord
+// (the json.Marshal baseline) above.
+func BenchmarkEncodeChangeRecordBinary(b *testing.B) {
+	rec := newChangeRecord(streamTestTable(), ChangePut,
+		types.Item{"id": streamS("k")},
+		nil,
+		types.Item{"id": streamS("k"), "status": streamS("v"), "payload": streamS("0123456789abcdef0123456789abcdef")},
+	)
+	rec.Index = 42
+	rec.SequenceNumber = "42"
+	rec.UnixNano = 1_700_000_000_000_000_000
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf, err := encodeChangeRecord(nil, rec)
+		if err != nil {
+			b.Fatalf("encode: %v", err)
+		}
+		if len(buf) == 0 {
+			b.Fatalf("empty buffer")
+		}
+	}
+}
+
+func BenchmarkDecodeChangeRecordBinary(b *testing.B) {
+	rec := newChangeRecord(streamTestTable(), ChangePut,
+		types.Item{"id": streamS("k")},
+		nil,
+		types.Item{"id": streamS("k"), "status": streamS("v"), "payload": streamS("0123456789abcdef0123456789abcdef")},
+	)
+	rec.Index = 42
+	rec.SequenceNumber = "42"
+	rec.UnixNano = 1_700_000_000_000_000_000
+	raw, err := encodeChangeRecord(nil, rec)
+	if err != nil {
+		b.Fatalf("encode: %v", err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(raw)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := decodeChangeRecord(raw); err != nil {
+			b.Fatalf("decode: %v", err)
+		}
+	}
+}
+
 // BenchmarkApproximateChangeRecordSize covers the second json.Marshal
 // per write that Wave 1 #427 deletes.
 func BenchmarkApproximateChangeRecordSize(b *testing.B) {

@@ -90,9 +90,9 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if rec.StreamRecord && rec.SizeBytes == 0 {
 		rec.SizeBytes = estimateChangeRecordSize(rec)
 	}
-	raw, err := json.Marshal(rec)
+	raw, err := encodeChangeRecord(nil, rec)
 	if err != nil {
-		return rec, fmt.Errorf("marshal change record: %w", err)
+		return rec, fmt.Errorf("encode change record: %w", err)
 	}
 	var counter [8]byte
 	binary.BigEndian.PutUint64(counter[:], rec.Index)
@@ -464,9 +464,8 @@ func (d *DB) scanStreamRetentionRecords(table string, extra *ChangeRecord) ([]st
 	defer it.Close()
 	var records []streamRetentionRecord
 	for valid := it.First(); valid; valid = it.Next() {
-		var rec ChangeRecord
-		raw := append([]byte(nil), it.Value()...)
-		if err := json.Unmarshal(raw, &rec); err != nil {
+		rec, err := decodeChangeRecord(it.Value())
+		if err != nil {
 			return nil, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
 		}
 		if rec.Table == table && rec.StreamRecord {
@@ -575,9 +574,8 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 
 	var out []ChangeRecord
 	for valid := it.First(); valid; valid = it.Next() {
-		var rec ChangeRecord
-		raw := append([]byte(nil), it.Value()...)
-		if err := json.Unmarshal(raw, &rec); err != nil {
+		rec, err := decodeChangeRecord(it.Value())
+		if err != nil {
 			return nil, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
 		}
 		if rec.Table != table {
@@ -625,9 +623,9 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 	var out []ChangeRecord
 	var bytes int64
 	for valid := it.First(); valid; valid = it.Next() {
-		var rec ChangeRecord
-		raw := append([]byte(nil), it.Value()...)
-		if err := json.Unmarshal(raw, &rec); err != nil {
+		raw := it.Value()
+		rec, err := decodeChangeRecord(raw)
+		if err != nil {
 			return nil, nextSequence, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
 		}
 		if rec.Table != table || !rec.StreamRecord {
