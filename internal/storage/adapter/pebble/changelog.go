@@ -80,17 +80,7 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if rec.Table == "" {
 		return rec, fmt.Errorf("change record table required")
 	}
-	d.changeMu.Lock()
-	defer d.changeMu.Unlock()
-	if d.changeIndex == 0 {
-		idx, err := d.loadChangeIndexLocked()
-		if err != nil {
-			return rec, err
-		}
-		d.changeIndex = idx
-	}
-	d.changeIndex++
-	rec.Index = d.changeIndex
+	rec.Index = d.changeIndex.Add(1)
 	if rec.StreamRecord {
 		rec.SequenceNumber = strconv.FormatUint(rec.Index, 10)
 	}
@@ -285,7 +275,11 @@ func cloneChangeAttr(in types.AttributeValue) types.AttributeValue {
 	return out
 }
 
-func (d *DB) loadChangeIndexLocked() (uint64, error) {
+// loadPersistedChangeIndex reads ChangeCounterKey or returns 0 when absent.
+// May trail the true MAX(KeyChangeLog) by up to one commit window after
+// a crash because the counter is written from inside batches the caller
+// owns; seedChangeIndex covers that gap with a key-range scan.
+func (d *DB) loadPersistedChangeIndex() (uint64, error) {
 	raw, err := d.getNoLane(storage.ChangeCounterKey)
 	if errors.Is(err, ErrNotFound) {
 		return 0, nil
@@ -299,18 +293,48 @@ func (d *DB) loadChangeIndexLocked() (uint64, error) {
 	return binary.BigEndian.Uint64(raw), nil
 }
 
-func (d *DB) CurrentChangeIndex() (uint64, error) {
-	d.changeMu.Lock()
-	defer d.changeMu.Unlock()
-	if d.changeIndex != 0 {
-		return d.changeIndex, nil
-	}
-	idx, err := d.loadChangeIndexLocked()
+// scanMaxChangeIndex walks the changelog prefix backwards and returns the
+// largest known index, or 0 if the changelog is empty. Used in Open to
+// recover from a stale ChangeCounterKey after an unclean shutdown.
+func (d *DB) scanMaxChangeIndex() (uint64, error) {
+	lower, upper := storage.PrefixChangeLog()
+	it, err := d.Iter(lower, upper)
 	if err != nil {
 		return 0, err
 	}
-	d.changeIndex = idx
+	defer it.Close()
+	if !it.Last() {
+		return 0, it.Error()
+	}
+	key := it.Key()
+	idx, err := storage.ChangeLogIndexFromKey(key)
+	if err != nil {
+		return 0, fmt.Errorf("decode change log key: %w", err)
+	}
 	return idx, nil
+}
+
+// seedChangeIndex initialises d.changeIndex on Open. Takes the larger of
+// the persisted counter and a tail scan so a crash that lost the counter
+// write cannot produce overlapping indexes on the next append.
+func (d *DB) seedChangeIndex() error {
+	persisted, err := d.loadPersistedChangeIndex()
+	if err != nil {
+		return err
+	}
+	scanned, err := d.scanMaxChangeIndex()
+	if err != nil {
+		return err
+	}
+	if scanned > persisted {
+		persisted = scanned
+	}
+	d.changeIndex.Store(persisted)
+	return nil
+}
+
+func (d *DB) CurrentChangeIndex() (uint64, error) {
+	return d.changeIndex.Load(), nil
 }
 
 // ApplyStreamRetention advances the logical stream trim point for table using
@@ -323,8 +347,6 @@ func (d *DB) ApplyStreamRetention(table string, now time.Time) (StreamRetentionS
 	if now.IsZero() {
 		now = time.Now()
 	}
-	d.changeMu.Lock()
-	defer d.changeMu.Unlock()
 	b := d.Batch()
 	defer b.Close()
 	stats, err := d.applyStreamRetentionLocked(b, table, now, nil)
