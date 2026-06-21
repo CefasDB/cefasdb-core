@@ -105,15 +105,16 @@ type Config struct {
 	// HasExistingState contract).
 	Bootstrap bool
 
-	FsyncOnCommit   bool
-	StorageProfile  string
-	StorageTuning   pebble.PebbleTuning
-	Backpressure    pebble.BackpressureOptions
-	StorageLanes    pebble.LaneOptions
-	StreamRetention pebble.StreamRetentionOptions
-	ChangeLogMode   string
-	RaftProfile     string
-	RaftTuning      pebble.PebbleTuning
+	FsyncOnCommit       bool
+	StorageProfile      string
+	StorageTuning       pebble.PebbleTuning
+	Backpressure        pebble.BackpressureOptions
+	StorageLanes        pebble.LaneOptions
+	StreamRetention     pebble.StreamRetentionOptions
+	ChangeLogMode       string
+	AdaptiveStorageMode bool
+	RaftProfile         string
+	RaftTuning          pebble.PebbleTuning
 
 	HeartbeatMS                   int
 	ElectionMS                    int
@@ -309,6 +310,7 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Lanes:           pebble.DataLaneOptions(m.cfg.StorageLanes),
 		StreamRetention: m.cfg.StreamRetention,
 		ChangeLogMode:   m.cfg.ChangeLogMode,
+		AdaptiveMode:    m.cfg.AdaptiveStorageMode,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
