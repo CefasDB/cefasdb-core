@@ -484,31 +484,9 @@ func (s *Server) batchGetByShard(table string, ks types.KeySchema, keys []types.
 		}
 		return out, nil
 	}
-	out := make([]types.Item, len(keys))
-	for i, k := range keys {
-		started := time.Now()
-		pkBytes, err := pkBytesFromItem(k, ks)
-		if err != nil {
-			return nil, err
-		}
-		db, err := s.readStorageFor(pkBytes)
-		if err != nil {
-			return nil, err
-		}
-		single, err := db.BatchGetItem(table, ks, []types.Item{k})
-		if err != nil {
-			return nil, err
-		}
-		if len(single) == 1 {
-			out[i] = single[0]
-		}
-		approxBytes := uint64(len(pkBytes))
-		if out[i] != nil {
-			approxBytes = estimatedItemBytes(out[i])
-		}
+	return batchGetGroupByShard(table, ks, keys, s.readStorageFor, func(pkBytes []byte, approxBytes uint64, started time.Time) {
 		s.observeRangeMetric(rangeMetricRead, pkBytes, approxBytes, started)
-	}
-	return out, nil
+	})
 }
 
 // spatialAllShards scatter-gathers a spatial query across every
