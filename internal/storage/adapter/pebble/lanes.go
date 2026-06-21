@@ -16,24 +16,45 @@ const (
 	// defaultLaneReadWorkers / defaultLaneReadQueue below — the prior
 	// hardcoded 8 capped a 24-shard / 512-reader bench at 192 in-flight
 	// reads and starved mixed-read.
-	minLaneReadWorkers = 16
-	minLaneReadQueue   = 4096
+	minLaneReadWorkers     = 16
+	minLaneReadQueue       = 4096
+	minPerShardReadWorkers = 2
+	minPerShardReadQueue   = 512
 )
 
-func defaultLaneReadWorkers() int {
-	n := runtime.GOMAXPROCS(0) * 2
-	if n < minLaneReadWorkers {
+// defaultLaneReadWorkers returns the read-lane worker count for one DB,
+// given the number of sibling shards on the same node (0 means "I'm the
+// only one"). For multi-shard nodes the GOMAXPROCS*2 target is divided
+// across shards so the total worker count stays close to the core count
+// instead of N_shards * cores.
+func defaultLaneReadWorkers(sharedShards int) int {
+	target := runtime.GOMAXPROCS(0) * 2
+	if sharedShards > 1 {
+		perShard := target / sharedShards
+		if perShard < minPerShardReadWorkers {
+			perShard = minPerShardReadWorkers
+		}
+		return perShard
+	}
+	if target < minLaneReadWorkers {
 		return minLaneReadWorkers
 	}
-	return n
+	return target
 }
 
-func defaultLaneReadQueue() int {
-	n := runtime.GOMAXPROCS(0) * 256
-	if n < minLaneReadQueue {
+func defaultLaneReadQueue(sharedShards int) int {
+	target := runtime.GOMAXPROCS(0) * 256
+	if sharedShards > 1 {
+		perShard := target / sharedShards
+		if perShard < minPerShardReadQueue {
+			perShard = minPerShardReadQueue
+		}
+		return perShard
+	}
+	if target < minLaneReadQueue {
 		return minLaneReadQueue
 	}
-	return n
+	return target
 }
 
 type laneJob struct {
@@ -79,7 +100,7 @@ func newDBLanes(opts LaneOptions) *dbLanes {
 	}
 	readWorkers := opts.ReadWorkers
 	if readWorkers <= 0 {
-		readWorkers = defaultLaneReadWorkers()
+		readWorkers = defaultLaneReadWorkers(opts.SharedShardCount)
 	}
 	writeWorkers := opts.WriteWorkers
 	if writeWorkers <= 0 {
@@ -87,7 +108,7 @@ func newDBLanes(opts LaneOptions) *dbLanes {
 	}
 	readQueue := opts.ReadQueue
 	if readQueue <= 0 {
-		readQueue = defaultLaneReadQueue()
+		readQueue = defaultLaneReadQueue(opts.SharedShardCount)
 	}
 	writeQueue := opts.WriteQueue
 	if writeQueue <= 0 {

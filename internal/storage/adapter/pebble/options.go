@@ -42,12 +42,18 @@ type PebbleTuning struct {
 // They are intended for multi-shard data stores where caller goroutines should
 // not all enter Pebble's read and write paths directly. Mode "auto" is resolved
 // by the bootstrap layer: data shards enable it, raft metadata stores do not.
+//
+// SharedShardCount lets the bootstrap layer tell each per-shard DB how many
+// peers share the same node, so the GOMAXPROCS-derived default worker count
+// is divided across shards instead of multiplied by them. Zero keeps the
+// single-shard sizing (max(GOMAXPROCS*2, 16) workers per DB).
 type LaneOptions struct {
-	Mode         string
-	ReadWorkers  int
-	WriteWorkers int
-	ReadQueue    int
-	WriteQueue   int
+	Mode             string
+	ReadWorkers      int
+	WriteWorkers     int
+	ReadQueue        int
+	WriteQueue       int
+	SharedShardCount int
 }
 
 // BackpressureOptions throttles caller-facing writes before the LSM reaches

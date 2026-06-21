@@ -300,13 +300,15 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		return nil, fmt.Errorf("mkdir %s: %w", raftDir, err)
 	}
 
+	dataLanes := pebble.DataLaneOptions(m.cfg.StorageLanes)
+	dataLanes.SharedShardCount = m.cfg.Shards
 	st, err := pebble.Open(pebble.Options{
 		Path:            stateDir,
 		FsyncOnCommit:   m.cfg.FsyncOnCommit,
 		Profile:         m.cfg.StorageProfile,
 		Tuning:          storageTuningForShards(m.cfg.Shards, m.cfg.StorageTuning),
 		Backpressure:    m.cfg.Backpressure,
-		Lanes:           pebble.DataLaneOptions(m.cfg.StorageLanes),
+		Lanes:           dataLanes,
 		StreamRetention: m.cfg.StreamRetention,
 		ChangeLogMode:   m.cfg.ChangeLogMode,
 	})
