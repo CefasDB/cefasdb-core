@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 func openLaneTestDB(t testing.TB) *pebble.DB {
@@ -28,25 +27,30 @@ func openLaneTestDB(t testing.TB) *pebble.DB {
 
 func TestReadWriteLanesServePointReadsAndWrites(t *testing.T) {
 	db := openLaneTestDB(t)
-	ks := types.KeySchema{PK: "id"}
-	td := types.TableDescriptor{Name: "events", KeySchema: ks}
 
-	if err := db.BatchWriteItem(td, []pebble.BatchOp{
-		{Op: pebble.BatchOpPut, Item: types.Item{"id": sAttr("a"), "v": sAttr("one")}},
-		{Op: pebble.BatchOpPut, Item: types.Item{"id": sAttr("b"), "v": sAttr("two")}},
-	}); err != nil {
-		t.Fatalf("BatchWriteItem: %v", err)
+	// Set/Delete/Get/Has stay on the lane (small independent ops the
+	// lane was designed to throttle). CommitBatch deliberately bypasses
+	// the write lane after #428 so the group-commit coalescer is not
+	// capped by lane.write.workers; covered by TestCommitBatchBypassesWriteLane.
+	if err := db.Set([]byte("k1"), []byte("v1")); err != nil {
+		t.Fatalf("Set: %v", err)
 	}
-
-	got, err := db.BatchGetItem("events", ks, []types.Item{
-		{"id": sAttr("a")},
-		{"id": sAttr("b")},
-	})
+	if err := db.Set([]byte("k2"), []byte("v2")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, err := db.Get([]byte("k1"))
 	if err != nil {
-		t.Fatalf("BatchGetItem: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if len(got) != 2 || got[0]["v"].S != "one" || got[1]["v"].S != "two" {
-		t.Fatalf("BatchGetItem = %#v", got)
+	if string(got) != "v1" {
+		t.Fatalf("value = %q, want v1", got)
+	}
+	ok, err := db.Has([]byte("k2"))
+	if err != nil {
+		t.Fatalf("Has: %v", err)
+	}
+	if !ok {
+		t.Fatal("Has(k2) = false")
 	}
 
 	stats := laneStatsByName(db.LaneStats())
@@ -55,6 +59,30 @@ func TestReadWriteLanesServePointReadsAndWrites(t *testing.T) {
 	}
 	if stats["write"].Ops == 0 {
 		t.Fatalf("write lane did not record operations: %+v", stats["write"])
+	}
+}
+
+// TestCommitBatchBypassesWriteLane pins the #428 contract: CommitBatch
+// is intentionally routed straight to commitCh so the group-commit
+// coalescer is not throttled by lane.write.workers.
+func TestCommitBatchBypassesWriteLane(t *testing.T) {
+	db := openLaneTestDB(t)
+	before := laneStatsByName(db.LaneStats())["write"].Ops
+
+	b := db.Raw().NewBatch()
+	if err := b.Set([]byte("cb"), []byte("v"), nil); err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	if err := db.CommitBatch(b); err != nil {
+		t.Fatalf("CommitBatch: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("batch close: %v", err)
+	}
+
+	after := laneStatsByName(db.LaneStats())["write"].Ops
+	if after != before {
+		t.Fatalf("CommitBatch must not increment write lane Ops: before=%d after=%d", before, after)
 	}
 }
 

@@ -296,6 +296,12 @@ func (d *DB) Batch() *pebbledb.Batch { return d.db.NewBatch() }
 // batch goes through the group-commit coalescer; with a replicator it
 // flows through Replicate (the FSM applies it on every node, including
 // this one). Caller still owns b and must Close it after this returns.
+//
+// Submission bypasses the write lane: the lane was designed to throttle
+// small independent ops (Set/Delete/Get/Has), and routing CommitBatch
+// through it caps in-flight requests at lane.write.workers and starves
+// commitLoop's maxMergeBatch coalescer. Callers pay only the cheap
+// goroutine park on <-req.done, which scales freely.
 func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 	if d.repl != nil {
 		if !d.repl.IsLeader() {
@@ -303,15 +309,13 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 		}
 		return d.repl.Replicate(b.Repr())
 	}
-	return d.runWrite(func() error {
-		req := &commitReq{batch: b, done: make(chan error, 1)}
-		select {
-		case d.commitCh <- req:
-		case <-d.stopCh:
-			return fmt.Errorf("db closed")
-		}
-		return <-req.done
-	})
+	req := &commitReq{batch: b, done: make(chan error, 1)}
+	select {
+	case d.commitCh <- req:
+	case <-d.stopCh:
+		return fmt.Errorf("db closed")
+	}
+	return <-req.done
 }
 
 // ApplyCommittedBatch applies a batch that has already been committed through
