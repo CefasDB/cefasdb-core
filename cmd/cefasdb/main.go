@@ -122,6 +122,14 @@ func main() {
 		tracingURL = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
 		tracingIns = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
 
+		// pprof debug listener. Default empty = disabled. Recommended
+		// bind '127.0.0.1:6060' for benchmark runs; binding to a
+		// non-loopback interface logs a warning because pprof leaks
+		// process internals.
+		pprofAddr      = flag.String("pprof-addr", "", "Bind address for net/http/pprof (e.g. '127.0.0.1:6060'). Empty disables it.")
+		pprofMutexRate = flag.Int("pprof-mutex-rate", 0, "runtime.SetMutexProfileFraction value (1 = sample every event). 0 disables mutex profiling.")
+		pprofBlockRate = flag.Int("pprof-block-rate", 0, "runtime.SetBlockProfileRate value in nanoseconds (1 = sample every event). 0 disables block profiling.")
+
 		// Autonomous rebalancer. Disabled by default; dry-run/manual
 		// modes are intended for rollout before automatic apply.
 		rebalancerEnabled       = flag.Bool("rebalancer-enabled", false, "Enable the hotspot-driven placement rebalancer.")
@@ -210,6 +218,16 @@ func main() {
 	var prom *metrics.Metrics
 	if cfg.Metrics.Enabled {
 		prom = metrics.NewWithRangeHotspots(bootstrapserver.RangeHotspotConfig(cfg))
+	}
+
+	pprofSrv, err := server.StartPprof(server.PprofOptions{
+		Addr:      *pprofAddr,
+		MutexRate: *pprofMutexRate,
+		BlockRate: *pprofBlockRate,
+	}, logf)
+	if err != nil {
+		logger.Error("pprof", "err", err)
+		os.Exit(1)
 	}
 
 	var (
@@ -480,6 +498,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	_ = server.ShutdownPprof(ctx, pprofSrv)
 	if gsrv != nil {
 		gsrv.GracefulStop()
 	}
