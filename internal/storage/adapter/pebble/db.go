@@ -106,6 +106,19 @@ type DB struct {
 
 	streamRetention StreamRetentionOptions
 	changeLogMode   string
+
+	// streamTables remembers which tables have produced at least one
+	// stream-enabled change record. The background retention loop reads
+	// this set to know which tables to trim. Populated by
+	// appendChangeRecord whenever rec.StreamRecord is true.
+	streamTablesMu sync.RWMutex
+	streamTables   map[string]struct{}
+
+	// retentionStopCh signals the background retention loop to exit;
+	// retentionStopped is closed by the loop when it has finished.
+	// Both are nil when the loop is disabled (Interval < 0).
+	retentionStopCh  chan struct{}
+	retentionStopped chan struct{}
 }
 
 type commitReq struct {
@@ -146,8 +159,10 @@ func Open(opts Options) (*DB, error) {
 		activeBackupRestores: make(map[string]int),
 		memTables:            make(map[string]map[string][]byte),
 		memLoaded:            make(map[string]bool),
+		streamTables:         make(map[string]struct{}),
 	}
 	go wrapper.commitLoop()
+	wrapper.startRetentionLoop()
 	return wrapper, nil
 }
 
@@ -163,6 +178,7 @@ func (d *DB) Close() error {
 	}
 	close(d.stopCh)
 	<-d.stopped
+	d.stopRetentionLoop()
 	if d.lanes != nil {
 		d.lanes.Close()
 	}

@@ -112,6 +112,9 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if err := b.Set(storage.KeyChangeLog(rec.Index), raw, nil); err != nil {
 		return rec, err
 	}
+	if rec.StreamRecord {
+		d.trackStreamTable(rec.Table)
+	}
 	return rec, nil
 }
 
@@ -276,14 +279,6 @@ func (d *DB) CurrentChangeIndex() (uint64, error) {
 	}
 	d.changeIndex = idx
 	return idx, nil
-}
-
-func (d *DB) refreshStreamRetentionAfterWrite(td types.TableDescriptor) error {
-	if td.StreamSpecification == nil || !td.StreamSpecification.StreamEnabled {
-		return nil
-	}
-	_, err := d.ApplyStreamRetention(td.Name, time.Now())
-	return err
 }
 
 // ApplyStreamRetention advances the logical stream trim point for table using

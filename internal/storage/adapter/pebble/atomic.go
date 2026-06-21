@@ -245,9 +245,6 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	if err := d.refreshStreamRetentionAfterWrite(td); err != nil {
-		return AtomicResult{}, err
-	}
 	return AtomicResult{Item: newItem, OldItem: priorItem, Returned: returned, Created: created}, nil
 }
 

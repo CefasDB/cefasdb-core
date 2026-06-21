@@ -250,10 +250,7 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 			}
 		}
 	}
-	if err := r.db.CommitBatch(b); err != nil {
-		return err
-	}
-	return r.db.refreshStreamRetentionAfterWrite(td)
+	return r.db.CommitBatch(b)
 }
 
 // _ keeps pebbledb referenced for future raw-iterator paths.
