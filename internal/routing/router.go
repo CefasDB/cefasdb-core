@@ -8,6 +8,7 @@ package routing
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/cespare/xxhash/v2"
 
@@ -24,9 +25,18 @@ var ErrNoShardForToken = errors.New("routing: no shard owns token under active p
 // Router maps a partition key (canonical byte form, same input the
 // storage layer's pkHash8 consumes) onto a shard ID using the active
 // placement catalog.
+//
+// Token-range lookups split into two slices: normalRanges holds the
+// well-ordered [Start, End) intervals (Start < End) sorted by End, so
+// ShardForUint64 can binary-search them in O(log N). specialRanges
+// holds wrap-around (Start > End) and full-ring (Start == End)
+// intervals, which only appear during transitions or single-shard
+// catalogs; those are walked linearly because they're a small
+// constant.
 type Router struct {
-	catalog placement.PlacementCatalog
-	ranges  []routeRange
+	catalog       placement.PlacementCatalog
+	normalRanges  []routeRange
+	specialRanges []routeRange
 }
 
 type routeRange struct {
@@ -61,9 +71,24 @@ func NewRouterFromCatalog(cat placement.PlacementCatalog) (*Router, error) {
 				continue
 			}
 			for _, rng := range sh.Ranges {
-				r.ranges = append(r.ranges, routeRange{shardID: sh.ID, rng: rng})
+				rr := routeRange{shardID: sh.ID, rng: rng}
+				switch {
+				case rng.Start == rng.End:
+					// Full ring (singleton catalog).
+					r.specialRanges = append(r.specialRanges, rr)
+				case rng.Start < rng.End:
+					r.normalRanges = append(r.normalRanges, rr)
+				default:
+					// Wrap-around: appears only in transient placement states.
+					r.specialRanges = append(r.specialRanges, rr)
+				}
 			}
 		}
+		// Sort normal ranges by End so ShardForUint64 can binary-search
+		// for the first range whose End > token.
+		sort.Slice(r.normalRanges, func(i, j int) bool {
+			return r.normalRanges[i].rng.End < r.normalRanges[j].rng.End
+		})
 	}
 	return r, nil
 }
@@ -144,7 +169,21 @@ func (r *Router) ShardForUint64(h uint64) (uint32, error) {
 		}
 		return uint32(h % uint64(len(r.catalog.Shards))), nil
 	}
-	for _, rr := range r.ranges {
+	// Fast path: normal [Start, End) ranges sorted by End. The first
+	// range with End > h is the candidate; its Start gates membership.
+	if len(r.normalRanges) > 0 {
+		idx := sort.Search(len(r.normalRanges), func(i int) bool {
+			return r.normalRanges[i].rng.End > h
+		})
+		if idx < len(r.normalRanges) {
+			rr := r.normalRanges[idx]
+			if h >= rr.rng.Start {
+				return rr.shardID, nil
+			}
+		}
+	}
+	// Slow path: wrap-around / full-ring intervals (rare).
+	for _, rr := range r.specialRanges {
 		if rr.rng.Contains(h) {
 			return rr.shardID, nil
 		}
