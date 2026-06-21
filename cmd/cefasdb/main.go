@@ -96,6 +96,7 @@ func main() {
 		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
 		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
 		storageChangeLogMode     = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
+		storageAdaptiveMode      = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -254,6 +255,7 @@ func main() {
 			StorageLanes:                  bootstrapserver.StorageLaneOptions(cfg),
 			StreamRetention:               bootstrapserver.StreamRetentionOptions(cfg),
 			ChangeLogMode:                 cfg.Storage.ChangeLogMode,
+			AdaptiveStorageMode:           *storageAdaptiveMode,
 			RaftProfile:                   cfg.Storage.RaftProfile,
 			HeartbeatMS:                   int(cfg.Raft.HeartbeatTimeout / time.Millisecond),
 			ElectionMS:                    int(cfg.Raft.ElectionTimeout / time.Millisecond),

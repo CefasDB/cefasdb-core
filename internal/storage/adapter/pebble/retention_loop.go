@@ -40,7 +40,8 @@ func (d *DB) startRetentionLoop() {
 
 func (d *DB) runRetentionLoop(interval time.Duration) {
 	defer close(d.retentionStopped)
-	t := time.NewTicker(interval)
+	current := d.workload.RetentionInterval(interval)
+	t := time.NewTicker(current)
 	defer t.Stop()
 	for {
 		select {
@@ -48,6 +49,12 @@ func (d *DB) runRetentionLoop(interval time.Duration) {
 			return
 		case now := <-t.C:
 			d.tickRetention(now)
+			// Pick up any adaptive change made by workloadMode.
+			next := d.workload.RetentionInterval(interval)
+			if next != current && next > 0 {
+				t.Reset(next)
+				current = next
+			}
 		}
 	}
 }

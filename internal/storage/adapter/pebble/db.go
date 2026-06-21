@@ -77,6 +77,13 @@ type Options struct {
 	ChangeLogMode string
 	// Lanes configures the read/write worker lanes above this Pebble handle.
 	Lanes LaneOptions
+	// AdaptiveMode enables the workload-mode observer/tuner. When true, a
+	// background goroutine samples read/write ops per second and adjusts
+	// commitLoop's mergeLimit and the retention loop's interval to fit
+	// the observed mode (idle / read-heavy / write-heavy / mixed). Off
+	// by default; counter increments and the goroutine are skipped when
+	// disabled, so the hot path pays nothing.
+	AdaptiveMode bool
 }
 
 // DB wraps a *pebble.DB with cefas-specific helpers: a group-commit
@@ -123,6 +130,11 @@ type DB struct {
 	// Both are nil when the loop is disabled (Interval < 0).
 	retentionStopCh  chan struct{}
 	retentionStopped chan struct{}
+
+	// workload runs the adaptive observer/tuner when Options.AdaptiveMode
+	// is set. Nil otherwise — callers must check before recording or
+	// reading tuning values.
+	workload *workloadMode
 }
 
 type commitReq struct {
@@ -131,8 +143,14 @@ type commitReq struct {
 }
 
 const (
-	maxMergeBatch = 64
-	commitChanBuf = 1024
+	// Static defaults / bounds for the commit-loop merge cap. With
+	// AdaptiveMode off, commitLoop uses defaultMergeBatch as a constant.
+	// With AdaptiveMode on, workloadMode picks values in
+	// [minMergeBatch, maxMergeBatchCap] per observed mode.
+	defaultMergeBatch = 64
+	minMergeBatch     = 16
+	maxMergeBatchCap  = 256
+	commitChanBuf     = 1024
 )
 
 // Open creates or opens the Pebble database at opts.Path. Pebble takes
@@ -165,6 +183,10 @@ func Open(opts Options) (*DB, error) {
 		memLoaded:            make(map[string]bool),
 		streamTables:         make(map[string]struct{}),
 	}
+	if opts.AdaptiveMode {
+		wrapper.workload = newWorkloadMode(wrapper.streamRetention.Interval)
+		wrapper.workload.start()
+	}
 	go wrapper.commitLoop()
 	wrapper.startRetentionLoop()
 	if err := wrapper.seedChangeIndex(); err != nil {
@@ -187,10 +209,22 @@ func (d *DB) Close() error {
 	close(d.stopCh)
 	<-d.stopped
 	d.stopRetentionLoop()
+	if d.workload != nil {
+		d.workload.stop()
+	}
 	if d.lanes != nil {
 		d.lanes.Close()
 	}
 	return d.db.Close()
+}
+
+// WorkloadSnapshot returns the adaptive workload mode observer's current
+// state, or the zero value when adaptive mode is off.
+func (d *DB) WorkloadSnapshot() WorkloadModeSnapshot {
+	if d == nil {
+		return WorkloadModeSnapshot{}
+	}
+	return d.workload.Snapshot()
 }
 
 // Raw exposes the underlying pebble.DB. Reserved for tests, migrations
@@ -223,6 +257,9 @@ func (d *DB) Get(key []byte) ([]byte, error) {
 }
 
 func (d *DB) getNoLane(key []byte) ([]byte, error) {
+	if d.workload != nil {
+		d.workload.recordRead()
+	}
 	v, closer, err := d.db.Get(key)
 	if err == pebbledb.ErrNotFound {
 		return nil, ErrNotFound
@@ -306,6 +343,9 @@ func (d *DB) Batch() *pebbledb.Batch { return d.db.NewBatch() }
 // commitLoop's maxMergeBatch coalescer. Callers pay only the cheap
 // goroutine park on <-req.done, which scales freely.
 func (d *DB) CommitBatch(b *pebbledb.Batch) error {
+	if d.workload != nil {
+		d.workload.recordWrite()
+	}
 	if d.repl != nil {
 		if !d.repl.IsLeader() {
 			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
@@ -369,8 +409,12 @@ func (d *DB) commitLoop() {
 		}
 		reqs := []*commitReq{first}
 
+		// MergeLimit() returns defaultMergeBatch when adaptive mode is off
+		// and the per-mode cap when on (workloadMode keeps it in
+		// [minMergeBatch, maxMergeBatchCap]).
+		limit := d.workload.MergeLimit()
 	drain:
-		for len(reqs) < maxMergeBatch {
+		for len(reqs) < limit {
 			select {
 			case more := <-d.commitCh:
 				if err := merged.Apply(more.batch, nil); err != nil {
