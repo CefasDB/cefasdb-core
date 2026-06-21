@@ -242,6 +242,15 @@ func (s *GRPCServer) itemSourceFor(table string) func(yield func(model.Item) boo
 	return source
 }
 
+// indexItemSourceFor builds the in-memory item set that seeds a plugin
+// index Build/Rebuild. scatterReadStores requires every logical shard
+// to have a local replica, so multi-node clusters with RF < N reject
+// CreateIndex from any node that lacks at least one shard locally. A
+// proper fix delegates remote-shard scans to peer nodes; for now
+// callers must either run single-node or coordinate the build with the
+// admin tooling (cmd/cefas-route-loadtest --with-plugin-index walks
+// every node until one accepts).
+// TODO: delegate cross-shard build via cluster manager.
 func (s *GRPCServer) indexItemSourceFor(table string) (func(yield func(model.Item) bool), int, error) {
 	td, err := s.cat.Describe(table)
 	if err != nil {

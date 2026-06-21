@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/core/index"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -154,10 +155,26 @@ func (s *GRPCServer) pluginIndexMutationHookForPlan(plan cefassql.Plan) cefassql
 	}
 }
 
+// applyPluginIndexPlan runs every plugin-backed index's deltas. The
+// previous serial loop blocked the write path for
+// sum(D × N × per-plugin update cost). Plugins are independent (each
+// owns its own state and lock), so descriptors run in parallel via
+// errgroup. Deltas inside one descriptor stay serial because many
+// plugins keep a single writer-lock internally; touching them
+// concurrently would either serialise or break the plugin.
+//
+// Fast path: only one descriptor → run inline, no goroutine cost.
 func (s *GRPCServer) applyPluginIndexPlan(plan pluginIndexWritePlan) error {
 	if plan.empty() {
 		return nil
 	}
+	// Resolve every plugin up front so a missing or typed-mismatched
+	// plugin fails before any work is dispatched.
+	type bound struct {
+		desc index.Descriptor
+		idx  plugin.IndexPlugin
+	}
+	resolved := make([]bound, 0, len(plan.descriptors))
 	for _, desc := range plan.descriptors {
 		raw, ok := s.pluginRegistry().Lookup(desc.PluginName)
 		if !ok {
@@ -167,29 +184,46 @@ func (s *GRPCServer) applyPluginIndexPlan(plan pluginIndexWritePlan) error {
 		if !ok {
 			return status.Errorf(codes.InvalidArgument, "plugin index %s/%s: plugin %q is not an IndexPlugin", desc.Table, desc.Name, desc.PluginName)
 		}
-		for _, delta := range plan.deltas {
-			if delta.newItem == nil {
-				key := delta.oldItem
-				if key == nil {
-					key = delta.deleteKey
-				}
-				if key == nil {
-					continue
-				}
-				started := time.Now()
-				err := idx.Delete(desc, clonePluginIndexItem(key))
-				s.observePluginIndexMutation(desc.Table, "delete", started, err)
-				if err != nil {
-					return status.Errorf(codes.Internal, "plugin index %s/%s delete: %v", desc.Table, desc.Name, err)
-				}
+		resolved = append(resolved, bound{desc: desc, idx: idx})
+	}
+
+	if len(resolved) == 1 {
+		return s.applyPluginIndexDescriptorDeltas(resolved[0].desc, resolved[0].idx, plan.deltas)
+	}
+
+	var g errgroup.Group
+	for _, b := range resolved {
+		b := b
+		g.Go(func() error {
+			return s.applyPluginIndexDescriptorDeltas(b.desc, b.idx, plan.deltas)
+		})
+	}
+	return g.Wait()
+}
+
+func (s *GRPCServer) applyPluginIndexDescriptorDeltas(desc index.Descriptor, idx plugin.IndexPlugin, deltas []pluginIndexDelta) error {
+	for _, delta := range deltas {
+		if delta.newItem == nil {
+			key := delta.oldItem
+			if key == nil {
+				key = delta.deleteKey
+			}
+			if key == nil {
 				continue
 			}
 			started := time.Now()
-			err := idx.Update(desc, clonePluginIndexItem(delta.oldItem), clonePluginIndexItem(delta.newItem))
-			s.observePluginIndexMutation(desc.Table, "update", started, err)
+			err := idx.Delete(desc, clonePluginIndexItem(key))
+			s.observePluginIndexMutation(desc.Table, "delete", started, err)
 			if err != nil {
-				return status.Errorf(codes.Internal, "plugin index %s/%s update: %v", desc.Table, desc.Name, err)
+				return status.Errorf(codes.Internal, "plugin index %s/%s delete: %v", desc.Table, desc.Name, err)
 			}
+			continue
+		}
+		started := time.Now()
+		err := idx.Update(desc, clonePluginIndexItem(delta.oldItem), clonePluginIndexItem(delta.newItem))
+		s.observePluginIndexMutation(desc.Table, "update", started, err)
+		if err != nil {
+			return status.Errorf(codes.Internal, "plugin index %s/%s update: %v", desc.Table, desc.Name, err)
 		}
 	}
 	return nil
