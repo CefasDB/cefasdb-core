@@ -137,7 +137,7 @@ const (
 	defaultMergeBatch = 64
 	minMergeBatch     = 16
 	maxMergeBatchCap  = 256
-	mergeStepUp       = 32
+	mergeStepUp       = 16
 	mergeStepDown     = 8
 
 	commitChanBuf = 1024
@@ -401,9 +401,11 @@ func (d *DB) commitLoop() {
 
 		// Adapt mergeLimit for the next iteration. Hysteresis: only
 		// step up when the drain fully saturated the current cap and
-		// the channel is genuinely backed up; only step down when the
+		// the channel is genuinely backed up (7/8 full, not 3/4 — the
+		// looser threshold tripped on short bursts and starved readers
+		// when the limit climbed too fast); only step down when the
 		// drain barely picked anything.
-		if len(reqs) >= mergeLimit && len(d.commitCh) >= cap(d.commitCh)*3/4 {
+		if len(reqs) >= mergeLimit && len(d.commitCh) >= cap(d.commitCh)*7/8 {
 			if mergeLimit+mergeStepUp <= maxMergeBatchCap {
 				mergeLimit += mergeStepUp
 			} else {
