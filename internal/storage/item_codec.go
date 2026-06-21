@@ -4,10 +4,43 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"sync"
 
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
+
+// attrNamesPool reuses the []string backing array used to sort an item's
+// attribute names before encoding. Every PutItem walks this path, and
+// the per-call alloc was visible in the profile.
+//
+// We retain slices up to maxRetainedAttrNamesCap; anything larger
+// (extremely wide items, rare) is dropped on Put so we don't hold a
+// pathological cap indefinitely.
+var attrNamesPool = sync.Pool{
+	New: func() any {
+		s := make([]string, 0, 16)
+		return &s
+	},
+}
+
+const maxRetainedAttrNamesCap = 256
+
+func acquireAttrNames() *[]string {
+	return attrNamesPool.Get().(*[]string)
+}
+
+func releaseAttrNames(p *[]string) {
+	if p == nil {
+		return
+	}
+	if cap(*p) > maxRetainedAttrNamesCap {
+		return
+	}
+	*p = (*p)[:0]
+	attrNamesPool.Put(p)
+}
 
 // Item binary format (TLV, big-endian):
 //
@@ -48,12 +81,16 @@ func EncodeItem(item types.Item) ([]byte, error) {
 	}
 	// Sort attribute names so identical items produce byte-identical
 	// encodings — important for snapshot integrity and for cache
-	// friendliness in the LSM.
-	names := make([]string, 0, len(item))
+	// friendliness in the LSM. The []string backing array is pooled
+	// since every write pays this otherwise.
+	namesPtr := acquireAttrNames()
+	defer releaseAttrNames(namesPtr)
+	names := (*namesPtr)[:0]
 	for n := range item {
 		names = append(names, n)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
+	*namesPtr = names
 
 	buf := make([]byte, 0, 64+32*len(item))
 	buf = binary.BigEndian.AppendUint16(buf, itemMagic)
