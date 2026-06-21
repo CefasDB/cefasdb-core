@@ -195,10 +195,13 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 		return AtomicResult{}, err
 	}
 
-	encoded, err := storage.EncodeItem(newItem)
+	bufPtr := acquireEncodeBuf()
+	defer releaseEncodeBuf(bufPtr)
+	encoded, err := storage.EncodeItemAppend((*bufPtr)[:0], newItem)
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("encode item: %w", err)
 	}
+	*bufPtr = encoded
 
 	gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, newItem)
 	if err != nil {

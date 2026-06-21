@@ -41,10 +41,19 @@ const (
 	itemVersion = byte(1)
 )
 
-// EncodeItem serializes an Item to its on-disk byte form.
+// EncodeItem serializes an Item to its on-disk byte form. Allocates a
+// fresh buffer; hot-path callers should use EncodeItemAppend with a
+// pooled buffer.
 func EncodeItem(item types.Item) ([]byte, error) {
+	return EncodeItemAppend(nil, item)
+}
+
+// EncodeItemAppend serializes item and appends the result to dst, returning
+// the extended slice. Lets hot-path callers reuse a pooled buffer; pass
+// dst[:0] to reset retained capacity without re-allocation.
+func EncodeItemAppend(dst []byte, item types.Item) ([]byte, error) {
 	if item == nil {
-		return nil, fmt.Errorf("encode item: nil")
+		return dst, fmt.Errorf("encode item: nil")
 	}
 	// Sort attribute names so identical items produce byte-identical
 	// encodings — important for snapshot integrity and for cache
@@ -55,20 +64,22 @@ func EncodeItem(item types.Item) ([]byte, error) {
 	}
 	sort.Strings(names)
 
-	buf := make([]byte, 0, 64+32*len(item))
-	buf = binary.BigEndian.AppendUint16(buf, itemMagic)
-	buf = append(buf, itemVersion)
-	buf = appendUvarint(buf, uint64(len(item)))
+	if cap(dst) < 64+32*len(item) {
+		dst = make([]byte, 0, 64+32*len(item))
+	}
+	dst = binary.BigEndian.AppendUint16(dst, itemMagic)
+	dst = append(dst, itemVersion)
+	dst = appendUvarint(dst, uint64(len(item)))
 	for _, n := range names {
-		buf = appendUvarint(buf, uint64(len(n)))
-		buf = append(buf, n...)
+		dst = appendUvarint(dst, uint64(len(n)))
+		dst = append(dst, n...)
 		var err error
-		buf, err = appendAttr(buf, item[n])
+		dst, err = appendAttr(dst, item[n])
 		if err != nil {
-			return nil, fmt.Errorf("encode attr %q: %w", n, err)
+			return dst, fmt.Errorf("encode attr %q: %w", n, err)
 		}
 	}
-	return buf, nil
+	return dst, nil
 }
 
 // DecodeItem reverses EncodeItem.

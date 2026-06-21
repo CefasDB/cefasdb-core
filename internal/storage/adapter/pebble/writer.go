@@ -83,10 +83,13 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		return err
 	}
 	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
-	encoded, err := storage.EncodeItem(item)
+	bufPtr := acquireEncodeBuf()
+	defer releaseEncodeBuf(bufPtr)
+	encoded, err := storage.EncodeItemAppend((*bufPtr)[:0], item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
 	}
+	*bufPtr = encoded
 
 	if d.putItemCanSkipPrior(td, opts.Condition) {
 		return d.putPrimaryWithoutPrior(td, primaryKey, encoded)
@@ -625,6 +628,8 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 
 	b := d.Batch()
 	defer b.Close()
+	encBufPtr := acquireEncodeBuf()
+	defer releaseEncodeBuf(encBufPtr)
 	type memDelta struct {
 		key    []byte
 		value  []byte
@@ -642,10 +647,11 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			if err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
-			enc, err := storage.EncodeItem(op.Item)
+			enc, err := storage.EncodeItemAppend((*encBufPtr)[:0], op.Item)
 			if err != nil {
 				return fmt.Errorf("op %d encode: %w", i, err)
 			}
+			*encBufPtr = enc
 			primaryKey := storage.KeyPrimary(td.Name, pk, sk)
 			priorItem, err := readSnapshotItem(snap, primaryKey)
 			if err != nil {
@@ -773,6 +779,8 @@ func (d *DB) batchPutItemsCanSkipPrior(td types.TableDescriptor, ops []BatchOp) 
 func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) error {
 	b := d.Batch()
 	defer b.Close()
+	encBufPtr := acquireEncodeBuf()
+	defer releaseEncodeBuf(encBufPtr)
 	type memDelta struct {
 		key   []byte
 		value []byte
@@ -786,10 +794,11 @@ func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) 
 		if err != nil {
 			return fmt.Errorf("op %d: %w", i, err)
 		}
-		enc, err := storage.EncodeItem(op.Item)
+		enc, err := storage.EncodeItemAppend((*encBufPtr)[:0], op.Item)
 		if err != nil {
 			return fmt.Errorf("op %d encode: %w", i, err)
 		}
+		*encBufPtr = enc
 		primaryKey := storage.KeyPrimary(td.Name, pk, sk)
 		if err := b.Set(primaryKey, enc, nil); err != nil {
 			return err
