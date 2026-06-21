@@ -168,7 +168,7 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	return d.refreshStreamRetentionAfterWrite(td)
+	return nil
 }
 
 func (d *DB) putItemCanSkipPrior(td types.TableDescriptor, condition string) bool {
@@ -193,7 +193,7 @@ func (d *DB) putPrimaryWithoutPrior(td types.TableDescriptor, primaryKey, encode
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	return d.refreshStreamRetentionAfterWrite(td)
+	return nil
 }
 
 // DeleteItem removes an item identified by its key attributes (no GSI
@@ -286,7 +286,7 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	if isMemoryTable(td) {
 		d.memoryDelete(td.Name, primaryKey)
 	}
-	return d.refreshStreamRetentionAfterWrite(td)
+	return nil
 }
 
 // snapshotGet performs a single-key read under a Pebble snapshot. The
@@ -755,7 +755,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			}
 		}
 	}
-	return d.refreshStreamRetentionAfterWrite(td)
+	return nil
 }
 
 func (d *DB) batchPutItemsCanSkipPrior(td types.TableDescriptor, ops []BatchOp) bool {
@@ -806,7 +806,7 @@ func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) 
 			d.memorySet(td.Name, delta.key, delta.value)
 		}
 	}
-	return d.refreshStreamRetentionAfterWrite(td)
+	return nil
 }
 
 // BatchGetItem fetches multiple items by primary key in one pass. The
