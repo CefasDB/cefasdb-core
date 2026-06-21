@@ -32,6 +32,7 @@ LATENCY_SAMPLE_RATE="${LATENCY_SAMPLE_RATE:-100}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-30s}"
 CLIENT_ROUTE_AWARE_READS="${CLIENT_ROUTE_AWARE_READS:-0}"
 WITH_STREAM="${WITH_STREAM:-0}"
+WITH_PLUGIN_INDEX="${WITH_PLUGIN_INDEX:-}"
 PHASE_SAMPLE_INTERVAL="${PHASE_SAMPLE_INTERVAL:-0}"
 PHASE_SAMPLE_FILTER="${PHASE_SAMPLE_FILTER:-^(cefas_pebble_|cefas_storage_lane_|cefas_backpressure_|cefas_raft_|cefas_op_|go_memstats_|process_)}"
 RPC_TIMEOUT="${RPC_TIMEOUT:-30s}"
@@ -397,6 +398,12 @@ with_stream_args() {
   fi
 }
 
+with_plugin_index_args() {
+  if [[ -n "$WITH_PLUGIN_INDEX" ]]; then
+    printf '%s\n%s\n' "-with-plugin-index" "$WITH_PLUGIN_INDEX"
+  fi
+}
+
 phase_sample_file_count() {
   local phase="$1"
   local dir="$RESULT_DIR/metrics/${phase}_series"
@@ -489,6 +496,7 @@ write_summary() {
     echo "- read rate: \`${READ_RATE}\`"
     echo "- client route-aware reads: \`${CLIENT_ROUTE_AWARE_READS}\`"
     echo "- with stream: \`${WITH_STREAM}\`"
+    echo "- with plugin index: \`${WITH_PLUGIN_INDEX:-none}\`"
     echo "- phase sample interval: \`$(phase_sample_interval_label)\`"
     echo "- keep cluster: \`${KEEP_CLUSTER}\`"
     echo
@@ -531,7 +539,7 @@ failures=0
 
 run_phase "smoke" "$ROUTE_BIN" \
   -nodes "$NODE_MAP" \
-  $(client_route_aware_args) $(with_stream_args) \
+  $(client_route_aware_args) $(with_stream_args) $(with_plugin_index_args) \
   -table "$SMOKE_TABLE" \
   -items "$SMOKE_ITEMS" \
   -mixed-duration "$SMOKE_DURATION" \
@@ -552,7 +560,7 @@ run_phase "smoke" "$ROUTE_BIN" \
 
 run_phase "write_only" "$ROUTE_BIN" \
   -nodes "$NODE_MAP" \
-  $(client_route_aware_args) $(with_stream_args) \
+  $(client_route_aware_args) $(with_stream_args) $(with_plugin_index_args) \
   -table "$WRITE_TABLE" \
   -items 0 \
   -mixed-duration "$WRITE_DURATION" \
@@ -573,7 +581,7 @@ run_phase "write_only" "$ROUTE_BIN" \
 
 run_phase "read_seed" "$ROUTE_BIN" \
   -nodes "$NODE_MAP" \
-  $(client_route_aware_args) $(with_stream_args) \
+  $(client_route_aware_args) $(with_stream_args) $(with_plugin_index_args) \
   -table "$READ_TABLE" \
   -items "$READ_SEED_ITEMS" \
   -mixed-duration 0s \
@@ -594,7 +602,7 @@ run_phase "read_seed" "$ROUTE_BIN" \
 
 run_phase "read_only" "$ROUTE_BIN" \
   -nodes "$NODE_MAP" \
-  $(client_route_aware_args) $(with_stream_args) \
+  $(client_route_aware_args) $(with_stream_args) $(with_plugin_index_args) \
   -table "$READ_TABLE" \
   -items 0 \
   -keyspace "$READ_SEED_ITEMS" \
@@ -616,7 +624,7 @@ run_phase "read_only" "$ROUTE_BIN" \
 
 run_phase "mixed" "$ROUTE_BIN" \
   -nodes "$NODE_MAP" \
-  $(client_route_aware_args) $(with_stream_args) \
+  $(client_route_aware_args) $(with_stream_args) $(with_plugin_index_args) \
   -table "$READ_TABLE" \
   -items 0 \
   -keyspace "$READ_SEED_ITEMS" \

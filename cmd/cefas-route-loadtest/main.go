@@ -45,6 +45,7 @@ type cfg struct {
 	LatencySampleRate     int64
 	ClientRouteAwareReads bool
 	WithStream            bool
+	WithPluginIndex       string
 	JSONOutput            string
 	Label                 string
 }
@@ -254,6 +255,7 @@ func parseFlags() cfg {
 	flag.Int64Var(&c.LatencySampleRate, "latency-sample-rate", 10, "record one latency sample every N RPCs")
 	flag.BoolVar(&c.ClientRouteAwareReads, "client-route-aware-reads", false, "serve mixed/read phases through the Go client route-aware eventual-read path")
 	flag.BoolVar(&c.WithStream, "with-stream", false, "create the bench table with StreamSpecification enabled (NEW_AND_OLD_IMAGES) so write paths exercise the changelog + retention loop; required to validate Wave 1+ retention/changelog initiatives")
+	flag.StringVar(&c.WithPluginIndex, "with-plugin-index", "", "after CreateTable, attach a plugin-backed index using the named registered plugin (e.g. bloom). Empty disables. Required to exercise applyPluginIndexPlan on the write path.")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -413,14 +415,72 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 	err := cli.CreateTable(rpcCtx, td)
 	if err == nil {
 		fmt.Printf("created table: %s via %s\n", c.Table, leader)
+		if perr := ensurePluginIndex(ctx, c, cli); perr != nil {
+			return perr
+		}
 		return warmTable(ctx, c, cs)
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "already") || strings.Contains(msg, "exist") {
 		fmt.Printf("using existing table: %s\n", c.Table)
+		if perr := ensurePluginIndex(ctx, c, cli); perr != nil {
+			return perr
+		}
 		return warmTable(ctx, c, cs)
 	}
 	return err
+}
+
+// ensurePluginIndex attaches a plugin-backed index to the bench table
+// when -with-plugin-index is set. Idempotent: existing index from a
+// prior run is reused. Plugin choice is opaque to the loadtest; the
+// server resolves the name against its registered plugins.
+func ensurePluginIndex(ctx context.Context, c cfg, cli *client.Client) error {
+	if c.WithPluginIndex == "" {
+		return nil
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cfg := pluginIndexConfigFor(c.WithPluginIndex)
+	_, err := cli.CreateIndex(rpcCtx, client.PluginIndex{
+		Table:        c.Table,
+		Name:         "bench-idx",
+		PluginName:   c.WithPluginIndex,
+		PluginConfig: cfg,
+		KeySchema:    types.KeySchema{PK: "pk", SK: "sk"},
+	})
+	if err == nil {
+		fmt.Printf("attached plugin index: plugin=%s name=bench-idx table=%s\n", c.WithPluginIndex, c.Table)
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "already") || strings.Contains(msg, "exist") {
+		fmt.Printf("plugin index already attached: plugin=%s name=bench-idx table=%s\n", c.WithPluginIndex, c.Table)
+		return nil
+	}
+	return fmt.Errorf("attach plugin index %q: %w", c.WithPluginIndex, err)
+}
+
+// pluginIndexConfigFor returns a reasonable default JSON config for a
+// few built-in plugins. The loadtest payload attribute is "payload"
+// (created by buildItem) and is always present.
+func pluginIndexConfigFor(name string) []byte {
+	switch name {
+	case "bloom":
+		return []byte(`{"field":"payload","m":131072,"k":7}`)
+	case "cbloom":
+		return []byte(`{"field":"payload","m":131072,"k":7}`)
+	case "hll":
+		return []byte(`{"field":"payload","precision":12}`)
+	case "cms":
+		return []byte(`{"field":"payload","width":4096,"depth":4}`)
+	case "bitmap", "roaring":
+		// Roaring needs a uint32 field; payload is a string. Fall
+		// through to empty so the server returns a clearer error.
+		return []byte(`{"field":"payload"}`)
+	default:
+		return []byte(`{"field":"payload"}`)
+	}
 }
 
 func warmTable(ctx context.Context, c cfg, cs *clients) error {
