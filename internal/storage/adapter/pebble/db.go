@@ -212,14 +212,14 @@ func (d *DB) Metrics() pebbledb.Metrics {
 }
 
 // Get returns the value at key. Returns (nil, ErrNotFound) on miss.
+//
+// Point reads bypass the read lane: the lane round-trip (~500 ns
+// channel send + worker pickup + done signal) costs more than the
+// Pebble Get itself, and Pebble's block-cache is already concurrent-
+// safe. The lane stays in place for Iter/Scan/Query — long-running
+// work where serialization keeps tail latency bounded.
 func (d *DB) Get(key []byte) ([]byte, error) {
-	var out []byte
-	err := d.runRead(func() error {
-		var err error
-		out, err = d.getNoLane(key)
-		return err
-	})
-	return out, err
+	return d.getNoLane(key)
 }
 
 func (d *DB) getNoLane(key []byte) ([]byte, error) {
@@ -236,15 +236,10 @@ func (d *DB) getNoLane(key []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Has reports membership without copying the value.
+// Has reports membership without copying the value. Bypasses the read
+// lane for the same reason as Get; see the Get docstring.
 func (d *DB) Has(key []byte) (bool, error) {
-	var ok bool
-	err := d.runRead(func() error {
-		var err error
-		ok, err = d.hasNoLane(key)
-		return err
-	})
-	return ok, err
+	return d.hasNoLane(key)
 }
 
 func (d *DB) hasNoLane(key []byte) (bool, error) {
