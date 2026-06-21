@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
 
@@ -101,8 +102,11 @@ type DB struct {
 	memTables map[string]map[string][]byte
 	memLoaded map[string]bool
 
-	changeMu    sync.Mutex
-	changeIndex uint64
+	// changeIndex is monotonically advanced by appendChangeRecord via
+	// atomic.Add. Seeded in Open from max(persisted ChangeCounterKey,
+	// MAX(KeyChangeLog)) so a stale counter from a crash never overlaps
+	// existing keys. Access on the hot path is lock-free.
+	changeIndex atomic.Uint64
 
 	streamRetention StreamRetentionOptions
 	changeLogMode   string
@@ -163,6 +167,10 @@ func Open(opts Options) (*DB, error) {
 	}
 	go wrapper.commitLoop()
 	wrapper.startRetentionLoop()
+	if err := wrapper.seedChangeIndex(); err != nil {
+		_ = wrapper.Close()
+		return nil, fmt.Errorf("seed change index: %w", err)
+	}
 	return wrapper, nil
 }
 

@@ -63,6 +63,22 @@ func PrefixChangeLog() (lower, upper []byte) {
 	return p, prefixUpper(p)
 }
 
+// ChangeLogIndexFromKey decodes the 8-byte big-endian index suffix from
+// a key produced by KeyChangeLog. Returns an error on malformed keys so
+// callers can flag a corrupt iterator entry instead of silently zeroing.
+func ChangeLogIndexFromKey(key []byte) (uint64, error) {
+	prefix := []byte(pAdmin + "change/log/")
+	if len(key) != len(prefix)+8 {
+		return 0, fmt.Errorf("change log key length %d, want %d", len(key), len(prefix)+8)
+	}
+	for i := range prefix {
+		if key[i] != prefix[i] {
+			return 0, fmt.Errorf("change log key prefix mismatch")
+		}
+	}
+	return binary.BigEndian.Uint64(key[len(prefix):]), nil
+}
+
 // KeyStreamDescriptor stores persisted DynamoDB Streams metadata by ARN.
 func KeyStreamDescriptor(streamArn string) []byte {
 	return []byte(pStreams + escapeKeySegment(streamArn))
