@@ -81,6 +81,11 @@ func (s *GRPCServer) hydratePluginIndexCatalog() error {
 	for _, desc := range descs {
 		cachePluginIndexDescriptor(desc)
 	}
+	// Build the local slice for every known descriptor in the
+	// background so this node serves queries without waiting for the
+	// first lazy access. Failures get reported per-descriptor via the
+	// ensure path's own logging; startup continues either way.
+	s.rehydratePluginIndexLocalStates()
 	return nil
 }
 
