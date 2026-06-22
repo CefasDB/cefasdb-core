@@ -128,6 +128,46 @@ func (d *DB) memoryScan(table string, lower, upper []byte, limit int) ([]types.I
 	return out, nil
 }
 
+// memoryScanWith is the streaming counterpart of memoryScan used by
+// ScanTableWith. Snapshots the key set under the read lock so the
+// visit callback can run without holding it (visit may be slow:
+// filter evaluation, network sends, decoding upstream).
+func (d *DB) memoryScanWith(table string, lower, upper []byte, visit func(types.Item) bool) error {
+	d.memMu.RLock()
+	m := d.memTables[table]
+	if m == nil {
+		d.memMu.RUnlock()
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	values := make([][]byte, 0, len(m))
+	for k, v := range m {
+		kb := []byte(k)
+		if bytes.Compare(kb, lower) >= 0 && (upper == nil || bytes.Compare(kb, upper) < 0) {
+			keys = append(keys, k)
+			values = append(values, append([]byte(nil), v...))
+		}
+	}
+	d.memMu.RUnlock()
+
+	order := make([]int, len(keys))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(i, j int) bool { return keys[order[i]] < keys[order[j]] })
+
+	for _, idx := range order {
+		item, err := storage.DecodeItem(values[idx])
+		if err != nil {
+			return fmt.Errorf("decode memory item %q: %w", keys[idx], err)
+		}
+		if !visit(item) {
+			return nil
+		}
+	}
+	return nil
+}
+
 func (d *DB) ensureMemoryTableLoaded(table string) error {
 	if d.memoryHasTable(table) {
 		return nil

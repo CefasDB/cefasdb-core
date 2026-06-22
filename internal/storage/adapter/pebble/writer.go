@@ -568,12 +568,34 @@ func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) 
 // (limit ≤ 0 means "no limit"). Decoding happens here so the caller
 // never sees raw pebble bytes. Multi-shard mode requires the caller
 // to scatter the call across each shard's DB.
+//
+// Callers that can apply a predicate row-by-row should prefer
+// ScanTableWith — it stops materializing once the caller's visit
+// callback returns false, so a filtered scan never pays for items
+// the caller will reject.
 func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
 	lower, upper := storage.PrefixPrimaryAll(table)
 	if d.memoryHasTable(table) {
 		return d.memoryScan(table, lower, upper, limit)
 	}
 	return d.scanItems(lower, upper, limit)
+}
+
+// ScanTableWith iterates every primary item in `table` in
+// primary-key order and invokes visit on each one. The caller's
+// filter, limit, and any other early-stop logic lives inside visit
+// — return false to stop iteration. Items rejected by visit are
+// never accumulated, so a permissive scan with a selective
+// predicate stays bounded in memory.
+//
+// Decoding still happens here; visit always sees a fully decoded
+// types.Item, never raw bytes.
+func (d *DB) ScanTableWith(table string, visit func(types.Item) bool) error {
+	lower, upper := storage.PrefixPrimaryAll(table)
+	if d.memoryHasTable(table) {
+		return d.memoryScanWith(table, lower, upper, visit)
+	}
+	return d.scanItemsWith(lower, upper, visit)
 }
 
 func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
@@ -598,6 +620,28 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 		}
 	}
 	return out, it.Error()
+}
+
+func (d *DB) scanItemsWith(lower, upper []byte, visit func(types.Item) bool) error {
+	it, err := d.Iter(lower, upper)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+
+	for valid := it.First(); valid; valid = it.Next() {
+		v := it.Value()
+		cp := make([]byte, len(v))
+		copy(cp, v)
+		item, err := storage.DecodeItem(cp)
+		if err != nil {
+			return fmt.Errorf("decode at key %q: %w", it.Key(), err)
+		}
+		if !visit(item) {
+			return nil
+		}
+	}
+	return it.Error()
 }
 
 // BatchWriteItem applies N Put / Delete operations atomically: every op

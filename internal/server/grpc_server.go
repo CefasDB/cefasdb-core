@@ -810,22 +810,24 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 		return true, nil
 	}
 
-	// Single-shard / no-manager fallback: scan the local pebble.DB
-	// directly. Multi-node fan-in below requires a placement-aware
-	// manager.
+	// Single-shard / no-manager fallback: stream the local pebble.DB
+	// directly via the predicate-pushdown variant so a permissive
+	// filter never materialises the whole table.
 	if s.manager == nil {
-		items, err := s.db.ScanTable(req.GetTable(), 0)
-		if err != nil {
-			return mapStorageErr(err)
-		}
-		for _, it := range items {
+		var emitErr error
+		err := s.db.ScanTableWith(req.GetTable(), func(it types.Item) bool {
 			cont, err := emit(it)
 			if err != nil {
-				return err
+				emitErr = err
+				return false
 			}
-			if !cont {
-				return nil
-			}
+			return cont
+		})
+		if emitErr != nil {
+			return emitErr
+		}
+		if err != nil {
+			return mapStorageErr(err)
 		}
 		return nil
 	}
@@ -855,18 +857,28 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 			if sh.Storage == nil {
 				return status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
 			}
-			items, err := sh.Storage.ScanTable(req.GetTable(), 0)
+			var stopErr error
+			stopped := false
+			err := sh.Storage.ScanTableWith(req.GetTable(), func(it types.Item) bool {
+				cont, err := emitOnce(it)
+				if err != nil {
+					stopErr = err
+					return false
+				}
+				if !cont {
+					stopped = true
+					return false
+				}
+				return true
+			})
+			if stopErr != nil {
+				return stopErr
+			}
 			if err != nil {
 				return mapStorageErr(err)
 			}
-			for _, it := range items {
-				cont, err := emitOnce(it)
-				if err != nil {
-					return err
-				}
-				if !cont {
-					return nil
-				}
+			if stopped {
+				return nil
 			}
 			continue
 		}
