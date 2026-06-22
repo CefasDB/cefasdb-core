@@ -593,70 +593,122 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 
 func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if s.manager == nil {
-		started := time.Now()
-		pluginPlan, err := s.planPluginIndexBatch(s.db, td, ops)
-		if err != nil {
-			return err
-		}
-		if err := s.db.BatchWriteItem(td, ops); err != nil {
-			return err
-		}
-		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
-			return err
-		}
-		if err := s.applyMVEagerBatch(td, ops); err != nil {
-			return err
-		}
-		for _, op := range ops {
-			probe := op.Item
-			approxBytes := estimatedItemBytes(op.Item)
-			if op.Op == pebble.BatchOpDelete {
-				probe = op.Key
-				approxBytes = estimatedItemBytes(op.Key)
-			}
-			pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
-			if err != nil {
-				return err
-			}
-			s.observeRangeMetric(rangeMetricWrite, pkBytes, approxBytes, started)
-		}
-		return nil
+		return s.batchWriteFanOutSingleShard(td, ops)
 	}
-	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp)
-	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp)
-	type observation struct {
+	return s.batchWriteFanOutMultiShard(td, ops)
+}
+
+type batchWriteOpMeta struct {
+	pkBytes     []byte
+	approxBytes uint64
+	routeIdx    int
+}
+
+func extractBatchOpMeta(op pebble.BatchOp, ks types.KeySchema) (pkBytes []byte, approxBytes uint64, err error) {
+	probe := op.Item
+	approxBytes = estimatedItemBytes(op.Item)
+	if op.Op == pebble.BatchOpDelete {
+		probe = op.Key
+		approxBytes = estimatedItemBytes(op.Key)
+	}
+	pkBytes, err = pkBytesFromItem(probe, ks)
+	return pkBytes, approxBytes, err
+}
+
+func (s *GRPCServer) batchWriteFanOutSingleShard(td types.TableDescriptor, ops []pebble.BatchOp) error {
+	started := time.Now()
+	pluginPlan, err := s.planPluginIndexBatch(s.db, td, ops)
+	if err != nil {
+		return err
+	}
+	type obs struct {
 		pkBytes     []byte
 		approxBytes uint64
 	}
-	observations := make([]observation, 0, len(ops))
-	var releases []func()
+	observations := make([]obs, 0, len(ops))
+	for _, op := range ops {
+		pkBytes, approxBytes, err := extractBatchOpMeta(op, td.KeySchema)
+		if err != nil {
+			return err
+		}
+		observations = append(observations, obs{pkBytes: append([]byte(nil), pkBytes...), approxBytes: approxBytes})
+	}
+	if err := s.db.BatchWriteItem(td, ops); err != nil {
+		return err
+	}
+	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
+		return err
+	}
+	if err := s.applyMVEagerBatch(td, ops); err != nil {
+		return err
+	}
+	for _, o := range observations {
+		s.observeRangeMetric(rangeMetricWrite, o.pkBytes, o.approxBytes, started)
+	}
+	return nil
+}
+
+// batchWriteFanOutMultiShard groups ops by their owning shard and the
+// matching mirror set. Before issue #455 the implementation rebuilt
+// the per-mirror bucket map by appending on every op; with K = 500
+// batch ops that produced O(K * M) map appends plus K splitMu RLock
+// cycles. The new shape splits the work in two passes: first a
+// routing dedup that hits writeTargetsForPK once per unique PK, then
+// a single bucket-fill loop on pre-sized slices.
+func (s *GRPCServer) batchWriteFanOutMultiShard(td types.TableDescriptor, ops []pebble.BatchOp) error {
+	metas := make([]batchWriteOpMeta, 0, len(ops))
+	keyToRoute := make(map[string]int, len(ops))
+	routes := make([]routedWriteTargets, 0, len(ops))
 	defer func() {
-		for i := len(releases) - 1; i >= 0; i-- {
-			releases[i]()
+		for i := len(routes) - 1; i >= 0; i-- {
+			routes[i].Release()
 		}
 	}()
+
 	for _, op := range ops {
-		probe := op.Item
-		approxBytes := estimatedItemBytes(op.Item)
-		if op.Op == pebble.BatchOpDelete {
-			probe = op.Key
-			approxBytes = estimatedItemBytes(op.Key)
-		}
-		pkBytes, err := pkBytesFromItem(probe, td.KeySchema)
+		pkBytes, approxBytes, err := extractBatchOpMeta(op, td.KeySchema)
 		if err != nil {
 			return err
 		}
-		observations = append(observations, observation{pkBytes: append([]byte(nil), pkBytes...), approxBytes: approxBytes})
-		targets, err := s.writeTargetsForPK(pkBytes)
-		if err != nil {
-			return err
+		key := string(pkBytes)
+		idx, ok := keyToRoute[key]
+		if !ok {
+			targets, err := s.writeTargetsForPK(pkBytes)
+			if err != nil {
+				return err
+			}
+			idx = len(routes)
+			routes = append(routes, targets)
+			keyToRoute[key] = idx
 		}
-		releases = append(releases, targets.Release)
-		primaryBuckets[targets.primary] = append(primaryBuckets[targets.primary], op)
-		for _, mirror := range targets.mirrors {
+		metas = append(metas, batchWriteOpMeta{
+			pkBytes:     append([]byte(nil), pkBytes...),
+			approxBytes: approxBytes,
+			routeIdx:    idx,
+		})
+	}
+
+	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
+	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
+	for _, r := range routes {
+		if _, ok := primaryBuckets[r.primary]; !ok {
+			primaryBuckets[r.primary] = make([]pebble.BatchOp, 0, len(ops))
+		}
+		for _, mirror := range r.mirrors {
+			if _, ok := mirrorBuckets[mirror]; !ok {
+				mirrorBuckets[mirror] = make([]pebble.BatchOp, 0, len(ops))
+			}
+		}
+	}
+	for i, meta := range metas {
+		r := routes[meta.routeIdx]
+		op := ops[i]
+		primaryBuckets[r.primary] = append(primaryBuckets[r.primary], op)
+		for _, mirror := range r.mirrors {
 			mirrorBuckets[mirror] = append(mirrorBuckets[mirror], op)
 		}
 	}
+
 	started := time.Now()
 	pluginPlans := make([]pluginIndexWritePlan, 0, len(primaryBuckets))
 	for db, group := range primaryBuckets {
@@ -680,8 +732,8 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.Bat
 	if err := s.applyMVEagerBatch(td, ops); err != nil {
 		return err
 	}
-	for _, obs := range observations {
-		s.observeRangeMetric(rangeMetricWrite, obs.pkBytes, obs.approxBytes, started)
+	for _, meta := range metas {
+		s.observeRangeMetric(rangeMetricWrite, meta.pkBytes, meta.approxBytes, started)
 	}
 	return nil
 }
