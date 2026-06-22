@@ -55,7 +55,7 @@ type overlayArgs struct {
 
 	raftBind, raftID, raftPath, raftStorePath string
 	raftBootstrap                             bool
-	raftPeers, raftHTTPPeers                  string
+	raftPeers, raftHTTPPeers, raftGRPCPeers   string
 	raftHeartbeatTimeout                      time.Duration
 	raftElectionTimeout                       time.Duration
 	raftLeaderLeaseTimeout                    time.Duration
@@ -142,7 +142,7 @@ func zeroArgs() overlayArgs {
 func runOverlay(cfg *config.Config, a overlayArgs) {
 	OverlayFlags(cfg,
 		a.dataDir, a.httpAddr, a.fsync,
-		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers,
+		a.raftBind, a.raftID, a.raftPath, a.raftStorePath, a.raftBootstrap, a.raftPeers, a.raftHTTPPeers, a.raftGRPCPeers,
 		a.raftHeartbeatTimeout, a.raftElectionTimeout, a.raftLeaderLeaseTimeout, a.raftCommitTimeout, a.raftApplyTimeout,
 		a.raftSnapshotEntries, a.raftLogCompression,
 		a.raftLogCompressionMinBytes, a.raftLogCompressionMinSavingsRatio, a.raftLogCompressionSkipCooldown,

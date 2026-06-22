@@ -96,6 +96,18 @@ http_peer_map() {
   printf '%s' "$out"
 }
 
+grpc_peer_map() {
+  local out=""
+  local i
+  for i in $(seq 1 "$NODES"); do
+    if [[ -n "$out" ]]; then
+      out+=","
+    fi
+    out+="n${i}=cefas-node-${i}:9090"
+  done
+  printf '%s' "$out"
+}
+
 emit_extra_command_args() {
   if [[ -z "$SERVER_EXTRA_ARGS" ]]; then
     return
@@ -110,9 +122,10 @@ emit_extra_command_args() {
 }
 
 write_compose() {
-  local peers http_peers i
+  local peers http_peers grpc_peers i
   peers="$(peer_map)"
   http_peers="$(http_peer_map)"
+  grpc_peers="$(grpc_peer_map)"
   {
     cat <<YAML
 x-cefas-common: &cefas-common
@@ -155,6 +168,8 @@ YAML
       - "${peers}"
       - "-raft-http-peers"
       - "${http_peers}"
+      - "-raft-grpc-peers"
+      - "${grpc_peers}"
     ports:
       - "$((HTTP_PORT_BASE + i)):8080"
       - "$((GRPC_PORT_BASE + i)):9090"

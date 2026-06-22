@@ -18,7 +18,7 @@ import (
 func OverlayFlags(
 	cfg *config.Config,
 	dataDir, httpAddr string, fsync bool,
-	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers string,
+	raftBind, raftID, raftPath, raftStorePath string, raftBootstrap bool, raftPeers, raftHTTPPeers, raftGRPCPeers string,
 	raftHeartbeatTimeout, raftElectionTimeout, raftLeaderLeaseTimeout, raftCommitTimeout, raftApplyTimeout time.Duration,
 	raftSnapshotEntries uint64, raftLogCompression string,
 	raftLogCompressionMinBytes int, raftLogCompressionMinSavingsRatio float64, raftLogCompressionSkipCooldown time.Duration,
@@ -81,6 +81,10 @@ func OverlayFlags(
 	if raftHTTPPeers != "" {
 		hp, _ := config.ParsePeers(raftHTTPPeers)
 		cfg.Cluster.HTTPPeers = hp
+	}
+	if raftGRPCPeers != "" {
+		gp, _ := config.ParsePeers(raftGRPCPeers)
+		cfg.Cluster.GRPCPeers = gp
 	}
 	if raftHeartbeatTimeout > 0 {
 		cfg.Raft.HeartbeatTimeout = raftHeartbeatTimeout
