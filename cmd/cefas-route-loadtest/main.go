@@ -46,6 +46,7 @@ type cfg struct {
 	ClientRouteAwareReads bool
 	WithStream            bool
 	WithPluginIndex       string
+	WithMVEager           bool
 	JSONOutput            string
 	Label                 string
 }
@@ -256,6 +257,7 @@ func parseFlags() cfg {
 	flag.BoolVar(&c.ClientRouteAwareReads, "client-route-aware-reads", false, "serve mixed/read phases through the Go client route-aware eventual-read path")
 	flag.BoolVar(&c.WithStream, "with-stream", false, "create the bench table with StreamSpecification enabled (NEW_AND_OLD_IMAGES) so write paths exercise the changelog + retention loop; required to validate Wave 1+ retention/changelog initiatives")
 	flag.StringVar(&c.WithPluginIndex, "with-plugin-index", "", "comma-separated list of plugin names. After CreateTable, attaches one bench-idx-<plugin> per name so write paths exercise applyPluginIndexPlan with as many descriptors as supplied. Empty disables.")
+	flag.BoolVar(&c.WithMVEager, "with-mv-eager", false, "after CreateTable, attach a materialized view (REFRESH EAGER) so write paths exercise applyMVEagerPut. The view's PK is the base SK, SK is the base PK — gives a non-trivial reshuffle.")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -418,12 +420,18 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 		if perr := ensurePluginIndexes(ctx, c, cs); perr != nil {
 			return perr
 		}
+		if perr := ensureMVEager(ctx, c, cs); perr != nil {
+			return perr
+		}
 		return warmTable(ctx, c, cs)
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "already") || strings.Contains(msg, "exist") {
 		fmt.Printf("using existing table: %s\n", c.Table)
 		if perr := ensurePluginIndexes(ctx, c, cs); perr != nil {
+			return perr
+		}
+		if perr := ensureMVEager(ctx, c, cs); perr != nil {
 			return perr
 		}
 		return warmTable(ctx, c, cs)
@@ -1111,4 +1119,35 @@ func min64(a, b int64) int64 {
 func fatal(msg string, err error) {
 	log.Error(msg, "err", err)
 	os.Exit(1)
+}
+
+// ensureMVEager attaches an EAGER materialized view to the bench
+// table when -with-mv-eager is set. The view's PK is the base SK
+// ("sk") and its SK is the base PK ("pk"), so every base write
+// produces a reshuffled MV row — useful to measure the eager hook
+// cost without the trivial identity-projection short-circuit.
+func ensureMVEager(ctx context.Context, c cfg, cs *clients) error {
+	if !c.WithMVEager {
+		return nil
+	}
+	mvName := "bench-mv-" + c.Table
+	for _, nodeID := range cs.order {
+		cli := cs.byNode[nodeID]
+		if cli == nil {
+			continue
+		}
+		rpcCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := cli.CreateMaterializedView(rpcCtx, mvName, c.Table, types.KeySchema{PK: "sk", SK: "pk"}, nil, client.RefreshPolicy{Mode: client.RefreshModeEager})
+		cancel()
+		if err == nil {
+			fmt.Printf("attached materialized view: name=%s base=%s via %s\n", mvName, c.Table, nodeID)
+			return nil
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "already") || strings.Contains(msg, "exist") {
+			fmt.Printf("materialized view already attached: %s\n", mvName)
+			return nil
+		}
+	}
+	return fmt.Errorf("no node accepted CreateMaterializedView")
 }
