@@ -2410,6 +2410,129 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	Replica_ScanShard_FullMethodName = "/cefas.v1.Replica/ScanShard"
+)
+
+// ReplicaClient is the client API for Replica service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Replica is the cluster-internal RPC surface served by every node.
+// Callers are peer nodes, not end users; the methods here let one node
+// pull data straight from a replica that another node hosts. The
+// public Cefas service stays the only contract clients depend on.
+type ReplicaClient interface {
+	// ScanShard streams every primary item that belongs to a single
+	// logical shard, served by a node that holds a local replica of
+	// that shard. Returns UNAVAILABLE when the receiving node does not
+	// host the shard, so the caller can try a different peer.
+	ScanShard(ctx context.Context, in *ScanShardRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+}
+
+type replicaClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewReplicaClient(cc grpc.ClientConnInterface) ReplicaClient {
+	return &replicaClient{cc}
+}
+
+func (c *replicaClient) ScanShard(ctx context.Context, in *ScanShardRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Replica_ServiceDesc.Streams[0], Replica_ScanShard_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ScanShardRequest, Item]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Replica_ScanShardClient = grpc.ServerStreamingClient[Item]
+
+// ReplicaServer is the server API for Replica service.
+// All implementations must embed UnimplementedReplicaServer
+// for forward compatibility.
+//
+// Replica is the cluster-internal RPC surface served by every node.
+// Callers are peer nodes, not end users; the methods here let one node
+// pull data straight from a replica that another node hosts. The
+// public Cefas service stays the only contract clients depend on.
+type ReplicaServer interface {
+	// ScanShard streams every primary item that belongs to a single
+	// logical shard, served by a node that holds a local replica of
+	// that shard. Returns UNAVAILABLE when the receiving node does not
+	// host the shard, so the caller can try a different peer.
+	ScanShard(*ScanShardRequest, grpc.ServerStreamingServer[Item]) error
+	mustEmbedUnimplementedReplicaServer()
+}
+
+// UnimplementedReplicaServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedReplicaServer struct{}
+
+func (UnimplementedReplicaServer) ScanShard(*ScanShardRequest, grpc.ServerStreamingServer[Item]) error {
+	return status.Errorf(codes.Unimplemented, "method ScanShard not implemented")
+}
+func (UnimplementedReplicaServer) mustEmbedUnimplementedReplicaServer() {}
+func (UnimplementedReplicaServer) testEmbeddedByValue()                 {}
+
+// UnsafeReplicaServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ReplicaServer will
+// result in compilation errors.
+type UnsafeReplicaServer interface {
+	mustEmbedUnimplementedReplicaServer()
+}
+
+func RegisterReplicaServer(s grpc.ServiceRegistrar, srv ReplicaServer) {
+	// If the following call pancis, it indicates UnimplementedReplicaServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Replica_ServiceDesc, srv)
+}
+
+func _Replica_ScanShard_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ScanShardRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ReplicaServer).ScanShard(m, &grpc.GenericServerStream[ScanShardRequest, Item]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Replica_ScanShardServer = grpc.ServerStreamingServer[Item]
+
+// Replica_ServiceDesc is the grpc.ServiceDesc for Replica service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Replica_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "cefas.v1.Replica",
+	HandlerType: (*ReplicaServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ScanShard",
+			Handler:       _Replica_ScanShard_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "cefas.proto",
+}
+
+const (
 	CefasAtomic_AtomicUpdate_FullMethodName = "/cefas.v1.CefasAtomic/AtomicUpdate"
 )
 

@@ -33,6 +33,7 @@ import (
 // enforce the same matrix.
 type GRPCServer struct {
 	cefaspb.UnimplementedCefasServer
+	cefaspb.UnimplementedReplicaServer
 
 	db      *pebble.DB
 	cat     *catalog.Catalog

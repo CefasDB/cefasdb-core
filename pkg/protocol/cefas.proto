@@ -124,6 +124,23 @@ service Cefas {
   rpc BanditDescribe(BanditDescribeRequest) returns (BanditDescribeResponse);
 }
 
+// Replica is the cluster-internal RPC surface served by every node.
+// Callers are peer nodes, not end users; the methods here let one node
+// pull data straight from a replica that another node hosts. The
+// public Cefas service stays the only contract clients depend on.
+service Replica {
+  // ScanShard streams every primary item that belongs to a single
+  // logical shard, served by a node that holds a local replica of
+  // that shard. Returns UNAVAILABLE when the receiving node does not
+  // host the shard, so the caller can try a different peer.
+  rpc ScanShard(ScanShardRequest) returns (stream Item);
+}
+
+message ScanShardRequest {
+  string table    = 1;
+  uint32 shard_id = 2;
+}
+
 message StreamChangesRequest {
   // RaftIndex hints the lowest index the consumer cares about; the
   // server publishes events ≥ this index when its in-memory ring
