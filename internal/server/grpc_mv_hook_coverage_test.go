@@ -222,3 +222,121 @@ func TestEagerHook_AppliesDeleteItem(t *testing.T) {
 		t.Error("view row should be deleted via DeleteItem cascade")
 	}
 }
+
+// TestEagerHook_BatchCoalescedAcrossMV exercises the per-(MV, shard)
+// coalescing landed in #531. Two MVs attached to the same base, batch
+// with mixed put + delete ops: both MVs must reflect every op
+// exactly once, even though the hook now submits one batchWriteBuckets
+// call per MV instead of per op.
+func TestEagerHook_BatchCoalescedAcrossMV(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "Multi",
+			KeySchema: &cefaspb.KeySchema{Pk: "pk", Sk: "sk"},
+		},
+	}); err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	for _, spec := range []struct {
+		name    string
+		pk, sk  string
+	}{
+		{"Multi_mvA", "sk", "pk"},
+		{"Multi_mvB", "pk", "sk"},
+	} {
+		if _, err := stub.CreateMaterializedView(ctx, &cefaspb.CreateMaterializedViewRequest{
+			Descriptor_: &cefaspb.MaterializedViewDescriptor{
+				Name:      spec.name,
+				BaseTable: "Multi",
+				KeySchema: &cefaspb.KeySchema{Pk: spec.pk, Sk: spec.sk},
+				RefreshPolicy: &cefaspb.RefreshPolicy{
+					Mode: cefaspb.RefreshPolicy_EAGER,
+				},
+			},
+		}); err != nil {
+			t.Fatalf("create view %s: %v", spec.name, err)
+		}
+	}
+
+	ops := []*cefaspb.BatchWriteOp{
+		{Kind: cefaspb.BatchWriteOp_KIND_PUT, Item: map[string]*cefaspb.AttributeValue{
+			"pk": {Value: &cefaspb.AttributeValue_S{S: "p1"}},
+			"sk": {Value: &cefaspb.AttributeValue_S{S: "open"}},
+		}},
+		{Kind: cefaspb.BatchWriteOp_KIND_PUT, Item: map[string]*cefaspb.AttributeValue{
+			"pk": {Value: &cefaspb.AttributeValue_S{S: "p2"}},
+			"sk": {Value: &cefaspb.AttributeValue_S{S: "open"}},
+		}},
+		{Kind: cefaspb.BatchWriteOp_KIND_PUT, Item: map[string]*cefaspb.AttributeValue{
+			"pk": {Value: &cefaspb.AttributeValue_S{S: "p3"}},
+			"sk": {Value: &cefaspb.AttributeValue_S{S: "closed"}},
+		}},
+	}
+	if _, err := stub.BatchWriteItem(ctx, &cefaspb.BatchWriteItemRequest{Table: "Multi", Ops: ops}); err != nil {
+		t.Fatalf("BatchWriteItem: %v", err)
+	}
+
+	// mvA is reshuffled (PK=sk, SK=pk).
+	for _, want := range [][2]string{{"open", "p1"}, {"open", "p2"}, {"closed", "p3"}} {
+		got, err := stub.GetItem(ctx, &cefaspb.GetItemRequest{
+			Table: "Multi_mvA",
+			Key: map[string]*cefaspb.AttributeValue{
+				"sk": {Value: &cefaspb.AttributeValue_S{S: want[0]}},
+				"pk": {Value: &cefaspb.AttributeValue_S{S: want[1]}},
+			},
+		})
+		if err != nil || !got.GetFound() {
+			t.Errorf("mvA missing %s/%s: err=%v found=%v", want[0], want[1], err, got.GetFound())
+		}
+	}
+	// mvB carries identity key (PK=pk, SK=sk).
+	for _, want := range [][2]string{{"p1", "open"}, {"p2", "open"}, {"p3", "closed"}} {
+		got, err := stub.GetItem(ctx, &cefaspb.GetItemRequest{
+			Table: "Multi_mvB",
+			Key: map[string]*cefaspb.AttributeValue{
+				"pk": {Value: &cefaspb.AttributeValue_S{S: want[0]}},
+				"sk": {Value: &cefaspb.AttributeValue_S{S: want[1]}},
+			},
+		})
+		if err != nil || !got.GetFound() {
+			t.Errorf("mvB missing %s/%s: err=%v found=%v", want[0], want[1], err, got.GetFound())
+		}
+	}
+
+	// Now batch-delete one row; both MVs must drop their entry.
+	if _, err := stub.BatchWriteItem(ctx, &cefaspb.BatchWriteItemRequest{
+		Table: "Multi",
+		Ops: []*cefaspb.BatchWriteOp{
+			{Kind: cefaspb.BatchWriteOp_KIND_DELETE, Key: map[string]*cefaspb.AttributeValue{
+				"pk": {Value: &cefaspb.AttributeValue_S{S: "p1"}},
+				"sk": {Value: &cefaspb.AttributeValue_S{S: "open"}},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("batch delete: %v", err)
+	}
+	for _, q := range []struct {
+		table, ka, va, kb, vb string
+	}{
+		{"Multi_mvA", "sk", "open", "pk", "p1"},
+		{"Multi_mvB", "pk", "p1", "sk", "open"},
+	} {
+		got, err := stub.GetItem(ctx, &cefaspb.GetItemRequest{
+			Table: q.table,
+			Key: map[string]*cefaspb.AttributeValue{
+				q.ka: {Value: &cefaspb.AttributeValue_S{S: q.va}},
+				q.kb: {Value: &cefaspb.AttributeValue_S{S: q.vb}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("post-delete view get: %v", err)
+		}
+		if got.GetFound() {
+			t.Errorf("%s should have dropped row after cascade", q.table)
+		}
+	}
+}

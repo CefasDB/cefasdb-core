@@ -61,26 +61,143 @@ func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) 
 }
 
 // applyMVEagerBatch propagates a BatchWriteItem's worth of puts +
-// deletes to every attached EAGER materialized view. Iterates the
-// caller's ops in order so EAGER consistency matches the sequence
-// the base table observed. SCHEDULED / ON_DEMAND views remain
-// inert here, just as in applyMVEagerPut.
+// deletes to every attached EAGER materialized view. Each MV's ops
+// are bucketed by the MV's owning shard and submitted in a single
+// batchWriteBuckets call — one raft round-trip per (MV, shard)
+// bucket, not per op.
+//
+// The earlier shape called applyMVEagerPut / applyMVEagerDelete per
+// op, which produced K = batch-size raft round-trips per worker and
+// collapsed the 8-node cluster under realistic load (issue #531).
+// EAGER consistency is preserved: the call blocks until every
+// bucket commits.
 func (s *GRPCServer) applyMVEagerBatch(td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
+	for _, viewName := range td.MaterializedViews {
+		mv, err := s.cat.DescribeView(viewName)
+		if err != nil {
+			return status.Errorf(codes.Internal, "mv lookup %s: %v", viewName, err)
+		}
+		if mv.Status == types.MVStatusPaused {
+			s.mvObserveDuration(mv.Name, "skip_paused", time.Now())
+			continue
+		}
+		if mv.RefreshPolicy.Mode != types.RefreshModeEager {
+			s.mvObserveDuration(mv.Name, "skip_non_eager", time.Now())
+			continue
+		}
+		if err := s.applyMVEagerBatchOneView(mv, ops); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMVEagerBatchOneView fans out a base-table batch into a single
+// MV. Steps:
+//
+//  1. Derive every MV row up front; ops that lack the MV PK / SK are
+//     dropped with a metric (schema drift).
+//  2. Dedupe routing per MV PK so writeTargetsForPK runs once per
+//     unique MV PK, not per op.
+//  3. Bucket the resulting MV ops by primary shard + mirror shards.
+//  4. Submit each bucket with batchWriteBuckets — one raft entry per
+//     (MV, shard) bucket.
+func (s *GRPCServer) applyMVEagerBatchOneView(mv types.MaterializedViewDescriptor, ops []pebble.BatchOp) error {
+	mvTD := mvSyntheticTableDescriptor(mv)
+	mvOps := make([]pebble.BatchOp, 0, len(ops))
 	for _, op := range ops {
 		switch op.Op {
 		case pebble.BatchOpPut:
-			if err := s.applyMVEagerPut(td, op.Item); err != nil {
-				return err
+			mvItem := deriveMVItem(mv, op.Item)
+			if mvItem == nil {
+				s.mvObserveDuration(mv.Name, "skip_missing_key", time.Now())
+				continue
 			}
+			mvOps = append(mvOps, pebble.BatchOp{Op: pebble.BatchOpPut, Item: mvItem})
 		case pebble.BatchOpDelete:
-			if err := s.applyMVEagerDelete(td, op.Key); err != nil {
-				return err
+			mvItem := deriveMVItem(mv, op.Key)
+			if mvItem == nil {
+				continue
+			}
+			mvOps = append(mvOps, pebble.BatchOp{Op: pebble.BatchOpDelete, Key: itemKeyOnly(mvItem, mv.KeySchema)})
+		}
+	}
+	if len(mvOps) == 0 {
+		return nil
+	}
+
+	// Routing dedup for the MV ops.
+	type pending struct {
+		op       pebble.BatchOp
+		routeIdx int
+	}
+	pendings := make([]pending, 0, len(mvOps))
+	keyToRoute := make(map[string]int, len(mvOps))
+	routes := make([]routedWriteTargets, 0, len(mvOps))
+	releaseRoutes := func() {
+		for i := len(routes) - 1; i >= 0; i-- {
+			routes[i].Release()
+		}
+	}
+	for _, op := range mvOps {
+		probe := op.Item
+		if op.Op == pebble.BatchOpDelete {
+			probe = op.Key
+		}
+		pkBytes, err := pkBytesFromItem(probe, mv.KeySchema)
+		if err != nil {
+			releaseRoutes()
+			return status.Errorf(codes.Internal, "mv %s pk: %v", mv.Name, err)
+		}
+		key := string(pkBytes)
+		idx, ok := keyToRoute[key]
+		if !ok {
+			targets, err := s.writeTargetsForPK(pkBytes)
+			if err != nil {
+				releaseRoutes()
+				return status.Errorf(codes.Internal, "mv %s route: %v", mv.Name, err)
+			}
+			idx = len(routes)
+			routes = append(routes, targets)
+			keyToRoute[key] = idx
+		}
+		pendings = append(pendings, pending{op: op, routeIdx: idx})
+	}
+
+	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
+	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
+	for _, r := range routes {
+		if _, ok := primaryBuckets[r.primary]; !ok {
+			primaryBuckets[r.primary] = make([]pebble.BatchOp, 0, len(pendings))
+		}
+		for _, m := range r.mirrors {
+			if _, ok := mirrorBuckets[m]; !ok {
+				mirrorBuckets[m] = make([]pebble.BatchOp, 0, len(pendings))
 			}
 		}
 	}
+	for _, p := range pendings {
+		r := routes[p.routeIdx]
+		primaryBuckets[r.primary] = append(primaryBuckets[r.primary], p.op)
+		for _, m := range r.mirrors {
+			mirrorBuckets[m] = append(mirrorBuckets[m], p.op)
+		}
+	}
+
+	started := time.Now()
+	if err := batchWriteBuckets(mvTD, primaryBuckets); err != nil {
+		releaseRoutes()
+		return status.Errorf(codes.Internal, "mv %s primary: %v", mv.Name, err)
+	}
+	if err := batchWriteBuckets(mvTD, mirrorBuckets); err != nil {
+		releaseRoutes()
+		return status.Errorf(codes.Internal, "mv %s mirror: %v", mv.Name, err)
+	}
+	releaseRoutes()
+	s.mvObserveDuration(mv.Name, "batch", started)
 	return nil
 }
 
