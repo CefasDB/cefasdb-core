@@ -33,8 +33,17 @@ func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pk
 func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	var out []types.Item
 	seen := make(map[string]struct{})
+
+	// Push the caller's limit down to each shard. A GSI key uniquely
+	// belongs to one shard in a steady-state placement, so a per-shard
+	// limit equal to the caller's limit cannot under-fill the answer:
+	// when shard S contributes K rows, the remaining shards contribute
+	// the rest. The seen-map dedup still guards against transitional
+	// placements where the same row is briefly visible on two shards.
+	// In that rare case the cross-shard result may dip below limit;
+	// that is acceptable — the previous shape returned the right count
+	// only by transferring the entire partition from every shard.
 	shardOpts := opts
-	shardOpts.Limit = 0
 	for _, db := range dbs {
 		got, err := db.QueryByGSI(td, indexName, pkVal, shardOpts)
 		if err != nil {
