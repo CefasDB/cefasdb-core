@@ -2410,7 +2410,8 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Replica_ScanShard_FullMethodName = "/cefas.v1.Replica/ScanShard"
+	Replica_ScanShard_FullMethodName  = "/cefas.v1.Replica/ScanShard"
+	Replica_QueryIndex_FullMethodName = "/cefas.v1.Replica/QueryIndex"
 )
 
 // ReplicaClient is the client API for Replica service.
@@ -2427,6 +2428,11 @@ type ReplicaClient interface {
 	// that shard. Returns UNAVAILABLE when the receiving node does not
 	// host the shard, so the caller can try a different peer.
 	ScanShard(ctx context.Context, in *ScanShardRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Item], error)
+	// QueryIndex runs a plugin-backed secondary index query against
+	// the local slice on the receiving node and streams candidates
+	// back. Coordinators fan QueryIndex out across every node hosting
+	// a replica of the table to build the full result set.
+	QueryIndex(ctx context.Context, in *QueryIndexRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IndexCandidate], error)
 }
 
 type replicaClient struct {
@@ -2456,6 +2462,25 @@ func (c *replicaClient) ScanShard(ctx context.Context, in *ScanShardRequest, opt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Replica_ScanShardClient = grpc.ServerStreamingClient[Item]
 
+func (c *replicaClient) QueryIndex(ctx context.Context, in *QueryIndexRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IndexCandidate], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Replica_ServiceDesc.Streams[1], Replica_QueryIndex_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[QueryIndexRequest, IndexCandidate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Replica_QueryIndexClient = grpc.ServerStreamingClient[IndexCandidate]
+
 // ReplicaServer is the server API for Replica service.
 // All implementations must embed UnimplementedReplicaServer
 // for forward compatibility.
@@ -2470,6 +2495,11 @@ type ReplicaServer interface {
 	// that shard. Returns UNAVAILABLE when the receiving node does not
 	// host the shard, so the caller can try a different peer.
 	ScanShard(*ScanShardRequest, grpc.ServerStreamingServer[Item]) error
+	// QueryIndex runs a plugin-backed secondary index query against
+	// the local slice on the receiving node and streams candidates
+	// back. Coordinators fan QueryIndex out across every node hosting
+	// a replica of the table to build the full result set.
+	QueryIndex(*QueryIndexRequest, grpc.ServerStreamingServer[IndexCandidate]) error
 	mustEmbedUnimplementedReplicaServer()
 }
 
@@ -2482,6 +2512,9 @@ type UnimplementedReplicaServer struct{}
 
 func (UnimplementedReplicaServer) ScanShard(*ScanShardRequest, grpc.ServerStreamingServer[Item]) error {
 	return status.Errorf(codes.Unimplemented, "method ScanShard not implemented")
+}
+func (UnimplementedReplicaServer) QueryIndex(*QueryIndexRequest, grpc.ServerStreamingServer[IndexCandidate]) error {
+	return status.Errorf(codes.Unimplemented, "method QueryIndex not implemented")
 }
 func (UnimplementedReplicaServer) mustEmbedUnimplementedReplicaServer() {}
 func (UnimplementedReplicaServer) testEmbeddedByValue()                 {}
@@ -2515,6 +2548,17 @@ func _Replica_ScanShard_Handler(srv interface{}, stream grpc.ServerStream) error
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Replica_ScanShardServer = grpc.ServerStreamingServer[Item]
 
+func _Replica_QueryIndex_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QueryIndexRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ReplicaServer).QueryIndex(m, &grpc.GenericServerStream[QueryIndexRequest, IndexCandidate]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Replica_QueryIndexServer = grpc.ServerStreamingServer[IndexCandidate]
+
 // Replica_ServiceDesc is the grpc.ServiceDesc for Replica service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2526,6 +2570,11 @@ var Replica_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ScanShard",
 			Handler:       _Replica_ScanShard_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "QueryIndex",
+			Handler:       _Replica_QueryIndex_Handler,
 			ServerStreams: true,
 		},
 	},

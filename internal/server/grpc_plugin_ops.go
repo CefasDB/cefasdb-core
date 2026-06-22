@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +22,13 @@ import (
 	"github.com/CefasDb/cefasdb/internal/core/model"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
+	"github.com/CefasDb/cefasdb/internal/plugin/builtin/haversine"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/roaring"
 	"github.com/CefasDb/cefasdb/internal/storage"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
+	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
 // pluginIndexBook is the in-memory descriptor cache for plugin-backed
@@ -529,20 +532,13 @@ func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb
 		return err
 	}
 	a.Bind(audience.IndexBinding{Geohash: d})
-	cs, err := a.Select(plugin.AudienceRequest{
-		Lat:    req.GetLat(),
-		Lon:    req.GetLon(),
-		Radius: req.GetRadiusMeters(),
-	})
+
+	candidates, err := s.fanOutGeoAudience(ctx, a, d, req)
 	if err != nil {
-		return status.Errorf(codes.Internal, "select: %v", err)
+		return err
 	}
 	sent := 0
-	for {
-		c, ok := cs.Next()
-		if !ok {
-			break
-		}
+	for _, c := range candidates {
 		if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(c.Key)}); err != nil {
 			return err
 		}
@@ -552,6 +548,118 @@ func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb
 		}
 	}
 	return nil
+}
+
+// fanOutGeoAudience runs the local audience.Select, fans QueryIndex
+// out across every peer that hosts a replica of the table, then
+// merges the candidates so the caller sees the full table-wide
+// result regardless of which node it hit. Dedup happens by primary
+// key; haversine filtering already ran inside each node's
+// audience.Select.
+func (s *GRPCServer) fanOutGeoAudience(ctx context.Context, a *audience.Plugin, d index.Descriptor, req *cefaspb.GeoAudienceRequest) ([]plugin.Candidate, error) {
+	seen := make(map[string]struct{})
+	out := make([]plugin.Candidate, 0)
+	appendCandidate := func(c plugin.Candidate) {
+		id, err := primaryIdentity(c.Key, d.KeySchema)
+		if err != nil {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, c)
+	}
+
+	cs, err := a.Select(plugin.AudienceRequest{
+		Lat:    req.GetLat(),
+		Lon:    req.GetLon(),
+		Radius: req.GetRadiusMeters(),
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "select: %v", err)
+	}
+	for {
+		c, ok := cs.Next()
+		if !ok {
+			break
+		}
+		appendCandidate(c)
+	}
+	cs.Close()
+
+	if s.manager == nil {
+		return out, nil
+	}
+	binds := map[string]*cefaspb.AttributeValue{
+		":center": {Value: &cefaspb.AttributeValue_M{M: &cefaspb.Map{Values: map[string]*cefaspb.AttributeValue{
+			"lat": {Value: &cefaspb.AttributeValue_N{N: strconv.FormatFloat(req.GetLat(), 'f', -1, 64)}},
+			"lon": {Value: &cefaspb.AttributeValue_N{N: strconv.FormatFloat(req.GetLon(), 'f', -1, 64)}},
+		}}}},
+	}
+	for _, peerID := range s.manager.PeersForTable() {
+		itemCh, errCh := s.manager.PeerQueryIndex(ctx, peerID, d.Table, d.Name, binds, 0)
+		for cand := range itemCh {
+			key, err := pbToItem(cand.GetKey())
+			if err != nil {
+				continue
+			}
+			// Apply the same haversine post-filter the local
+			// audience.Select runs. Remote nodes return raw
+			// geohash candidates; the cell-boundary false
+			// positives drop out here.
+			if !audienceWithinRadius(key, req.GetLat(), req.GetLon(), req.GetRadiusMeters(), d) {
+				continue
+			}
+			appendCandidate(plugin.Candidate{Key: key, Score: cand.GetScore()})
+		}
+		if err := <-errCh; err != nil {
+			return nil, status.Errorf(codes.Unavailable, "peer %s query index: %v", peerID, err)
+		}
+	}
+	return out, nil
+}
+
+// audienceWithinRadius applies the same haversine filter the local
+// audience.Select uses. Repeated here so candidates streamed back
+// from peers (which return raw geohash buckets, not filtered) drop
+// cell-boundary false positives before reaching the client.
+func audienceWithinRadius(key types.Item, lat, lon, radius float64, d index.Descriptor) bool {
+	field := geoFieldFor(d)
+	if field == "" {
+		return true
+	}
+	loc, ok := key[field]
+	if !ok || loc.T != types.AttrM {
+		return false
+	}
+	latAttr, ok := loc.M["lat"]
+	if !ok || latAttr.T != types.AttrN {
+		return false
+	}
+	lonAttr, ok := loc.M["lon"]
+	if !ok || lonAttr.T != types.AttrN {
+		return false
+	}
+	itemLat, err := strconv.ParseFloat(latAttr.N, 64)
+	if err != nil {
+		return false
+	}
+	itemLon, err := strconv.ParseFloat(lonAttr.N, 64)
+	if err != nil {
+		return false
+	}
+	return haversine.Distance(lat, lon, itemLat, itemLon) <= radius
+}
+
+func geoFieldFor(d index.Descriptor) string {
+	var cfg struct {
+		Field string `json:"field"`
+	}
+	if err := json.Unmarshal(d.PluginConfig, &cfg); err != nil {
+		return ""
+	}
+	return cfg.Field
 }
 
 func (s *GRPCServer) Dedup(ctx context.Context, req *cefaspb.DedupRequest) (*cefaspb.DedupResponse, error) {
