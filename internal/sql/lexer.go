@@ -103,6 +103,22 @@ const (
 	tStorage
 	tAllow
 	tScan
+	tMaterialized
+	tView
+	tRefresh
+	tEvery
+	tEager
+	tOnDemand
+	tDemand
+	tSecond
+	tSeconds
+	tMinute
+	tMinutes
+	tHour
+	tHours
+	tDay
+	tDays
+	tAs
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -115,51 +131,67 @@ type Token struct {
 }
 
 var keywords = map[string]TokenKind{
-	"SELECT":    tSelect,
-	"FROM":      tFrom,
-	"WHERE":     tWhere,
-	"INSERT":    tInsert,
-	"INTO":      tInto,
-	"VALUES":    tValues,
-	"UPDATE":    tUpdate,
-	"SET":       tSet,
-	"DELETE":    tDelete,
-	"CREATE":    tCreate,
-	"TABLE":     tTable,
-	"PRIMARY":   tPrimary,
-	"KEY":       tKey,
-	"DROP":      tDrop,
-	"ORDER":     tOrder,
-	"BY":        tBy,
-	"ASC":       tAsc,
-	"DESC":      tDesc,
-	"LIMIT":     tLimit,
-	"AND":       tAnd,
-	"OR":        tOr,
-	"NOT":       tNot,
-	"BETWEEN":   tBetween,
-	"IS":        tIs,
-	"NULL":      tNull,
-	"TRUE":      tTrue,
-	"FALSE":     tFalse,
-	"USE":       tUse,
-	"INDEX":     tIndex,
-	"IF":        tIf,
-	"EXISTS":    tExists,
-	"ADD":       tAdd,
-	"REMOVE":    tRemove,
-	"COUNT":     tCount,
-	"RETURNING": tReturning,
-	"NEW":       tNew,
-	"OLD":       tOld,
-	"ANN":       tAnn,
-	"OF":        tOf,
-	"DIVERSIFY": tDiversify,
-	"TO":        tTo,
-	"WITH":      tWith,
-	"STORAGE":   tStorage,
-	"ALLOW":     tAllow,
-	"SCAN":      tScan,
+	"SELECT":       tSelect,
+	"FROM":         tFrom,
+	"WHERE":        tWhere,
+	"INSERT":       tInsert,
+	"INTO":         tInto,
+	"VALUES":       tValues,
+	"UPDATE":       tUpdate,
+	"SET":          tSet,
+	"DELETE":       tDelete,
+	"CREATE":       tCreate,
+	"TABLE":        tTable,
+	"PRIMARY":      tPrimary,
+	"KEY":          tKey,
+	"DROP":         tDrop,
+	"ORDER":        tOrder,
+	"BY":           tBy,
+	"ASC":          tAsc,
+	"DESC":         tDesc,
+	"LIMIT":        tLimit,
+	"AND":          tAnd,
+	"OR":           tOr,
+	"NOT":          tNot,
+	"BETWEEN":      tBetween,
+	"IS":           tIs,
+	"NULL":         tNull,
+	"TRUE":         tTrue,
+	"FALSE":        tFalse,
+	"USE":          tUse,
+	"INDEX":        tIndex,
+	"IF":           tIf,
+	"EXISTS":       tExists,
+	"ADD":          tAdd,
+	"REMOVE":       tRemove,
+	"COUNT":        tCount,
+	"RETURNING":    tReturning,
+	"NEW":          tNew,
+	"OLD":          tOld,
+	"ANN":          tAnn,
+	"OF":           tOf,
+	"DIVERSIFY":    tDiversify,
+	"TO":           tTo,
+	"WITH":         tWith,
+	"STORAGE":      tStorage,
+	"ALLOW":        tAllow,
+	"SCAN":         tScan,
+	"MATERIALIZED": tMaterialized,
+	"VIEW":         tView,
+	"REFRESH":      tRefresh,
+	"EVERY":        tEvery,
+	"EAGER":        tEager,
+	"ON":           tOnDemand,
+	"DEMAND":       tDemand,
+	"SECOND":       tSecond,
+	"SECONDS":      tSeconds,
+	"MINUTE":       tMinute,
+	"MINUTES":      tMinutes,
+	"HOUR":         tHour,
+	"HOURS":        tHours,
+	"DAY":          tDay,
+	"DAYS":         tDays,
+	"AS":           tAs,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of

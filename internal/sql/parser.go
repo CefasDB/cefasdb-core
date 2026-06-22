@@ -40,6 +40,16 @@ func (p *parser) peek() Token {
 	return p.toks[p.pos]
 }
 
+// peekAt returns the token offset positions ahead of the current
+// cursor without advancing. Used by parseStatement to disambiguate
+// CREATE TABLE from CREATE MATERIALIZED VIEW.
+func (p *parser) peekAt(offset int) Token {
+	if p.pos+offset >= len(p.toks) {
+		return Token{Kind: tEOF}
+	}
+	return p.toks[p.pos+offset]
+}
+
 func (p *parser) consume() Token {
 	t := p.peek()
 	p.pos++
@@ -75,8 +85,14 @@ func (p *parser) parseStatement() (Stmt, error) {
 	case tDelete:
 		return p.parseDelete()
 	case tCreate:
+		if p.peekAt(1).Kind == tMaterialized {
+			return p.parseCreateMaterializedView()
+		}
 		return p.parseCreate()
 	case tDrop:
+		if p.peekAt(1).Kind == tMaterialized {
+			return p.parseDropMaterializedView()
+		}
 		return p.parseDrop()
 	}
 	return nil, fmt.Errorf("unsupported statement starting with %q", p.peek().Lit)
@@ -903,4 +919,152 @@ func (p *parser) parseVectorLiteral() (*VectorLiteral, error) {
 		return nil, err
 	}
 	return &VectorLiteral{Values: out}, nil
+}
+
+func (p *parser) parseCreateMaterializedView() (*CreateMaterializedViewStmt, error) {
+	p.consume() // CREATE
+	if _, err := p.expect(tMaterialized, "MATERIALIZED"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tView, "VIEW"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "view name")
+	if err != nil {
+		return nil, err
+	}
+	stmt := &CreateMaterializedViewStmt{Name: name.Lit}
+
+	if _, err := p.expect(tAs, "AS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tSelect, "SELECT"); err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == tStar {
+		p.consume()
+	} else {
+		for {
+			col, err := p.expect(tIdent, "projected attribute")
+			if err != nil {
+				return nil, err
+			}
+			stmt.Projected = append(stmt.Projected, col.Lit)
+			if p.peek().Kind != tComma {
+				break
+			}
+			p.consume()
+		}
+	}
+	if _, err := p.expect(tFrom, "FROM"); err != nil {
+		return nil, err
+	}
+	base, err := p.expect(tIdent, "base table name")
+	if err != nil {
+		return nil, err
+	}
+	stmt.BaseTable = base.Lit
+
+	if _, err := p.expect(tPrimary, "PRIMARY"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tKey, "KEY"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLParen, "("); err != nil {
+		return nil, err
+	}
+	pk, err := p.expect(tIdent, "PK column")
+	if err != nil {
+		return nil, err
+	}
+	stmt.PK = pk.Lit
+	if p.peek().Kind == tComma {
+		p.consume()
+		sk, err := p.expect(tIdent, "SK column")
+		if err != nil {
+			return nil, err
+		}
+		stmt.SK = sk.Lit
+	}
+	if _, err := p.expect(tRParen, ")"); err != nil {
+		return nil, err
+	}
+
+	if p.peek().Kind == tRefresh {
+		p.consume()
+		spec, err := p.parseRefreshClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Refresh = spec
+	} else {
+		stmt.Refresh = MVRefreshSpec{Mode: "eager"}
+	}
+	return stmt, nil
+}
+
+func (p *parser) parseRefreshClause() (MVRefreshSpec, error) {
+	switch p.peek().Kind {
+	case tEager:
+		p.consume()
+		return MVRefreshSpec{Mode: "eager"}, nil
+	case tEvery:
+		p.consume()
+		n, err := p.expect(tNumber, "refresh interval")
+		if err != nil {
+			return MVRefreshSpec{}, err
+		}
+		val, err := strconv.ParseInt(n.Lit, 10, 64)
+		if err != nil || val <= 0 {
+			return MVRefreshSpec{}, fmt.Errorf("REFRESH EVERY: bad interval %q", n.Lit)
+		}
+		secs, err := p.parseRefreshUnit(val)
+		if err != nil {
+			return MVRefreshSpec{}, err
+		}
+		return MVRefreshSpec{Mode: "scheduled", IntervalSeconds: secs}, nil
+	case tOnDemand:
+		p.consume()
+		if _, err := p.expect(tDemand, "DEMAND"); err != nil {
+			return MVRefreshSpec{}, err
+		}
+		return MVRefreshSpec{Mode: "on_demand"}, nil
+	default:
+		return MVRefreshSpec{}, fmt.Errorf("expected EAGER, EVERY or ON DEMAND after REFRESH, got %q", p.peek().Lit)
+	}
+}
+
+func (p *parser) parseRefreshUnit(val int64) (int64, error) {
+	switch p.peek().Kind {
+	case tSecond, tSeconds:
+		p.consume()
+		return val, nil
+	case tMinute, tMinutes:
+		p.consume()
+		return val * 60, nil
+	case tHour, tHours:
+		p.consume()
+		return val * 3600, nil
+	case tDay, tDays:
+		p.consume()
+		return val * 86400, nil
+	default:
+		return 0, fmt.Errorf("expected SECONDS / MINUTES / HOURS / DAYS, got %q", p.peek().Lit)
+	}
+}
+
+func (p *parser) parseDropMaterializedView() (*DropMaterializedViewStmt, error) {
+	p.consume() // DROP
+	if _, err := p.expect(tMaterialized, "MATERIALIZED"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tView, "VIEW"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "view name")
+	if err != nil {
+		return nil, err
+	}
+	return &DropMaterializedViewStmt{Name: name.Lit}, nil
 }

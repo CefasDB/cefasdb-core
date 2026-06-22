@@ -341,6 +341,9 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
+	if err := s.applyMVEagerPut(td, item); err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
 	return &cefaspb.PutItemResponse{}, nil
 }
@@ -773,6 +776,7 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	if _, err := s.cat.Describe(req.GetTable()); err != nil {
 		return mapStorageErr(err)
 	}
+	s.maybeSetMVStalenessHeader(grpcStreamHeaderCtx{stream: stream}, req.GetTable())
 	cond, err := storage.ParseCondition(req.GetFilterExpression())
 	if err != nil {
 		return status.Error(codes.InvalidArgument, fmt.Sprintf("filter_expression: %v", err))

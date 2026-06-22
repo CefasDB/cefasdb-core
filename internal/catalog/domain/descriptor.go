@@ -228,3 +228,66 @@ func CloneIndexProjection(in types.IndexProjection) types.IndexProjection {
 	}
 	return in
 }
+
+// NormalizeMVDescriptor validates a materialized view descriptor in
+// place and applies defaults. Default Mode is RefreshModeEager.
+func NormalizeMVDescriptor(mv *types.MaterializedViewDescriptor) error {
+	if mv == nil {
+		return fmt.Errorf("nil materialized view descriptor")
+	}
+	mv.Name = strings.TrimSpace(mv.Name)
+	mv.BaseTable = strings.TrimSpace(mv.BaseTable)
+	if mv.Name == "" {
+		return fmt.Errorf("materialized view name required")
+	}
+	if mv.BaseTable == "" {
+		return fmt.Errorf("materialized view %q: base_table required", mv.Name)
+	}
+	if mv.KeySchema.PK == "" {
+		return fmt.Errorf("materialized view %q: KeySchema.PK required", mv.Name)
+	}
+	switch mv.RefreshPolicy.Mode {
+	case types.RefreshModeUnspecified:
+		mv.RefreshPolicy.Mode = types.RefreshModeEager
+		mv.RefreshPolicy.IntervalSeconds = 0
+	case types.RefreshModeEager:
+		mv.RefreshPolicy.IntervalSeconds = 0
+	case types.RefreshModeScheduled:
+		if mv.RefreshPolicy.IntervalSeconds <= 0 {
+			return fmt.Errorf("materialized view %q: REFRESH EVERY requires interval > 0", mv.Name)
+		}
+	case types.RefreshModeOnDemand:
+		mv.RefreshPolicy.IntervalSeconds = 0
+	default:
+		return fmt.Errorf("materialized view %q: unsupported refresh mode %q", mv.Name, mv.RefreshPolicy.Mode)
+	}
+	if mv.Status == "" {
+		mv.Status = types.MVStatusBuilding
+	}
+	if mv.ProjectedAttributes != nil {
+		seen := map[string]struct{}{}
+		out := make([]string, 0, len(mv.ProjectedAttributes))
+		for _, a := range mv.ProjectedAttributes {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			if _, dup := seen[a]; dup {
+				continue
+			}
+			seen[a] = struct{}{}
+			out = append(out, a)
+		}
+		mv.ProjectedAttributes = out
+	}
+	return nil
+}
+
+// CloneMVDescriptor deep-copies a materialized view descriptor.
+func CloneMVDescriptor(in types.MaterializedViewDescriptor) types.MaterializedViewDescriptor {
+	out := in
+	if in.ProjectedAttributes != nil {
+		out.ProjectedAttributes = append([]string(nil), in.ProjectedAttributes...)
+	}
+	return out
+}

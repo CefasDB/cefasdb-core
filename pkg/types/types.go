@@ -234,6 +234,45 @@ type TableDescriptor struct {
 	LatestStreamArn     string               `json:"latestStreamArn,omitempty"`
 	LatestStreamLabel   string               `json:"latestStreamLabel,omitempty"`
 	StreamStatus        string               `json:"streamStatus,omitempty"`
+	// MaterializedViews names the views whose base is this table.
+	MaterializedViews []string `json:"materializedViews,omitempty"`
+}
+
+// RefreshMode mirrors cefaspb.RefreshPolicy_Mode.
+type RefreshMode string
+
+const (
+	RefreshModeUnspecified RefreshMode = ""
+	RefreshModeEager       RefreshMode = "eager"
+	RefreshModeScheduled   RefreshMode = "scheduled"
+	RefreshModeOnDemand    RefreshMode = "on_demand"
+)
+
+// RefreshPolicy decides when a materialized view is reconciled
+// with its base. IntervalSeconds is only meaningful when Mode is
+// RefreshModeScheduled.
+type RefreshPolicy struct {
+	Mode            RefreshMode `json:"mode"`
+	IntervalSeconds int64       `json:"intervalSeconds,omitempty"`
+}
+
+const (
+	MVStatusBuilding = "building"
+	MVStatusActive   = "active"
+	MVStatusPaused   = "paused"
+	MVStatusFailed   = "failed"
+)
+
+// MaterializedViewDescriptor is the persisted shape of a materialized
+// view. Stored under cefas/internal/mv/<name>.
+type MaterializedViewDescriptor struct {
+	Name                string        `json:"name"`
+	BaseTable           string        `json:"baseTable"`
+	KeySchema           KeySchema     `json:"keySchema"`
+	ProjectedAttributes []string      `json:"projectedAttributes,omitempty"`
+	RefreshPolicy       RefreshPolicy `json:"refreshPolicy"`
+	Status              string        `json:"status"`
+	LastRefreshAtUnix   int64         `json:"lastRefreshAtUnix,omitempty"`
 }
 
 // Errors surfaced by the public API. Server code maps these to HTTP /
@@ -251,4 +290,6 @@ var (
 	ErrStreamIteratorInvalid = errors.New("cefas: stream iterator invalid")
 	ErrStreamIteratorExpired = errors.New("cefas: stream iterator expired")
 	ErrStreamTrimmed         = errors.New("cefas: stream sequence has been trimmed")
+	ErrMVNotFound            = errors.New("cefas: materialized view not found")
+	ErrMVAlreadyExists       = errors.New("cefas: materialized view already exists")
 )

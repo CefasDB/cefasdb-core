@@ -129,12 +129,39 @@ type DropTableStmt struct {
 	Table string
 }
 
-func (*SelectStmt) stmt()      {}
-func (*InsertStmt) stmt()      {}
-func (*UpdateStmt) stmt()      {}
-func (*DeleteStmt) stmt()      {}
-func (*CreateTableStmt) stmt() {}
-func (*DropTableStmt) stmt()   {}
+// CreateMaterializedViewStmt is CREATE MATERIALIZED VIEW <name>
+// AS SELECT cols FROM <base> PRIMARY KEY (<pk> [, <sk>])
+// [REFRESH EAGER | EVERY N <unit> | ON DEMAND].
+type CreateMaterializedViewStmt struct {
+	Name      string
+	BaseTable string
+	Projected []string
+	PK        string
+	SK        string
+	Refresh   MVRefreshSpec
+}
+
+// MVRefreshSpec parses the REFRESH clause. Mode is one of "eager",
+// "scheduled", "on_demand"; IntervalSeconds is populated only for
+// "scheduled".
+type MVRefreshSpec struct {
+	Mode            string
+	IntervalSeconds int64
+}
+
+// DropMaterializedViewStmt is DROP MATERIALIZED VIEW <name>.
+type DropMaterializedViewStmt struct {
+	Name string
+}
+
+func (*SelectStmt) stmt()                 {}
+func (*InsertStmt) stmt()                 {}
+func (*UpdateStmt) stmt()                 {}
+func (*DeleteStmt) stmt()                 {}
+func (*CreateTableStmt) stmt()            {}
+func (*DropTableStmt) stmt()              {}
+func (*CreateMaterializedViewStmt) stmt() {}
+func (*DropMaterializedViewStmt) stmt()   {}
 
 // Expr is the predicate / value-expression node interface.
 type Expr interface {

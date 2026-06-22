@@ -27,12 +27,20 @@ type Catalog struct {
 
 	mu     sync.RWMutex
 	tables map[string]types.TableDescriptor
+	views  map[string]types.MaterializedViewDescriptor
 }
 
 func New(db *pebble.DB) (*Catalog, error) {
-	c := &Catalog{db: db, tables: make(map[string]types.TableDescriptor)}
+	c := &Catalog{
+		db:     db,
+		tables: make(map[string]types.TableDescriptor),
+		views:  make(map[string]types.MaterializedViewDescriptor),
+	}
 	if err := c.loadAll(); err != nil {
 		return nil, fmt.Errorf("catalog load: %w", err)
+	}
+	if err := c.loadAllViews(); err != nil {
+		return nil, fmt.Errorf("catalog view load: %w", err)
 	}
 	return c, nil
 }
@@ -120,6 +128,12 @@ func (c *Catalog) Create(td types.TableDescriptor) error {
 func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	c.mu.RLock()
 	td, ok := c.tables[name]
+	if !ok {
+		if mv, mvOk := c.views[name]; mvOk {
+			c.mu.RUnlock()
+			return mvToTableDescriptor(mv), nil
+		}
+	}
 	c.mu.RUnlock()
 	if ok {
 		return domain.CloneTableDescriptor(td), nil
@@ -385,4 +399,194 @@ func (c *Catalog) Drop(name string) error {
 	}
 	delete(c.tables, name)
 	return nil
+}
+
+func (c *Catalog) loadAllViews() error {
+	lower, upper := storage.PrefixMaterializedViews()
+	it, err := c.db.Iter(lower, upper)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for valid := it.First(); valid; valid = it.Next() {
+		var mv types.MaterializedViewDescriptor
+		v := it.Value()
+		if err := json.Unmarshal(v, &mv); err != nil {
+			return fmt.Errorf("decode mv at %s: %w", it.Key(), err)
+		}
+		_ = domain.NormalizeMVDescriptor(&mv)
+		c.views[mv.Name] = mv
+	}
+	return it.Error()
+}
+
+func (c *Catalog) CreateView(mv types.MaterializedViewDescriptor) (types.MaterializedViewDescriptor, error) {
+	if mv.Name == "" {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("view name required")
+	}
+	if err := domain.NormalizeMVDescriptor(&mv); err != nil {
+		return types.MaterializedViewDescriptor{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.views[mv.Name]; exists {
+		return types.MaterializedViewDescriptor{}, types.ErrMVAlreadyExists
+	}
+	if _, exists := c.tables[mv.Name]; exists {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("name %q clashes with an existing table", mv.Name)
+	}
+	base, ok := c.tables[mv.BaseTable]
+	if !ok {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("base table %q: %w", mv.BaseTable, types.ErrTableNotFound)
+	}
+	if mv.Status == "" {
+		mv.Status = types.MVStatusBuilding
+	}
+	raw, err := json.Marshal(mv)
+	if err != nil {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("marshal view: %w", err)
+	}
+	batch := c.db.Batch()
+	defer batch.Close()
+	if err := batch.Set(storage.KeyMaterializedView(mv.Name), raw, nil); err != nil {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("batch view: %w", err)
+	}
+	updatedBase := domain.CloneTableDescriptor(base)
+	if !containsViewName(updatedBase.MaterializedViews, mv.Name) {
+		updatedBase.MaterializedViews = append(updatedBase.MaterializedViews, mv.Name)
+		baseRaw, err := json.Marshal(updatedBase)
+		if err != nil {
+			return types.MaterializedViewDescriptor{}, fmt.Errorf("marshal base: %w", err)
+		}
+		if err := batch.Set(storage.KeyCatalog(updatedBase.Name), baseRaw, nil); err != nil {
+			return types.MaterializedViewDescriptor{}, fmt.Errorf("batch base: %w", err)
+		}
+	}
+	if err := c.db.CommitBatch(batch); err != nil {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("persist view: %w", err)
+	}
+	c.views[mv.Name] = mv
+	c.tables[updatedBase.Name] = updatedBase
+	return mv, nil
+}
+
+func (c *Catalog) DescribeView(name string) (types.MaterializedViewDescriptor, error) {
+	c.mu.RLock()
+	mv, ok := c.views[name]
+	c.mu.RUnlock()
+	if ok {
+		return mv, nil
+	}
+	raw, err := c.db.Get(storage.KeyMaterializedView(name))
+	if err != nil {
+		return types.MaterializedViewDescriptor{}, types.ErrMVNotFound
+	}
+	var out types.MaterializedViewDescriptor
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return types.MaterializedViewDescriptor{}, fmt.Errorf("decode view %s: %w", name, err)
+	}
+	_ = domain.NormalizeMVDescriptor(&out)
+	c.mu.Lock()
+	c.views[out.Name] = out
+	c.mu.Unlock()
+	return out, nil
+}
+
+func (c *Catalog) ListViews(baseTable string) []types.MaterializedViewDescriptor {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]types.MaterializedViewDescriptor, 0, len(c.views))
+	for _, mv := range c.views {
+		if baseTable != "" && mv.BaseTable != baseTable {
+			continue
+		}
+		out = append(out, mv)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (c *Catalog) UpdateView(mv types.MaterializedViewDescriptor) error {
+	if mv.Name == "" {
+		return fmt.Errorf("view name required")
+	}
+	if err := domain.NormalizeMVDescriptor(&mv); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.views[mv.Name]; !ok {
+		return types.ErrMVNotFound
+	}
+	raw, err := json.Marshal(mv)
+	if err != nil {
+		return fmt.Errorf("marshal view: %w", err)
+	}
+	if err := c.db.Set(storage.KeyMaterializedView(mv.Name), raw); err != nil {
+		return fmt.Errorf("persist view: %w", err)
+	}
+	c.views[mv.Name] = mv
+	return nil
+}
+
+func (c *Catalog) DropView(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mv, ok := c.views[name]
+	if !ok {
+		return types.ErrMVNotFound
+	}
+	batch := c.db.Batch()
+	defer batch.Close()
+	if err := batch.Delete(storage.KeyMaterializedView(name), nil); err != nil {
+		return fmt.Errorf("delete view: %w", err)
+	}
+	if base, baseOK := c.tables[mv.BaseTable]; baseOK {
+		updated := domain.CloneTableDescriptor(base)
+		updated.MaterializedViews = removeViewName(updated.MaterializedViews, name)
+		baseRaw, err := json.Marshal(updated)
+		if err != nil {
+			return fmt.Errorf("marshal base after detach: %w", err)
+		}
+		if err := batch.Set(storage.KeyCatalog(updated.Name), baseRaw, nil); err != nil {
+			return fmt.Errorf("batch detach: %w", err)
+		}
+		if err := c.db.CommitBatch(batch); err != nil {
+			return fmt.Errorf("persist drop: %w", err)
+		}
+		c.tables[updated.Name] = updated
+	} else {
+		if err := c.db.CommitBatch(batch); err != nil {
+			return fmt.Errorf("persist drop: %w", err)
+		}
+	}
+	delete(c.views, name)
+	return nil
+}
+
+func containsViewName(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+func removeViewName(xs []string, x string) []string {
+	out := xs[:0]
+	for _, v := range xs {
+		if v == x {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func mvToTableDescriptor(mv types.MaterializedViewDescriptor) types.TableDescriptor {
+	return types.TableDescriptor{
+		Name:      mv.Name,
+		KeySchema: mv.KeySchema,
+	}
 }
