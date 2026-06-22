@@ -73,6 +73,7 @@ type Config struct {
 		Bootstrap         bool              `yaml:"bootstrap"`
 		Peers             map[string]string `yaml:"peers"`
 		HTTPPeers         map[string]string `yaml:"httpPeers"`
+		GRPCPeers         map[string]string `yaml:"grpcPeers"`
 	} `yaml:"cluster"`
 	Raft struct {
 		Bind                          string        `yaml:"bind"`
@@ -315,6 +316,7 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Cluster.Bootstrap = boolean("CLUSTER_BOOTSTRAP", cfg.Cluster.Bootstrap)
 	cfg.Cluster.Peers = mergeKV(cfg.Cluster.Peers, str("CLUSTER_PEERS", ""))
 	cfg.Cluster.HTTPPeers = mergeKV(cfg.Cluster.HTTPPeers, str("CLUSTER_HTTP_PEERS", ""))
+	cfg.Cluster.GRPCPeers = mergeKV(cfg.Cluster.GRPCPeers, str("CLUSTER_GRPC_PEERS", ""))
 
 	cfg.Raft.Bind = str("RAFT_BIND", cfg.Raft.Bind)
 	cfg.Raft.Path = str("RAFT_PATH", cfg.Raft.Path)
