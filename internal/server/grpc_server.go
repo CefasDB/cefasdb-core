@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -788,40 +789,149 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	}
 	limit := int(req.GetLimit())
 
-	dbs, err := s.readShardStores()
-	if err != nil {
-		return mapStorageErr(err)
+	sent := 0
+	emit := func(it types.Item) (bool, error) {
+		if !cond.IsZero() {
+			ok, err := cond.Evaluate(it, binds)
+			if err != nil {
+				return false, status.Error(codes.InvalidArgument, fmt.Sprintf("evaluate filter: %v", err))
+			}
+			if !ok {
+				return true, nil
+			}
+		}
+		if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
+			return false, err
+		}
+		sent++
+		if limit > 0 && sent >= limit {
+			return false, nil
+		}
+		return true, nil
 	}
 
-	sent := 0
-	for _, db := range dbs {
-		// Pull every primary item; filter + cap on the way out so a
-		// permissive filter doesn't materialise the full shard in
-		// memory before stopping.
-		items, err := db.ScanTable(req.GetTable(), 0)
+	// Single-shard / no-manager fallback: scan the local pebble.DB
+	// directly. Multi-node fan-in below requires a placement-aware
+	// manager.
+	if s.manager == nil {
+		items, err := s.db.ScanTable(req.GetTable(), 0)
 		if err != nil {
 			return mapStorageErr(err)
 		}
 		for _, it := range items {
-			if !cond.IsZero() {
-				ok, err := cond.Evaluate(it, binds)
-				if err != nil {
-					return status.Error(codes.InvalidArgument, fmt.Sprintf("evaluate filter: %v", err))
-				}
-				if !ok {
-					continue
-				}
-			}
-			if err := stream.Send(&cefaspb.Item{Attributes: itemToPB(it)}); err != nil {
+			cont, err := emit(it)
+			if err != nil {
 				return err
 			}
-			sent++
-			if limit > 0 && sent >= limit {
+			if !cont {
 				return nil
 			}
 		}
+		return nil
+	}
+
+	// Multi-shard: scan every logical shard exactly once. Shards
+	// this node hosts locally come from the in-process pebble.DB;
+	// remote shards stream through Replica.ScanShard on a peer that
+	// holds a replica. The seen map dedups across transitional
+	// placements that briefly leave two shards holding the same key.
+	seen := make(map[string]struct{})
+	emitOnce := func(it types.Item) (bool, error) {
+		id := scanItemKeyString(it)
+		if id != "" {
+			if _, dup := seen[id]; dup {
+				return true, nil
+			}
+			seen[id] = struct{}{}
+		}
+		return emit(it)
+	}
+
+	for _, sh := range s.manager.Shards() {
+		if sh == nil {
+			continue
+		}
+		if sh.IsLocalVoter || sh.IsLocalNonVoter {
+			if sh.Storage == nil {
+				return status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
+			}
+			items, err := sh.Storage.ScanTable(req.GetTable(), 0)
+			if err != nil {
+				return mapStorageErr(err)
+			}
+			for _, it := range items {
+				cont, err := emitOnce(it)
+				if err != nil {
+					return err
+				}
+				if !cont {
+					return nil
+				}
+			}
+			continue
+		}
+		if err := s.scanRemoteShard(ctx, sh.ID, req.GetTable(), emitOnce); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (s *GRPCServer) scanRemoteShard(ctx context.Context, shardID uint32, table string, sink func(types.Item) (bool, error)) error {
+	itemCh, errCh := s.manager.PeerScanShard(ctx, shardID, table)
+	stopRecv := false
+	for it := range itemCh {
+		if stopRecv {
+			continue
+		}
+		decoded, err := pbToItem(it.GetAttributes())
+		if err != nil {
+			return status.Errorf(codes.Internal, "decode peer item: %v", err)
+		}
+		cont, err := sink(decoded)
+		if err != nil {
+			return err
+		}
+		if !cont {
+			stopRecv = true
+		}
+	}
+	if err := <-errCh; err != nil {
+		return status.Errorf(codes.Unavailable, "peer scan shard %d: %v", shardID, err)
+	}
+	return nil
+}
+
+// scanItemKeyString builds a stable identity string for dedup across
+// shards. Scan does not see the table descriptor's key schema at this
+// layer, so it sorts and concatenates the primitive (S/N/B) attributes
+// found in the item — enough to detect "same item served by two
+// shards" without dragging the catalog into the hot path.
+func scanItemKeyString(it types.Item) string {
+	type kv struct{ k, v string }
+	pairs := make([]kv, 0, len(it))
+	for k, v := range it {
+		switch v.T {
+		case types.AttrS:
+			pairs = append(pairs, kv{k, "S:" + v.S})
+		case types.AttrN:
+			pairs = append(pairs, kv{k, "N:" + v.N})
+		}
+	}
+	if len(pairs) == 0 {
+		return ""
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].k < pairs[j].k })
+	var sb strings.Builder
+	for i, p := range pairs {
+		if i > 0 {
+			sb.WriteByte('|')
+		}
+		sb.WriteString(p.k)
+		sb.WriteByte('=')
+		sb.WriteString(p.v)
+	}
+	return sb.String()
 }
 
 func (s *GRPCServer) SpatialQuery(req *cefaspb.SpatialQueryRequest, stream cefaspb.Cefas_SpatialQueryServer) error {
