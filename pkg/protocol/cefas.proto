@@ -97,6 +97,8 @@ service Cefas {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc ListMaterializedViews(ListMaterializedViewsRequest) returns (ListMaterializedViewsResponse);
   rpc RefreshMaterializedView(RefreshMaterializedViewRequest) returns (RefreshMaterializedViewResponse);
+  rpc PauseMaterializedView(PauseMaterializedViewRequest) returns (PauseMaterializedViewResponse);
+  rpc ResumeMaterializedView(ResumeMaterializedViewRequest) returns (ResumeMaterializedViewResponse);
 
   // Plugin-backed index lifecycle (#158, #159, #160).
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
@@ -226,6 +228,16 @@ message RefreshMaterializedViewResponse {
   // smoke signal from CLI.
   int64 rows_indexed = 1;
 }
+
+message PauseMaterializedViewRequest {
+  string name = 1;
+}
+message PauseMaterializedViewResponse {}
+
+message ResumeMaterializedViewRequest {
+  string name = 1;
+}
+message ResumeMaterializedViewResponse {}
 
 message StreamChangesRequest {
   // RaftIndex hints the lowest index the consumer cares about; the

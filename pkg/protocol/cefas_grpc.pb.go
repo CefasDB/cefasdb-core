@@ -70,6 +70,8 @@ const (
 	Cefas_DropMaterializedView_FullMethodName     = "/cefas.v1.Cefas/DropMaterializedView"
 	Cefas_ListMaterializedViews_FullMethodName    = "/cefas.v1.Cefas/ListMaterializedViews"
 	Cefas_RefreshMaterializedView_FullMethodName  = "/cefas.v1.Cefas/RefreshMaterializedView"
+	Cefas_PauseMaterializedView_FullMethodName    = "/cefas.v1.Cefas/PauseMaterializedView"
+	Cefas_ResumeMaterializedView_FullMethodName   = "/cefas.v1.Cefas/ResumeMaterializedView"
 	Cefas_CreateIndex_FullMethodName              = "/cefas.v1.Cefas/CreateIndex"
 	Cefas_DescribeIndex_FullMethodName            = "/cefas.v1.Cefas/DescribeIndex"
 	Cefas_RebuildIndex_FullMethodName             = "/cefas.v1.Cefas/RebuildIndex"
@@ -167,6 +169,8 @@ type CefasClient interface {
 	DropMaterializedView(ctx context.Context, in *DropMaterializedViewRequest, opts ...grpc.CallOption) (*DropMaterializedViewResponse, error)
 	ListMaterializedViews(ctx context.Context, in *ListMaterializedViewsRequest, opts ...grpc.CallOption) (*ListMaterializedViewsResponse, error)
 	RefreshMaterializedView(ctx context.Context, in *RefreshMaterializedViewRequest, opts ...grpc.CallOption) (*RefreshMaterializedViewResponse, error)
+	PauseMaterializedView(ctx context.Context, in *PauseMaterializedViewRequest, opts ...grpc.CallOption) (*PauseMaterializedViewResponse, error)
+	ResumeMaterializedView(ctx context.Context, in *ResumeMaterializedViewRequest, opts ...grpc.CallOption) (*ResumeMaterializedViewResponse, error)
 	// Plugin-backed index lifecycle (#158, #159, #160).
 	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error)
 	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
@@ -681,6 +685,26 @@ func (c *cefasClient) RefreshMaterializedView(ctx context.Context, in *RefreshMa
 	return out, nil
 }
 
+func (c *cefasClient) PauseMaterializedView(ctx context.Context, in *PauseMaterializedViewRequest, opts ...grpc.CallOption) (*PauseMaterializedViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PauseMaterializedViewResponse)
+	err := c.cc.Invoke(ctx, Cefas_PauseMaterializedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ResumeMaterializedView(ctx context.Context, in *ResumeMaterializedViewRequest, opts ...grpc.CallOption) (*ResumeMaterializedViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeMaterializedViewResponse)
+	err := c.cc.Invoke(ctx, Cefas_ResumeMaterializedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateIndexResponse)
@@ -965,6 +989,8 @@ type CefasServer interface {
 	DropMaterializedView(context.Context, *DropMaterializedViewRequest) (*DropMaterializedViewResponse, error)
 	ListMaterializedViews(context.Context, *ListMaterializedViewsRequest) (*ListMaterializedViewsResponse, error)
 	RefreshMaterializedView(context.Context, *RefreshMaterializedViewRequest) (*RefreshMaterializedViewResponse, error)
+	PauseMaterializedView(context.Context, *PauseMaterializedViewRequest) (*PauseMaterializedViewResponse, error)
+	ResumeMaterializedView(context.Context, *ResumeMaterializedViewRequest) (*ResumeMaterializedViewResponse, error)
 	// Plugin-backed index lifecycle (#158, #159, #160).
 	CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error)
 	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
@@ -1134,6 +1160,12 @@ func (UnimplementedCefasServer) ListMaterializedViews(context.Context, *ListMate
 }
 func (UnimplementedCefasServer) RefreshMaterializedView(context.Context, *RefreshMaterializedViewRequest) (*RefreshMaterializedViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RefreshMaterializedView not implemented")
+}
+func (UnimplementedCefasServer) PauseMaterializedView(context.Context, *PauseMaterializedViewRequest) (*PauseMaterializedViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PauseMaterializedView not implemented")
+}
+func (UnimplementedCefasServer) ResumeMaterializedView(context.Context, *ResumeMaterializedViewRequest) (*ResumeMaterializedViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResumeMaterializedView not implemented")
 }
 func (UnimplementedCefasServer) CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
@@ -1980,6 +2012,42 @@ func _Cefas_RefreshMaterializedView_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_PauseMaterializedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseMaterializedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).PauseMaterializedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_PauseMaterializedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).PauseMaterializedView(ctx, req.(*PauseMaterializedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ResumeMaterializedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeMaterializedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ResumeMaterializedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ResumeMaterializedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ResumeMaterializedView(ctx, req.(*ResumeMaterializedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateIndexRequest)
 	if err := dec(in); err != nil {
@@ -2499,6 +2567,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshMaterializedView",
 			Handler:    _Cefas_RefreshMaterializedView_Handler,
+		},
+		{
+			MethodName: "PauseMaterializedView",
+			Handler:    _Cefas_PauseMaterializedView_Handler,
+		},
+		{
+			MethodName: "ResumeMaterializedView",
+			Handler:    _Cefas_ResumeMaterializedView_Handler,
 		},
 		{
 			MethodName: "CreateIndex",
