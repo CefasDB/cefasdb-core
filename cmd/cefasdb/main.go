@@ -52,6 +52,7 @@ func main() {
 		raftBootstrap              = flag.Bool("raft-bootstrap", false, "Bootstrap a new cluster from -raft-peers (run on the first node only)")
 		raftPeersFlag              = flag.String("raft-peers", "", "Comma-separated id=raftAddr peer list, e.g. 'a=127.0.0.1:9001,b=127.0.0.1:9002,c=127.0.0.1:9003'")
 		raftHTTPFlag               = flag.String("raft-http-peers", "", "Comma-separated id=httpURL peer list for 307 redirects, e.g. 'a=http://h1:8080,b=http://h2:8080'")
+		raftGRPCFlag               = flag.String("raft-grpc-peers", "", "Comma-separated id=grpcAddr peer list for cross-shard fan-in via Replica.ScanShard, e.g. 'a=h1:9090,b=h2:9090'")
 		raftHeartbeat              = flag.Duration("raft-heartbeat-timeout", 0, "Raft heartbeat timeout. 0 inherits config/default.")
 		raftElection               = flag.Duration("raft-election-timeout", 0, "Raft election timeout. 0 inherits config/default.")
 		raftLease                  = flag.Duration("raft-leader-lease-timeout", 0, "Raft leader lease timeout. Must be <= heartbeat timeout. 0 inherits config/default.")
@@ -174,7 +175,7 @@ func main() {
 	// Promote any flag value the user actually set onto cfg so the
 	// downstream code paths can read a single source of truth.
 	bootstrapserver.OverlayFlags(&cfg, *dataDir, *httpAddr, *fsync,
-		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag,
+		*raftBind, *raftID, *raftPath, *raftStorePath, *raftBootstrap, *raftPeersFlag, *raftHTTPFlag, *raftGRPCFlag,
 		*raftHeartbeat, *raftElection, *raftLease, *raftCommit, *raftApply,
 		*raftSnapshots, *raftLogComp, *raftLogCompMinBytes, *raftLogCompMinSavingsRatio, *raftLogCompSkipCooldown,
 		*storageProfile, *raftStorageProfile,
