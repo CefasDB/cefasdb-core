@@ -7,9 +7,9 @@ import (
 
 	_ "unsafe" // for go:linkname placeholder; kept inert today
 
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/spatial"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -37,8 +37,26 @@ func PlanStmt(stmt Stmt, cat Catalog) (Plan, error) {
 		return planDelete(s, cat)
 	case *SelectStmt:
 		return planSelect(s, cat)
+	case *CreateMaterializedViewStmt:
+		return planCreateMaterializedView(s)
+	case *DropMaterializedViewStmt:
+		return &PlanDropMaterializedView{Name: s.Name}, nil
 	}
 	return nil, fmt.Errorf("unsupported statement type %T", stmt)
+}
+
+func planCreateMaterializedView(s *CreateMaterializedViewStmt) (*PlanCreateMaterializedView, error) {
+	mv := types.MaterializedViewDescriptor{
+		Name:                s.Name,
+		BaseTable:           s.BaseTable,
+		KeySchema:           types.KeySchema{PK: s.PK, SK: s.SK},
+		ProjectedAttributes: append([]string(nil), s.Projected...),
+		RefreshPolicy: types.RefreshPolicy{
+			Mode:            types.RefreshMode(s.Refresh.Mode),
+			IntervalSeconds: s.Refresh.IntervalSeconds,
+		},
+	}
+	return &PlanCreateMaterializedView{Descriptor: mv}, nil
 }
 
 func planCreateTable(s *CreateTableStmt) (*PlanCreateTable, error) {

@@ -3,9 +3,9 @@ package sql
 import (
 	"strconv"
 
+	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/spatial"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -134,16 +134,28 @@ type PlanDelete struct {
 	Returning  ReturningMode
 }
 
-func (*PlanCreateTable) plan() {}
-func (*PlanDropTable) plan()   {}
-func (*PlanGetItem) plan()     {}
-func (*PlanQuery) plan()       {}
-func (*PlanScan) plan()        {}
-func (*PlanSpatial) plan()     {}
-func (*PlanANN) plan()         {}
-func (*PlanPutItem) plan()     {}
-func (*PlanUpdate) plan()      {}
-func (*PlanDelete) plan()      {}
+// PlanCreateMaterializedView is CREATE MATERIALIZED VIEW.
+type PlanCreateMaterializedView struct {
+	Descriptor types.MaterializedViewDescriptor
+}
+
+// PlanDropMaterializedView is DROP MATERIALIZED VIEW.
+type PlanDropMaterializedView struct {
+	Name string
+}
+
+func (*PlanCreateTable) plan()            {}
+func (*PlanDropTable) plan()              {}
+func (*PlanGetItem) plan()                {}
+func (*PlanQuery) plan()                  {}
+func (*PlanScan) plan()                   {}
+func (*PlanSpatial) plan()                {}
+func (*PlanANN) plan()                    {}
+func (*PlanPutItem) plan()                {}
+func (*PlanUpdate) plan()                 {}
+func (*PlanDelete) plan()                 {}
+func (*PlanCreateMaterializedView) plan() {}
+func (*PlanDropMaterializedView) plan()   {}
 
 // Explain renders the ANN plan for EXPLAIN output. The hybrid
 // filter node is stitched under the ANN scan so callers see both

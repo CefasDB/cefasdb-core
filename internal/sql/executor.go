@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CefasDb/cefasdb/internal/storage"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	cquery "github.com/CefasDb/cefasdb/internal/core/query"
 	"github.com/CefasDb/cefasdb/internal/core/query/mmr"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -70,11 +70,13 @@ type Storage interface {
 }
 
 // CatalogMutator is the schema-management surface the executor uses
-// for CREATE / DROP TABLE.
+// for CREATE / DROP TABLE and CREATE / DROP MATERIALIZED VIEW.
 type CatalogMutator interface {
 	Create(td types.TableDescriptor) error
 	Drop(name string) error
 	Describe(name string) (types.TableDescriptor, error)
+	CreateView(mv types.MaterializedViewDescriptor) (types.MaterializedViewDescriptor, error)
+	DropView(name string) error
 }
 
 // Executor runs a compiled Plan against the storage + catalog.
@@ -110,8 +112,26 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execSpatial(p)
 	case *PlanANN:
 		return e.execANN(p)
+	case *PlanCreateMaterializedView:
+		return e.execCreateMaterializedView(p)
+	case *PlanDropMaterializedView:
+		return e.execDropMaterializedView(p)
 	}
 	return nil, fmt.Errorf("unsupported plan type %T", plan)
+}
+
+func (e *Executor) execCreateMaterializedView(p *PlanCreateMaterializedView) (*Result, error) {
+	if _, err := e.Catalog.CreateView(p.Descriptor); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
+}
+
+func (e *Executor) execDropMaterializedView(p *PlanDropMaterializedView) (*Result, error) {
+	if err := e.Catalog.DropView(p.Name); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
 }
 
 func (e *Executor) execCreate(p *PlanCreateTable) (*Result, error) {

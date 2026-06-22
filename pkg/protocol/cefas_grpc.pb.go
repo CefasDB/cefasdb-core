@@ -26,65 +26,69 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Cefas_CreateTable_FullMethodName            = "/cefas.v1.Cefas/CreateTable"
-	Cefas_DescribeTable_FullMethodName          = "/cefas.v1.Cefas/DescribeTable"
-	Cefas_ListTables_FullMethodName             = "/cefas.v1.Cefas/ListTables"
-	Cefas_DropTable_FullMethodName              = "/cefas.v1.Cefas/DropTable"
-	Cefas_ListStreams_FullMethodName            = "/cefas.v1.Cefas/ListStreams"
-	Cefas_DescribeStream_FullMethodName         = "/cefas.v1.Cefas/DescribeStream"
-	Cefas_GetShardIterator_FullMethodName       = "/cefas.v1.Cefas/GetShardIterator"
-	Cefas_GetRecords_FullMethodName             = "/cefas.v1.Cefas/GetRecords"
-	Cefas_UpdateTimeToLive_FullMethodName       = "/cefas.v1.Cefas/UpdateTimeToLive"
-	Cefas_DescribeTimeToLive_FullMethodName     = "/cefas.v1.Cefas/DescribeTimeToLive"
-	Cefas_PutItem_FullMethodName                = "/cefas.v1.Cefas/PutItem"
-	Cefas_GetItem_FullMethodName                = "/cefas.v1.Cefas/GetItem"
-	Cefas_UpdateItem_FullMethodName             = "/cefas.v1.Cefas/UpdateItem"
-	Cefas_DeleteItem_FullMethodName             = "/cefas.v1.Cefas/DeleteItem"
-	Cefas_BatchWriteItem_FullMethodName         = "/cefas.v1.Cefas/BatchWriteItem"
-	Cefas_BatchGetItem_FullMethodName           = "/cefas.v1.Cefas/BatchGetItem"
-	Cefas_TransactWriteItems_FullMethodName     = "/cefas.v1.Cefas/TransactWriteItems"
-	Cefas_TransactGetItems_FullMethodName       = "/cefas.v1.Cefas/TransactGetItems"
-	Cefas_Query_FullMethodName                  = "/cefas.v1.Cefas/Query"
-	Cefas_Scan_FullMethodName                   = "/cefas.v1.Cefas/Scan"
-	Cefas_SpatialQuery_FullMethodName           = "/cefas.v1.Cefas/SpatialQuery"
-	Cefas_Sql_FullMethodName                    = "/cefas.v1.Cefas/Sql"
-	Cefas_ClusterStatus_FullMethodName          = "/cefas.v1.Cefas/ClusterStatus"
-	Cefas_AddVoter_FullMethodName               = "/cefas.v1.Cefas/AddVoter"
-	Cefas_RemoveServer_FullMethodName           = "/cefas.v1.Cefas/RemoveServer"
-	Cefas_PlanPlacement_FullMethodName          = "/cefas.v1.Cefas/PlanPlacement"
-	Cefas_ApplyPlacement_FullMethodName         = "/cefas.v1.Cefas/ApplyPlacement"
-	Cefas_FinalizeSplit_FullMethodName          = "/cefas.v1.Cefas/FinalizeSplit"
-	Cefas_FinalizeRangeMove_FullMethodName      = "/cefas.v1.Cefas/FinalizeRangeMove"
-	Cefas_StreamChanges_FullMethodName          = "/cefas.v1.Cefas/StreamChanges"
-	Cefas_ListSnapshots_FullMethodName          = "/cefas.v1.Cefas/ListSnapshots"
-	Cefas_Compact_FullMethodName                = "/cefas.v1.Cefas/Compact"
-	Cefas_CreateBackup_FullMethodName           = "/cefas.v1.Cefas/CreateBackup"
-	Cefas_ListBackups_FullMethodName            = "/cefas.v1.Cefas/ListBackups"
-	Cefas_DeleteBackup_FullMethodName           = "/cefas.v1.Cefas/DeleteBackup"
-	Cefas_ApplyBackupRetention_FullMethodName   = "/cefas.v1.Cefas/ApplyBackupRetention"
-	Cefas_RestoreTableFromBackup_FullMethodName = "/cefas.v1.Cefas/RestoreTableFromBackup"
-	Cefas_ListPlugins_FullMethodName            = "/cefas.v1.Cefas/ListPlugins"
-	Cefas_DescribePlugin_FullMethodName         = "/cefas.v1.Cefas/DescribePlugin"
-	Cefas_CreateIndex_FullMethodName            = "/cefas.v1.Cefas/CreateIndex"
-	Cefas_DescribeIndex_FullMethodName          = "/cefas.v1.Cefas/DescribeIndex"
-	Cefas_RebuildIndex_FullMethodName           = "/cefas.v1.Cefas/RebuildIndex"
-	Cefas_Explain_FullMethodName                = "/cefas.v1.Cefas/Explain"
-	Cefas_TopK_FullMethodName                   = "/cefas.v1.Cefas/TopK"
-	Cefas_CohortCreate_FullMethodName           = "/cefas.v1.Cefas/CohortCreate"
-	Cefas_CohortEstimate_FullMethodName         = "/cefas.v1.Cefas/CohortEstimate"
-	Cefas_GeoAudience_FullMethodName            = "/cefas.v1.Cefas/GeoAudience"
-	Cefas_Dedup_FullMethodName                  = "/cefas.v1.Cefas/Dedup"
-	Cefas_FreqCap_FullMethodName                = "/cefas.v1.Cefas/FreqCap"
-	Cefas_Aggregate_FullMethodName              = "/cefas.v1.Cefas/Aggregate"
-	Cefas_Rerank_FullMethodName                 = "/cefas.v1.Cefas/Rerank"
-	Cefas_Recommend_FullMethodName              = "/cefas.v1.Cefas/Recommend"
-	Cefas_NextBestAction_FullMethodName         = "/cefas.v1.Cefas/NextBestAction"
-	Cefas_RecordReward_FullMethodName           = "/cefas.v1.Cefas/RecordReward"
-	Cefas_GetDecision_FullMethodName            = "/cefas.v1.Cefas/GetDecision"
-	Cefas_BanditCreate_FullMethodName           = "/cefas.v1.Cefas/BanditCreate"
-	Cefas_BanditSample_FullMethodName           = "/cefas.v1.Cefas/BanditSample"
-	Cefas_BanditReward_FullMethodName           = "/cefas.v1.Cefas/BanditReward"
-	Cefas_BanditDescribe_FullMethodName         = "/cefas.v1.Cefas/BanditDescribe"
+	Cefas_CreateTable_FullMethodName              = "/cefas.v1.Cefas/CreateTable"
+	Cefas_DescribeTable_FullMethodName            = "/cefas.v1.Cefas/DescribeTable"
+	Cefas_ListTables_FullMethodName               = "/cefas.v1.Cefas/ListTables"
+	Cefas_DropTable_FullMethodName                = "/cefas.v1.Cefas/DropTable"
+	Cefas_ListStreams_FullMethodName              = "/cefas.v1.Cefas/ListStreams"
+	Cefas_DescribeStream_FullMethodName           = "/cefas.v1.Cefas/DescribeStream"
+	Cefas_GetShardIterator_FullMethodName         = "/cefas.v1.Cefas/GetShardIterator"
+	Cefas_GetRecords_FullMethodName               = "/cefas.v1.Cefas/GetRecords"
+	Cefas_UpdateTimeToLive_FullMethodName         = "/cefas.v1.Cefas/UpdateTimeToLive"
+	Cefas_DescribeTimeToLive_FullMethodName       = "/cefas.v1.Cefas/DescribeTimeToLive"
+	Cefas_PutItem_FullMethodName                  = "/cefas.v1.Cefas/PutItem"
+	Cefas_GetItem_FullMethodName                  = "/cefas.v1.Cefas/GetItem"
+	Cefas_UpdateItem_FullMethodName               = "/cefas.v1.Cefas/UpdateItem"
+	Cefas_DeleteItem_FullMethodName               = "/cefas.v1.Cefas/DeleteItem"
+	Cefas_BatchWriteItem_FullMethodName           = "/cefas.v1.Cefas/BatchWriteItem"
+	Cefas_BatchGetItem_FullMethodName             = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_TransactWriteItems_FullMethodName       = "/cefas.v1.Cefas/TransactWriteItems"
+	Cefas_TransactGetItems_FullMethodName         = "/cefas.v1.Cefas/TransactGetItems"
+	Cefas_Query_FullMethodName                    = "/cefas.v1.Cefas/Query"
+	Cefas_Scan_FullMethodName                     = "/cefas.v1.Cefas/Scan"
+	Cefas_SpatialQuery_FullMethodName             = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName                      = "/cefas.v1.Cefas/Sql"
+	Cefas_ClusterStatus_FullMethodName            = "/cefas.v1.Cefas/ClusterStatus"
+	Cefas_AddVoter_FullMethodName                 = "/cefas.v1.Cefas/AddVoter"
+	Cefas_RemoveServer_FullMethodName             = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_PlanPlacement_FullMethodName            = "/cefas.v1.Cefas/PlanPlacement"
+	Cefas_ApplyPlacement_FullMethodName           = "/cefas.v1.Cefas/ApplyPlacement"
+	Cefas_FinalizeSplit_FullMethodName            = "/cefas.v1.Cefas/FinalizeSplit"
+	Cefas_FinalizeRangeMove_FullMethodName        = "/cefas.v1.Cefas/FinalizeRangeMove"
+	Cefas_StreamChanges_FullMethodName            = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName            = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_Compact_FullMethodName                  = "/cefas.v1.Cefas/Compact"
+	Cefas_CreateBackup_FullMethodName             = "/cefas.v1.Cefas/CreateBackup"
+	Cefas_ListBackups_FullMethodName              = "/cefas.v1.Cefas/ListBackups"
+	Cefas_DeleteBackup_FullMethodName             = "/cefas.v1.Cefas/DeleteBackup"
+	Cefas_ApplyBackupRetention_FullMethodName     = "/cefas.v1.Cefas/ApplyBackupRetention"
+	Cefas_RestoreTableFromBackup_FullMethodName   = "/cefas.v1.Cefas/RestoreTableFromBackup"
+	Cefas_ListPlugins_FullMethodName              = "/cefas.v1.Cefas/ListPlugins"
+	Cefas_DescribePlugin_FullMethodName           = "/cefas.v1.Cefas/DescribePlugin"
+	Cefas_CreateMaterializedView_FullMethodName   = "/cefas.v1.Cefas/CreateMaterializedView"
+	Cefas_DescribeMaterializedView_FullMethodName = "/cefas.v1.Cefas/DescribeMaterializedView"
+	Cefas_DropMaterializedView_FullMethodName     = "/cefas.v1.Cefas/DropMaterializedView"
+	Cefas_ListMaterializedViews_FullMethodName    = "/cefas.v1.Cefas/ListMaterializedViews"
+	Cefas_CreateIndex_FullMethodName              = "/cefas.v1.Cefas/CreateIndex"
+	Cefas_DescribeIndex_FullMethodName            = "/cefas.v1.Cefas/DescribeIndex"
+	Cefas_RebuildIndex_FullMethodName             = "/cefas.v1.Cefas/RebuildIndex"
+	Cefas_Explain_FullMethodName                  = "/cefas.v1.Cefas/Explain"
+	Cefas_TopK_FullMethodName                     = "/cefas.v1.Cefas/TopK"
+	Cefas_CohortCreate_FullMethodName             = "/cefas.v1.Cefas/CohortCreate"
+	Cefas_CohortEstimate_FullMethodName           = "/cefas.v1.Cefas/CohortEstimate"
+	Cefas_GeoAudience_FullMethodName              = "/cefas.v1.Cefas/GeoAudience"
+	Cefas_Dedup_FullMethodName                    = "/cefas.v1.Cefas/Dedup"
+	Cefas_FreqCap_FullMethodName                  = "/cefas.v1.Cefas/FreqCap"
+	Cefas_Aggregate_FullMethodName                = "/cefas.v1.Cefas/Aggregate"
+	Cefas_Rerank_FullMethodName                   = "/cefas.v1.Cefas/Rerank"
+	Cefas_Recommend_FullMethodName                = "/cefas.v1.Cefas/Recommend"
+	Cefas_NextBestAction_FullMethodName           = "/cefas.v1.Cefas/NextBestAction"
+	Cefas_RecordReward_FullMethodName             = "/cefas.v1.Cefas/RecordReward"
+	Cefas_GetDecision_FullMethodName              = "/cefas.v1.Cefas/GetDecision"
+	Cefas_BanditCreate_FullMethodName             = "/cefas.v1.Cefas/BanditCreate"
+	Cefas_BanditSample_FullMethodName             = "/cefas.v1.Cefas/BanditSample"
+	Cefas_BanditReward_FullMethodName             = "/cefas.v1.Cefas/BanditReward"
+	Cefas_BanditDescribe_FullMethodName           = "/cefas.v1.Cefas/BanditDescribe"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -153,6 +157,14 @@ type CefasClient interface {
 	// Plugin introspection.
 	ListPlugins(ctx context.Context, in *ListPluginsRequest, opts ...grpc.CallOption) (*ListPluginsResponse, error)
 	DescribePlugin(ctx context.Context, in *DescribePluginRequest, opts ...grpc.CallOption) (*DescribePluginResponse, error)
+	// Materialized view DDL + introspection. CefasDB innovates beyond
+	// ScyllaDB by exposing a REFRESH POLICY: EAGER (sync on every base
+	// mutation), EVERY N seconds (scheduled COMPLETE refresh), or
+	// ON_DEMAND (manual via RefreshMaterializedView in Phase 6/7).
+	CreateMaterializedView(ctx context.Context, in *CreateMaterializedViewRequest, opts ...grpc.CallOption) (*CreateMaterializedViewResponse, error)
+	DescribeMaterializedView(ctx context.Context, in *DescribeMaterializedViewRequest, opts ...grpc.CallOption) (*DescribeMaterializedViewResponse, error)
+	DropMaterializedView(ctx context.Context, in *DropMaterializedViewRequest, opts ...grpc.CallOption) (*DropMaterializedViewResponse, error)
+	ListMaterializedViews(ctx context.Context, in *ListMaterializedViewsRequest, opts ...grpc.CallOption) (*ListMaterializedViewsResponse, error)
 	// Plugin-backed index lifecycle (#158, #159, #160).
 	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error)
 	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
@@ -617,6 +629,46 @@ func (c *cefasClient) DescribePlugin(ctx context.Context, in *DescribePluginRequ
 	return out, nil
 }
 
+func (c *cefasClient) CreateMaterializedView(ctx context.Context, in *CreateMaterializedViewRequest, opts ...grpc.CallOption) (*CreateMaterializedViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateMaterializedViewResponse)
+	err := c.cc.Invoke(ctx, Cefas_CreateMaterializedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DescribeMaterializedView(ctx context.Context, in *DescribeMaterializedViewRequest, opts ...grpc.CallOption) (*DescribeMaterializedViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeMaterializedViewResponse)
+	err := c.cc.Invoke(ctx, Cefas_DescribeMaterializedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DropMaterializedView(ctx context.Context, in *DropMaterializedViewRequest, opts ...grpc.CallOption) (*DropMaterializedViewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DropMaterializedViewResponse)
+	err := c.cc.Invoke(ctx, Cefas_DropMaterializedView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ListMaterializedViews(ctx context.Context, in *ListMaterializedViewsRequest, opts ...grpc.CallOption) (*ListMaterializedViewsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMaterializedViewsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListMaterializedViews_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*CreateIndexResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateIndexResponse)
@@ -892,6 +944,14 @@ type CefasServer interface {
 	// Plugin introspection.
 	ListPlugins(context.Context, *ListPluginsRequest) (*ListPluginsResponse, error)
 	DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error)
+	// Materialized view DDL + introspection. CefasDB innovates beyond
+	// ScyllaDB by exposing a REFRESH POLICY: EAGER (sync on every base
+	// mutation), EVERY N seconds (scheduled COMPLETE refresh), or
+	// ON_DEMAND (manual via RefreshMaterializedView in Phase 6/7).
+	CreateMaterializedView(context.Context, *CreateMaterializedViewRequest) (*CreateMaterializedViewResponse, error)
+	DescribeMaterializedView(context.Context, *DescribeMaterializedViewRequest) (*DescribeMaterializedViewResponse, error)
+	DropMaterializedView(context.Context, *DropMaterializedViewRequest) (*DropMaterializedViewResponse, error)
+	ListMaterializedViews(context.Context, *ListMaterializedViewsRequest) (*ListMaterializedViewsResponse, error)
 	// Plugin-backed index lifecycle (#158, #159, #160).
 	CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error)
 	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
@@ -1046,6 +1106,18 @@ func (UnimplementedCefasServer) ListPlugins(context.Context, *ListPluginsRequest
 }
 func (UnimplementedCefasServer) DescribePlugin(context.Context, *DescribePluginRequest) (*DescribePluginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribePlugin not implemented")
+}
+func (UnimplementedCefasServer) CreateMaterializedView(context.Context, *CreateMaterializedViewRequest) (*CreateMaterializedViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateMaterializedView not implemented")
+}
+func (UnimplementedCefasServer) DescribeMaterializedView(context.Context, *DescribeMaterializedViewRequest) (*DescribeMaterializedViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeMaterializedView not implemented")
+}
+func (UnimplementedCefasServer) DropMaterializedView(context.Context, *DropMaterializedViewRequest) (*DropMaterializedViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropMaterializedView not implemented")
+}
+func (UnimplementedCefasServer) ListMaterializedViews(context.Context, *ListMaterializedViewsRequest) (*ListMaterializedViewsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMaterializedViews not implemented")
 }
 func (UnimplementedCefasServer) CreateIndex(context.Context, *CreateIndexRequest) (*CreateIndexResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
@@ -1802,6 +1874,78 @@ func _Cefas_DescribePlugin_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_CreateMaterializedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMaterializedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CreateMaterializedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CreateMaterializedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CreateMaterializedView(ctx, req.(*CreateMaterializedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DescribeMaterializedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeMaterializedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DescribeMaterializedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DescribeMaterializedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DescribeMaterializedView(ctx, req.(*DescribeMaterializedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DropMaterializedView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropMaterializedViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DropMaterializedView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DropMaterializedView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DropMaterializedView(ctx, req.(*DropMaterializedViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ListMaterializedViews_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMaterializedViewsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListMaterializedViews(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListMaterializedViews_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListMaterializedViews(ctx, req.(*ListMaterializedViewsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateIndexRequest)
 	if err := dec(in); err != nil {
@@ -2301,6 +2445,22 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DescribePlugin",
 			Handler:    _Cefas_DescribePlugin_Handler,
+		},
+		{
+			MethodName: "CreateMaterializedView",
+			Handler:    _Cefas_CreateMaterializedView_Handler,
+		},
+		{
+			MethodName: "DescribeMaterializedView",
+			Handler:    _Cefas_DescribeMaterializedView_Handler,
+		},
+		{
+			MethodName: "DropMaterializedView",
+			Handler:    _Cefas_DropMaterializedView_Handler,
+		},
+		{
+			MethodName: "ListMaterializedViews",
+			Handler:    _Cefas_ListMaterializedViews_Handler,
 		},
 		{
 			MethodName: "CreateIndex",

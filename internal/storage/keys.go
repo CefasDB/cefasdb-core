@@ -35,6 +35,7 @@ const (
 	pInternal = Namespace + "internal/"
 
 	pPluginIndex = pInternal + "plugin-index/"
+	pMVDesc      = pInternal + "mv/"
 	pStreams     = pAdmin + "streams/by-arn/"
 	pStreamTrim  = pAdmin + "streams/retention/"
 
@@ -633,4 +634,16 @@ func DecodeGSIPointer(data []byte) (primaryPK, primarySK []byte, err error) {
 	}
 	primarySK = append([]byte(nil), rest[:n]...)
 	return primaryPK, primarySK, nil
+}
+
+// KeyMaterializedView stores a materialized view descriptor under
+// the internal namespace.
+func KeyMaterializedView(name string) []byte {
+	return []byte(pMVDesc + escapeKeySegment(name))
+}
+
+// PrefixMaterializedViews covers every materialized view descriptor.
+func PrefixMaterializedViews() (lower, upper []byte) {
+	p := []byte(pMVDesc)
+	return p, prefixUpper(p)
 }
