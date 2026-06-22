@@ -35,6 +35,10 @@ func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) 
 		if err != nil {
 			return status.Errorf(codes.Internal, "mv lookup %s: %v", viewName, err)
 		}
+		if mv.Status == types.MVStatusPaused {
+			s.mvObserveDuration(mv.Name, "skip_paused", time.Now())
+			continue
+		}
 		if mv.RefreshPolicy.Mode != types.RefreshModeEager {
 			s.mvObserveDuration(mv.Name, "skip_non_eager", time.Now())
 			continue
