@@ -44,6 +44,8 @@ type GRPCServer struct {
 	plugins *plugin.Registry // nil → uses plugin.Default
 	metrics *metrics.Metrics // nil when metrics disabled
 	backups BackupSchedulerStatusProvider
+
+	mvScheduler *mvScheduler
 }
 
 // NewGRPCServer wires the gRPC handler over the same storage / catalog
@@ -53,7 +55,21 @@ func NewGRPCServer(db *pebble.DB, cat *catalog.Catalog, cluster Cluster) *GRPCSe
 	if db != nil {
 		_ = s.hydratePluginIndexCatalog()
 	}
+	if cat != nil {
+		s.mvScheduler = newMVScheduler(s, 30*time.Second)
+		s.mvScheduler.Start(context.Background())
+	}
 	return s
+}
+
+// StopMVScheduler stops the background materialized view refresh
+// scheduler. Exposed so callers (server shutdown, tests) can drain
+// pending refreshes cleanly. Safe to call when the scheduler was
+// never started.
+func (s *GRPCServer) StopMVScheduler() {
+	if s.mvScheduler != nil {
+		s.mvScheduler.Stop()
+	}
 }
 
 // AttachManager wires the multi-shard manager onto the gRPC handler.
