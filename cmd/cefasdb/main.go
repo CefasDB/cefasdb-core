@@ -474,6 +474,7 @@ func main() {
 			gsrvImpl.AttachChangeStream(bootstrapserver.NewStreamAdapter(raftDB))
 		}
 		cefaspb.RegisterCefasServer(gsrv, gsrvImpl)
+		cefaspb.RegisterReplicaServer(gsrv, gsrvImpl)
 		server.RegisterAtomic(gsrv, gsrvImpl)
 		if cfg.GRPC.Reflection {
 			reflection.Register(gsrv)
