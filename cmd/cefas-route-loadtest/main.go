@@ -255,7 +255,7 @@ func parseFlags() cfg {
 	flag.Int64Var(&c.LatencySampleRate, "latency-sample-rate", 10, "record one latency sample every N RPCs")
 	flag.BoolVar(&c.ClientRouteAwareReads, "client-route-aware-reads", false, "serve mixed/read phases through the Go client route-aware eventual-read path")
 	flag.BoolVar(&c.WithStream, "with-stream", false, "create the bench table with StreamSpecification enabled (NEW_AND_OLD_IMAGES) so write paths exercise the changelog + retention loop; required to validate Wave 1+ retention/changelog initiatives")
-	flag.StringVar(&c.WithPluginIndex, "with-plugin-index", "", "comma-separated list of plugin names. After CreateTable, attaches one bench-idx-<plugin> per name so write paths exercise applyPluginIndexPlan with as many descriptors as supplied. Empty disables. Multi-node clusters where no single node has all shards locally cannot currently build plugin indexes (server-side limitation in indexItemSourceFor); the attach is best-effort and the bench continues if every node refuses.")
+	flag.StringVar(&c.WithPluginIndex, "with-plugin-index", "", "comma-separated list of plugin names. After CreateTable, attaches one bench-idx-<plugin> per name so write paths exercise applyPluginIndexPlan with as many descriptors as supplied. Empty disables.")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -436,11 +436,9 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 // "bench-idx-<plugin>" so the server's applyPluginIndexPlan loop sees
 // as many descriptors as the caller supplied.
 //
-// CreateIndex is currently single-node-only (indexItemSourceFor needs
-// every shard local). The loadtest walks every node until one accepts,
-// and if none does — typical in any multi-node cluster with RF < N —
-// the bench keeps running without the index. We never block on the
-// server-side limitation.
+// CreateIndex works against any node since epic #475 (local plugin
+// indexes with cross-node query fanout). The loadtest still walks
+// every node so that a single peer down does not abort the run.
 func ensurePluginIndexes(ctx context.Context, c cfg, cs *clients) error {
 	if c.WithPluginIndex == "" {
 		return nil
