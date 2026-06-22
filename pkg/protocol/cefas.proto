@@ -134,11 +134,33 @@ service Replica {
   // that shard. Returns UNAVAILABLE when the receiving node does not
   // host the shard, so the caller can try a different peer.
   rpc ScanShard(ScanShardRequest) returns (stream Item);
+
+  // QueryIndex runs a plugin-backed secondary index query against
+  // the local slice on the receiving node and streams candidates
+  // back. Coordinators fan QueryIndex out across every node hosting
+  // a replica of the table to build the full result set.
+  rpc QueryIndex(QueryIndexRequest) returns (stream IndexCandidate);
 }
 
 message ScanShardRequest {
   string table    = 1;
   uint32 shard_id = 2;
+}
+
+message QueryIndexRequest {
+  string                       table      = 1;
+  string                       index_name = 2;
+  map<string, AttributeValue>  binds      = 3;
+  int32                        limit      = 4;
+}
+
+message IndexCandidate {
+  // Primary attributes of the candidate item as the plugin recorded
+  // them at Build / Update time.
+  map<string, AttributeValue> key   = 1;
+  // Optional plugin-defined score (distance, similarity, frequency,
+  // ...). Plugins that have no score leave it zero.
+  double                      score = 2;
 }
 
 message StreamChangesRequest {
