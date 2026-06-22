@@ -247,6 +247,7 @@ func main() {
 			MuxAddr:                       cfg.Cluster.MuxAddr,
 			Peers:                         cfg.Cluster.Peers,
 			PeerHTTPAddrs:                 cfg.Cluster.HTTPPeers,
+			PeerGRPCAddrs:                 cfg.Cluster.GRPCPeers,
 			Bootstrap:                     cfg.Cluster.Bootstrap,
 			FsyncOnCommit:                 cfg.Storage.FsyncOnCommit,
 			StorageProfile:                cfg.Storage.Profile,

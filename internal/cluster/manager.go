@@ -102,6 +102,12 @@ type Config struct {
 	// raft.LeaderHTTPAddr() for 307 redirects.
 	PeerHTTPAddrs map[string]string
 
+	// PeerGRPCAddrs is the per-peer gRPC address. PeerScanShard dials
+	// these addresses to call Replica.ScanShard on peers that host
+	// shards this node does not replicate. Empty when single-node or
+	// when cross-shard fan-in is not configured.
+	PeerGRPCAddrs map[string]string
+
 	// NodeCapacity is advisory metadata recorded in the placement
 	// catalog for this node. Zero values default to weight=1.
 	NodeCapacity placement.NodeCapacity
@@ -148,6 +154,11 @@ type Manager struct {
 	placementPath string
 	mux           *craft.MuxAcceptor
 	shards        []*Shard
+
+	// peerDialer is nil in production (falls back to dialPeerGRPC) and
+	// non-nil in tests that need to swap real gRPC for an in-process
+	// connection.
+	peerDialer peerDialer
 }
 
 const (
