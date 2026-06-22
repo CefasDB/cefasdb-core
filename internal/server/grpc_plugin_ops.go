@@ -88,7 +88,7 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	source, _, err := s.indexItemSourceFor(buildDesc.Table)
+	source, _, err := s.indexItemSourceFor(ctx, buildDesc.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	source, count, err := s.indexItemSourceFor(buildDesc.Table)
+	source, count, err := s.indexItemSourceFor(ctx, buildDesc.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -233,62 +233,100 @@ func tableVectorDim(td model.TableDescriptor, field string) (int, bool) {
 	return 0, false
 }
 
-// itemSourceFor produces a plugin.ItemSource over the live table.
-func (s *GRPCServer) itemSourceFor(table string) func(yield func(model.Item) bool) {
-	source, _, err := s.indexItemSourceFor(table)
-	if err != nil {
-		return func(yield func(model.Item) bool) {}
-	}
-	return source
-}
-
 // indexItemSourceFor builds the in-memory item set that seeds a plugin
-// index Build/Rebuild. scatterReadStores requires every logical shard
-// to have a local replica, so multi-node clusters with RF < N reject
-// CreateIndex from any node that lacks at least one shard locally. A
-// proper fix delegates remote-shard scans to peer nodes; for now
-// callers must either run single-node or coordinate the build with the
-// admin tooling (cmd/cefas-route-loadtest --with-plugin-index walks
-// every node until one accepts).
-// TODO: delegate cross-shard build via cluster manager.
-func (s *GRPCServer) indexItemSourceFor(table string) (func(yield func(model.Item) bool), int, error) {
+// index Build/Rebuild. Every logical shard contributes once: a shard
+// the coordinator hosts locally is scanned in-process; a shard whose
+// only replicas live elsewhere is fetched via Replica.ScanShard on a
+// peer. The dedup map keeps a single copy per primary key even when a
+// transitional placement leaves two shards holding the same row.
+func (s *GRPCServer) indexItemSourceFor(ctx context.Context, table string) (func(yield func(model.Item) bool), int, error) {
 	td, err := s.cat.Describe(table)
 	if err != nil {
 		return nil, 0, mapStorageErr(err)
 	}
-	stores, err := s.scatterReadStores()
-	if err != nil {
-		return nil, 0, mapStorageErr(err)
-	}
-	if len(stores) == 0 {
-		return nil, 0, status.Error(codes.Unavailable, "no readable shards available")
-	}
+
 	seen := make(map[string]struct{})
 	items := make([]model.Item, 0)
-	for _, db := range stores {
-		scanned, err := db.ScanTable(table, 0)
+	appendItem := func(it model.Item) {
+		id, err := primaryIdentity(it, td.KeySchema)
+		if err != nil {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		items = append(items, it)
+	}
+
+	// Single-shard / no-manager fallback: the local pebble.DB holds
+	// every row already.
+	if s.manager == nil {
+		scanned, err := s.db.ScanTable(table, 0)
 		if err != nil {
 			return nil, 0, mapStorageErr(err)
 		}
 		for _, it := range scanned {
-			id, err := primaryIdentity(it, td.KeySchema)
+			appendItem(it)
+		}
+		return materialiseSource(items), len(items), nil
+	}
+
+	shards := s.manager.Shards()
+	if len(shards) == 0 {
+		return nil, 0, status.Error(codes.Unavailable, "no shards in placement")
+	}
+
+	for _, sh := range shards {
+		if sh == nil {
+			continue
+		}
+		if sh.IsLocalVoter || sh.IsLocalNonVoter {
+			if sh.Storage == nil {
+				return nil, 0, status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
+			}
+			scanned, err := sh.Storage.ScanTable(table, 0)
 			if err != nil {
-				continue
+				return nil, 0, mapStorageErr(err)
 			}
-			if _, ok := seen[id]; ok {
-				continue
+			for _, it := range scanned {
+				appendItem(it)
 			}
-			seen[id] = struct{}{}
-			items = append(items, it)
+			continue
+		}
+		if err := s.peerScanShardIntoSet(ctx, sh.ID, table, appendItem); err != nil {
+			return nil, 0, fmt.Errorf("fetch shard %d: %w", sh.ID, err)
 		}
 	}
+	return materialiseSource(items), len(items), nil
+}
+
+// peerScanShardIntoSet streams every item from a remote shard via a
+// peer that hosts it, decodes the gRPC payload, and pushes the result
+// into the shared dedup sink.
+func (s *GRPCServer) peerScanShardIntoSet(ctx context.Context, shardID uint32, table string, sink func(model.Item)) error {
+	itemCh, errCh := s.manager.PeerScanShard(ctx, shardID, table)
+	for it := range itemCh {
+		decoded, err := pbToItem(it.GetAttributes())
+		if err != nil {
+			return status.Errorf(codes.Internal, "decode peer item: %v", err)
+		}
+		sink(decoded)
+	}
+	if err := <-errCh; err != nil {
+		return err
+	}
+	return nil
+}
+
+func materialiseSource(items []model.Item) func(yield func(model.Item) bool) {
 	return func(yield func(model.Item) bool) {
 		for _, it := range items {
 			if !yield(it) {
 				return
 			}
 		}
-	}, len(items), nil
+	}
 }
 
 // ---------- Explain ----------
