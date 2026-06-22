@@ -60,6 +60,30 @@ func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) 
 	return nil
 }
 
+// applyMVEagerBatch propagates a BatchWriteItem's worth of puts +
+// deletes to every attached EAGER materialized view. Iterates the
+// caller's ops in order so EAGER consistency matches the sequence
+// the base table observed. SCHEDULED / ON_DEMAND views remain
+// inert here, just as in applyMVEagerPut.
+func (s *GRPCServer) applyMVEagerBatch(td types.TableDescriptor, ops []pebble.BatchOp) error {
+	if len(td.MaterializedViews) == 0 || s.cat == nil {
+		return nil
+	}
+	for _, op := range ops {
+		switch op.Op {
+		case pebble.BatchOpPut:
+			if err := s.applyMVEagerPut(td, op.Item); err != nil {
+				return err
+			}
+		case pebble.BatchOpDelete:
+			if err := s.applyMVEagerDelete(td, op.Key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // applyMVEagerDelete cascades a base delete to every attached EAGER
 // MV. Computes the MV key from the same base item the delete request
 // carried (the catalog's KeySchema for the base table guarantees the

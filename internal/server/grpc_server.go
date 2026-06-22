@@ -464,13 +464,21 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	if err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if len(targets.mirrors) > 0 {
-		finalItem, err := db.GetItem(req.GetTable(), td.KeySchema, key)
+	var finalItem types.Item
+	if len(targets.mirrors) > 0 || len(td.MaterializedViews) > 0 {
+		finalItem, err = db.GetItem(req.GetTable(), td.KeySchema, key)
 		if err != nil {
 			return nil, mapStorageErr(err)
 		}
+	}
+	if len(targets.mirrors) > 0 {
 		if err := targets.MirrorPutItem(td, finalItem); err != nil {
 			return nil, mapStorageErr(err)
+		}
+	}
+	if len(td.MaterializedViews) > 0 {
+		if err := s.applyMVEagerPut(td, finalItem); err != nil {
+			return nil, mapWriteMutationErr(err)
 		}
 	}
 	resp := &cefaspb.UpdateItemResponse{}
@@ -539,6 +547,9 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
+	if err := s.applyMVEagerDelete(td, key); err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
 	return &cefaspb.DeleteItemResponse{}, nil
 }
@@ -591,6 +602,9 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.Bat
 			return err
 		}
 		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
+			return err
+		}
+		if err := s.applyMVEagerBatch(td, ops); err != nil {
 			return err
 		}
 		for _, op := range ops {
@@ -662,6 +676,9 @@ func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.Bat
 		if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 			return err
 		}
+	}
+	if err := s.applyMVEagerBatch(td, ops); err != nil {
+		return err
 	}
 	for _, obs := range observations {
 		s.observeRangeMetric(rangeMetricWrite, obs.pkBytes, obs.approxBytes, started)
