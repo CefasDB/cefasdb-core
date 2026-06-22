@@ -88,13 +88,14 @@ func (s *GRPCServer) CreateIndex(ctx context.Context, req *cefaspb.CreateIndexRe
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	source, _, err := s.indexItemSourceFor(ctx, buildDesc.Table)
+	source, _, err := s.localIndexItemSourceFor(buildDesc.Table)
 	if err != nil {
 		return nil, err
 	}
 	if err := ip.Build(buildDesc, source); err != nil {
 		return nil, status.Errorf(codes.Internal, "plugin build: %v", err)
 	}
+	s.markPluginIndexLocalStateBuilt(storedDesc)
 	if err := s.db.PutPluginIndexDescriptor(storedDesc); err != nil {
 		return nil, mapStorageErr(err)
 	}
@@ -147,13 +148,14 @@ func (s *GRPCServer) RebuildIndex(ctx context.Context, req *cefaspb.RebuildIndex
 	if !ok {
 		return nil, status.Errorf(codes.InvalidArgument, "plugin %q is not an IndexPlugin", buildDesc.PluginName)
 	}
-	source, count, err := s.indexItemSourceFor(ctx, buildDesc.Table)
+	source, count, err := s.localIndexItemSourceFor(buildDesc.Table)
 	if err != nil {
 		return nil, err
 	}
 	if err := ip.Build(buildDesc, source); err != nil {
 		return nil, status.Errorf(codes.Internal, "rebuild: %v", err)
 	}
+	s.markPluginIndexLocalStateBuilt(d)
 	return &cefaspb.RebuildIndexResponse{ItemsIndexed: int64(count)}, nil
 }
 
@@ -233,13 +235,15 @@ func tableVectorDim(td model.TableDescriptor, field string) (int, bool) {
 	return 0, false
 }
 
-// indexItemSourceFor builds the in-memory item set that seeds a plugin
-// index Build/Rebuild. Every logical shard contributes once: a shard
-// the coordinator hosts locally is scanned in-process; a shard whose
-// only replicas live elsewhere is fetched via Replica.ScanShard on a
-// peer. The dedup map keeps a single copy per primary key even when a
-// transitional placement leaves two shards holding the same row.
-func (s *GRPCServer) indexItemSourceFor(ctx context.Context, table string) (func(yield func(model.Item) bool), int, error) {
+// localIndexItemSourceFor builds the in-memory item set that seeds a
+// plugin index Build/Rebuild from this node's local shards only.
+//
+// Each node owns the slice of the plugin index corresponding to the
+// data it replicates; cross-node query fanout (see #478) joins the
+// per-node slices on read. The dedup map keeps a single copy per
+// primary key even when a transitional placement leaves two local
+// shards holding the same row.
+func (s *GRPCServer) localIndexItemSourceFor(table string) (func(yield func(model.Item) bool), int, error) {
 	td, err := s.cat.Describe(table)
 	if err != nil {
 		return nil, 0, mapStorageErr(err)
@@ -272,51 +276,22 @@ func (s *GRPCServer) indexItemSourceFor(ctx context.Context, table string) (func
 		return materialiseSource(items), len(items), nil
 	}
 
-	shards := s.manager.Shards()
-	if len(shards) == 0 {
-		return nil, 0, status.Error(codes.Unavailable, "no shards in placement")
-	}
-
-	for _, sh := range shards {
-		if sh == nil {
+	for _, sh := range s.manager.Shards() {
+		if sh == nil || !(sh.IsLocalVoter || sh.IsLocalNonVoter) {
 			continue
 		}
-		if sh.IsLocalVoter || sh.IsLocalNonVoter {
-			if sh.Storage == nil {
-				return nil, 0, status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
-			}
-			scanned, err := sh.Storage.ScanTable(table, 0)
-			if err != nil {
-				return nil, 0, mapStorageErr(err)
-			}
-			for _, it := range scanned {
-				appendItem(it)
-			}
-			continue
+		if sh.Storage == nil {
+			return nil, 0, status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
 		}
-		if err := s.peerScanShardIntoSet(ctx, sh.ID, table, appendItem); err != nil {
-			return nil, 0, fmt.Errorf("fetch shard %d: %w", sh.ID, err)
+		scanned, err := sh.Storage.ScanTable(table, 0)
+		if err != nil {
+			return nil, 0, mapStorageErr(err)
+		}
+		for _, it := range scanned {
+			appendItem(it)
 		}
 	}
 	return materialiseSource(items), len(items), nil
-}
-
-// peerScanShardIntoSet streams every item from a remote shard via a
-// peer that hosts it, decodes the gRPC payload, and pushes the result
-// into the shared dedup sink.
-func (s *GRPCServer) peerScanShardIntoSet(ctx context.Context, shardID uint32, table string, sink func(model.Item)) error {
-	itemCh, errCh := s.manager.PeerScanShard(ctx, shardID, table)
-	for it := range itemCh {
-		decoded, err := pbToItem(it.GetAttributes())
-		if err != nil {
-			return status.Errorf(codes.Internal, "decode peer item: %v", err)
-		}
-		sink(decoded)
-	}
-	if err := <-errCh; err != nil {
-		return err
-	}
-	return nil
 }
 
 func materialiseSource(items []model.Item) func(yield func(model.Item) bool) {
@@ -549,6 +524,9 @@ func (s *GRPCServer) GeoAudience(req *cefaspb.GeoAudienceRequest, stream cefaspb
 	if !ok {
 		return status.Errorf(codes.FailedPrecondition,
 			"geohash index %s/%s not registered; create with cefas create-index --type geohash", req.GetTable(), idxName)
+	}
+	if err := s.ensurePluginIndexLocalState(d); err != nil {
+		return err
 	}
 	a.Bind(audience.IndexBinding{Geohash: d})
 	cs, err := a.Select(plugin.AudienceRequest{
