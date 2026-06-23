@@ -67,6 +67,14 @@ type Manifest struct {
 	Version      string          `json:"version"`
 	Description  string          `json:"description,omitempty"`
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// NeedsOldItem signals that the plugin's update path differentiates
+	// behaviour based on the row's prior state (e.g. to undo a previous
+	// indexing). When false, the mutation hook skips the snapshot read
+	// before the write — material on the hot path (#487 fix #2). All
+	// built-in plugins set this to false today; plugins that genuinely
+	// need it (e.g. a counter index that decrements on prior values)
+	// must opt in.
+	NeedsOldItem bool `json:"needsOldItem,omitempty"`
 }
 
 // Validate fails fast on manifests that would break the registry.
