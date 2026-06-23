@@ -106,9 +106,33 @@ proves this explicitly.
 - **Phase 3** (#498) partitions per-shard lanes by SL using DRR.
 - **Phase 4** (#499) wires `MaxInFlight` / `Max*PerSec` caps;
   exceeding returns `codes.ResourceExhausted`.
-- **Phase 5** (#500) exposes per-SL metrics + admin pause/resume.
-- **Phase 6** (#501) is the chaos validation gate: one tenant
-  floods, the other stays within SLO.
+- **Phase 5** (#500) exposes per-SL admin Pause / Resume; full
+  metrics dashboard JSON deferred.
+- **Phase 6** (#501) is the chaos validation gate.
+
+### Phase 6 acceptance thresholds (locked)
+
+Two complementary invariants:
+
+1. **WL-4 admission engagement** (single-node, in-tree test) — when
+   a flood SL with `MaxInFlight=N` is hammered by N+M concurrent
+   submitters, the controller returns `codes.ResourceExhausted` for
+   ≥1 of the M overflow submissions, and a second SL with no caps
+   sees zero throttling errors. Verified by
+   `TestWorkloadIsolation_WL4AdmissionCapEngages`.
+
+2. **WL-3 latency isolation** (chaos rig + future in-tree test) —
+   under sustained flood traffic, interactive p99 stays within
+   **baseline × 1.2** (production gate). Implementation requires
+   ctx-aware `pebble.DB` write/read methods so
+   `auth.ServiceLevelFromContext` flows to `runReadSL` /
+   `runWriteSL`. The chaos test
+   (`TestWorkloadIsolation_InteractiveLatencyUnderFlood`) is
+   already in tree but `t.Skip()`'d until that wiring lands.
+
+The single-node CI harness uses a wider tolerance (the comment
+inside the skipped test lists the constants); the 1.2× bound
+remains the contract on the 8-node deploy.
 
 ## Alternatives rejected
 
