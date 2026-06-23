@@ -26,85 +26,86 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Cefas_CreateTable_FullMethodName              = "/cefas.v1.Cefas/CreateTable"
-	Cefas_DescribeTable_FullMethodName            = "/cefas.v1.Cefas/DescribeTable"
-	Cefas_ListTables_FullMethodName               = "/cefas.v1.Cefas/ListTables"
-	Cefas_DropTable_FullMethodName                = "/cefas.v1.Cefas/DropTable"
-	Cefas_ListStreams_FullMethodName              = "/cefas.v1.Cefas/ListStreams"
-	Cefas_DescribeStream_FullMethodName           = "/cefas.v1.Cefas/DescribeStream"
-	Cefas_GetShardIterator_FullMethodName         = "/cefas.v1.Cefas/GetShardIterator"
-	Cefas_GetRecords_FullMethodName               = "/cefas.v1.Cefas/GetRecords"
-	Cefas_UpdateTimeToLive_FullMethodName         = "/cefas.v1.Cefas/UpdateTimeToLive"
-	Cefas_DescribeTimeToLive_FullMethodName       = "/cefas.v1.Cefas/DescribeTimeToLive"
-	Cefas_PutItem_FullMethodName                  = "/cefas.v1.Cefas/PutItem"
-	Cefas_GetItem_FullMethodName                  = "/cefas.v1.Cefas/GetItem"
-	Cefas_UpdateItem_FullMethodName               = "/cefas.v1.Cefas/UpdateItem"
-	Cefas_DeleteItem_FullMethodName               = "/cefas.v1.Cefas/DeleteItem"
-	Cefas_BatchWriteItem_FullMethodName           = "/cefas.v1.Cefas/BatchWriteItem"
-	Cefas_BatchGetItem_FullMethodName             = "/cefas.v1.Cefas/BatchGetItem"
-	Cefas_TransactWriteItems_FullMethodName       = "/cefas.v1.Cefas/TransactWriteItems"
-	Cefas_TransactGetItems_FullMethodName         = "/cefas.v1.Cefas/TransactGetItems"
-	Cefas_Query_FullMethodName                    = "/cefas.v1.Cefas/Query"
-	Cefas_Scan_FullMethodName                     = "/cefas.v1.Cefas/Scan"
-	Cefas_SpatialQuery_FullMethodName             = "/cefas.v1.Cefas/SpatialQuery"
-	Cefas_Sql_FullMethodName                      = "/cefas.v1.Cefas/Sql"
-	Cefas_ClusterStatus_FullMethodName            = "/cefas.v1.Cefas/ClusterStatus"
-	Cefas_AddVoter_FullMethodName                 = "/cefas.v1.Cefas/AddVoter"
-	Cefas_RemoveServer_FullMethodName             = "/cefas.v1.Cefas/RemoveServer"
-	Cefas_PlanPlacement_FullMethodName            = "/cefas.v1.Cefas/PlanPlacement"
-	Cefas_ApplyPlacement_FullMethodName           = "/cefas.v1.Cefas/ApplyPlacement"
-	Cefas_FinalizeSplit_FullMethodName            = "/cefas.v1.Cefas/FinalizeSplit"
-	Cefas_FinalizeRangeMove_FullMethodName        = "/cefas.v1.Cefas/FinalizeRangeMove"
-	Cefas_StreamChanges_FullMethodName            = "/cefas.v1.Cefas/StreamChanges"
-	Cefas_ListSnapshots_FullMethodName            = "/cefas.v1.Cefas/ListSnapshots"
-	Cefas_Compact_FullMethodName                  = "/cefas.v1.Cefas/Compact"
-	Cefas_CreateBackup_FullMethodName             = "/cefas.v1.Cefas/CreateBackup"
-	Cefas_ListBackups_FullMethodName              = "/cefas.v1.Cefas/ListBackups"
-	Cefas_DeleteBackup_FullMethodName             = "/cefas.v1.Cefas/DeleteBackup"
-	Cefas_ApplyBackupRetention_FullMethodName     = "/cefas.v1.Cefas/ApplyBackupRetention"
-	Cefas_RestoreTableFromBackup_FullMethodName   = "/cefas.v1.Cefas/RestoreTableFromBackup"
-	Cefas_ListPlugins_FullMethodName              = "/cefas.v1.Cefas/ListPlugins"
-	Cefas_DescribePlugin_FullMethodName           = "/cefas.v1.Cefas/DescribePlugin"
-	Cefas_CreateMaterializedView_FullMethodName   = "/cefas.v1.Cefas/CreateMaterializedView"
-	Cefas_DescribeMaterializedView_FullMethodName = "/cefas.v1.Cefas/DescribeMaterializedView"
-	Cefas_DropMaterializedView_FullMethodName     = "/cefas.v1.Cefas/DropMaterializedView"
-	Cefas_ListMaterializedViews_FullMethodName    = "/cefas.v1.Cefas/ListMaterializedViews"
-	Cefas_RefreshMaterializedView_FullMethodName  = "/cefas.v1.Cefas/RefreshMaterializedView"
-	Cefas_PauseMaterializedView_FullMethodName    = "/cefas.v1.Cefas/PauseMaterializedView"
-	Cefas_ResumeMaterializedView_FullMethodName   = "/cefas.v1.Cefas/ResumeMaterializedView"
-	Cefas_CreateIndex_FullMethodName              = "/cefas.v1.Cefas/CreateIndex"
-	Cefas_DescribeIndex_FullMethodName            = "/cefas.v1.Cefas/DescribeIndex"
-	Cefas_RebuildIndex_FullMethodName             = "/cefas.v1.Cefas/RebuildIndex"
-	Cefas_Explain_FullMethodName                  = "/cefas.v1.Cefas/Explain"
-	Cefas_TopK_FullMethodName                     = "/cefas.v1.Cefas/TopK"
-	Cefas_CohortCreate_FullMethodName             = "/cefas.v1.Cefas/CohortCreate"
-	Cefas_CohortEstimate_FullMethodName           = "/cefas.v1.Cefas/CohortEstimate"
-	Cefas_GeoAudience_FullMethodName              = "/cefas.v1.Cefas/GeoAudience"
-	Cefas_Dedup_FullMethodName                    = "/cefas.v1.Cefas/Dedup"
-	Cefas_FreqCap_FullMethodName                  = "/cefas.v1.Cefas/FreqCap"
-	Cefas_Aggregate_FullMethodName                = "/cefas.v1.Cefas/Aggregate"
-	Cefas_Rerank_FullMethodName                   = "/cefas.v1.Cefas/Rerank"
-	Cefas_Recommend_FullMethodName                = "/cefas.v1.Cefas/Recommend"
-	Cefas_NextBestAction_FullMethodName           = "/cefas.v1.Cefas/NextBestAction"
-	Cefas_RecordReward_FullMethodName             = "/cefas.v1.Cefas/RecordReward"
-	Cefas_GetDecision_FullMethodName              = "/cefas.v1.Cefas/GetDecision"
-	Cefas_BanditCreate_FullMethodName             = "/cefas.v1.Cefas/BanditCreate"
-	Cefas_BanditSample_FullMethodName             = "/cefas.v1.Cefas/BanditSample"
-	Cefas_BanditReward_FullMethodName             = "/cefas.v1.Cefas/BanditReward"
-	Cefas_BanditDescribe_FullMethodName           = "/cefas.v1.Cefas/BanditDescribe"
-	Cefas_CreateServiceLevel_FullMethodName       = "/cefas.v1.Cefas/CreateServiceLevel"
-	Cefas_AlterServiceLevel_FullMethodName        = "/cefas.v1.Cefas/AlterServiceLevel"
-	Cefas_DropServiceLevel_FullMethodName         = "/cefas.v1.Cefas/DropServiceLevel"
-	Cefas_ListServiceLevels_FullMethodName        = "/cefas.v1.Cefas/ListServiceLevels"
-	Cefas_PauseServiceLevel_FullMethodName        = "/cefas.v1.Cefas/PauseServiceLevel"
-	Cefas_ResumeServiceLevel_FullMethodName       = "/cefas.v1.Cefas/ResumeServiceLevel"
-	Cefas_CreateGlobalIndex_FullMethodName        = "/cefas.v1.Cefas/CreateGlobalIndex"
-	Cefas_DescribeGlobalIndex_FullMethodName      = "/cefas.v1.Cefas/DescribeGlobalIndex"
-	Cefas_DropGlobalIndex_FullMethodName          = "/cefas.v1.Cefas/DropGlobalIndex"
-	Cefas_ListGlobalIndexes_FullMethodName        = "/cefas.v1.Cefas/ListGlobalIndexes"
-	Cefas_RebuildGlobalIndex_FullMethodName       = "/cefas.v1.Cefas/RebuildGlobalIndex"
-	Cefas_PauseGlobalIndex_FullMethodName         = "/cefas.v1.Cefas/PauseGlobalIndex"
-	Cefas_ResumeGlobalIndex_FullMethodName        = "/cefas.v1.Cefas/ResumeGlobalIndex"
+	Cefas_CreateTable_FullMethodName               = "/cefas.v1.Cefas/CreateTable"
+	Cefas_DescribeTable_FullMethodName             = "/cefas.v1.Cefas/DescribeTable"
+	Cefas_ListTables_FullMethodName                = "/cefas.v1.Cefas/ListTables"
+	Cefas_DropTable_FullMethodName                 = "/cefas.v1.Cefas/DropTable"
+	Cefas_ListStreams_FullMethodName               = "/cefas.v1.Cefas/ListStreams"
+	Cefas_DescribeStream_FullMethodName            = "/cefas.v1.Cefas/DescribeStream"
+	Cefas_GetShardIterator_FullMethodName          = "/cefas.v1.Cefas/GetShardIterator"
+	Cefas_GetRecords_FullMethodName                = "/cefas.v1.Cefas/GetRecords"
+	Cefas_UpdateTimeToLive_FullMethodName          = "/cefas.v1.Cefas/UpdateTimeToLive"
+	Cefas_DescribeTimeToLive_FullMethodName        = "/cefas.v1.Cefas/DescribeTimeToLive"
+	Cefas_PutItem_FullMethodName                   = "/cefas.v1.Cefas/PutItem"
+	Cefas_GetItem_FullMethodName                   = "/cefas.v1.Cefas/GetItem"
+	Cefas_UpdateItem_FullMethodName                = "/cefas.v1.Cefas/UpdateItem"
+	Cefas_DeleteItem_FullMethodName                = "/cefas.v1.Cefas/DeleteItem"
+	Cefas_BatchWriteItem_FullMethodName            = "/cefas.v1.Cefas/BatchWriteItem"
+	Cefas_BatchGetItem_FullMethodName              = "/cefas.v1.Cefas/BatchGetItem"
+	Cefas_TransactWriteItems_FullMethodName        = "/cefas.v1.Cefas/TransactWriteItems"
+	Cefas_TransactGetItems_FullMethodName          = "/cefas.v1.Cefas/TransactGetItems"
+	Cefas_Query_FullMethodName                     = "/cefas.v1.Cefas/Query"
+	Cefas_Scan_FullMethodName                      = "/cefas.v1.Cefas/Scan"
+	Cefas_SpatialQuery_FullMethodName              = "/cefas.v1.Cefas/SpatialQuery"
+	Cefas_Sql_FullMethodName                       = "/cefas.v1.Cefas/Sql"
+	Cefas_ClusterStatus_FullMethodName             = "/cefas.v1.Cefas/ClusterStatus"
+	Cefas_AddVoter_FullMethodName                  = "/cefas.v1.Cefas/AddVoter"
+	Cefas_RemoveServer_FullMethodName              = "/cefas.v1.Cefas/RemoveServer"
+	Cefas_PlanPlacement_FullMethodName             = "/cefas.v1.Cefas/PlanPlacement"
+	Cefas_ApplyPlacement_FullMethodName            = "/cefas.v1.Cefas/ApplyPlacement"
+	Cefas_FinalizeSplit_FullMethodName             = "/cefas.v1.Cefas/FinalizeSplit"
+	Cefas_FinalizeRangeMove_FullMethodName         = "/cefas.v1.Cefas/FinalizeRangeMove"
+	Cefas_StreamChanges_FullMethodName             = "/cefas.v1.Cefas/StreamChanges"
+	Cefas_ListSnapshots_FullMethodName             = "/cefas.v1.Cefas/ListSnapshots"
+	Cefas_Compact_FullMethodName                   = "/cefas.v1.Cefas/Compact"
+	Cefas_CreateBackup_FullMethodName              = "/cefas.v1.Cefas/CreateBackup"
+	Cefas_ListBackups_FullMethodName               = "/cefas.v1.Cefas/ListBackups"
+	Cefas_DeleteBackup_FullMethodName              = "/cefas.v1.Cefas/DeleteBackup"
+	Cefas_ApplyBackupRetention_FullMethodName      = "/cefas.v1.Cefas/ApplyBackupRetention"
+	Cefas_RestoreTableFromBackup_FullMethodName    = "/cefas.v1.Cefas/RestoreTableFromBackup"
+	Cefas_ListPlugins_FullMethodName               = "/cefas.v1.Cefas/ListPlugins"
+	Cefas_DescribePlugin_FullMethodName            = "/cefas.v1.Cefas/DescribePlugin"
+	Cefas_CreateMaterializedView_FullMethodName    = "/cefas.v1.Cefas/CreateMaterializedView"
+	Cefas_DescribeMaterializedView_FullMethodName  = "/cefas.v1.Cefas/DescribeMaterializedView"
+	Cefas_DropMaterializedView_FullMethodName      = "/cefas.v1.Cefas/DropMaterializedView"
+	Cefas_ListMaterializedViews_FullMethodName     = "/cefas.v1.Cefas/ListMaterializedViews"
+	Cefas_RefreshMaterializedView_FullMethodName   = "/cefas.v1.Cefas/RefreshMaterializedView"
+	Cefas_PauseMaterializedView_FullMethodName     = "/cefas.v1.Cefas/PauseMaterializedView"
+	Cefas_ResumeMaterializedView_FullMethodName    = "/cefas.v1.Cefas/ResumeMaterializedView"
+	Cefas_CreateIndex_FullMethodName               = "/cefas.v1.Cefas/CreateIndex"
+	Cefas_DescribeIndex_FullMethodName             = "/cefas.v1.Cefas/DescribeIndex"
+	Cefas_RebuildIndex_FullMethodName              = "/cefas.v1.Cefas/RebuildIndex"
+	Cefas_Explain_FullMethodName                   = "/cefas.v1.Cefas/Explain"
+	Cefas_TopK_FullMethodName                      = "/cefas.v1.Cefas/TopK"
+	Cefas_CohortCreate_FullMethodName              = "/cefas.v1.Cefas/CohortCreate"
+	Cefas_CohortEstimate_FullMethodName            = "/cefas.v1.Cefas/CohortEstimate"
+	Cefas_GeoAudience_FullMethodName               = "/cefas.v1.Cefas/GeoAudience"
+	Cefas_Dedup_FullMethodName                     = "/cefas.v1.Cefas/Dedup"
+	Cefas_FreqCap_FullMethodName                   = "/cefas.v1.Cefas/FreqCap"
+	Cefas_Aggregate_FullMethodName                 = "/cefas.v1.Cefas/Aggregate"
+	Cefas_Rerank_FullMethodName                    = "/cefas.v1.Cefas/Rerank"
+	Cefas_Recommend_FullMethodName                 = "/cefas.v1.Cefas/Recommend"
+	Cefas_NextBestAction_FullMethodName            = "/cefas.v1.Cefas/NextBestAction"
+	Cefas_RecordReward_FullMethodName              = "/cefas.v1.Cefas/RecordReward"
+	Cefas_GetDecision_FullMethodName               = "/cefas.v1.Cefas/GetDecision"
+	Cefas_BanditCreate_FullMethodName              = "/cefas.v1.Cefas/BanditCreate"
+	Cefas_BanditSample_FullMethodName              = "/cefas.v1.Cefas/BanditSample"
+	Cefas_BanditReward_FullMethodName              = "/cefas.v1.Cefas/BanditReward"
+	Cefas_BanditDescribe_FullMethodName            = "/cefas.v1.Cefas/BanditDescribe"
+	Cefas_UpdateStreamSpecification_FullMethodName = "/cefas.v1.Cefas/UpdateStreamSpecification"
+	Cefas_CreateServiceLevel_FullMethodName        = "/cefas.v1.Cefas/CreateServiceLevel"
+	Cefas_AlterServiceLevel_FullMethodName         = "/cefas.v1.Cefas/AlterServiceLevel"
+	Cefas_DropServiceLevel_FullMethodName          = "/cefas.v1.Cefas/DropServiceLevel"
+	Cefas_ListServiceLevels_FullMethodName         = "/cefas.v1.Cefas/ListServiceLevels"
+	Cefas_PauseServiceLevel_FullMethodName         = "/cefas.v1.Cefas/PauseServiceLevel"
+	Cefas_ResumeServiceLevel_FullMethodName        = "/cefas.v1.Cefas/ResumeServiceLevel"
+	Cefas_CreateGlobalIndex_FullMethodName         = "/cefas.v1.Cefas/CreateGlobalIndex"
+	Cefas_DescribeGlobalIndex_FullMethodName       = "/cefas.v1.Cefas/DescribeGlobalIndex"
+	Cefas_DropGlobalIndex_FullMethodName           = "/cefas.v1.Cefas/DropGlobalIndex"
+	Cefas_ListGlobalIndexes_FullMethodName         = "/cefas.v1.Cefas/ListGlobalIndexes"
+	Cefas_RebuildGlobalIndex_FullMethodName        = "/cefas.v1.Cefas/RebuildGlobalIndex"
+	Cefas_PauseGlobalIndex_FullMethodName          = "/cefas.v1.Cefas/PauseGlobalIndex"
+	Cefas_ResumeGlobalIndex_FullMethodName         = "/cefas.v1.Cefas/ResumeGlobalIndex"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -212,6 +213,10 @@ type CefasClient interface {
 	BanditSample(ctx context.Context, in *BanditSampleRequest, opts ...grpc.CallOption) (*BanditSampleResponse, error)
 	BanditReward(ctx context.Context, in *BanditRewardRequest, opts ...grpc.CallOption) (*BanditRewardResponse, error)
 	BanditDescribe(ctx context.Context, in *BanditDescribeRequest, opts ...grpc.CallOption) (*BanditDescribeResponse, error)
+	// UpdateStreamSpecification (#525) flips a table's CDC capture on
+	// or off, swaps the view type, or adjusts the per-table retention
+	// (#521) without recreating the table.
+	UpdateStreamSpecification(ctx context.Context, in *UpdateStreamSpecificationRequest, opts ...grpc.CallOption) (*UpdateStreamSpecificationResponse, error)
 	// ===== Workload prioritization (epic #489) =====
 	// CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
 	// (#496); scheduling enforcement lands in Phase 3 (#498).
@@ -958,6 +963,16 @@ func (c *cefasClient) BanditDescribe(ctx context.Context, in *BanditDescribeRequ
 	return out, nil
 }
 
+func (c *cefasClient) UpdateStreamSpecification(ctx context.Context, in *UpdateStreamSpecificationRequest, opts ...grpc.CallOption) (*UpdateStreamSpecificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateStreamSpecificationResponse)
+	err := c.cc.Invoke(ctx, Cefas_UpdateStreamSpecification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cefasClient) CreateServiceLevel(ctx context.Context, in *CreateServiceLevelRequest, opts ...grpc.CallOption) (*CreateServiceLevelResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateServiceLevelResponse)
@@ -1193,6 +1208,10 @@ type CefasServer interface {
 	BanditSample(context.Context, *BanditSampleRequest) (*BanditSampleResponse, error)
 	BanditReward(context.Context, *BanditRewardRequest) (*BanditRewardResponse, error)
 	BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error)
+	// UpdateStreamSpecification (#525) flips a table's CDC capture on
+	// or off, swaps the view type, or adjusts the per-table retention
+	// (#521) without recreating the table.
+	UpdateStreamSpecification(context.Context, *UpdateStreamSpecificationRequest) (*UpdateStreamSpecificationResponse, error)
 	// ===== Workload prioritization (epic #489) =====
 	// CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
 	// (#496); scheduling enforcement lands in Phase 3 (#498).
@@ -1431,6 +1450,9 @@ func (UnimplementedCefasServer) BanditReward(context.Context, *BanditRewardReque
 }
 func (UnimplementedCefasServer) BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BanditDescribe not implemented")
+}
+func (UnimplementedCefasServer) UpdateStreamSpecification(context.Context, *UpdateStreamSpecificationRequest) (*UpdateStreamSpecificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateStreamSpecification not implemented")
 }
 func (UnimplementedCefasServer) CreateServiceLevel(context.Context, *CreateServiceLevelRequest) (*CreateServiceLevelResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateServiceLevel not implemented")
@@ -2645,6 +2667,24 @@ func _Cefas_BanditDescribe_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_UpdateStreamSpecification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateStreamSpecificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).UpdateStreamSpecification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_UpdateStreamSpecification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).UpdateStreamSpecification(ctx, req.(*UpdateStreamSpecificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Cefas_CreateServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateServiceLevelRequest)
 	if err := dec(in); err != nil {
@@ -3129,6 +3169,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BanditDescribe",
 			Handler:    _Cefas_BanditDescribe_Handler,
+		},
+		{
+			MethodName: "UpdateStreamSpecification",
+			Handler:    _Cefas_UpdateStreamSpecification_Handler,
 		},
 		{
 			MethodName: "CreateServiceLevel",
