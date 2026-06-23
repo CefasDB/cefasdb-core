@@ -80,6 +80,14 @@ func (s *GRPCServer) refreshComplete(ctx context.Context, viewName string) (int6
 		close(done)
 	}()
 
+	return s.runCompleteRefresh(ctx, mv)
+}
+
+// runCompleteRefresh drives a COMPLETE rescan + status transitions
+// without re-entering refreshSingleFlight. Callers that already
+// hold the single-flight (e.g. refreshFast's stale-cursor
+// fallback in #541) invoke this directly to avoid self-deadlock.
+func (s *GRPCServer) runCompleteRefresh(ctx context.Context, mv types.MaterializedViewDescriptor) (int64, error) {
 	// Update status → building so observability sees the rebuild in
 	// progress. Best-effort: if the catalog update fails the refresh
 	// still runs and lifts status later.

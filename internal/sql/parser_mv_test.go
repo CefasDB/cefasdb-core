@@ -62,6 +62,24 @@ func TestParseCreateMaterializedView(t *testing.T) {
 			wantPK:   "a",
 			wantMode: "on_demand",
 		},
+		{
+			name:     "fast every seconds",
+			input:    "CREATE MATERIALIZED VIEW v AS SELECT * FROM base PRIMARY KEY (a) REFRESH FAST EVERY 30 SECONDS",
+			wantName: "v",
+			wantBase: "base",
+			wantPK:   "a",
+			wantMode: "fast",
+			wantSecs: 30,
+		},
+		{
+			name:     "fast every minutes",
+			input:    "CREATE MATERIALIZED VIEW v AS SELECT * FROM base PRIMARY KEY (a) REFRESH FAST EVERY 5 MINUTES",
+			wantName: "v",
+			wantBase: "base",
+			wantPK:   "a",
+			wantMode: "fast",
+			wantSecs: 300,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

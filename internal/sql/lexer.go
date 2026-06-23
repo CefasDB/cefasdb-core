@@ -108,6 +108,7 @@ const (
 	tRefresh
 	tEvery
 	tEager
+	tFast
 	tOnDemand
 	tDemand
 	tSecond
@@ -188,6 +189,7 @@ var keywords = map[string]TokenKind{
 	"REFRESH":      tRefresh,
 	"EVERY":        tEvery,
 	"EAGER":        tEager,
+	"FAST":         tFast,
 	"ON":           tOnDemand,
 	"DEMAND":       tDemand,
 	"SECOND":       tSecond,
