@@ -115,8 +115,9 @@ type DB struct {
 	// existing keys. Access on the hot path is lock-free.
 	changeIndex atomic.Uint64
 
-	streamRetention StreamRetentionOptions
-	changeLogMode   string
+	streamRetention         StreamRetentionOptions
+	streamRetentionResolver func(table string) int64
+	changeLogMode           string
 
 	// streamTables remembers which tables have produced at least one
 	// stream-enabled change record. The background retention loop reads
@@ -194,6 +195,16 @@ func Open(opts Options) (*DB, error) {
 		return nil, fmt.Errorf("seed change index: %w", err)
 	}
 	return wrapper, nil
+}
+
+// AttachStreamRetentionResolver registers a per-table retention
+// resolver consulted by the retention loop (#521). When non-nil, a
+// positive return value overrides the cluster-default retention for
+// that table; zero means "no override, use the default". Catalog
+// integrations register this so StreamSpecification.RetentionSeconds
+// flows into the loop without the pebble layer importing catalog.
+func (d *DB) AttachStreamRetentionResolver(fn func(table string) int64) {
+	d.streamRetentionResolver = fn
 }
 
 // AttachReplicator hooks a replication delegate (typically *raft.DB)

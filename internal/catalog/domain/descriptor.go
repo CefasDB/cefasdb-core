@@ -74,9 +74,17 @@ func NormalizeStreamDescriptor(td *types.TableDescriptor) error {
 			types.StreamViewTypeOldImage,
 			types.StreamViewTypeNewAndOldImages)
 	}
+	retention := td.StreamSpecification.RetentionSeconds
+	if retention != 0 {
+		if retention < types.MinStreamRetentionSeconds || retention > types.MaxStreamRetentionSeconds {
+			return fmt.Errorf("StreamSpecification.RetentionSeconds %d outside [%d, %d]",
+				retention, types.MinStreamRetentionSeconds, types.MaxStreamRetentionSeconds)
+		}
+	}
 	td.StreamSpecification = &types.StreamSpecification{
-		StreamEnabled:  true,
-		StreamViewType: view,
+		StreamEnabled:    true,
+		StreamViewType:   view,
+		RetentionSeconds: retention,
 	}
 	if td.LatestStreamLabel == "" {
 		td.LatestStreamLabel = NextStreamLabel()

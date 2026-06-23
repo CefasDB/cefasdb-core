@@ -722,8 +722,13 @@ message AttributeDefinition {
 }
 
 message StreamSpecification {
-  bool   stream_enabled   = 1;
-  string stream_view_type = 2; // KEYS_ONLY | NEW_IMAGE | OLD_IMAGE | NEW_AND_OLD_IMAGES
+  bool   stream_enabled    = 1;
+  string stream_view_type  = 2; // KEYS_ONLY | NEW_IMAGE | OLD_IMAGE | NEW_AND_OLD_IMAGES
+  // Per-table retention override (#521). 0 means "inherit
+  // cluster default"; non-zero must be within the
+  // MinStreamRetentionSeconds / MaxStreamRetentionSeconds bounds
+  // declared in pkg/types.
+  int64  retention_seconds = 3;
 }
 
 message TableDescriptor {

@@ -167,7 +167,20 @@ const (
 type StreamSpecification struct {
 	StreamEnabled  bool   `json:"streamEnabled"`
 	StreamViewType string `json:"streamViewType,omitempty"`
+	// RetentionSeconds overrides the cluster-wide retention for
+	// this table's stream (#521). Zero means "inherit cluster
+	// default"; non-zero must be within [MinStreamRetentionSeconds,
+	// MaxStreamRetentionSeconds].
+	RetentionSeconds int64 `json:"retentionSeconds,omitempty"`
 }
+
+// Stream retention bounds for the per-table override. Loose enough
+// to accept "1 minute" through "90 days"; the cluster-wide default
+// stays whatever the pebble StreamRetentionOptions set at boot.
+const (
+	MinStreamRetentionSeconds int64 = 60
+	MaxStreamRetentionSeconds int64 = 90 * 24 * 60 * 60
+)
 
 // StreamSequenceNumberRange mirrors DynamoDB's per-shard sequence range.
 // Active shards omit EndingSequenceNumber; closed shards retain it.
