@@ -71,9 +71,12 @@ func (s *GRPCServer) planPluginIndexPut(getter pluginIndexItemGetter, td types.T
 	if err != nil || len(descs) == 0 {
 		return pluginIndexWritePlan{descriptors: descs}, err
 	}
-	oldItem, err := readPluginIndexOldItem(getter, td, itemKeyOnly(item, td.KeySchema))
-	if err != nil {
-		return pluginIndexWritePlan{}, err
+	var oldItem types.Item
+	if s.pluginIndexNeedsOldItem(descs) {
+		oldItem, err = readPluginIndexOldItem(getter, td, itemKeyOnly(item, td.KeySchema))
+		if err != nil {
+			return pluginIndexWritePlan{}, err
+		}
 	}
 	return pluginIndexWritePlan{
 		descriptors: descs,
@@ -86,6 +89,9 @@ func (s *GRPCServer) planPluginIndexDelete(getter pluginIndexItemGetter, td type
 	if err != nil || len(descs) == 0 {
 		return pluginIndexWritePlan{descriptors: descs}, err
 	}
+	// Delete always needs the prior — the plugin sees the row leaving
+	// and must update its state accordingly. Skip-the-read only
+	// applies to puts, where the new image is the source of truth.
 	oldItem, err := readPluginIndexOldItem(getter, td, itemKeyOnly(key, td.KeySchema))
 	if err != nil {
 		return pluginIndexWritePlan{}, err
@@ -101,18 +107,23 @@ func (s *GRPCServer) planPluginIndexBatch(getter pluginIndexItemGetter, td types
 	if err != nil || len(descs) == 0 || len(ops) == 0 {
 		return pluginIndexWritePlan{descriptors: descs}, err
 	}
+	needsOld := s.pluginIndexNeedsOldItem(descs)
 	deltas := make([]pluginIndexDelta, 0, len(ops))
 	for i, op := range ops {
 		switch op.Op {
 		case pebble.BatchOpPut:
 			key := itemKeyOnly(op.Item, td.KeySchema)
-			oldItem, err := readPluginIndexOldItem(getter, td, key)
-			if err != nil {
-				return pluginIndexWritePlan{}, fmt.Errorf("op %d plugin index prior: %w", i, err)
+			var oldItem types.Item
+			if needsOld {
+				oldItem, err = readPluginIndexOldItem(getter, td, key)
+				if err != nil {
+					return pluginIndexWritePlan{}, fmt.Errorf("op %d plugin index prior: %w", i, err)
+				}
 			}
 			deltas = append(deltas, pluginIndexDelta{oldItem: oldItem, newItem: clonePluginIndexItem(op.Item)})
 		case pebble.BatchOpDelete:
 			key := itemKeyOnly(op.Key, td.KeySchema)
+			// Deletes always need the prior — see planPluginIndexDelete.
 			oldItem, err := readPluginIndexOldItem(getter, td, key)
 			if err != nil {
 				return pluginIndexWritePlan{}, fmt.Errorf("op %d plugin index prior: %w", i, err)
@@ -123,6 +134,34 @@ func (s *GRPCServer) planPluginIndexBatch(getter pluginIndexItemGetter, td types
 		}
 	}
 	return pluginIndexWritePlan{descriptors: descs, deltas: deltas}, nil
+}
+
+// pluginIndexNeedsOldItem returns true when at least one descriptor's
+// plugin manifest declares NeedsOldItem. The Put hot path can skip
+// the prior-read entirely when this is false — bloom / HLL / geohash
+// / ANN all return false today, leaving the optimisation on by
+// default. A future plugin that needs the prior image (counter
+// index, delta encoder) opts in via its Manifest.
+func (s *GRPCServer) pluginIndexNeedsOldItem(descs []index.Descriptor) bool {
+	reg := s.pluginRegistry()
+	if reg == nil {
+		// No registry attached — assume needs-old to keep the safe path.
+		return true
+	}
+	for _, desc := range descs {
+		raw, ok := reg.Lookup(desc.PluginName)
+		if !ok {
+			return true
+		}
+		ip, isIndex := raw.(plugin.IndexPlugin)
+		if !isIndex {
+			continue
+		}
+		if ip.Manifest().NeedsOldItem {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GRPCServer) pluginIndexMutationHook(td types.TableDescriptor) cefassql.MutationHook {
