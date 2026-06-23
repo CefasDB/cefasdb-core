@@ -103,6 +103,8 @@ const (
 	Cefas_DropGlobalIndex_FullMethodName          = "/cefas.v1.Cefas/DropGlobalIndex"
 	Cefas_ListGlobalIndexes_FullMethodName        = "/cefas.v1.Cefas/ListGlobalIndexes"
 	Cefas_RebuildGlobalIndex_FullMethodName       = "/cefas.v1.Cefas/RebuildGlobalIndex"
+	Cefas_PauseGlobalIndex_FullMethodName         = "/cefas.v1.Cefas/PauseGlobalIndex"
+	Cefas_ResumeGlobalIndex_FullMethodName        = "/cefas.v1.Cefas/ResumeGlobalIndex"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -235,6 +237,12 @@ type CefasClient interface {
 	// Idempotent (pointer writes are upserts) and concurrent with
 	// live mutations — last-writer-wins per (indexed value, base PK).
 	RebuildGlobalIndex(ctx context.Context, in *RebuildGlobalIndexRequest, opts ...grpc.CallOption) (*RebuildGlobalIndexResponse, error)
+	// Pause / Resume — operator emergency surface. Paused indexes
+	// are skipped by the Phase 2 write hook; Resume restores the
+	// cascade and a follow-up Rebuild closes the gap accumulated
+	// during the pause.
+	PauseGlobalIndex(ctx context.Context, in *PauseGlobalIndexRequest, opts ...grpc.CallOption) (*PauseGlobalIndexResponse, error)
+	ResumeGlobalIndex(ctx context.Context, in *ResumeGlobalIndexRequest, opts ...grpc.CallOption) (*ResumeGlobalIndexResponse, error)
 }
 
 type cefasClient struct {
@@ -1060,6 +1068,26 @@ func (c *cefasClient) RebuildGlobalIndex(ctx context.Context, in *RebuildGlobalI
 	return out, nil
 }
 
+func (c *cefasClient) PauseGlobalIndex(ctx context.Context, in *PauseGlobalIndexRequest, opts ...grpc.CallOption) (*PauseGlobalIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PauseGlobalIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_PauseGlobalIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ResumeGlobalIndex(ctx context.Context, in *ResumeGlobalIndexRequest, opts ...grpc.CallOption) (*ResumeGlobalIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeGlobalIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_ResumeGlobalIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -1190,6 +1218,12 @@ type CefasServer interface {
 	// Idempotent (pointer writes are upserts) and concurrent with
 	// live mutations — last-writer-wins per (indexed value, base PK).
 	RebuildGlobalIndex(context.Context, *RebuildGlobalIndexRequest) (*RebuildGlobalIndexResponse, error)
+	// Pause / Resume — operator emergency surface. Paused indexes
+	// are skipped by the Phase 2 write hook; Resume restores the
+	// cascade and a follow-up Rebuild closes the gap accumulated
+	// during the pause.
+	PauseGlobalIndex(context.Context, *PauseGlobalIndexRequest) (*PauseGlobalIndexResponse, error)
+	ResumeGlobalIndex(context.Context, *ResumeGlobalIndexRequest) (*ResumeGlobalIndexResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -1430,6 +1464,12 @@ func (UnimplementedCefasServer) ListGlobalIndexes(context.Context, *ListGlobalIn
 }
 func (UnimplementedCefasServer) RebuildGlobalIndex(context.Context, *RebuildGlobalIndexRequest) (*RebuildGlobalIndexResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RebuildGlobalIndex not implemented")
+}
+func (UnimplementedCefasServer) PauseGlobalIndex(context.Context, *PauseGlobalIndexRequest) (*PauseGlobalIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PauseGlobalIndex not implemented")
+}
+func (UnimplementedCefasServer) ResumeGlobalIndex(context.Context, *ResumeGlobalIndexRequest) (*ResumeGlobalIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResumeGlobalIndex not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -2803,6 +2843,42 @@ func _Cefas_RebuildGlobalIndex_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_PauseGlobalIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseGlobalIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).PauseGlobalIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_PauseGlobalIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).PauseGlobalIndex(ctx, req.(*PauseGlobalIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ResumeGlobalIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeGlobalIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ResumeGlobalIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ResumeGlobalIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ResumeGlobalIndex(ctx, req.(*ResumeGlobalIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3097,6 +3173,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RebuildGlobalIndex",
 			Handler:    _Cefas_RebuildGlobalIndex_Handler,
+		},
+		{
+			MethodName: "PauseGlobalIndex",
+			Handler:    _Cefas_PauseGlobalIndex_Handler,
+		},
+		{
+			MethodName: "ResumeGlobalIndex",
+			Handler:    _Cefas_ResumeGlobalIndex_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
