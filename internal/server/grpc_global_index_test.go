@@ -244,6 +244,88 @@ func TestGlobalIndex_QueryRoutesToIndex(t *testing.T) {
 	}
 }
 
+func TestGlobalIndex_RebuildBackfillsPopulatedBase(t *testing.T) {
+	stub, _, _, cleanup := startGIFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "Users",
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Seed before creating the index so the eager hook does not fire.
+	const seed = 8
+	for i := 0; i < seed; i++ {
+		if _, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+			Table: "Users",
+			Item: map[string]*cefaspb.AttributeValue{
+				"id":    {Value: &cefaspb.AttributeValue_S{S: "u" + itoa(i)}},
+				"email": {Value: &cefaspb.AttributeValue_S{S: "e" + itoa(i) + "@x"}},
+			},
+		}); err != nil {
+			t.Fatalf("PutItem %d: %v", i, err)
+		}
+	}
+
+	if _, err := stub.CreateGlobalIndex(ctx, &cefaspb.CreateGlobalIndexRequest{
+		Descriptor_: &cefaspb.GlobalIndexDescriptor{
+			Name:          "idx_email",
+			BaseTable:     "Users",
+			IndexedColumn: "email",
+		},
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+
+	// Index just landed; pointer space is empty. RebuildGlobalIndex
+	// scans the base + writes every pointer.
+	resp, err := stub.RebuildGlobalIndex(ctx, &cefaspb.RebuildGlobalIndexRequest{Name: "idx_email"})
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if resp.GetRowsIndexed() != int64(seed) {
+		t.Errorf("RowsIndexed = %d, want %d", resp.GetRowsIndexed(), seed)
+	}
+
+	// Verify one pointer queryable end-to-end via the Phase 3 path.
+	stream, err := stub.Query(ctx, &cefaspb.QueryRequest{
+		Table:     "Users",
+		IndexName: "idx_email",
+		PkValue:   &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_S{S: "e3@x"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	var rows int
+	for {
+		it, err := stream.Recv()
+		if err != nil || it == nil {
+			break
+		}
+		rows++
+	}
+	if rows == 0 {
+		t.Error("Query post-rebuild returned 0 rows; expected the backfilled pointer")
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}
+
 func TestGlobalIndex_EagerHook_SkipsWhenItemLacksIndexedColumn(t *testing.T) {
 	stub, _, _, cleanup := startGIFixture(t)
 	defer cleanup()
