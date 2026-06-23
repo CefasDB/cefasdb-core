@@ -6795,8 +6795,13 @@ type StreamSpecification struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	StreamEnabled  bool                   `protobuf:"varint,1,opt,name=stream_enabled,json=streamEnabled,proto3" json:"stream_enabled,omitempty"`
 	StreamViewType string                 `protobuf:"bytes,2,opt,name=stream_view_type,json=streamViewType,proto3" json:"stream_view_type,omitempty"` // KEYS_ONLY | NEW_IMAGE | OLD_IMAGE | NEW_AND_OLD_IMAGES
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Per-table retention override (#521). 0 means "inherit
+	// cluster default"; non-zero must be within the
+	// MinStreamRetentionSeconds / MaxStreamRetentionSeconds bounds
+	// declared in pkg/types.
+	RetentionSeconds int64 `protobuf:"varint,3,opt,name=retention_seconds,json=retentionSeconds,proto3" json:"retention_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *StreamSpecification) Reset() {
@@ -6841,6 +6846,13 @@ func (x *StreamSpecification) GetStreamViewType() string {
 		return x.StreamViewType
 	}
 	return ""
+}
+
+func (x *StreamSpecification) GetRetentionSeconds() int64 {
+	if x != nil {
+		return x.RetentionSeconds
+	}
+	return 0
 }
 
 type TableDescriptor struct {
@@ -14941,10 +14953,11 @@ const file_cefas_proto_rawDesc = "" +
 	"\x13AttributeDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12+\n" +
-	"\x11vector_dimensions\x18\x03 \x01(\x05R\x10vectorDimensions\"f\n" +
+	"\x11vector_dimensions\x18\x03 \x01(\x05R\x10vectorDimensions\"\x93\x01\n" +
 	"\x13StreamSpecification\x12%\n" +
 	"\x0estream_enabled\x18\x01 \x01(\bR\rstreamEnabled\x12(\n" +
-	"\x10stream_view_type\x18\x02 \x01(\tR\x0estreamViewType\"\xd3\x04\n" +
+	"\x10stream_view_type\x18\x02 \x01(\tR\x0estreamViewType\x12+\n" +
+	"\x11retention_seconds\x18\x03 \x01(\x03R\x10retentionSeconds\"\xd3\x04\n" +
 	"\x0fTableDescriptor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\n" +

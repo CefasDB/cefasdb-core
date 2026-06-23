@@ -300,6 +300,21 @@ func main() {
 		}
 	}
 
+	// Per-table CDC retention (#521): catalog supplies the override
+	// for any stream-enabled table that declares
+	// StreamSpecification.RetentionSeconds. Zero means "inherit
+	// cluster default".
+	db.AttachStreamRetentionResolver(func(table string) int64 {
+		if cat == nil {
+			return 0
+		}
+		td, err := cat.Describe(table)
+		if err != nil || td.StreamSpecification == nil {
+			return 0
+		}
+		return td.StreamSpecification.RetentionSeconds
+	})
+
 	var raftStore *pebble.DB
 	if mgr == nil && cfg.Raft.Bind != "" {
 		if cfg.Cluster.SelfID == "" {

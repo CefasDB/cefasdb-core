@@ -357,6 +357,64 @@ func TestStreamRetentionTrimsOldRecordsLogically(t *testing.T) {
 	}
 }
 
+// TestStreamRetentionPerTableOverride exercises #521: two tables
+// declare different RetentionSeconds via the resolver, and the
+// retention loop trims each one according to its own window
+// while the cluster default would have kept both.
+func TestStreamRetentionPerTableOverride(t *testing.T) {
+	db := openChangeLogTestDBWithOptions(t, Options{
+		Path:            t.TempDir(),
+		StreamRetention: StreamRetentionOptions{Retention: 24 * time.Hour}, // generous default
+	})
+
+	// Resolver: A retains 1h, B retains 4h; the default (24h) should
+	// not apply when an override is set.
+	db.AttachStreamRetentionResolver(func(table string) int64 {
+		switch table {
+		case "A":
+			return 3600
+		case "B":
+			return 14400
+		}
+		return 0
+	})
+
+	tdA := types.TableDescriptor{
+		Name:      "A",
+		KeySchema: types.KeySchema{PK: "id"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeNewAndOldImages,
+		},
+	}
+	tdB := tdA
+	tdB.Name = "B"
+
+	now := time.Unix(1_700_000_000, 0)
+	// 2h-old write hits BOTH tables.
+	appendStreamChangeAt(t, db, tdA, "old", now.Add(-2*time.Hour))
+	appendStreamChangeAt(t, db, tdB, "old", now.Add(-2*time.Hour))
+	// Current write hits both.
+	appendStreamChangeAt(t, db, tdA, "cur", now)
+	appendStreamChangeAt(t, db, tdB, "cur", now)
+
+	statsA, err := db.ApplyStreamRetention("A", now)
+	if err != nil {
+		t.Fatalf("retention A: %v", err)
+	}
+	statsB, err := db.ApplyStreamRetention("B", now)
+	if err != nil {
+		t.Fatalf("retention B: %v", err)
+	}
+
+	if statsA.RecordsTrimmed != 1 {
+		t.Errorf("A trimmed = %d, want 1 (1h override sweeps the 2h-old record)", statsA.RecordsTrimmed)
+	}
+	if statsB.RecordsTrimmed != 0 {
+		t.Errorf("B trimmed = %d, want 0 (4h override keeps the 2h-old record)", statsB.RecordsTrimmed)
+	}
+}
+
 func TestStreamRetentionMetadataSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	td := streamTestTable()

@@ -508,6 +508,14 @@ func (d *DB) computeStreamRetentionStats(table string, records []streamRetention
 
 	start := 0
 	retention := d.streamRetention.Retention
+	// Per-table override from #521. The resolver returns the
+	// StreamSpecification.RetentionSeconds for table or 0 when no
+	// override is set; non-zero replaces the cluster default.
+	if d.streamRetentionResolver != nil {
+		if secs := d.streamRetentionResolver(table); secs > 0 {
+			retention = time.Duration(secs) * time.Second
+		}
+	}
 	if retention > 0 {
 		cutoff := now.Add(-retention).UnixNano()
 		for start < len(records) && records[start].UnixNano < cutoff {
