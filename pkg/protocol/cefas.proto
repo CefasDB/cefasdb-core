@@ -152,6 +152,14 @@ service Replica {
   // back. Coordinators fan QueryIndex out across every node hosting
   // a replica of the table to build the full result set.
   rpc QueryIndex(QueryIndexRequest) returns (stream IndexCandidate);
+
+  // BatchWriteMV applies a materialized-view cascade directly to the
+  // receiving node's local pebble store, bypassing raft entirely.
+  // Materialized views are explicitly RF=1: only the owning node
+  // holds the rows; if the owner is lost the view is rebuilt via
+  // RefreshMaterializedView. Skipping consensus eliminates the
+  // cascade's per-shard raft latency on every base BatchWriteItem.
+  rpc BatchWriteMV(BatchWriteMVRequest) returns (BatchWriteMVResponse);
 }
 
 message ScanShardRequest {
@@ -165,6 +173,17 @@ message QueryIndexRequest {
   map<string, AttributeValue>  binds      = 3;
   int32                        limit      = 4;
 }
+
+// BatchWriteMVRequest carries a coalesced MV cascade for the named
+// view. The receiver looks up the view descriptor, derives the
+// synthetic table descriptor, and writes the ops directly to its
+// local pebble store without going through raft.
+message BatchWriteMVRequest {
+  string                view = 1;
+  repeated BatchWriteOp ops  = 2;
+}
+
+message BatchWriteMVResponse {}
 
 message IndexCandidate {
   // Primary attributes of the candidate item as the plugin recorded

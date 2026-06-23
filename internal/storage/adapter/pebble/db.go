@@ -352,6 +352,22 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 		}
 		return d.repl.Replicate(b.Repr())
 	}
+	return d.commitLocal(b)
+}
+
+// CommitBatchLocal commits the batch to this node's pebble store
+// without consulting the replicator. Use for writes that are
+// intentionally RF=1 (materialized-view cascade). The caller is
+// responsible for ensuring the receiving node is the right owner —
+// followers will not see the resulting state.
+func (d *DB) CommitBatchLocal(b *pebbledb.Batch) error {
+	if d.workload != nil {
+		d.workload.recordWrite()
+	}
+	return d.commitLocal(b)
+}
+
+func (d *DB) commitLocal(b *pebbledb.Batch) error {
 	req := &commitReq{batch: b, done: make(chan error, 1)}
 	select {
 	case d.commitCh <- req:

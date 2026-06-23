@@ -2684,8 +2684,9 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Replica_ScanShard_FullMethodName  = "/cefas.v1.Replica/ScanShard"
-	Replica_QueryIndex_FullMethodName = "/cefas.v1.Replica/QueryIndex"
+	Replica_ScanShard_FullMethodName    = "/cefas.v1.Replica/ScanShard"
+	Replica_QueryIndex_FullMethodName   = "/cefas.v1.Replica/QueryIndex"
+	Replica_BatchWriteMV_FullMethodName = "/cefas.v1.Replica/BatchWriteMV"
 )
 
 // ReplicaClient is the client API for Replica service.
@@ -2707,6 +2708,13 @@ type ReplicaClient interface {
 	// back. Coordinators fan QueryIndex out across every node hosting
 	// a replica of the table to build the full result set.
 	QueryIndex(ctx context.Context, in *QueryIndexRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IndexCandidate], error)
+	// BatchWriteMV applies a materialized-view cascade directly to the
+	// receiving node's local pebble store, bypassing raft entirely.
+	// Materialized views are explicitly RF=1: only the owning node
+	// holds the rows; if the owner is lost the view is rebuilt via
+	// RefreshMaterializedView. Skipping consensus eliminates the
+	// cascade's per-shard raft latency on every base BatchWriteItem.
+	BatchWriteMV(ctx context.Context, in *BatchWriteMVRequest, opts ...grpc.CallOption) (*BatchWriteMVResponse, error)
 }
 
 type replicaClient struct {
@@ -2755,6 +2763,16 @@ func (c *replicaClient) QueryIndex(ctx context.Context, in *QueryIndexRequest, o
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Replica_QueryIndexClient = grpc.ServerStreamingClient[IndexCandidate]
 
+func (c *replicaClient) BatchWriteMV(ctx context.Context, in *BatchWriteMVRequest, opts ...grpc.CallOption) (*BatchWriteMVResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BatchWriteMVResponse)
+	err := c.cc.Invoke(ctx, Replica_BatchWriteMV_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ReplicaServer is the server API for Replica service.
 // All implementations must embed UnimplementedReplicaServer
 // for forward compatibility.
@@ -2774,6 +2792,13 @@ type ReplicaServer interface {
 	// back. Coordinators fan QueryIndex out across every node hosting
 	// a replica of the table to build the full result set.
 	QueryIndex(*QueryIndexRequest, grpc.ServerStreamingServer[IndexCandidate]) error
+	// BatchWriteMV applies a materialized-view cascade directly to the
+	// receiving node's local pebble store, bypassing raft entirely.
+	// Materialized views are explicitly RF=1: only the owning node
+	// holds the rows; if the owner is lost the view is rebuilt via
+	// RefreshMaterializedView. Skipping consensus eliminates the
+	// cascade's per-shard raft latency on every base BatchWriteItem.
+	BatchWriteMV(context.Context, *BatchWriteMVRequest) (*BatchWriteMVResponse, error)
 	mustEmbedUnimplementedReplicaServer()
 }
 
@@ -2789,6 +2814,9 @@ func (UnimplementedReplicaServer) ScanShard(*ScanShardRequest, grpc.ServerStream
 }
 func (UnimplementedReplicaServer) QueryIndex(*QueryIndexRequest, grpc.ServerStreamingServer[IndexCandidate]) error {
 	return status.Errorf(codes.Unimplemented, "method QueryIndex not implemented")
+}
+func (UnimplementedReplicaServer) BatchWriteMV(context.Context, *BatchWriteMVRequest) (*BatchWriteMVResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BatchWriteMV not implemented")
 }
 func (UnimplementedReplicaServer) mustEmbedUnimplementedReplicaServer() {}
 func (UnimplementedReplicaServer) testEmbeddedByValue()                 {}
@@ -2833,13 +2861,36 @@ func _Replica_QueryIndex_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Replica_QueryIndexServer = grpc.ServerStreamingServer[IndexCandidate]
 
+func _Replica_BatchWriteMV_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchWriteMVRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReplicaServer).BatchWriteMV(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Replica_BatchWriteMV_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReplicaServer).BatchWriteMV(ctx, req.(*BatchWriteMVRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Replica_ServiceDesc is the grpc.ServiceDesc for Replica service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Replica_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "cefas.v1.Replica",
 	HandlerType: (*ReplicaServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "BatchWriteMV",
+			Handler:    _Replica_BatchWriteMV_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "ScanShard",
