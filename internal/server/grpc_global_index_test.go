@@ -181,6 +181,69 @@ func TestGlobalIndex_EagerHook_BatchWriteCascades(t *testing.T) {
 	}
 }
 
+func TestGlobalIndex_QueryRoutesToIndex(t *testing.T) {
+	stub, _, _, cleanup := startGIFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "Users",
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := stub.CreateGlobalIndex(ctx, &cefaspb.CreateGlobalIndexRequest{
+		Descriptor_: &cefaspb.GlobalIndexDescriptor{
+			Name:             "idx_email",
+			BaseTable:        "Users",
+			IndexedColumn:    "email",
+			ProjectedColumns: []string{"name"},
+		},
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+
+	// Seed three rows; two share an email.
+	for _, row := range [][2]string{{"u1", "alice@x"}, {"u2", "bob@x"}, {"u3", "alice@x"}} {
+		if _, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+			Table: "Users",
+			Item: map[string]*cefaspb.AttributeValue{
+				"id":    {Value: &cefaspb.AttributeValue_S{S: row[0]}},
+				"email": {Value: &cefaspb.AttributeValue_S{S: row[1]}},
+				"name":  {Value: &cefaspb.AttributeValue_S{S: "name-" + row[0]}},
+			},
+		}); err != nil {
+			t.Fatalf("PutItem %s: %v", row[0], err)
+		}
+	}
+
+	stream, err := stub.Query(ctx, &cefaspb.QueryRequest{
+		Table:     "Users",
+		IndexName: "idx_email",
+		PkValue:   &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_S{S: "alice@x"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	var rows int
+	for {
+		item, err := stream.Recv()
+		if err != nil {
+			break
+		}
+		if item == nil {
+			break
+		}
+		rows++
+		_ = item
+	}
+	if rows != 2 {
+		t.Errorf("Query rows for email=alice@x = %d, want 2", rows)
+	}
+}
+
 func TestGlobalIndex_EagerHook_SkipsWhenItemLacksIndexedColumn(t *testing.T) {
 	stub, _, _, cleanup := startGIFixture(t)
 	defer cleanup()
