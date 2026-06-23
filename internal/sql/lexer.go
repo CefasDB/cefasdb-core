@@ -119,6 +119,11 @@ const (
 	tDay
 	tDays
 	tAs
+	tService
+	tLevel
+	tShares
+	tAlter
+	tList
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -192,6 +197,11 @@ var keywords = map[string]TokenKind{
 	"DAY":          tDay,
 	"DAYS":         tDays,
 	"AS":           tAs,
+	"SERVICE":      tService,
+	"LEVEL":        tLevel,
+	"SHARES":       tShares,
+	"ALTER":        tAlter,
+	"LIST":         tList,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of

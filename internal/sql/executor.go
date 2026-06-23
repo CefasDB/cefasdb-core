@@ -77,6 +77,10 @@ type CatalogMutator interface {
 	Describe(name string) (types.TableDescriptor, error)
 	CreateView(mv types.MaterializedViewDescriptor) (types.MaterializedViewDescriptor, error)
 	DropView(name string) error
+	CreateServiceLevel(sl types.ServiceLevelDescriptor) (types.ServiceLevelDescriptor, error)
+	UpdateServiceLevel(sl types.ServiceLevelDescriptor) (types.ServiceLevelDescriptor, error)
+	DropServiceLevel(name string) error
+	ListServiceLevels() []types.ServiceLevelDescriptor
 }
 
 // Executor runs a compiled Plan against the storage + catalog.
@@ -116,8 +120,57 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execCreateMaterializedView(p)
 	case *PlanDropMaterializedView:
 		return e.execDropMaterializedView(p)
+	case *PlanCreateServiceLevel:
+		return e.execCreateServiceLevel(p)
+	case *PlanAlterServiceLevel:
+		return e.execAlterServiceLevel(p)
+	case *PlanDropServiceLevel:
+		return e.execDropServiceLevel(p)
+	case *PlanListServiceLevels:
+		return e.execListServiceLevels(p)
 	}
 	return nil, fmt.Errorf("unsupported plan type %T", plan)
+}
+
+func (e *Executor) execCreateServiceLevel(p *PlanCreateServiceLevel) (*Result, error) {
+	if _, err := e.Catalog.CreateServiceLevel(p.Descriptor); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
+}
+
+func (e *Executor) execAlterServiceLevel(p *PlanAlterServiceLevel) (*Result, error) {
+	if _, err := e.Catalog.UpdateServiceLevel(p.Descriptor); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
+}
+
+func (e *Executor) execDropServiceLevel(p *PlanDropServiceLevel) (*Result, error) {
+	if err := e.Catalog.DropServiceLevel(p.Name); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
+}
+
+func (e *Executor) execListServiceLevels(p *PlanListServiceLevels) (*Result, error) {
+	_ = p
+	out := e.Catalog.ListServiceLevels()
+	res := &Result{}
+	for _, sl := range out {
+		res.Rows = append(res.Rows, types.Item{
+			"name":              {T: types.AttrS, S: sl.Name},
+			"shares":            nAttrFromInt64(int64(sl.Shares)),
+			"max_in_flight":     nAttrFromInt64(int64(sl.MaxInFlight)),
+			"max_rows_per_sec":  nAttrFromInt64(sl.MaxRowsPerSec),
+			"max_bytes_per_sec": nAttrFromInt64(sl.MaxBytesPerSec),
+		})
+	}
+	return res, nil
+}
+
+func nAttrFromInt64(v int64) types.AttributeValue {
+	return types.AttributeValue{T: types.AttrN, N: strconv.FormatInt(v, 10)}
 }
 
 func (e *Executor) execCreateMaterializedView(p *PlanCreateMaterializedView) (*Result, error) {

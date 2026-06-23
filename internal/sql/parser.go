@@ -88,12 +88,26 @@ func (p *parser) parseStatement() (Stmt, error) {
 		if p.peekAt(1).Kind == tMaterialized {
 			return p.parseCreateMaterializedView()
 		}
+		if p.peekAt(1).Kind == tService {
+			return p.parseCreateServiceLevel()
+		}
 		return p.parseCreate()
 	case tDrop:
 		if p.peekAt(1).Kind == tMaterialized {
 			return p.parseDropMaterializedView()
 		}
+		if p.peekAt(1).Kind == tService {
+			return p.parseDropServiceLevel()
+		}
 		return p.parseDrop()
+	case tAlter:
+		if p.peekAt(1).Kind == tService {
+			return p.parseAlterServiceLevel()
+		}
+	case tList:
+		if p.peekAt(1).Kind == tService {
+			return p.parseListServiceLevels()
+		}
 	}
 	return nil, fmt.Errorf("unsupported statement starting with %q", p.peek().Lit)
 }
@@ -1067,4 +1081,128 @@ func (p *parser) parseDropMaterializedView() (*DropMaterializedViewStmt, error) 
 		return nil, err
 	}
 	return &DropMaterializedViewStmt{Name: name.Lit}, nil
+}
+
+// parseCreateServiceLevel parses
+//
+//	CREATE SERVICE LEVEL <name>
+//	  [WITH SHARES=N [, MAX_IN_FLIGHT=N] [, MAX_ROWS_PER_SEC=N] [, MAX_BYTES_PER_SEC=N]]
+func (p *parser) parseCreateServiceLevel() (*CreateServiceLevelStmt, error) {
+	p.consume() // CREATE
+	if _, err := p.expect(tService, "SERVICE"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLevel, "LEVEL"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "service level name")
+	if err != nil {
+		return nil, err
+	}
+	spec, err := p.parseOptionalServiceLevelWith()
+	if err != nil {
+		return nil, err
+	}
+	return &CreateServiceLevelStmt{Name: name.Lit, Spec: spec}, nil
+}
+
+// parseAlterServiceLevel parses ALTER SERVICE LEVEL <name> WITH ...
+func (p *parser) parseAlterServiceLevel() (*AlterServiceLevelStmt, error) {
+	p.consume() // ALTER
+	if _, err := p.expect(tService, "SERVICE"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLevel, "LEVEL"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "service level name")
+	if err != nil {
+		return nil, err
+	}
+	spec, err := p.parseOptionalServiceLevelWith()
+	if err != nil {
+		return nil, err
+	}
+	return &AlterServiceLevelStmt{Name: name.Lit, Spec: spec}, nil
+}
+
+// parseDropServiceLevel parses DROP SERVICE LEVEL <name>.
+func (p *parser) parseDropServiceLevel() (*DropServiceLevelStmt, error) {
+	p.consume() // DROP
+	if _, err := p.expect(tService, "SERVICE"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLevel, "LEVEL"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "service level name")
+	if err != nil {
+		return nil, err
+	}
+	return &DropServiceLevelStmt{Name: name.Lit}, nil
+}
+
+// parseListServiceLevels parses LIST SERVICE LEVELS.
+func (p *parser) parseListServiceLevels() (*ListServiceLevelsStmt, error) {
+	p.consume() // LIST
+	if _, err := p.expect(tService, "SERVICE"); err != nil {
+		return nil, err
+	}
+	// Accept LEVEL or LEVELS — keyword lookup table only has LEVEL,
+	// so the lexer reports both as tLevel since the case-insensitive
+	// match handles plurals at the application layer.
+	if _, err := p.expect(tLevel, "LEVEL"); err != nil {
+		return nil, err
+	}
+	return &ListServiceLevelsStmt{}, nil
+}
+
+// parseOptionalServiceLevelWith parses the optional
+// WITH key=value [, key=value]+ clause. Recognised keys are
+// SHARES, MAX_IN_FLIGHT, MAX_ROWS_PER_SEC, MAX_BYTES_PER_SEC.
+func (p *parser) parseOptionalServiceLevelWith() (ServiceLevelSpec, error) {
+	var spec ServiceLevelSpec
+	if p.peek().Kind != tWith {
+		return spec, nil
+	}
+	p.consume() // WITH
+	for {
+		key, err := p.expect(tIdent, "service level option")
+		if err != nil {
+			// SHARES is a reserved keyword (tShares); accept it.
+			if p.peek().Kind == tShares {
+				key = p.consume()
+			} else {
+				return spec, err
+			}
+		}
+		if _, err := p.expect(tEq, "="); err != nil {
+			return spec, err
+		}
+		val, err := p.expect(tNumber, "integer value")
+		if err != nil {
+			return spec, err
+		}
+		v, err := strconv.ParseInt(val.Lit, 10, 64)
+		if err != nil {
+			return spec, fmt.Errorf("service level option %q: %w", key.Lit, err)
+		}
+		switch strings.ToUpper(key.Lit) {
+		case "SHARES":
+			spec.Shares = int(v)
+		case "MAX_IN_FLIGHT":
+			spec.MaxInFlight = int(v)
+		case "MAX_ROWS_PER_SEC":
+			spec.MaxRowsPerSec = v
+		case "MAX_BYTES_PER_SEC":
+			spec.MaxBytesPerSec = v
+		default:
+			return spec, fmt.Errorf("unknown service level option %q", key.Lit)
+		}
+		if p.peek().Kind != tComma {
+			break
+		}
+		p.consume()
+	}
+	return spec, nil
 }

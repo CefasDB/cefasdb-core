@@ -25,22 +25,27 @@ import (
 type Catalog struct {
 	db *pebble.DB
 
-	mu     sync.RWMutex
-	tables map[string]types.TableDescriptor
-	views  map[string]types.MaterializedViewDescriptor
+	mu            sync.RWMutex
+	tables        map[string]types.TableDescriptor
+	views         map[string]types.MaterializedViewDescriptor
+	serviceLevels map[string]types.ServiceLevelDescriptor
 }
 
 func New(db *pebble.DB) (*Catalog, error) {
 	c := &Catalog{
-		db:     db,
-		tables: make(map[string]types.TableDescriptor),
-		views:  make(map[string]types.MaterializedViewDescriptor),
+		db:            db,
+		tables:        make(map[string]types.TableDescriptor),
+		views:         make(map[string]types.MaterializedViewDescriptor),
+		serviceLevels: make(map[string]types.ServiceLevelDescriptor),
 	}
 	if err := c.loadAll(); err != nil {
 		return nil, fmt.Errorf("catalog load: %w", err)
 	}
 	if err := c.loadAllViews(); err != nil {
 		return nil, fmt.Errorf("catalog view load: %w", err)
+	}
+	if err := c.loadAllServiceLevels(); err != nil {
+		return nil, fmt.Errorf("catalog service-level load: %w", err)
 	}
 	return c, nil
 }
@@ -606,4 +611,140 @@ func mvToTableDescriptor(mv types.MaterializedViewDescriptor) types.TableDescrip
 		Name:      mv.Name,
 		KeySchema: mv.KeySchema,
 	}
+}
+
+// loadAllServiceLevels hydrates the in-memory map from pebble on open.
+func (c *Catalog) loadAllServiceLevels() error {
+	lower, upper := storage.PrefixServiceLevels()
+	it, err := c.db.Iter(lower, upper)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for valid := it.First(); valid; valid = it.Next() {
+		var sl types.ServiceLevelDescriptor
+		if err := json.Unmarshal(it.Value(), &sl); err != nil {
+			return fmt.Errorf("decode service-level at %s: %w", it.Key(), err)
+		}
+		c.serviceLevels[sl.Name] = sl
+	}
+	return it.Error()
+}
+
+// CreateServiceLevel persists a new service level. The name
+// "default" is reserved and cannot be created or dropped — it is
+// served synthetically from GetServiceLevel.
+func (c *Catalog) CreateServiceLevel(sl types.ServiceLevelDescriptor) (types.ServiceLevelDescriptor, error) {
+	if sl.Name == "" {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level name required")
+	}
+	if sl.Name == types.DefaultServiceLevelName {
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelReserved
+	}
+	if sl.Shares < 0 || sl.MaxInFlight < 0 || sl.MaxRowsPerSec < 0 || sl.MaxBytesPerSec < 0 {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level %q: shares + caps must be >= 0", sl.Name)
+	}
+	if sl.Shares == 0 {
+		sl.Shares = 1
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.serviceLevels[sl.Name]; exists {
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelExists
+	}
+	raw, err := json.Marshal(sl)
+	if err != nil {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("marshal service-level: %w", err)
+	}
+	if err := c.db.Set(storage.KeyServiceLevel(sl.Name), raw); err != nil {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("persist service-level: %w", err)
+	}
+	c.serviceLevels[sl.Name] = sl
+	return sl, nil
+}
+
+// UpdateServiceLevel replaces the persisted descriptor. Name must
+// match an existing record; default cannot be altered.
+func (c *Catalog) UpdateServiceLevel(sl types.ServiceLevelDescriptor) (types.ServiceLevelDescriptor, error) {
+	if sl.Name == "" {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level name required")
+	}
+	if sl.Name == types.DefaultServiceLevelName {
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelReserved
+	}
+	if sl.Shares < 0 || sl.MaxInFlight < 0 || sl.MaxRowsPerSec < 0 || sl.MaxBytesPerSec < 0 {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level %q: shares + caps must be >= 0", sl.Name)
+	}
+	if sl.Shares == 0 {
+		sl.Shares = 1
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.serviceLevels[sl.Name]; !exists {
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelNotFound
+	}
+	raw, err := json.Marshal(sl)
+	if err != nil {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("marshal service-level: %w", err)
+	}
+	if err := c.db.Set(storage.KeyServiceLevel(sl.Name), raw); err != nil {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("persist service-level: %w", err)
+	}
+	c.serviceLevels[sl.Name] = sl
+	return sl, nil
+}
+
+// DropServiceLevel removes the persisted descriptor. The "default"
+// name is reserved and rejected.
+func (c *Catalog) DropServiceLevel(name string) error {
+	if name == "" {
+		return fmt.Errorf("service level name required")
+	}
+	if name == types.DefaultServiceLevelName {
+		return types.ErrServiceLevelReserved
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.serviceLevels[name]; !exists {
+		return types.ErrServiceLevelNotFound
+	}
+	if err := c.db.Delete(storage.KeyServiceLevel(name)); err != nil {
+		return fmt.Errorf("delete service-level: %w", err)
+	}
+	delete(c.serviceLevels, name)
+	return nil
+}
+
+// GetServiceLevel returns the descriptor for name. The implicit
+// "default" service level is served from a synthetic descriptor with
+// shares=1 and no caps when no explicit record exists.
+func (c *Catalog) GetServiceLevel(name string) (types.ServiceLevelDescriptor, error) {
+	if name == "" {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level name required")
+	}
+	c.mu.RLock()
+	sl, ok := c.serviceLevels[name]
+	c.mu.RUnlock()
+	if ok {
+		return sl, nil
+	}
+	if name == types.DefaultServiceLevelName {
+		return types.ServiceLevelDescriptor{Name: types.DefaultServiceLevelName, Shares: 1}, nil
+	}
+	return types.ServiceLevelDescriptor{}, types.ErrServiceLevelNotFound
+}
+
+// ListServiceLevels returns every persisted service level plus the
+// synthetic "default" entry. Order is unspecified.
+func (c *Catalog) ListServiceLevels() []types.ServiceLevelDescriptor {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]types.ServiceLevelDescriptor, 0, len(c.serviceLevels)+1)
+	for _, sl := range c.serviceLevels {
+		out = append(out, sl)
+	}
+	if _, ok := c.serviceLevels[types.DefaultServiceLevelName]; !ok {
+		out = append(out, types.ServiceLevelDescriptor{Name: types.DefaultServiceLevelName, Shares: 1})
+	}
+	return out
 }

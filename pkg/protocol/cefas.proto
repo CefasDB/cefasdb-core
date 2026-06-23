@@ -134,7 +134,32 @@ service Cefas {
   rpc BanditSample(BanditSampleRequest) returns (BanditSampleResponse);
   rpc BanditReward(BanditRewardRequest) returns (BanditRewardResponse);
   rpc BanditDescribe(BanditDescribeRequest) returns (BanditDescribeResponse);
+
+  // ===== Workload prioritization (epic #489) =====
+  // CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
+  // (#496); scheduling enforcement lands in Phase 3 (#498).
+  rpc CreateServiceLevel(CreateServiceLevelRequest) returns (CreateServiceLevelResponse);
+  rpc AlterServiceLevel(AlterServiceLevelRequest) returns (AlterServiceLevelResponse);
+  rpc DropServiceLevel(DropServiceLevelRequest) returns (DropServiceLevelResponse);
+  rpc ListServiceLevels(ListServiceLevelsRequest) returns (ListServiceLevelsResponse);
 }
+
+message ServiceLevelDescriptor {
+  string name              = 1;
+  int32  shares            = 2;
+  int32  max_in_flight     = 3;
+  int64  max_rows_per_sec  = 4;
+  int64  max_bytes_per_sec = 5;
+}
+
+message CreateServiceLevelRequest  { ServiceLevelDescriptor descriptor = 1; }
+message CreateServiceLevelResponse { ServiceLevelDescriptor descriptor = 1; }
+message AlterServiceLevelRequest   { ServiceLevelDescriptor descriptor = 1; }
+message AlterServiceLevelResponse  { ServiceLevelDescriptor descriptor = 1; }
+message DropServiceLevelRequest    { string name = 1; }
+message DropServiceLevelResponse   {}
+message ListServiceLevelsRequest   {}
+message ListServiceLevelsResponse  { repeated ServiceLevelDescriptor service_levels = 1; }
 
 // Replica is the cluster-internal RPC surface served by every node.
 // Callers are peer nodes, not end users; the methods here let one node

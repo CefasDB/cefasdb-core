@@ -41,8 +41,26 @@ func PlanStmt(stmt Stmt, cat Catalog) (Plan, error) {
 		return planCreateMaterializedView(s)
 	case *DropMaterializedViewStmt:
 		return &PlanDropMaterializedView{Name: s.Name}, nil
+	case *CreateServiceLevelStmt:
+		return &PlanCreateServiceLevel{Descriptor: serviceLevelFromSpec(s.Name, s.Spec)}, nil
+	case *AlterServiceLevelStmt:
+		return &PlanAlterServiceLevel{Descriptor: serviceLevelFromSpec(s.Name, s.Spec)}, nil
+	case *DropServiceLevelStmt:
+		return &PlanDropServiceLevel{Name: s.Name}, nil
+	case *ListServiceLevelsStmt:
+		return &PlanListServiceLevels{}, nil
 	}
 	return nil, fmt.Errorf("unsupported statement type %T", stmt)
+}
+
+func serviceLevelFromSpec(name string, spec ServiceLevelSpec) types.ServiceLevelDescriptor {
+	return types.ServiceLevelDescriptor{
+		Name:           name,
+		Shares:         spec.Shares,
+		MaxInFlight:    spec.MaxInFlight,
+		MaxRowsPerSec:  spec.MaxRowsPerSec,
+		MaxBytesPerSec: spec.MaxBytesPerSec,
+	}
 }
 
 func planCreateMaterializedView(s *CreateMaterializedViewStmt) (*PlanCreateMaterializedView, error) {
