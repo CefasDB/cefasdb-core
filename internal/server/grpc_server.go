@@ -53,9 +53,13 @@ type GRPCServer struct {
 func NewGRPCServer(db *pebble.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
 	s := &GRPCServer{db: db, cat: cat, cluster: cluster}
 	if db != nil {
+		s.attachServiceLevelLaneResolver(db)
 		_ = s.hydratePluginIndexCatalog()
 	}
 	if cat != nil {
+		cat.OnServiceLevelChanged(func(name string) {
+			s.invalidateServiceLevelLaneShares(name)
+		})
 		s.mvScheduler = newMVScheduler(s, 30*time.Second)
 		s.mvScheduler.Start(context.Background())
 	}
@@ -74,7 +78,10 @@ func (s *GRPCServer) StopMVScheduler() {
 
 // AttachManager wires the multi-shard manager onto the gRPC handler.
 // Without it the handler routes every write to s.db (single-shard).
-func (s *GRPCServer) AttachManager(m *cluster.Manager) { s.manager = m }
+func (s *GRPCServer) AttachManager(m *cluster.Manager) {
+	s.manager = m
+	s.attachServiceLevelLaneResolvers()
+}
 
 // AttachPluginRegistry overrides the default plugin registry. The
 // server falls back to plugin.Default when no registry is attached —
@@ -86,6 +93,39 @@ func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) { s.plugins = r }
 func (s *GRPCServer) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
 func (s *GRPCServer) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.backups = p }
+
+func (s *GRPCServer) attachServiceLevelLaneResolvers() {
+	for _, db := range s.allShards() {
+		s.attachServiceLevelLaneResolver(db)
+	}
+}
+
+func (s *GRPCServer) attachServiceLevelLaneResolver(db *pebble.DB) {
+	if db == nil {
+		return
+	}
+	db.AttachServiceLevelSharesResolver(func(name string) (int, error) {
+		if s.cat == nil {
+			return 1, nil
+		}
+		sl, err := s.cat.GetServiceLevel(name)
+		if err != nil {
+			return 1, err
+		}
+		if sl.Shares <= 0 {
+			return 1, nil
+		}
+		return sl.Shares, nil
+	})
+}
+
+func (s *GRPCServer) invalidateServiceLevelLaneShares(name string) {
+	for _, db := range s.allShards() {
+		if db != nil {
+			db.InvalidateServiceLevelShares(name)
+		}
+	}
+}
 
 func (s *GRPCServer) pluginRegistry() *plugin.Registry {
 	if s.plugins != nil {
@@ -362,7 +402,7 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 			return nil, mapWriteMutationErr(err)
 		}
 	}
-	if err := targets.PutItemWith(td, item, pebble.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	if err := targets.PutItemWithCtx(ctx, td, item, pebble.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
@@ -410,7 +450,7 @@ func (s *GRPCServer) GetItem(ctx context.Context, req *cefaspb.GetItemRequest) (
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
-	rawItem, err := db.GetEncodedItemByKeyBytes(req.GetTable(), pkBytes, skBytes)
+	rawItem, err := db.GetEncodedItemByKeyBytesCtx(ctx, req.GetTable(), pkBytes, skBytes)
 	if err != nil {
 		if errors.Is(err, types.ErrItemNotFound) {
 			s.observeRangeMetric(rangeMetricRead, pkBytes, uint64(len(pkBytes)), started)
@@ -480,7 +520,7 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	}
 	var oldForMV types.Item
 	if hasAggMV {
-		oldForMV, err = db.GetItem(req.GetTable(), td.KeySchema, key)
+		oldForMV, err = db.GetItemCtx(ctx, req.GetTable(), td.KeySchema, key)
 		if errors.Is(err, types.ErrItemNotFound) {
 			oldForMV = nil
 		} else if err != nil {
@@ -499,13 +539,13 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	}
 	var finalItem types.Item
 	if res.AffectedRows > 0 && (len(targets.mirrors) > 0 || len(td.MaterializedViews) > 0) {
-		finalItem, err = db.GetItem(req.GetTable(), td.KeySchema, key)
+		finalItem, err = db.GetItemCtx(ctx, req.GetTable(), td.KeySchema, key)
 		if err != nil {
 			return nil, mapStorageErr(err)
 		}
 	}
 	if len(targets.mirrors) > 0 && res.AffectedRows > 0 {
-		if err := targets.MirrorPutItem(td, finalItem); err != nil {
+		if err := targets.MirrorPutItemCtx(ctx, td, finalItem); err != nil {
 			return nil, mapStorageErr(err)
 		}
 	}
@@ -596,7 +636,7 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 			return nil, mapWriteMutationErr(err)
 		}
 	}
-	if err := targets.DeleteItemWith(td, key, pebble.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
+	if err := targets.DeleteItemWithCtx(ctx, td, key, pebble.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
@@ -708,7 +748,7 @@ func (s *GRPCServer) batchWriteFanOutSingleShard(ctx context.Context, td types.T
 			return err
 		}
 	}
-	if err := s.db.BatchWriteItem(td, ops); err != nil {
+	if err := s.db.BatchWriteItemCtx(ctx, td, ops); err != nil {
 		return err
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
@@ -809,10 +849,10 @@ func (s *GRPCServer) batchWriteFanOutMultiShard(ctx context.Context, td types.Ta
 			return err
 		}
 	}
-	if err := batchWriteBuckets(td, primaryBuckets); err != nil {
+	if err := batchWriteBucketsCtx(ctx, td, primaryBuckets); err != nil {
 		return err
 	}
-	if err := batchWriteBuckets(td, mirrorBuckets); err != nil {
+	if err := batchWriteBucketsCtx(ctx, td, mirrorBuckets); err != nil {
 		return err
 	}
 	for _, pluginPlan := range pluginPlans {
@@ -852,7 +892,7 @@ func (s *GRPCServer) BatchGetItem(ctx context.Context, req *cefaspb.BatchGetItem
 		}
 		keys = append(keys, ka)
 	}
-	items, err := s.batchGetFanOut(req.GetTable(), td.KeySchema, keys)
+	items, err := s.batchGetFanOut(ctx, req.GetTable(), td.KeySchema, keys)
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
@@ -913,19 +953,19 @@ func (s *GRPCServer) Query(req *cefaspb.QueryRequest, stream cefaspb.Cefas_Query
 	limit := int(req.GetLimit())
 	switch {
 	case req.GetIndexName() != "":
-		items, err = s.queryByIndex(td, req.GetIndexName(), pkVal, pebble.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
+		items, err = s.queryByIndex(ctx, td, req.GetIndexName(), pkVal, pebble.QueryOptions{SKLow: lo, SKHigh: hi, Limit: limit})
 	case req.GetSkLow() == nil && req.GetSkHigh() == nil:
 		queryDB, qerr := s.readStorageFor(pkBytes)
 		if qerr != nil {
 			return mapStorageErr(qerr)
 		}
-		items, err = queryDB.QueryByPK(req.GetTable(), td.KeySchema, pkVal, limit)
+		items, err = queryDB.QueryByPKCtx(ctx, req.GetTable(), td.KeySchema, pkVal, limit)
 	default:
 		queryDB, qerr := s.readStorageFor(pkBytes)
 		if qerr != nil {
 			return mapStorageErr(qerr)
 		}
-		items, err = queryDB.QueryByPKRange(req.GetTable(), td.KeySchema, pkVal, lo, hi, limit)
+		items, err = queryDB.QueryByPKRangeCtx(ctx, req.GetTable(), td.KeySchema, pkVal, lo, hi, limit)
 	}
 	if err != nil {
 		return mapStorageErr(err)
@@ -1002,7 +1042,7 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	// filter never materialises the whole table.
 	if s.manager == nil {
 		var emitErr error
-		err := s.db.ScanTableWith(req.GetTable(), func(it types.Item) bool {
+		err := s.db.ScanTableWithCtx(ctx, req.GetTable(), func(it types.Item) bool {
 			cont, err := emit(it)
 			if err != nil {
 				emitErr = err
@@ -1046,7 +1086,7 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 			}
 			var stopErr error
 			stopped := false
-			err := sh.Storage.ScanTableWith(req.GetTable(), func(it types.Item) bool {
+			err := sh.Storage.ScanTableWithCtx(ctx, req.GetTable(), func(it types.Item) bool {
 				cont, err := emitOnce(it)
 				if err != nil {
 					stopErr = err
@@ -1659,10 +1699,10 @@ func (s *GRPCServer) Compact(ctx context.Context, req *cefaspb.CompactRequest) (
 
 // ---------- cluster ----------
 
-func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
+func (s *GRPCServer) batchGetFanOut(ctx context.Context, table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
 	if s.manager == nil {
 		started := time.Now()
-		out, err := s.db.BatchGetItem(table, ks, keys)
+		out, err := s.db.BatchGetItemCtx(ctx, table, ks, keys)
 		if err != nil {
 			return nil, err
 		}
@@ -1690,7 +1730,7 @@ func (s *GRPCServer) batchGetFanOut(table string, ks types.KeySchema, keys []typ
 		if err != nil {
 			return nil, err
 		}
-		single, err := db.BatchGetItem(table, ks, []types.Item{k})
+		single, err := db.BatchGetItemCtx(ctx, table, ks, []types.Item{k})
 		if err != nil {
 			return nil, err
 		}

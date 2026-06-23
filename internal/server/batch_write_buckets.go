@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"sync"
 
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
@@ -8,12 +9,16 @@ import (
 )
 
 func batchWriteBuckets(td types.TableDescriptor, buckets map[*pebble.DB][]pebble.BatchOp) error {
+	return batchWriteBucketsCtx(context.Background(), td, buckets)
+}
+
+func batchWriteBucketsCtx(ctx context.Context, td types.TableDescriptor, buckets map[*pebble.DB][]pebble.BatchOp) error {
 	switch len(buckets) {
 	case 0:
 		return nil
 	case 1:
 		for db, group := range buckets {
-			return db.BatchWriteItem(td, group)
+			return db.BatchWriteItemCtx(ctx, td, group)
 		}
 	}
 
@@ -24,7 +29,7 @@ func batchWriteBuckets(td types.TableDescriptor, buckets map[*pebble.DB][]pebble
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := db.BatchWriteItem(td, group); err != nil {
+			if err := db.BatchWriteItemCtx(ctx, td, group); err != nil {
 				errCh <- err
 			}
 		}()

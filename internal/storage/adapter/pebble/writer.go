@@ -1,6 +1,7 @@
 package pebble
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,6 +73,18 @@ func (d *DB) PutItem(table string, ks types.KeySchema, item types.Item) error {
 // write and every index pointer are atomic with respect to readers and
 // (in Phase 4) the Raft log.
 func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOptions) error {
+	return d.PutItemWithCtx(context.Background(), td, item, opts)
+}
+
+// PutItemWithCtx is PutItemWith routed through the request's service
+// level write lane.
+func (d *DB) PutItemWithCtx(ctx context.Context, td types.TableDescriptor, item types.Item, opts PutOptions) error {
+	return d.runWriteCtx(ctx, func() error {
+		return d.putItemWithNoLane(td, item, opts)
+	})
+}
+
+func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts PutOptions) error {
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -216,6 +229,18 @@ func (d *DB) DeleteItem(table string, ks types.KeySchema, keyAttrs types.Item) e
 // DeleteItemWith removes an item AND every GSI pointer that referenced
 // it, atomically. Honors an optional ConditionExpression.
 func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
+	return d.DeleteItemWithCtx(context.Background(), td, keyAttrs, opts)
+}
+
+// DeleteItemWithCtx is DeleteItemWith routed through the request's
+// service level write lane.
+func (d *DB) DeleteItemWithCtx(ctx context.Context, td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
+	return d.runWriteCtx(ctx, func() error {
+		return d.deleteItemWithNoLane(td, keyAttrs, opts)
+	})
+}
+
+func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -339,19 +364,30 @@ func applyIndexOps(b *pebbledb.Batch, ops []storage.IndexOp) error {
 // GetItem loads an item by its key attributes. Returns ErrItemNotFound
 // when the key is absent.
 func (d *DB) GetItem(table string, ks types.KeySchema, keyAttrs types.Item) (types.Item, error) {
+	return d.GetItemCtx(context.Background(), table, ks, keyAttrs)
+}
+
+// GetItemCtx loads an item through the request's service level read lane.
+func (d *DB) GetItemCtx(ctx context.Context, table string, ks types.KeySchema, keyAttrs types.Item) (types.Item, error) {
 	pk, sk, err := extractKeyBytes(keyAttrs, ks)
 	if err != nil {
 		return nil, err
 	}
-	return d.GetItemByKeyBytes(table, pk, sk)
+	return d.GetItemByKeyBytesCtx(ctx, table, pk, sk)
 }
 
 // GetItemByKeyBytes loads an item when the caller already has canonical
 // PK/SK bytes. It is the point-read fast path for protocol handlers
 // that can parse key bytes without materializing a full Item map.
 func (d *DB) GetItemByKeyBytes(table string, pk, sk []byte) (types.Item, error) {
+	return d.GetItemByKeyBytesCtx(context.Background(), table, pk, sk)
+}
+
+// GetItemByKeyBytesCtx is GetItemByKeyBytes routed through the
+// request's service level read lane.
+func (d *DB) GetItemByKeyBytesCtx(ctx context.Context, table string, pk, sk []byte) (types.Item, error) {
 	var item types.Item
-	err := d.runRead(func() error {
+	err := d.runReadCtx(ctx, func() error {
 		v, err := d.getEncodedItemByKeyBytesNoLane(table, pk, sk)
 		if err != nil {
 			return err
@@ -368,8 +404,14 @@ func (d *DB) GetItemByKeyBytes(table string, pk, sk []byte) (types.Item, error) 
 // GetEncodedItemByKeyBytes loads an encoded item when the caller already
 // has canonical PK/SK bytes. The returned buffer is owned by the caller.
 func (d *DB) GetEncodedItemByKeyBytes(table string, pk, sk []byte) ([]byte, error) {
+	return d.GetEncodedItemByKeyBytesCtx(context.Background(), table, pk, sk)
+}
+
+// GetEncodedItemByKeyBytesCtx is GetEncodedItemByKeyBytes routed
+// through the request's service level read lane.
+func (d *DB) GetEncodedItemByKeyBytesCtx(ctx context.Context, table string, pk, sk []byte) ([]byte, error) {
 	var out []byte
-	err := d.runRead(func() error {
+	err := d.runReadCtx(ctx, func() error {
 		var err error
 		out, err = d.getEncodedItemByKeyBytesNoLane(table, pk, sk)
 		return err
@@ -396,19 +438,37 @@ func (d *DB) getEncodedItemByKeyBytesNoLane(table string, pk, sk []byte) ([]byte
 // determined by the underlying byte ordering of the canonical SK bytes
 // (lexicographic). Limit ≤ 0 means "no limit".
 func (d *DB) QueryByPK(table string, ks types.KeySchema, pkAttr types.AttributeValue, limit int) ([]types.Item, error) {
+	return d.QueryByPKCtx(context.Background(), table, ks, pkAttr, limit)
+}
+
+// QueryByPKCtx returns every item under a single PK through the
+// request's service level read lane.
+func (d *DB) QueryByPKCtx(ctx context.Context, table string, ks types.KeySchema, pkAttr types.AttributeValue, limit int) ([]types.Item, error) {
 	pk, err := storage.AttrCanonicalBytes(pkAttr)
 	if err != nil {
 		return nil, fmt.Errorf("PK %q: %w", ks.PK, err)
 	}
 	lower, upper := storage.PrefixPrimaryByPK(table, pk)
 	if d.memoryHasTable(table) {
-		return d.memoryScan(table, lower, upper, limit)
+		var out []types.Item
+		err := d.runReadCtx(ctx, func() error {
+			var err error
+			out, err = d.memoryScan(table, lower, upper, limit)
+			return err
+		})
+		return out, err
 	}
-	return d.scanItems(lower, upper, limit)
+	return d.scanItemsCtx(ctx, lower, upper, limit)
 }
 
 // QueryByPKRange constrains SK to [skLow, skHigh).
 func (d *DB) QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skHigh types.AttributeValue, limit int) ([]types.Item, error) {
+	return d.QueryByPKRangeCtx(context.Background(), table, ks, pkAttr, skLow, skHigh, limit)
+}
+
+// QueryByPKRangeCtx constrains SK to [skLow, skHigh) through the
+// request's service level read lane.
+func (d *DB) QueryByPKRangeCtx(ctx context.Context, table string, ks types.KeySchema, pkAttr, skLow, skHigh types.AttributeValue, limit int) ([]types.Item, error) {
 	if ks.SK == "" {
 		return nil, fmt.Errorf("table %q has no sort key", table)
 	}
@@ -431,15 +491,27 @@ func (d *DB) QueryByPKRange(table string, ks types.KeySchema, pkAttr, skLow, skH
 	}
 	lower, upper := storage.RangePrimaryBySK(table, pk, lowBytes, highBytes)
 	if d.memoryHasTable(table) {
-		return d.memoryScan(table, lower, upper, limit)
+		var out []types.Item
+		err := d.runReadCtx(ctx, func() error {
+			var err error
+			out, err = d.memoryScan(table, lower, upper, limit)
+			return err
+		})
+		return out, err
 	}
-	return d.scanItems(lower, upper, limit)
+	return d.scanItemsCtx(ctx, lower, upper, limit)
 }
 
 // QueryByLSI iterates a local-secondary-index partition, resolves
 // pointers, and returns the underlying items. The supplied primaryPKVal
 // pins the partition; the LSI's own SK supplies ordering.
 func (d *DB) QueryByLSI(td types.TableDescriptor, idxName string, primaryPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
+	return d.QueryByLSICtx(context.Background(), td, idxName, primaryPKVal, opts)
+}
+
+// QueryByLSICtx iterates a local-secondary-index partition through
+// the request's service level read lane.
+func (d *DB) QueryByLSICtx(ctx context.Context, td types.TableDescriptor, idxName string, primaryPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
 	var descriptor types.LSIDescriptor
 	found := false
 	for _, l := range td.LSIs {
@@ -475,7 +547,7 @@ func (d *DB) QueryByLSI(td types.TableDescriptor, idxName string, primaryPKVal t
 		}
 		lower, upper = storage.RangeLSIBySK(td.Name, idxName, pkBytes, lo, hi)
 	}
-	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
+	return d.iterateIndexCtx(ctx, td, lower, upper, descriptor.Projection, opts.Limit)
 }
 
 // iterateIndex walks an index keyspace and resolves each pointer
@@ -483,58 +555,75 @@ func (d *DB) QueryByLSI(td types.TableDescriptor, idxName string, primaryPKVal t
 // avoid the dereference Get by carrying the projected payload in the
 // value blob.
 func (d *DB) iterateIndex(td types.TableDescriptor, lower, upper []byte, projection types.IndexProjection, limit int) ([]types.Item, error) {
-	it, err := d.Iter(lower, upper)
+	return d.iterateIndexCtx(context.Background(), td, lower, upper, projection, limit)
+}
+
+func (d *DB) iterateIndexCtx(ctx context.Context, td types.TableDescriptor, lower, upper []byte, projection types.IndexProjection, limit int) ([]types.Item, error) {
+	var out []types.Item
+	err := d.runReadCtx(ctx, func() error {
+		it, err := d.iterNoLane(lower, upper)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+
+		for valid := it.First(); valid; valid = it.Next() {
+			v := it.Value()
+			ptrCopy := make([]byte, len(v))
+			copy(ptrCopy, v)
+			pk, sk, projectedBytes, mode, err := storage.DecodeProjectedPointer(ptrCopy)
+			if err != nil {
+				return fmt.Errorf("decode pointer: %w", err)
+			}
+			switch mode {
+			case "ALL":
+				item, err := storage.DecodeItem(projectedBytes)
+				if err != nil {
+					return fmt.Errorf("decode ALL item: %w", err)
+				}
+				out = append(out, item)
+			case "INCLUDE":
+				item, err := storage.DecodeItem(projectedBytes)
+				if err != nil {
+					return fmt.Errorf("decode INCLUDE item: %w", err)
+				}
+				out = append(out, item)
+			default:
+				raw, err := d.Get(storage.KeyPrimary(td.Name, pk, sk))
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				item, err := storage.DecodeItem(raw)
+				if err != nil {
+					return fmt.Errorf("decode item: %w", err)
+				}
+				out = append(out, item)
+			}
+			_ = projection
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+		return it.Error()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer it.Close()
-	var out []types.Item
-	for valid := it.First(); valid; valid = it.Next() {
-		v := it.Value()
-		ptrCopy := make([]byte, len(v))
-		copy(ptrCopy, v)
-		pk, sk, projectedBytes, mode, err := storage.DecodeProjectedPointer(ptrCopy)
-		if err != nil {
-			return nil, fmt.Errorf("decode pointer: %w", err)
-		}
-		switch mode {
-		case "ALL":
-			item, err := storage.DecodeItem(projectedBytes)
-			if err != nil {
-				return nil, fmt.Errorf("decode ALL item: %w", err)
-			}
-			out = append(out, item)
-		case "INCLUDE":
-			item, err := storage.DecodeItem(projectedBytes)
-			if err != nil {
-				return nil, fmt.Errorf("decode INCLUDE item: %w", err)
-			}
-			out = append(out, item)
-		default:
-			raw, err := d.Get(storage.KeyPrimary(td.Name, pk, sk))
-			if errors.Is(err, ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			item, err := storage.DecodeItem(raw)
-			if err != nil {
-				return nil, fmt.Errorf("decode item: %w", err)
-			}
-			out = append(out, item)
-		}
-		_ = projection
-		if limit > 0 && len(out) >= limit {
-			break
-		}
-	}
-	return out, it.Error()
+	return out, nil
 }
 
 // QueryByGSI iterates a GSI partition, resolves pointers, and returns
 // the underlying items in the order the index produces them.
 func (d *DB) QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
+	return d.QueryByGSICtx(context.Background(), td, idxName, gsiPKVal, opts)
+}
+
+// QueryByGSICtx iterates a GSI partition through the request's service
+// level read lane.
+func (d *DB) QueryByGSICtx(ctx context.Context, td types.TableDescriptor, idxName string, gsiPKVal types.AttributeValue, opts QueryOptions) ([]types.Item, error) {
 	descriptor, ok := findGSI(td, idxName)
 	if !ok {
 		return nil, fmt.Errorf("table %q has no GSI named %q", td.Name, idxName)
@@ -565,7 +654,7 @@ func (d *DB) QueryByGSI(td types.TableDescriptor, idxName string, gsiPKVal types
 		}
 		lower, upper = storage.RangeGSIBySK(td.Name, idxName, gsiPK, lo, hi)
 	}
-	return d.iterateIndex(td, lower, upper, descriptor.Projection, opts.Limit)
+	return d.iterateIndexCtx(ctx, td, lower, upper, descriptor.Projection, opts.Limit)
 }
 
 func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) {
@@ -587,11 +676,23 @@ func findGSI(td types.TableDescriptor, name string) (types.GSIDescriptor, bool) 
 // callback returns false, so a filtered scan never pays for items
 // the caller will reject.
 func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
+	return d.ScanTableCtx(context.Background(), table, limit)
+}
+
+// ScanTableCtx streams every primary item through the request's
+// service level read lane.
+func (d *DB) ScanTableCtx(ctx context.Context, table string, limit int) ([]types.Item, error) {
 	lower, upper := storage.PrefixPrimaryAll(table)
 	if d.memoryHasTable(table) {
-		return d.memoryScan(table, lower, upper, limit)
+		var out []types.Item
+		err := d.runReadCtx(ctx, func() error {
+			var err error
+			out, err = d.memoryScan(table, lower, upper, limit)
+			return err
+		})
+		return out, err
 	}
-	return d.scanItems(lower, upper, limit)
+	return d.scanItemsCtx(ctx, lower, upper, limit)
 }
 
 // ScanTableWith iterates every primary item in `table` in
@@ -604,15 +705,40 @@ func (d *DB) ScanTable(table string, limit int) ([]types.Item, error) {
 // Decoding still happens here; visit always sees a fully decoded
 // types.Item, never raw bytes.
 func (d *DB) ScanTableWith(table string, visit func(types.Item) bool) error {
+	return d.ScanTableWithCtx(context.Background(), table, visit)
+}
+
+// ScanTableWithCtx iterates every primary item through the request's
+// service level read lane.
+func (d *DB) ScanTableWithCtx(ctx context.Context, table string, visit func(types.Item) bool) error {
 	lower, upper := storage.PrefixPrimaryAll(table)
 	if d.memoryHasTable(table) {
-		return d.memoryScanWith(table, lower, upper, visit)
+		return d.runReadCtx(ctx, func() error {
+			return d.memoryScanWith(table, lower, upper, visit)
+		})
 	}
-	return d.scanItemsWith(lower, upper, visit)
+	return d.scanItemsWithCtx(ctx, lower, upper, visit)
 }
 
 func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
-	it, err := d.Iter(lower, upper)
+	return d.scanItemsCtx(context.Background(), lower, upper, limit)
+}
+
+func (d *DB) scanItemsCtx(ctx context.Context, lower, upper []byte, limit int) ([]types.Item, error) {
+	var out []types.Item
+	err := d.runReadCtx(ctx, func() error {
+		var err error
+		out, err = d.scanItemsNoLane(lower, upper, limit)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (d *DB) scanItemsNoLane(lower, upper []byte, limit int) ([]types.Item, error) {
+	it, err := d.iterNoLane(lower, upper)
 	if err != nil {
 		return nil, err
 	}
@@ -636,7 +762,17 @@ func (d *DB) scanItems(lower, upper []byte, limit int) ([]types.Item, error) {
 }
 
 func (d *DB) scanItemsWith(lower, upper []byte, visit func(types.Item) bool) error {
-	it, err := d.Iter(lower, upper)
+	return d.scanItemsWithCtx(context.Background(), lower, upper, visit)
+}
+
+func (d *DB) scanItemsWithCtx(ctx context.Context, lower, upper []byte, visit func(types.Item) bool) error {
+	return d.runReadCtx(ctx, func() error {
+		return d.scanItemsWithNoLane(lower, upper, visit)
+	})
+}
+
+func (d *DB) scanItemsWithNoLane(lower, upper []byte, visit func(types.Item) bool) error {
+	it, err := d.iterNoLane(lower, upper)
 	if err != nil {
 		return err
 	}
@@ -668,7 +804,15 @@ func (d *DB) scanItemsWith(lower, upper []byte, visit func(types.Item) bool) err
 // reordering of writes on the same primary key is undefined. Callers
 // should not include two ops targeting the same key in a single batch.
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
-	return d.batchWriteItemImpl(td, ops, false)
+	return d.BatchWriteItemCtx(context.Background(), td, ops)
+}
+
+// BatchWriteItemCtx applies N Put / Delete operations through the
+// request's service level write lane.
+func (d *DB) BatchWriteItemCtx(ctx context.Context, td types.TableDescriptor, ops []BatchOp) error {
+	return d.runWriteCtx(ctx, func() error {
+		return d.batchWriteItemImpl(td, ops, false)
+	})
 }
 
 // BatchWriteItemLocal applies the batch directly to this node's
@@ -918,8 +1062,14 @@ func (d *DB) batchPutItemsWithoutPriorImpl(td types.TableDescriptor, ops []Batch
 // result slice has the same length and order as `keys`; missing items
 // are represented as nil entries.
 func (d *DB) BatchGetItem(table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
+	return d.BatchGetItemCtx(context.Background(), table, ks, keys)
+}
+
+// BatchGetItemCtx fetches multiple items by primary key through the
+// request's service level read lane.
+func (d *DB) BatchGetItemCtx(ctx context.Context, table string, ks types.KeySchema, keys []types.Item) ([]types.Item, error) {
 	out := make([]types.Item, len(keys))
-	err := d.runRead(func() error {
+	err := d.runReadCtx(ctx, func() error {
 		for i, ka := range keys {
 			pk, sk, err := extractKeyBytes(ka, ks)
 			if err != nil {

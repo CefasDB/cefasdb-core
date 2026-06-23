@@ -128,7 +128,7 @@ func (s *GRPCServer) applyGlobalIndexBatchOneIndex(ctx context.Context, td types
 
 	if s.manager == nil {
 		started := time.Now()
-		if err := s.db.BatchWriteItem(giTD, giOps); err != nil {
+		if err := s.db.BatchWriteItemCtx(ctx, giTD, giOps); err != nil {
 			return status.Errorf(codes.Internal, "gi %s: %v", gi.Name, err)
 		}
 		s.giObserveDuration(gi.Name, "batch", started)
@@ -239,7 +239,7 @@ func giBatchOpsToPB(index string, ops []pebble.BatchOp) *cefaspb.BatchWriteGIReq
 func (s *GRPCServer) writeGIRow(ctx context.Context, gi types.GlobalIndexDescriptor, basePKCol string, giItem types.Item) error {
 	giTD := giSyntheticTableDescriptor(gi, basePKCol)
 	if s.manager == nil {
-		return s.db.PutItemWith(giTD, giItem, pebble.PutOptions{})
+		return s.db.PutItemWithCtx(ctx, giTD, giItem, pebble.PutOptions{})
 	}
 	pkBytes, err := pkBytesFromItem(giItem, giTD.KeySchema)
 	if err != nil {
@@ -255,7 +255,7 @@ func (s *GRPCServer) writeGIRow(ctx context.Context, gi types.GlobalIndexDescrip
 func (s *GRPCServer) deleteGIRow(ctx context.Context, gi types.GlobalIndexDescriptor, basePKCol string, giKey types.Item) error {
 	giTD := giSyntheticTableDescriptor(gi, basePKCol)
 	if s.manager == nil {
-		return s.db.DeleteItemWith(giTD, giKey, pebble.DeleteOptions{})
+		return s.db.DeleteItemWithCtx(ctx, giTD, giKey, pebble.DeleteOptions{})
 	}
 	pkBytes, err := pkBytesFromItem(giKey, giTD.KeySchema)
 	if err != nil {

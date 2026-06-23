@@ -97,7 +97,7 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 			for k, v := range rawBinds {
 				binds[strings.TrimPrefix(k, ":")] = v
 			}
-			prior, err := primary.GetItem(table, td.KeySchema, key)
+			prior, err := primary.GetItemCtx(ctx, table, td.KeySchema, key)
 			if err != nil && err != types.ErrItemNotFound {
 				return nil, mapStorageErr(err)
 			}
@@ -138,11 +138,11 @@ func (s *GRPCServer) TransactWriteItems(ctx context.Context, req *cefaspb.Transa
 		if err != nil {
 			return nil, mapWriteMutationErr(err)
 		}
-		if err := primary.BatchWriteItem(td, batchOps); err != nil {
+		if err := primary.BatchWriteItemCtx(ctx, td, batchOps); err != nil {
 			return nil, mapStorageErr(err)
 		}
 		for mirror, mirrorOps := range mirrorBuckets {
-			if err := mirror.BatchWriteItem(td, mirrorOps); err != nil {
+			if err := mirror.BatchWriteItemCtx(ctx, td, mirrorOps); err != nil {
 				return nil, mapStorageErr(err)
 			}
 		}
@@ -192,7 +192,7 @@ func (s *GRPCServer) TransactGetItems(ctx context.Context, req *cefaspb.Transact
 		}
 		keys = append(keys, k)
 	}
-	got, err := s.batchGetFanOut(table, td.KeySchema, keys)
+	got, err := s.batchGetFanOut(ctx, table, td.KeySchema, keys)
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
