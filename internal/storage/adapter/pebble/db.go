@@ -115,6 +115,11 @@ type DB struct {
 	// existing keys. Access on the hot path is lock-free.
 	changeIndex atomic.Uint64
 
+	// batchSeqCounter is the monotonic per-process source of
+	// idempotency markers (#524). Combined with a nanosecond
+	// timestamp so the value remains unique across restarts.
+	batchSeqCounter atomic.Uint64
+
 	streamRetention         StreamRetentionOptions
 	streamRetentionResolver func(table string) int64
 	changeLogMode           string

@@ -44,6 +44,17 @@ type ChangeRecord struct {
 	NewItem        types.Item      `json:"newItem,omitempty"`
 	StreamViewType string          `json:"streamViewType,omitempty"`
 	SizeBytes      int64           `json:"sizeBytes,omitempty"`
+	// Idempotency markers (#524). BatchID is unique per
+	// BatchWriteItem invocation; SeqInBatch is the 0-indexed
+	// position within that batch. Single-op mutations get a
+	// per-call BatchID and SeqInBatch=0. OpKind exposes the
+	// INSERT / MODIFY / REMOVE classification independently of
+	// the EventName field (which only fires when stream view
+	// is set on the table). Zero values on legacy records mean
+	// "unknown batch" / "unknown kind" for forward-compat reads.
+	BatchID    string `json:"batchId,omitempty"`
+	SeqInBatch int32  `json:"seqInBatch,omitempty"`
+	OpKind     string `json:"opKind,omitempty"`
 }
 
 // StreamRetentionStats is the persisted logical retention state for one table
@@ -110,15 +121,44 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 
 func newChangeRecord(td types.TableDescriptor, op ChangeOp, key, oldItem, newItem types.Item) ChangeRecord {
 	rec := ChangeRecord{
-		Op:    op,
-		Table: td.Name,
-		Key:   cloneChangeItem(key),
+		Op:     op,
+		Table:  td.Name,
+		Key:    cloneChangeItem(key),
+		OpKind: deriveOpKind(op, oldItem),
 	}
 	if op == ChangePut {
 		rec.Item = cloneChangeItem(newItem)
 	}
 	applyStreamRecordFields(td, &rec, oldItem, newItem)
 	return rec
+}
+
+// deriveOpKind classifies the mutation independently of streams view
+// — INSERT when a put had no prior, MODIFY when it replaced an
+// existing row, REMOVE for deletes. The values match
+// ChangeEventName so consumers reading either field see the same
+// classification (#524).
+func deriveOpKind(op ChangeOp, oldItem types.Item) string {
+	switch op {
+	case ChangePut:
+		if oldItem == nil {
+			return string(ChangeEventInsert)
+		}
+		return string(ChangeEventModify)
+	case ChangeDelete:
+		return string(ChangeEventRemove)
+	}
+	return ""
+}
+
+// nextBatchID returns a unique-per-call identifier for a batch of
+// change records. The value is monotonic per-process (atomic
+// counter) and tagged with the wall-clock nanosecond so that
+// post-restart batches do not collide with pre-restart ones. Used
+// to tag every ChangeRecord produced by a single BatchWriteItem
+// invocation so consumers can dedup retried events (#524).
+func (d *DB) nextBatchID() string {
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), d.batchSeqCounter.Add(1))
 }
 
 func applyStreamRecordFields(td types.TableDescriptor, rec *ChangeRecord, oldItem, newItem types.Item) {

@@ -245,7 +245,9 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 			return err
 		}
 		if oldItem != nil && r.db.shouldAppendChangeRecord(td) {
-			if _, err := r.db.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(oldItem, td.KeySchema), oldItem, nil)); err != nil {
+			rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(oldItem, td.KeySchema), oldItem, nil)
+			rec.BatchID = r.db.nextBatchID()
+			if _, err := r.db.appendChangeRecord(b, rec); err != nil {
 				return fmt.Errorf("ttl change log: %w", err)
 			}
 		}

@@ -158,7 +158,9 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		return err
 	}
 	if d.shouldAppendChangeRecord(td) {
-		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)); err != nil {
+		rec := newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)
+		rec.BatchID = d.nextBatchID()
+		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
 	}
@@ -276,7 +278,9 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 		return err
 	}
 	if d.shouldAppendChangeRecord(td) {
-		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)); err != nil {
+		rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)
+		rec.BatchID = d.nextBatchID()
+		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
 	}
@@ -690,6 +694,14 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 	}
 	var memDeltas []memDelta
 
+	// One BatchID shared across every op in this BatchWriteItem
+	// (#524). Consumers receiving a retried record dedup on
+	// (BatchID, SeqInBatch).
+	var batchID string
+	if d.shouldAppendChangeRecord(td) {
+		batchID = d.nextBatchID()
+	}
+
 	for i, op := range ops {
 		switch op.Op {
 		case BatchOpPut:
@@ -732,7 +744,10 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
 			}
 			if d.shouldAppendChangeRecord(td) {
-				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)); err != nil {
+				rec := newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)
+				rec.BatchID = batchID
+				rec.SeqInBatch = int32(i)
+				if _, err := d.appendChangeRecord(b, rec); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}
 			}
@@ -781,7 +796,10 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 				memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), delete: true})
 			}
 			if d.shouldAppendChangeRecord(td) {
-				if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)); err != nil {
+				rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)
+				rec.BatchID = batchID
+				rec.SeqInBatch = int32(i)
+				if _, err := d.appendChangeRecord(b, rec); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}
 			}
