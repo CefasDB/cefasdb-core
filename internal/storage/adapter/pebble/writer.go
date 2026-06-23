@@ -76,12 +76,15 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	return d.PutItemWithCtx(context.Background(), td, item, opts)
 }
 
-// PutItemWithCtx is PutItemWith routed through the request's service
-// level write lane.
+// PutItemWithCtx is PutItemWith with the caller's context plumbed for
+// cancellation and observability. It must NOT take the write lane:
+// PutItemWith ends in CommitBatch → Replicate → FSM → ApplyCommittedBatch,
+// and ApplyCommittedBatch itself takes the write lane. Throttling the
+// entry would re-enter the same lane from the FSM and deadlock under
+// sustained load (#428 invariant; see lanes_test.go).
 func (d *DB) PutItemWithCtx(ctx context.Context, td types.TableDescriptor, item types.Item, opts PutOptions) error {
-	return d.runWriteCtx(ctx, func() error {
-		return d.putItemWithNoLane(td, item, opts)
-	})
+	_ = ctx
+	return d.putItemWithNoLane(td, item, opts)
 }
 
 func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts PutOptions) error {
@@ -232,12 +235,12 @@ func (d *DB) DeleteItemWith(td types.TableDescriptor, keyAttrs types.Item, opts 
 	return d.DeleteItemWithCtx(context.Background(), td, keyAttrs, opts)
 }
 
-// DeleteItemWithCtx is DeleteItemWith routed through the request's
-// service level write lane.
+// DeleteItemWithCtx is DeleteItemWith with the caller's context plumbed
+// for cancellation and observability. Same lane-bypass rationale as
+// PutItemWithCtx.
 func (d *DB) DeleteItemWithCtx(ctx context.Context, td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
-	return d.runWriteCtx(ctx, func() error {
-		return d.deleteItemWithNoLane(td, keyAttrs, opts)
-	})
+	_ = ctx
+	return d.deleteItemWithNoLane(td, keyAttrs, opts)
 }
 
 func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
@@ -807,12 +810,13 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 	return d.BatchWriteItemCtx(context.Background(), td, ops)
 }
 
-// BatchWriteItemCtx applies N Put / Delete operations through the
-// request's service level write lane.
+// BatchWriteItemCtx is BatchWriteItem with the caller's context plumbed
+// for cancellation and observability. Same lane-bypass rationale as
+// PutItemWithCtx — the batch ends in CommitBatch → Replicate → FSM →
+// ApplyCommittedBatch, and the FSM takes the write lane.
 func (d *DB) BatchWriteItemCtx(ctx context.Context, td types.TableDescriptor, ops []BatchOp) error {
-	return d.runWriteCtx(ctx, func() error {
-		return d.batchWriteItemImpl(td, ops, false)
-	})
+	_ = ctx
+	return d.batchWriteItemImpl(td, ops, false)
 }
 
 // BatchWriteItemLocal applies the batch directly to this node's
