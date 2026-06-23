@@ -140,6 +140,23 @@ func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	}
 	raw, err := c.db.Get(storage.KeyCatalog(name))
 	if err == pebble.ErrNotFound {
+		// Cross-shard MV cascade: peer nodes receive BatchWriteItem
+		// with the MV's name as the table. The MV descriptor lives at
+		// KeyMaterializedView, not KeyCatalog, so the table-key lookup
+		// misses on cold caches. Fall through to the MV key before
+		// declaring the table absent.
+		mvRaw, mvErr := c.db.Get(storage.KeyMaterializedView(name))
+		if mvErr == nil {
+			var mv types.MaterializedViewDescriptor
+			if jerr := json.Unmarshal(mvRaw, &mv); jerr != nil {
+				return types.TableDescriptor{}, fmt.Errorf("decode view: %w", jerr)
+			}
+			_ = domain.NormalizeMVDescriptor(&mv)
+			c.mu.Lock()
+			c.views[mv.Name] = mv
+			c.mu.Unlock()
+			return mvToTableDescriptor(mv), nil
+		}
 		return types.TableDescriptor{}, types.ErrTableNotFound
 	}
 	if err != nil {

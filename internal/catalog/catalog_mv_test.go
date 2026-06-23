@@ -149,6 +149,57 @@ func TestDescribeFallsBackToViewSynthetic(t *testing.T) {
 	}
 }
 
+// TestDescribeReloadsViewFromPebbleOnColdCache simulates a peer node
+// that has the MV descriptor persisted in shard 0 (replicated via
+// raft) but no in-memory cache entry yet — the cross-shard MV cascade
+// hits this path when forwarding an MV write to a peer leader. The
+// pebble fallback at the MV key must produce a synthetic descriptor.
+func TestDescribeReloadsViewFromPebbleOnColdCache(t *testing.T) {
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("pebble open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	hot, err := New(db)
+	if err != nil {
+		t.Fatalf("hot catalog: %v", err)
+	}
+	if err := hot.Create(types.TableDescriptor{
+		Name:      "base",
+		KeySchema: types.KeySchema{PK: "pk"},
+	}); err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if _, err := hot.CreateView(types.MaterializedViewDescriptor{
+		Name:      "v_cold",
+		BaseTable: "base",
+		KeySchema: types.KeySchema{PK: "vpk"},
+	}); err != nil {
+		t.Fatalf("create view: %v", err)
+	}
+
+	cold, err := New(db)
+	if err != nil {
+		t.Fatalf("cold catalog: %v", err)
+	}
+	cold.mu.Lock()
+	delete(cold.views, "v_cold")
+	delete(cold.tables, "v_cold")
+	cold.mu.Unlock()
+
+	td, err := cold.Describe("v_cold")
+	if err != nil {
+		t.Fatalf("Describe on cold cache: %v", err)
+	}
+	if td.Name != "v_cold" {
+		t.Errorf("Name = %q, want %q", td.Name, "v_cold")
+	}
+	if td.KeySchema.PK != "vpk" {
+		t.Errorf("KeySchema.PK = %q, want %q", td.KeySchema.PK, "vpk")
+	}
+}
+
 func TestScheduledRequiresInterval(t *testing.T) {
 	c := newTestCatalog(t)
 	mustCreateTable(t, c, "base")
