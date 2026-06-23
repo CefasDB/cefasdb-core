@@ -135,6 +135,11 @@ service Cefas {
   rpc BanditReward(BanditRewardRequest) returns (BanditRewardResponse);
   rpc BanditDescribe(BanditDescribeRequest) returns (BanditDescribeResponse);
 
+  // UpdateStreamSpecification (#525) flips a table's CDC capture on
+  // or off, swaps the view type, or adjusts the per-table retention
+  // (#521) without recreating the table.
+  rpc UpdateStreamSpecification(UpdateStreamSpecificationRequest) returns (UpdateStreamSpecificationResponse);
+
   // ===== Workload prioritization (epic #489) =====
   // CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
   // (#496); scheduling enforcement lands in Phase 3 (#498).
@@ -850,6 +855,18 @@ message GetRecordsResponse {
 }
 
 // TTL specification mirrors aws dynamodb update-time-to-live.
+message UpdateStreamSpecificationRequest {
+  string              table_name           = 1;
+  StreamSpecification stream_specification = 2;
+}
+
+message UpdateStreamSpecificationResponse {
+  StreamSpecification stream_specification = 1;
+  string              latest_stream_arn    = 2;
+  string              latest_stream_label  = 3;
+  string              stream_status        = 4;
+}
+
 message TimeToLiveSpecification {
   bool   enabled        = 1;
   string attribute_name = 2; // ignored when enabled = false
