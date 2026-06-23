@@ -1029,17 +1029,19 @@ func (p *parser) parseRefreshClause() (MVRefreshSpec, error) {
 	case tEager:
 		p.consume()
 		return MVRefreshSpec{Mode: "eager"}, nil
-	case tEvery:
+	case tFast:
 		p.consume()
-		n, err := p.expect(tNumber, "refresh interval")
+		if _, err := p.expect(tEvery, "EVERY"); err != nil {
+			return MVRefreshSpec{}, err
+		}
+		secs, err := p.parseEveryInterval()
 		if err != nil {
 			return MVRefreshSpec{}, err
 		}
-		val, err := strconv.ParseInt(n.Lit, 10, 64)
-		if err != nil || val <= 0 {
-			return MVRefreshSpec{}, fmt.Errorf("REFRESH EVERY: bad interval %q", n.Lit)
-		}
-		secs, err := p.parseRefreshUnit(val)
+		return MVRefreshSpec{Mode: "fast", IntervalSeconds: secs}, nil
+	case tEvery:
+		p.consume()
+		secs, err := p.parseEveryInterval()
 		if err != nil {
 			return MVRefreshSpec{}, err
 		}
@@ -1051,8 +1053,20 @@ func (p *parser) parseRefreshClause() (MVRefreshSpec, error) {
 		}
 		return MVRefreshSpec{Mode: "on_demand"}, nil
 	default:
-		return MVRefreshSpec{}, fmt.Errorf("expected EAGER, EVERY or ON DEMAND after REFRESH, got %q", p.peek().Lit)
+		return MVRefreshSpec{}, fmt.Errorf("expected EAGER, FAST, EVERY or ON DEMAND after REFRESH, got %q", p.peek().Lit)
 	}
+}
+
+func (p *parser) parseEveryInterval() (int64, error) {
+	n, err := p.expect(tNumber, "refresh interval")
+	if err != nil {
+		return 0, err
+	}
+	val, err := strconv.ParseInt(n.Lit, 10, 64)
+	if err != nil || val <= 0 {
+		return 0, fmt.Errorf("REFRESH EVERY: bad interval %q", n.Lit)
+	}
+	return p.parseRefreshUnit(val)
 }
 
 func (p *parser) parseRefreshUnit(val int64) (int64, error) {

@@ -77,6 +77,31 @@ func (s *GRPCServer) refreshFast(ctx context.Context, viewName string) (int64, e
 		return 0, status.Error(codes.FailedPrecondition, "catalog storage unavailable")
 	}
 
+	// FAST-4 fallback (#541): if retention has trimmed the changelog
+	// past our cursor, the delta is incomplete — fall back to a
+	// COMPLETE rescan, which produces an authoritative state without
+	// relying on the missing records. We probe before draining so the
+	// expensive scan only fires when needed. runCompleteRefresh is
+	// the inner driver (refreshComplete's body minus the single-
+	// flight) so we don't self-deadlock — refreshFast already holds
+	// the flight slot for viewName above.
+	if cursor > 0 {
+		stats, statsErr := catDB.StreamRetentionStats(mv.BaseTable)
+		if statsErr == nil && stats.OldestSequence > 0 && cursor+1 < stats.OldestSequence {
+			rows, err := s.runCompleteRefresh(ctx, mv)
+			if err != nil {
+				return rows, err
+			}
+			// Adopt the current changelog tail as the new FAST cursor so
+			// the next tick continues from where COMPLETE landed.
+			head, _ := catDB.CurrentChangeIndex()
+			if head > 0 {
+				_ = s.writeMVCursor(viewName, head)
+			}
+			return rows, nil
+		}
+	}
+
 	records, err := catDB.ChangeRecordsAfter(mv.BaseTable, cursor, 0, 0)
 	if err != nil {
 		return 0, status.Errorf(codes.Internal, "read changelog: %v", err)
