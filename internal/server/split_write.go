@@ -3,8 +3,8 @@ package server
 import (
 	"fmt"
 
-	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
 	"github.com/CefasDb/cefasdb/internal/cluster"
+	itemhttp "github.com/CefasDb/cefasdb/internal/server/http/item"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -57,7 +57,7 @@ func (t routedWriteTargets) PutItemWith(td types.TableDescriptor, item types.Ite
 		return err
 	}
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
+		if err := mirror.PutItemWith(td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
 			return err
 		}
 	}
@@ -78,7 +78,7 @@ func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.I
 
 func (t routedWriteTargets) MirrorPutItem(td types.TableDescriptor, item types.Item) error {
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, pebble.PutOptions{}); err != nil {
+		if err := mirror.PutItemWith(td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
 			return err
 		}
 	}

@@ -94,6 +94,9 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if len(opts.Actions) == 0 {
 		return AtomicResult{}, fmt.Errorf("atomic: at least one action required")
 	}
+	if err := validateAtomicCounterActions(td, opts.Actions); err != nil {
+		return AtomicResult{}, err
+	}
 	pk, sk, err := extractKeyBytes(keyAttrs, td.KeySchema)
 	if err != nil {
 		return AtomicResult{}, err
@@ -248,6 +251,29 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
 	return AtomicResult{Item: newItem, OldItem: priorItem, Returned: returned, Created: created}, nil
+}
+
+func validateAtomicCounterActions(td types.TableDescriptor, actions []AtomicAction) error {
+	counterAttrs := make(map[string]struct{}, len(td.AttributeDefinitions))
+	for _, def := range td.AttributeDefinitions {
+		if types.IsCounterAttributeType(def.Type) {
+			counterAttrs[def.Name] = struct{}{}
+		}
+	}
+	if len(counterAttrs) == 0 {
+		return nil
+	}
+	for i, act := range actions {
+		if _, ok := counterAttrs[act.Attribute]; !ok {
+			continue
+		}
+		switch act.Kind {
+		case AtomicActionIncrReturn, AtomicActionAddReturn:
+		default:
+			return fmt.Errorf("%w: action %d on counter attribute %q must use INCR_RETURN or ADD_RETURN", storage.ErrInvalidCounterMutation, i, act.Attribute)
+		}
+	}
+	return nil
 }
 
 func cloneItem(in types.Item) types.Item {

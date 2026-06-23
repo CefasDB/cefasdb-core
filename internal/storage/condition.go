@@ -15,6 +15,10 @@ import (
 // concurrency signal callers compare via errors.Is.
 var ErrConditionFailed = errors.New("cefas/storage: condition failed")
 
+// ErrInvalidCounterMutation is returned when a regular write path
+// attempts to set, overwrite, or remove a schema-level counter column.
+var ErrInvalidCounterMutation = errors.New("cefas/storage: counter columns must be mutated via AtomicUpdate")
+
 // Condition is a parsed expression ready for evaluation. Empty
 // expressions are valid and always succeed.
 //

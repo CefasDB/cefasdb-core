@@ -1,12 +1,14 @@
 package sql_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	cefassql "github.com/CefasDb/cefasdb/internal/sql"
+	"github.com/CefasDb/cefasdb/internal/storage"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -85,6 +87,20 @@ func TestParserCreateTableStorageAndVector(t *testing.T) {
 	}
 	if c.StorageClass != "memory" || len(c.AttributeDefinitions) != 1 || c.AttributeDefinitions[0].VectorDimensions != 3 {
 		t.Fatalf("unexpected create stmt: %+v", c)
+	}
+}
+
+func TestParserCreateTableCounter(t *testing.T) {
+	stmt, err := cefassql.Parse("CREATE TABLE counters (id S, views COUNTER, PRIMARY KEY (id))")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := stmt.(*cefassql.CreateTableStmt)
+	if !ok {
+		t.Fatalf("got %T", stmt)
+	}
+	if c.PK != "id" || len(c.AttributeDefinitions) != 2 || c.AttributeDefinitions[1].Type != types.AttributeTypeCounter {
+		t.Fatalf("unexpected counter definition: %+v", c.AttributeDefinitions)
 	}
 }
 
@@ -194,6 +210,45 @@ func TestEndToEndCreateInsertSelect(t *testing.T) {
 	res = run("SELECT * FROM events WHERE user_id = 'alice' ORDER BY ts DESC")
 	if len(res.Rows) != 2 || res.Rows[0]["ts"].S != "002" {
 		t.Fatalf("DESC order broken: %+v", res.Rows)
+	}
+}
+
+func TestCounterColumnsThroughSQL(t *testing.T) {
+	db, cat, ex := newSQL(t)
+	mustExec(t, ex, cat, "CREATE TABLE counters (id S, views COUNTER, PRIMARY KEY (id))")
+
+	plan, err := cefassql.Compile("INSERT INTO counters (id, views) VALUES ('page', 0)", cat)
+	if err != nil {
+		t.Fatalf("compile insert counter: %v", err)
+	}
+	_, err = ex.Execute(plan)
+	if !errors.Is(err, storage.ErrInvalidCounterMutation) {
+		t.Fatalf("insert counter error = %v, want ErrInvalidCounterMutation", err)
+	}
+
+	td, err := cat.Describe("counters")
+	if err != nil {
+		t.Fatalf("describe counters: %v", err)
+	}
+	if _, err := db.AtomicUpdate(td, types.Item{"id": {T: types.AttrS, S: "page"}}, pebble.AtomicOptions{
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "views",
+			Value:     types.AttributeValue{T: types.AttrN, N: "3"},
+		}},
+	}); err != nil {
+		t.Fatalf("atomic seed: %v", err)
+	}
+
+	mustExec(t, ex, cat, "UPDATE counters SET note = 'ok' WHERE id = 'page'")
+	res := mustExec(t, ex, cat, "SELECT * FROM counters WHERE id = 'page'")
+	if len(res.Rows) != 1 || res.Rows[0]["views"].N != "3" || res.Rows[0]["note"].S != "ok" {
+		t.Fatalf("unexpected counter row: %+v", res.Rows)
+	}
+
+	_, err = cefassql.Compile("UPDATE counters SET views = 4 WHERE id = 'page'", cat)
+	if err == nil || !strings.Contains(err.Error(), "counter column") {
+		t.Fatalf("expected counter UPDATE refusal, got %v", err)
 	}
 }
 

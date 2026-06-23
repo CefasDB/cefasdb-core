@@ -40,13 +40,38 @@ func NormalizeDescriptor(td *types.TableDescriptor) error {
 		return fmt.Errorf("storageClass %q must be %q or %q", td.StorageClass, types.StorageClassDisk, types.StorageClassMemory)
 	}
 	for i := range td.AttributeDefinitions {
-		td.AttributeDefinitions[i].Type = strings.ToUpper(strings.TrimSpace(td.AttributeDefinitions[i].Type))
-		if td.AttributeDefinitions[i].Type == "V" && td.AttributeDefinitions[i].VectorDimensions <= 0 {
-			return fmt.Errorf("attributeDefinitions[%d]: V requires vectorDimensions > 0", i)
+		def := &td.AttributeDefinitions[i]
+		def.Name = strings.TrimSpace(def.Name)
+		def.Type = types.NormalizeAttributeType(def.Type)
+		switch def.Type {
+		case types.AttributeTypeVector:
+			if def.VectorDimensions <= 0 {
+				return fmt.Errorf("%w: attributeDefinitions[%d]: V requires vectorDimensions > 0", types.ErrInvalidAttributeDefinition, i)
+			}
+		case types.AttributeTypeCounter:
+			if err := validateCounterDefinition(*def, td.KeySchema, i); err != nil {
+				return err
+			}
 		}
 	}
 	if err := NormalizeStreamDescriptor(td); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateCounterDefinition(def types.AttributeDefinition, ks types.KeySchema, index int) error {
+	if def.Name == "" {
+		return fmt.Errorf("%w: attributeDefinitions[%d]: counter attribute name required", types.ErrInvalidAttributeDefinition, index)
+	}
+	if def.Name == ks.PK || def.Name == ks.SK {
+		return fmt.Errorf("%w: counter attribute %q cannot be part of the primary key", types.ErrInvalidAttributeDefinition, def.Name)
+	}
+	if strings.ContainsAny(def.Name, ".[") || strings.Contains(def.Name, "]") {
+		return fmt.Errorf("%w: counter attribute %q must be a top-level attribute", types.ErrInvalidAttributeDefinition, def.Name)
+	}
+	if def.VectorDimensions != 0 {
+		return fmt.Errorf("%w: counter attribute %q cannot declare vectorDimensions", types.ErrInvalidAttributeDefinition, def.Name)
 	}
 	return nil
 }

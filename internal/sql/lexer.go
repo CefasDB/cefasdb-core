@@ -127,6 +127,7 @@ const (
 	tList
 	tGlobal
 	tProject
+	tCounter
 )
 
 // Token is a single lexer output. Lit carries the original source
@@ -208,6 +209,7 @@ var keywords = map[string]TokenKind{
 	"LIST":         tList,
 	"GLOBAL":       tGlobal,
 	"PROJECT":      tProject,
+	"COUNTER":      tCounter,
 }
 
 // Tokenize turns src into a slice of Tokens. Comments (-- to end of

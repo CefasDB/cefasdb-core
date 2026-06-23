@@ -28,7 +28,11 @@ func isMemoryTable(td types.TableDescriptor) bool {
 
 func validateDescriptorItem(td types.TableDescriptor, item types.Item) error {
 	for _, def := range td.AttributeDefinitions {
-		if strings.EqualFold(def.Type, "V") && def.VectorDimensions > 0 {
+		switch types.NormalizeAttributeType(def.Type) {
+		case types.AttributeTypeVector:
+			if def.VectorDimensions <= 0 {
+				continue
+			}
 			av, ok := item[def.Name]
 			if !ok {
 				continue
@@ -39,9 +43,44 @@ func validateDescriptorItem(td types.TableDescriptor, item types.Item) error {
 			if len(av.Vec) != def.VectorDimensions {
 				return fmt.Errorf("attribute %q: vector dim %d != declared dim %d", def.Name, len(av.Vec), def.VectorDimensions)
 			}
+		case types.AttributeTypeCounter:
+			av, ok := item[def.Name]
+			if !ok {
+				continue
+			}
+			if av.T != types.AttrN {
+				return fmt.Errorf("%w: attribute %q stores as N, got type %d", storage.ErrInvalidCounterMutation, def.Name, av.T)
+			}
 		}
 	}
 	return nil
+}
+
+func validatePutItemCounters(td types.TableDescriptor, prior, item types.Item, allowCounterWrite bool) error {
+	if allowCounterWrite {
+		return nil
+	}
+	for _, def := range td.AttributeDefinitions {
+		if !types.IsCounterAttributeType(def.Type) {
+			continue
+		}
+		if _, ok := item[def.Name]; ok {
+			return fmt.Errorf("%w: attribute %q", storage.ErrInvalidCounterMutation, def.Name)
+		}
+		if _, ok := prior[def.Name]; ok {
+			return fmt.Errorf("%w: PutItem would overwrite existing counter attribute %q", storage.ErrInvalidCounterMutation, def.Name)
+		}
+	}
+	return nil
+}
+
+func tableHasCounterDefinition(td types.TableDescriptor) bool {
+	for _, def := range td.AttributeDefinitions {
+		if types.IsCounterAttributeType(def.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *DB) memorySet(table string, key, value []byte) {

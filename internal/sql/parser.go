@@ -600,42 +600,33 @@ func (p *parser) parseCreate() (*CreateTableStmt, error) {
 	if _, err := p.expect(tLParen, "("); err != nil {
 		return nil, err
 	}
-	if _, err := p.expect(tPrimary, "PRIMARY"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tKey, "KEY"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tLParen, "("); err != nil {
-		return nil, err
-	}
-	pk, err := p.expect(tIdent, "PK column")
-	if err != nil {
-		return nil, err
-	}
-	stmt := &CreateTableStmt{Table: tn.Lit, PK: pk.Lit}
-	if p.peek().Kind == tComma {
+	stmt := &CreateTableStmt{Table: tn.Lit}
+	for {
+		switch p.peek().Kind {
+		case tPrimary:
+			if stmt.PK != "" {
+				return nil, fmt.Errorf("duplicate PRIMARY KEY")
+			}
+			if err := p.parseCreatePrimaryKey(stmt); err != nil {
+				return nil, err
+			}
+		case tIdent:
+			col := p.consume()
+			def, err := p.parseColumnDefinition(col.Lit)
+			if err != nil {
+				return nil, err
+			}
+			stmt.AttributeDefinitions = append(stmt.AttributeDefinitions, def)
+		default:
+			return nil, fmt.Errorf("expected column definition or PRIMARY KEY")
+		}
+		if p.peek().Kind != tComma {
+			break
+		}
 		p.consume()
-		sk, err := p.expect(tIdent, "SK column")
-		if err != nil {
-			return nil, err
-		}
-		stmt.SK = sk.Lit
 	}
-	if _, err := p.expect(tRParen, ")"); err != nil {
-		return nil, err
-	}
-	for p.peek().Kind == tComma {
-		p.consume()
-		col, err := p.expect(tIdent, "column name")
-		if err != nil {
-			return nil, err
-		}
-		def, err := p.parseColumnDefinition(col.Lit)
-		if err != nil {
-			return nil, err
-		}
-		stmt.AttributeDefinitions = append(stmt.AttributeDefinitions, def)
+	if stmt.PK == "" {
+		return nil, fmt.Errorf("PRIMARY KEY required")
 	}
 	if _, err := p.expect(tRParen, ")"); err != nil {
 		return nil, err
@@ -658,10 +649,40 @@ func (p *parser) parseCreate() (*CreateTableStmt, error) {
 	return stmt, nil
 }
 
-func (p *parser) parseColumnDefinition(name string) (CreateAttributeDefinition, error) {
-	typ, err := p.expect(tIdent, "attribute type")
+func (p *parser) parseCreatePrimaryKey(stmt *CreateTableStmt) error {
+	p.consume() // PRIMARY
+	if _, err := p.expect(tKey, "KEY"); err != nil {
+		return err
+	}
+	if _, err := p.expect(tLParen, "("); err != nil {
+		return err
+	}
+	pk, err := p.expect(tIdent, "PK column")
 	if err != nil {
-		return CreateAttributeDefinition{}, err
+		return err
+	}
+	stmt.PK = pk.Lit
+	if p.peek().Kind == tComma {
+		p.consume()
+		sk, err := p.expect(tIdent, "SK column")
+		if err != nil {
+			return err
+		}
+		stmt.SK = sk.Lit
+	}
+	if _, err := p.expect(tRParen, ")"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *parser) parseColumnDefinition(name string) (CreateAttributeDefinition, error) {
+	var typ Token
+	switch p.peek().Kind {
+	case tIdent, tCounter:
+		typ = p.consume()
+	default:
+		return CreateAttributeDefinition{}, fmt.Errorf("expected attribute type")
 	}
 	def := CreateAttributeDefinition{Name: name, Type: strings.ToUpper(typ.Lit)}
 	if strings.EqualFold(def.Type, "V") {

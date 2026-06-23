@@ -39,9 +39,7 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go RunStorageCollector(ctx, m, "solo", db, staticLeaderWithCompression{
+	stopCollector := startStorageCollectorForTest(m, "solo", db, staticLeaderWithCompression{
 		staticLeader: true,
 		stats: craft.LogCompressionStats{
 			RawBytes:           100,
@@ -49,6 +47,7 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 			CompressedPayloads: 1,
 		},
 	}, time.Millisecond)
+	defer stopCollector()
 
 	var body string
 	wait.Eventually(t, func() bool {
@@ -81,10 +80,12 @@ func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.ApplyStreamRetention(td.Name, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go RunStorageCollector(ctx, m, "solo", db, nil, time.Millisecond)
+	stopCollector := startStorageCollectorForTest(m, "solo", db, nil, time.Millisecond)
+	defer stopCollector()
 
 	var body string
 	wait.Eventually(t, func() bool {
@@ -92,6 +93,19 @@ func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 		return strings.Contains(body, `cefas_stream_records_appended{shard="solo",table="Events"} 1`) &&
 			strings.Contains(body, `cefas_stream_newest_sequence{shard="solo",table="Events"} 1`)
 	}, time.Second, 10*time.Millisecond, "metrics body missing expected stream retention series\n--- got ---\n%s", body)
+}
+
+func startStorageCollectorForTest(m *Metrics, label string, db *pebble.DB, leader LeaderGate, interval time.Duration) func() {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunStorageCollector(ctx, m, label, db, leader, interval)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func scrapeMetrics(t *testing.T, m *Metrics) string {

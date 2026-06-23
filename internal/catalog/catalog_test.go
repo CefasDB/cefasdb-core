@@ -83,6 +83,51 @@ func TestUpdateTableUnknownTable(t *testing.T) {
 	}
 }
 
+func TestCreateTableValidatesCounterColumns(t *testing.T) {
+	c := openCat(t)
+	if err := c.Create(types.TableDescriptor{
+		Name:      "Counters",
+		KeySchema: types.KeySchema{PK: "id"},
+		AttributeDefinitions: []types.AttributeDefinition{{
+			Name: "count",
+			Type: "counter",
+		}},
+	}); err != nil {
+		t.Fatalf("create counter table: %v", err)
+	}
+	got, err := c.Describe("Counters")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if got.AttributeDefinitions[0].Type != types.AttributeTypeCounter {
+		t.Fatalf("counter type = %q, want COUNTER", got.AttributeDefinitions[0].Type)
+	}
+
+	err = c.Create(types.TableDescriptor{
+		Name:      "BadCounterKey",
+		KeySchema: types.KeySchema{PK: "count"},
+		AttributeDefinitions: []types.AttributeDefinition{{
+			Name: "count",
+			Type: types.AttributeTypeCounter,
+		}},
+	})
+	if !errors.Is(err, types.ErrInvalidAttributeDefinition) {
+		t.Fatalf("counter key error = %v, want ErrInvalidAttributeDefinition", err)
+	}
+
+	err = c.Create(types.TableDescriptor{
+		Name:      "BadCounterPath",
+		KeySchema: types.KeySchema{PK: "id"},
+		AttributeDefinitions: []types.AttributeDefinition{{
+			Name: "metrics.count",
+			Type: types.AttributeTypeCounter,
+		}},
+	})
+	if !errors.Is(err, types.ErrInvalidAttributeDefinition) {
+		t.Fatalf("counter path error = %v, want ErrInvalidAttributeDefinition", err)
+	}
+}
+
 func TestUpdateTablePersistsAcrossReload(t *testing.T) {
 	c := openCat(t)
 	td := types.TableDescriptor{Name: "T", KeySchema: types.KeySchema{PK: "pk"}}
