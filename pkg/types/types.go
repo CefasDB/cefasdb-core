@@ -297,4 +297,23 @@ var (
 	ErrStreamTrimmed         = errors.New("cefas: stream sequence has been trimmed")
 	ErrMVNotFound            = errors.New("cefas: materialized view not found")
 	ErrMVAlreadyExists       = errors.New("cefas: materialized view already exists")
+	ErrServiceLevelNotFound  = errors.New("cefas: service level not found")
+	ErrServiceLevelExists    = errors.New("cefas: service level already exists")
+	ErrServiceLevelReserved  = errors.New("cefas: service level name is reserved")
 )
+
+// DefaultServiceLevelName is the implicit service level every caller
+// falls back to when no explicit SL is resolved. Cannot be dropped.
+const DefaultServiceLevelName = "default"
+
+// ServiceLevelDescriptor is the catalog object the workload
+// prioritization scheduler reads to size per-SL lanes. Shares is the
+// relative weight (1+); caps are advisory hints — Phase 4 (#499)
+// wires the rate limits, Phase 3 (#498) wires shares-based DRR.
+type ServiceLevelDescriptor struct {
+	Name           string `json:"name"`
+	Shares         int    `json:"shares,omitempty"`
+	MaxInFlight    int    `json:"maxInFlight,omitempty"`
+	MaxRowsPerSec  int64  `json:"maxRowsPerSec,omitempty"`
+	MaxBytesPerSec int64  `json:"maxBytesPerSec,omitempty"`
+}

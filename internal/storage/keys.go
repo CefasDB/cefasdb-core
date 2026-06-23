@@ -34,11 +34,12 @@ const (
 	pAdmin    = Namespace + "admin/"
 	pInternal = Namespace + "internal/"
 
-	pPluginIndex = pInternal + "plugin-index/"
-	pMVDesc      = pInternal + "mv/"
-	pMVCursor    = pInternal + "mv-cursor/"
-	pStreams     = pAdmin + "streams/by-arn/"
-	pStreamTrim  = pAdmin + "streams/retention/"
+	pPluginIndex  = pInternal + "plugin-index/"
+	pMVDesc       = pInternal + "mv/"
+	pMVCursor     = pInternal + "mv-cursor/"
+	pServiceLevel = pInternal + "service-level/"
+	pStreams      = pAdmin + "streams/by-arn/"
+	pStreamTrim   = pAdmin + "streams/retention/"
 
 	SegPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -654,4 +655,18 @@ func PrefixMaterializedViews() (lower, upper []byte) {
 // the cursor survives leader churn and gets replicated to followers.
 func KeyMVRefreshCursor(name string) []byte {
 	return []byte(pMVCursor + escapeKeySegment(name))
+}
+
+// KeyServiceLevel stores a workload-prioritization service-level
+// descriptor under the internal namespace.
+func KeyServiceLevel(name string) []byte {
+	return []byte(pServiceLevel + escapeKeySegment(name))
+}
+
+// PrefixServiceLevels covers every persisted service-level
+// descriptor — used by the catalog to bootstrap its in-memory map
+// at open.
+func PrefixServiceLevels() (lower, upper []byte) {
+	p := []byte(pServiceLevel)
+	return p, prefixUpper(p)
 }

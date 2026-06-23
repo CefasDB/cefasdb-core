@@ -92,6 +92,10 @@ const (
 	Cefas_BanditSample_FullMethodName             = "/cefas.v1.Cefas/BanditSample"
 	Cefas_BanditReward_FullMethodName             = "/cefas.v1.Cefas/BanditReward"
 	Cefas_BanditDescribe_FullMethodName           = "/cefas.v1.Cefas/BanditDescribe"
+	Cefas_CreateServiceLevel_FullMethodName       = "/cefas.v1.Cefas/CreateServiceLevel"
+	Cefas_AlterServiceLevel_FullMethodName        = "/cefas.v1.Cefas/AlterServiceLevel"
+	Cefas_DropServiceLevel_FullMethodName         = "/cefas.v1.Cefas/DropServiceLevel"
+	Cefas_ListServiceLevels_FullMethodName        = "/cefas.v1.Cefas/ListServiceLevels"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -199,6 +203,13 @@ type CefasClient interface {
 	BanditSample(ctx context.Context, in *BanditSampleRequest, opts ...grpc.CallOption) (*BanditSampleResponse, error)
 	BanditReward(ctx context.Context, in *BanditRewardRequest, opts ...grpc.CallOption) (*BanditRewardResponse, error)
 	BanditDescribe(ctx context.Context, in *BanditDescribeRequest, opts ...grpc.CallOption) (*BanditDescribeResponse, error)
+	// ===== Workload prioritization (epic #489) =====
+	// CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
+	// (#496); scheduling enforcement lands in Phase 3 (#498).
+	CreateServiceLevel(ctx context.Context, in *CreateServiceLevelRequest, opts ...grpc.CallOption) (*CreateServiceLevelResponse, error)
+	AlterServiceLevel(ctx context.Context, in *AlterServiceLevelRequest, opts ...grpc.CallOption) (*AlterServiceLevelResponse, error)
+	DropServiceLevel(ctx context.Context, in *DropServiceLevelRequest, opts ...grpc.CallOption) (*DropServiceLevelResponse, error)
+	ListServiceLevels(ctx context.Context, in *ListServiceLevelsRequest, opts ...grpc.CallOption) (*ListServiceLevelsResponse, error)
 }
 
 type cefasClient struct {
@@ -914,6 +925,46 @@ func (c *cefasClient) BanditDescribe(ctx context.Context, in *BanditDescribeRequ
 	return out, nil
 }
 
+func (c *cefasClient) CreateServiceLevel(ctx context.Context, in *CreateServiceLevelRequest, opts ...grpc.CallOption) (*CreateServiceLevelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateServiceLevelResponse)
+	err := c.cc.Invoke(ctx, Cefas_CreateServiceLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) AlterServiceLevel(ctx context.Context, in *AlterServiceLevelRequest, opts ...grpc.CallOption) (*AlterServiceLevelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AlterServiceLevelResponse)
+	err := c.cc.Invoke(ctx, Cefas_AlterServiceLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) DropServiceLevel(ctx context.Context, in *DropServiceLevelRequest, opts ...grpc.CallOption) (*DropServiceLevelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DropServiceLevelResponse)
+	err := c.cc.Invoke(ctx, Cefas_DropServiceLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ListServiceLevels(ctx context.Context, in *ListServiceLevelsRequest, opts ...grpc.CallOption) (*ListServiceLevelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListServiceLevelsResponse)
+	err := c.cc.Invoke(ctx, Cefas_ListServiceLevels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -1019,6 +1070,13 @@ type CefasServer interface {
 	BanditSample(context.Context, *BanditSampleRequest) (*BanditSampleResponse, error)
 	BanditReward(context.Context, *BanditRewardRequest) (*BanditRewardResponse, error)
 	BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error)
+	// ===== Workload prioritization (epic #489) =====
+	// CREATE/ALTER/DROP/LIST a service level. Catalog only in Phase 1
+	// (#496); scheduling enforcement lands in Phase 3 (#498).
+	CreateServiceLevel(context.Context, *CreateServiceLevelRequest) (*CreateServiceLevelResponse, error)
+	AlterServiceLevel(context.Context, *AlterServiceLevelRequest) (*AlterServiceLevelResponse, error)
+	DropServiceLevel(context.Context, *DropServiceLevelRequest) (*DropServiceLevelResponse, error)
+	ListServiceLevels(context.Context, *ListServiceLevelsRequest) (*ListServiceLevelsResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -1226,6 +1284,18 @@ func (UnimplementedCefasServer) BanditReward(context.Context, *BanditRewardReque
 }
 func (UnimplementedCefasServer) BanditDescribe(context.Context, *BanditDescribeRequest) (*BanditDescribeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BanditDescribe not implemented")
+}
+func (UnimplementedCefasServer) CreateServiceLevel(context.Context, *CreateServiceLevelRequest) (*CreateServiceLevelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateServiceLevel not implemented")
+}
+func (UnimplementedCefasServer) AlterServiceLevel(context.Context, *AlterServiceLevelRequest) (*AlterServiceLevelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterServiceLevel not implemented")
+}
+func (UnimplementedCefasServer) DropServiceLevel(context.Context, *DropServiceLevelRequest) (*DropServiceLevelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropServiceLevel not implemented")
+}
+func (UnimplementedCefasServer) ListServiceLevels(context.Context, *ListServiceLevelsRequest) (*ListServiceLevelsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListServiceLevels not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -2401,6 +2471,78 @@ func _Cefas_BanditDescribe_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_CreateServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateServiceLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).CreateServiceLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_CreateServiceLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).CreateServiceLevel(ctx, req.(*CreateServiceLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_AlterServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AlterServiceLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).AlterServiceLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_AlterServiceLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).AlterServiceLevel(ctx, req.(*AlterServiceLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_DropServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropServiceLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).DropServiceLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_DropServiceLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).DropServiceLevel(ctx, req.(*DropServiceLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ListServiceLevels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListServiceLevelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ListServiceLevels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ListServiceLevels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ListServiceLevels(ctx, req.(*ListServiceLevelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2651,6 +2793,22 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BanditDescribe",
 			Handler:    _Cefas_BanditDescribe_Handler,
+		},
+		{
+			MethodName: "CreateServiceLevel",
+			Handler:    _Cefas_CreateServiceLevel_Handler,
+		},
+		{
+			MethodName: "AlterServiceLevel",
+			Handler:    _Cefas_AlterServiceLevel_Handler,
+		},
+		{
+			MethodName: "DropServiceLevel",
+			Handler:    _Cefas_DropServiceLevel_Handler,
+		},
+		{
+			MethodName: "ListServiceLevels",
+			Handler:    _Cefas_ListServiceLevels_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

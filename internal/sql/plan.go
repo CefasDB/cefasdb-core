@@ -144,6 +144,24 @@ type PlanDropMaterializedView struct {
 	Name string
 }
 
+// PlanCreateServiceLevel is CREATE SERVICE LEVEL.
+type PlanCreateServiceLevel struct {
+	Descriptor types.ServiceLevelDescriptor
+}
+
+// PlanAlterServiceLevel is ALTER SERVICE LEVEL.
+type PlanAlterServiceLevel struct {
+	Descriptor types.ServiceLevelDescriptor
+}
+
+// PlanDropServiceLevel is DROP SERVICE LEVEL.
+type PlanDropServiceLevel struct {
+	Name string
+}
+
+// PlanListServiceLevels is LIST SERVICE LEVELS.
+type PlanListServiceLevels struct{}
+
 func (*PlanCreateTable) plan()            {}
 func (*PlanDropTable) plan()              {}
 func (*PlanGetItem) plan()                {}
@@ -156,6 +174,10 @@ func (*PlanUpdate) plan()                 {}
 func (*PlanDelete) plan()                 {}
 func (*PlanCreateMaterializedView) plan() {}
 func (*PlanDropMaterializedView) plan()   {}
+func (*PlanCreateServiceLevel) plan()     {}
+func (*PlanAlterServiceLevel) plan()      {}
+func (*PlanDropServiceLevel) plan()       {}
+func (*PlanListServiceLevels) plan()      {}
 
 // Explain renders the ANN plan for EXPLAIN output. The hybrid
 // filter node is stitched under the ANN scan so callers see both

@@ -154,6 +154,36 @@ type DropMaterializedViewStmt struct {
 	Name string
 }
 
+// ServiceLevelSpec holds the optional WITH clause for SL DDL.
+// Zero values mean "leave caps unspecified"; the executor / catalog
+// applies sensible defaults (Shares=1, no caps).
+type ServiceLevelSpec struct {
+	Shares         int
+	MaxInFlight    int
+	MaxRowsPerSec  int64
+	MaxBytesPerSec int64
+}
+
+// CreateServiceLevelStmt is CREATE SERVICE LEVEL <name> [WITH ...].
+type CreateServiceLevelStmt struct {
+	Name string
+	Spec ServiceLevelSpec
+}
+
+// AlterServiceLevelStmt is ALTER SERVICE LEVEL <name> WITH ...
+type AlterServiceLevelStmt struct {
+	Name string
+	Spec ServiceLevelSpec
+}
+
+// DropServiceLevelStmt is DROP SERVICE LEVEL <name>.
+type DropServiceLevelStmt struct {
+	Name string
+}
+
+// ListServiceLevelsStmt is LIST SERVICE LEVELS.
+type ListServiceLevelsStmt struct{}
+
 func (*SelectStmt) stmt()                 {}
 func (*InsertStmt) stmt()                 {}
 func (*UpdateStmt) stmt()                 {}
@@ -162,6 +192,10 @@ func (*CreateTableStmt) stmt()            {}
 func (*DropTableStmt) stmt()              {}
 func (*CreateMaterializedViewStmt) stmt() {}
 func (*DropMaterializedViewStmt) stmt()   {}
+func (*CreateServiceLevelStmt) stmt()     {}
+func (*AlterServiceLevelStmt) stmt()      {}
+func (*DropServiceLevelStmt) stmt()       {}
+func (*ListServiceLevelsStmt) stmt()      {}
 
 // Expr is the predicate / value-expression node interface.
 type Expr interface {
