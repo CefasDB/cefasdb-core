@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -45,7 +46,7 @@ func BenchmarkBatchWriteFanOutSingleShard(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := srv.batchWriteFanOut(td, ops); err != nil {
+		if err := srv.batchWriteFanOut(context.Background(), td, ops); err != nil {
 			b.Fatalf("fanOut: %v", err)
 		}
 	}

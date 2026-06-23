@@ -129,7 +129,7 @@ func (s *GRPCServer) driveRefresh(ctx context.Context, mv types.MaterializedView
 			if derived == nil {
 				continue
 			}
-			if err := s.writeMVRow(mv, derived); err != nil {
+			if err := s.writeMVRow(ctx, mv, derived); err != nil {
 				return fmt.Errorf("mv %s write: %w", mv.Name, err)
 			}
 			rows++
