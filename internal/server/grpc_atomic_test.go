@@ -168,6 +168,55 @@ func TestCounterColumnEnforcesAtomicIncrement(t *testing.T) {
 	}
 }
 
+func TestAtomicRequestIDDeduplicatesRetry(t *testing.T) {
+	cefas, atomic, cleanup := startAtomicFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	createTbl(t, cefas, "Dedup")
+
+	req := &cefaspb.AtomicUpdateRequest{
+		Table:     "Dedup",
+		RequestId: "retry-1",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "views"}},
+		},
+		Actions: []*cefaspb.AtomicAction{{
+			Kind:      cefaspb.AtomicActionKind_ATOMIC_INCR_RETURN,
+			Attribute: "count",
+			Value:     &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_N{N: "1"}},
+		}},
+	}
+	first, err := atomic.AtomicUpdate(ctx, req)
+	if err != nil {
+		t.Fatalf("first atomic update: %v", err)
+	}
+	if got := first.GetReturnedValues()[0].GetN(); got != "1" {
+		t.Fatalf("first returned = %q, want 1", got)
+	}
+
+	req.Actions[0].Value = &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_N{N: "99"}}
+	retry, err := atomic.AtomicUpdate(ctx, req)
+	if err != nil {
+		t.Fatalf("retry atomic update: %v", err)
+	}
+	if got := retry.GetReturnedValues()[0].GetN(); got != "1" {
+		t.Fatalf("retry returned = %q, want cached 1", got)
+	}
+
+	got, err := cefas.GetItem(ctx, &cefaspb.GetItemRequest{
+		Table: "Dedup",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "views"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.GetItem()["count"].GetN() != "1" {
+		t.Fatalf("stored count = %q, want 1", got.GetItem()["count"].GetN())
+	}
+}
+
 // TestAtomicIncrContended is the linearizability check from the
 // acceptance criteria: 10+ goroutines hammer a single key and the
 // final value must equal the sum of every delta the server

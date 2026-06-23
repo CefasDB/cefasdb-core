@@ -217,6 +217,89 @@ func TestCounterColumnRequiresAtomicUpdate(t *testing.T) {
 	}
 }
 
+func TestAtomicRequestIDDeduplicatesRetry(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{Name: "Counters", KeySchema: types.KeySchema{PK: "id"}}
+	key := types.Item{"id": sAttr("views")}
+
+	first, err := db.AtomicUpdate(td, key, pebble.AtomicOptions{
+		RequestID: "retry-1",
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "count",
+			Value:     nAttr("1"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("first atomic update: %v", err)
+	}
+	if !first.Created || first.Returned[0].N != "1" {
+		t.Fatalf("first result = %+v, want created count=1", first)
+	}
+
+	retry, err := db.AtomicUpdate(td, key, pebble.AtomicOptions{
+		RequestID: "retry-1",
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "count",
+			Value:     nAttr("99"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("retry atomic update: %v", err)
+	}
+	if !retry.Created || retry.Returned[0].N != "1" || retry.Item["count"].N != "1" {
+		t.Fatalf("retry result = %+v, want cached created count=1", retry)
+	}
+	got, err := db.GetItem("Counters", td.KeySchema, key)
+	if err != nil {
+		t.Fatalf("get after retry: %v", err)
+	}
+	if got["count"].N != "1" {
+		t.Fatalf("stored count = %q, want 1", got["count"].N)
+	}
+
+	next, err := db.AtomicUpdate(td, key, pebble.AtomicOptions{
+		RequestID: "retry-2",
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "count",
+			Value:     nAttr("4"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("second request id: %v", err)
+	}
+	if next.Returned[0].N != "5" {
+		t.Fatalf("new request result = %q, want 5", next.Returned[0].N)
+	}
+}
+
+func TestAtomicWithoutRequestIDKeepsLegacyAtLeastOnceSemantics(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{Name: "Counters", KeySchema: types.KeySchema{PK: "id"}}
+	key := types.Item{"id": sAttr("views")}
+	opts := pebble.AtomicOptions{
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "count",
+			Value:     nAttr("1"),
+		}},
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := db.AtomicUpdate(td, key, opts); err != nil {
+			t.Fatalf("atomic update %d: %v", i, err)
+		}
+	}
+	got, err := db.GetItem("Counters", td.KeySchema, key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got["count"].N != "2" {
+		t.Fatalf("stored count = %q, want 2", got["count"].N)
+	}
+}
+
 func TestEncodeDecodeItemRoundTrip(t *testing.T) {
 	item := types.Item{
 		"s":    sAttr("hello"),

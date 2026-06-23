@@ -36,6 +36,10 @@ type AtomicOptions struct {
 	// as PutItem / DeleteItem.
 	Condition string
 	Binds     map[string]types.AttributeValue
+	// RequestID enables at-most-once retry semantics for a short,
+	// in-memory per-shard dedup window. Empty preserves legacy
+	// at-least-once behavior.
+	RequestID string
 	// Actions are applied in declaration order against the snapshot
 	// of the item taken before the batch is built.
 	Actions []AtomicAction

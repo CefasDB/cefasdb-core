@@ -1,6 +1,7 @@
 package pebble
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -109,6 +110,10 @@ type DB struct {
 	memTables map[string]map[string][]byte
 	memLoaded map[string]bool
 
+	atomicDedupMu  sync.Mutex
+	atomicDedupLRU *list.List
+	atomicDedup    map[string]*list.Element
+
 	// changeIndex is monotonically advanced by appendChangeRecord via
 	// atomic.Add. Seeded in Open from max(persisted ChangeCounterKey,
 	// MAX(KeyChangeLog)) so a stale counter from a crash never overlaps
@@ -187,6 +192,8 @@ func Open(opts Options) (*DB, error) {
 		activeBackupRestores: make(map[string]int),
 		memTables:            make(map[string]map[string][]byte),
 		memLoaded:            make(map[string]bool),
+		atomicDedupLRU:       list.New(),
+		atomicDedup:          make(map[string]*list.Element),
 		streamTables:         make(map[string]struct{}),
 	}
 	if opts.AdaptiveMode {

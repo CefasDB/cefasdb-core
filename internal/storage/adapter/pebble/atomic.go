@@ -25,12 +25,14 @@
 package pebble
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
 	"hash/maphash"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
@@ -65,7 +67,12 @@ var ErrAtomicUnsupported = errors.New("cefas/storage: atomic action not supporte
 // is plenty for counter workloads: contention only matters when two
 // writers land on the same shard *and* the same bucket, which collapses
 // to a Mutex.Lock anyway.
-const atomicMutexShards = 64
+const (
+	atomicMutexShards     = 64
+	atomicDedupTTL        = 60 * time.Second
+	atomicDedupMaxEntries = 100_000
+	atomicDedupKeySep     = "\x00"
+)
 
 var (
 	atomicMu   [atomicMutexShards]sync.Mutex
@@ -102,6 +109,10 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 		return AtomicResult{}, err
 	}
 	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	dedupKey := ""
+	if strings.TrimSpace(opts.RequestID) != "" {
+		dedupKey = atomicDedupKey(primaryKey, opts.RequestID)
+	}
 
 	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
@@ -111,6 +122,11 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
+	if dedupKey != "" {
+		if cached, ok := d.atomicDedupGet(dedupKey, time.Now()); ok {
+			return cached, nil
+		}
+	}
 
 	prior, err := d.snapshotGet(primaryKey)
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -250,7 +266,11 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if isMemoryTable(td) {
 		d.memorySet(td.Name, primaryKey, encoded)
 	}
-	return AtomicResult{Item: newItem, OldItem: priorItem, Returned: returned, Created: created}, nil
+	res := AtomicResult{Item: newItem, OldItem: priorItem, Returned: returned, Created: created}
+	if dedupKey != "" {
+		d.atomicDedupStore(dedupKey, res, time.Now())
+	}
+	return res, nil
 }
 
 func validateAtomicCounterActions(td types.TableDescriptor, actions []AtomicAction) error {
@@ -274,6 +294,137 @@ func validateAtomicCounterActions(td types.TableDescriptor, actions []AtomicActi
 		}
 	}
 	return nil
+}
+
+type atomicDedupEntry struct {
+	key       string
+	expiresAt time.Time
+	result    AtomicResult
+}
+
+func atomicDedupKey(primaryKey []byte, requestID string) string {
+	return string(primaryKey) + atomicDedupKeySep + requestID
+}
+
+func (d *DB) atomicDedupGet(key string, now time.Time) (AtomicResult, bool) {
+	if d == nil {
+		return AtomicResult{}, false
+	}
+	d.atomicDedupMu.Lock()
+	defer d.atomicDedupMu.Unlock()
+	elem := d.atomicDedup[key]
+	if elem == nil {
+		return AtomicResult{}, false
+	}
+	entry := elem.Value.(*atomicDedupEntry)
+	if !now.Before(entry.expiresAt) {
+		d.atomicDedupRemove(elem)
+		return AtomicResult{}, false
+	}
+	d.atomicDedupLRU.MoveToFront(elem)
+	return cloneAtomicResult(entry.result), true
+}
+
+func (d *DB) atomicDedupStore(key string, result AtomicResult, now time.Time) {
+	if d == nil {
+		return
+	}
+	d.atomicDedupMu.Lock()
+	defer d.atomicDedupMu.Unlock()
+	if d.atomicDedupLRU == nil {
+		d.atomicDedupLRU = list.New()
+	}
+	if d.atomicDedup == nil {
+		d.atomicDedup = make(map[string]*list.Element)
+	}
+	if elem := d.atomicDedup[key]; elem != nil {
+		entry := elem.Value.(*atomicDedupEntry)
+		entry.expiresAt = now.Add(atomicDedupTTL)
+		entry.result = cloneAtomicResult(result)
+		d.atomicDedupLRU.MoveToFront(elem)
+		return
+	}
+	elem := d.atomicDedupLRU.PushFront(&atomicDedupEntry{
+		key:       key,
+		expiresAt: now.Add(atomicDedupTTL),
+		result:    cloneAtomicResult(result),
+	})
+	d.atomicDedup[key] = elem
+	d.atomicDedupEvict(now)
+}
+
+func (d *DB) atomicDedupEvict(now time.Time) {
+	for elem := d.atomicDedupLRU.Back(); elem != nil; elem = d.atomicDedupLRU.Back() {
+		entry := elem.Value.(*atomicDedupEntry)
+		if len(d.atomicDedup) <= atomicDedupMaxEntries && now.Before(entry.expiresAt) {
+			return
+		}
+		d.atomicDedupRemove(elem)
+	}
+}
+
+func (d *DB) atomicDedupRemove(elem *list.Element) {
+	entry := elem.Value.(*atomicDedupEntry)
+	delete(d.atomicDedup, entry.key)
+	d.atomicDedupLRU.Remove(elem)
+}
+
+func cloneAtomicResult(in AtomicResult) AtomicResult {
+	return AtomicResult{
+		Item:     cloneItemDeep(in.Item),
+		OldItem:  cloneItemDeep(in.OldItem),
+		Returned: cloneAttrValues(in.Returned),
+		Created:  in.Created,
+	}
+}
+
+func cloneItemDeep(in types.Item) types.Item {
+	if in == nil {
+		return nil
+	}
+	out := make(types.Item, len(in))
+	for k, v := range in {
+		out[k] = cloneAttrValue(v)
+	}
+	return out
+}
+
+func cloneAttrValues(in []types.AttributeValue) []types.AttributeValue {
+	if in == nil {
+		return nil
+	}
+	out := make([]types.AttributeValue, len(in))
+	for i, v := range in {
+		out[i] = cloneAttrValue(v)
+	}
+	return out
+}
+
+func cloneAttrValue(in types.AttributeValue) types.AttributeValue {
+	out := in
+	out.B = append([]byte(nil), in.B...)
+	out.SS = append([]string(nil), in.SS...)
+	out.NS = append([]string(nil), in.NS...)
+	if in.BS != nil {
+		out.BS = make([][]byte, len(in.BS))
+		for i := range in.BS {
+			out.BS[i] = append([]byte(nil), in.BS[i]...)
+		}
+	}
+	if in.L != nil {
+		out.L = make([]types.AttributeValue, len(in.L))
+		for i := range in.L {
+			out.L[i] = cloneAttrValue(in.L[i])
+		}
+	}
+	if in.M != nil {
+		out.M = make(map[string]types.AttributeValue, len(in.M))
+		for k, v := range in.M {
+			out.M[k] = cloneAttrValue(v)
+		}
+	}
+	out.Vec = append([]float64(nil), in.Vec...)
+	return out
 }
 
 func cloneItem(in types.Item) types.Item {
