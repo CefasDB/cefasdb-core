@@ -97,6 +97,17 @@ func (m *Manager) BatchWriteMVToPeer(ctx context.Context, peerID, addr string, r
 	return err
 }
 
+// BatchWriteGIToPeer forwards a global-index cascade bucket. Same
+// RF=1 contract as BatchWriteMVToPeer; see Replica.BatchWriteGI.
+func (m *Manager) BatchWriteGIToPeer(ctx context.Context, peerID, addr string, req *cefaspb.BatchWriteGIRequest) error {
+	conn, err := m.peerWriteConn(ctx, peerID, addr)
+	if err != nil {
+		return fmt.Errorf("dial peer %s: %w", peerID, err)
+	}
+	_, err = cefaspb.NewReplicaClient(conn).BatchWriteGI(ctx, req)
+	return err
+}
+
 // PeerDescribeView calls DescribeMaterializedView on the named peer
 // to confirm the catalog entry has propagated. Returns nil when the
 // peer's catalog can resolve the view; gRPC NotFound surfaces as a

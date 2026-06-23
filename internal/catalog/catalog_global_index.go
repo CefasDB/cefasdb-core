@@ -58,18 +58,45 @@ func (c *Catalog) CreateGlobalIndex(gi types.GlobalIndexDescriptor) (types.Globa
 	if _, exists := c.views[gi.Name]; exists {
 		return types.GlobalIndexDescriptor{}, fmt.Errorf("name %q clashes with an existing materialized view", gi.Name)
 	}
-	if _, ok := c.tables[gi.BaseTable]; !ok {
+	base, ok := c.tables[gi.BaseTable]
+	if !ok {
 		return types.GlobalIndexDescriptor{}, fmt.Errorf("base table %q: %w", gi.BaseTable, types.ErrTableNotFound)
 	}
 	raw, err := json.Marshal(gi)
 	if err != nil {
 		return types.GlobalIndexDescriptor{}, fmt.Errorf("marshal global-index: %w", err)
 	}
-	if err := c.db.Set(storage.KeyGlobalIndex(gi.Name), raw); err != nil {
+	batch := c.db.Batch()
+	defer batch.Close()
+	if err := batch.Set(storage.KeyGlobalIndex(gi.Name), raw, nil); err != nil {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("batch global-index: %w", err)
+	}
+	// Attach to the base descriptor so the write hook reads the
+	// updated list without a separate ListGlobalIndexes call.
+	updatedBase := base
+	updatedBase.GlobalIndexes = appendUnique(updatedBase.GlobalIndexes, gi.Name)
+	baseRaw, err := json.Marshal(updatedBase)
+	if err != nil {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("marshal base for GI attach: %w", err)
+	}
+	if err := batch.Set(storage.KeyCatalog(updatedBase.Name), baseRaw, nil); err != nil {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("batch base attach: %w", err)
+	}
+	if err := c.db.CommitBatch(batch); err != nil {
 		return types.GlobalIndexDescriptor{}, fmt.Errorf("persist global-index: %w", err)
 	}
 	c.globalIndexes[gi.Name] = gi
+	c.tables[updatedBase.Name] = updatedBase
 	return gi, nil
+}
+
+func appendUnique(in []string, v string) []string {
+	for _, s := range in {
+		if s == v {
+			return in
+		}
+	}
+	return append(in, v)
 }
 
 // DescribeGlobalIndex returns the cached descriptor; falls back to a
@@ -106,14 +133,42 @@ func (c *Catalog) DropGlobalIndex(name string) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, exists := c.globalIndexes[name]; !exists {
+	gi, exists := c.globalIndexes[name]
+	if !exists {
 		return types.ErrGlobalIndexNotFound
 	}
-	if err := c.db.Delete(storage.KeyGlobalIndex(name)); err != nil {
-		return fmt.Errorf("delete global-index: %w", err)
+	batch := c.db.Batch()
+	defer batch.Close()
+	if err := batch.Delete(storage.KeyGlobalIndex(name), nil); err != nil {
+		return fmt.Errorf("batch delete global-index: %w", err)
+	}
+	if base, ok := c.tables[gi.BaseTable]; ok {
+		updatedBase := base
+		updatedBase.GlobalIndexes = removeString(updatedBase.GlobalIndexes, name)
+		baseRaw, err := json.Marshal(updatedBase)
+		if err != nil {
+			return fmt.Errorf("marshal base for GI detach: %w", err)
+		}
+		if err := batch.Set(storage.KeyCatalog(updatedBase.Name), baseRaw, nil); err != nil {
+			return fmt.Errorf("batch base detach: %w", err)
+		}
+		c.tables[updatedBase.Name] = updatedBase
+	}
+	if err := c.db.CommitBatch(batch); err != nil {
+		return fmt.Errorf("persist drop: %w", err)
 	}
 	delete(c.globalIndexes, name)
 	return nil
+}
+
+func removeString(in []string, v string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != v {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ListGlobalIndexes returns every descriptor optionally filtered to

@@ -224,6 +224,12 @@ service Replica {
   // RefreshMaterializedView. Skipping consensus eliminates the
   // cascade's per-shard raft latency on every base BatchWriteItem.
   rpc BatchWriteMV(BatchWriteMVRequest) returns (BatchWriteMVResponse);
+
+  // BatchWriteGI applies a global-secondary-index cascade directly
+  // to the receiving node's local pebble store, bypassing raft.
+  // Same RF=1 rationale as BatchWriteMV: pointer rows are
+  // reconstructible from the base via RebuildGlobalIndex.
+  rpc BatchWriteGI(BatchWriteGIRequest) returns (BatchWriteGIResponse);
 }
 
 message ScanShardRequest {
@@ -248,6 +254,16 @@ message BatchWriteMVRequest {
 }
 
 message BatchWriteMVResponse {}
+
+// BatchWriteGIRequest carries a coalesced global-index cascade for
+// the named index. The receiver resolves the index descriptor and
+// writes pointer rows to its local pebble store without raft.
+message BatchWriteGIRequest {
+  string                index = 1;
+  repeated BatchWriteOp ops   = 2;
+}
+
+message BatchWriteGIResponse {}
 
 message IndexCandidate {
   // Primary attributes of the candidate item as the plugin recorded

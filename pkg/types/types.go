@@ -236,6 +236,10 @@ type TableDescriptor struct {
 	StreamStatus        string               `json:"streamStatus,omitempty"`
 	// MaterializedViews names the views whose base is this table.
 	MaterializedViews []string `json:"materializedViews,omitempty"`
+	// GlobalIndexes names the ScyllaDB-style global indexes attached
+	// to this base table (epic #509). The write hook in #511 reads
+	// this list to fan out per-mutation index updates.
+	GlobalIndexes []string `json:"globalIndexes,omitempty"`
 }
 
 // RefreshMode mirrors cefaspb.RefreshPolicy_Mode.
