@@ -74,6 +74,24 @@ type wrappedStream struct {
 
 func (w *wrappedStream) Context() context.Context { return w.ctx }
 
+// ServiceLevelInterceptor resolves the request's service level
+// (header → claim → default) and attaches it to ctx via
+// auth.WithServiceLevel. Wired unconditionally — workload
+// prioritization needs the tag whether or not auth is enabled.
+// Phase 1 of #498 will use the cached tag to pick a per-SL lane;
+// Phase 1 of #496 only attaches it for observability.
+func ServiceLevelInterceptor() (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		ctx = auth.WithServiceLevel(ctx, ResolveServiceLevel(ctx))
+		return handler(ctx, req)
+	}
+	stream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx := auth.WithServiceLevel(ss.Context(), ResolveServiceLevel(ss.Context()))
+		return handler(srv, &wrappedStream{ServerStream: ss, ctx: ctx})
+	}
+	return unary, stream
+}
+
 func extractBearerFromMD(md metadata.MD) (string, error) {
 	auths := md.Get("authorization")
 	if len(auths) == 0 {

@@ -15,15 +15,16 @@ import (
 )
 
 // TestBuildGRPCOpts_NoTLS_NoValidator verifies the happy "plaintext,
-// unauthenticated" path: no TLS material, no validator -> zero options
-// and no error.
+// unauthenticated" path: no TLS material, no validator. The service-
+// level interceptor still gets wired (always-on for #489), so we
+// expect the two interceptor-chain options.
 func TestBuildGRPCOpts_NoTLS_NoValidator(t *testing.T) {
 	opts, err := BuildGRPCOpts(nil, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(opts) != 0 {
-		t.Fatalf("expected 0 options, got %d", len(opts))
+	if len(opts) != 2 {
+		t.Fatalf("expected 2 options (chain unary + stream), got %d", len(opts))
 	}
 }
 
@@ -56,8 +57,8 @@ func TestBuildGRPCOpts_TLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(opts) != 1 {
-		t.Fatalf("expected 1 option (Creds), got %d", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("expected 3 options (Creds + 2 interceptor chains), got %d", len(opts))
 	}
 }
 
@@ -69,8 +70,8 @@ func TestBuildGRPCOpts_MTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(opts) != 1 {
-		t.Fatalf("expected 1 option (Creds), got %d", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("expected 3 options (Creds + 2 interceptor chains), got %d", len(opts))
 	}
 }
 
