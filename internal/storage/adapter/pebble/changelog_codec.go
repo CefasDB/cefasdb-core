@@ -39,6 +39,11 @@ const (
 	flagStreamViewType uint16 = 1 << 5
 	flagSizeBytes      uint16 = 1 << 6
 	flagKey            uint16 = 1 << 7
+	// #524 idempotency markers — additive, off-default for legacy
+	// records that pre-date the field set.
+	flagBatchID    uint16 = 1 << 8
+	flagSeqInBatch uint16 = 1 << 9
+	flagOpKind     uint16 = 1 << 10
 )
 
 // encodeChangeRecord serializes rec to the on-disk binary format. Always
@@ -82,6 +87,15 @@ func encodeChangeRecord(dst []byte, rec ChangeRecord) ([]byte, error) {
 	}
 	if rec.Key != nil {
 		flags |= flagKey
+	}
+	if rec.BatchID != "" {
+		flags |= flagBatchID
+	}
+	if rec.SeqInBatch != 0 {
+		flags |= flagSeqInBatch
+	}
+	if rec.OpKind != "" {
+		flags |= flagOpKind
 	}
 	dst = binary.BigEndian.AppendUint16(dst, flags)
 
@@ -135,6 +149,15 @@ func encodeChangeRecord(dst []byte, rec ChangeRecord) ([]byte, error) {
 		if err != nil {
 			return dst, fmt.Errorf("encode change record new item: %w", err)
 		}
+	}
+	if flags&flagBatchID != 0 {
+		dst = appendLenString(dst, rec.BatchID)
+	}
+	if flags&flagSeqInBatch != 0 {
+		dst = binary.BigEndian.AppendUint32(dst, uint32(rec.SeqInBatch))
+	}
+	if flags&flagOpKind != 0 {
+		dst = appendLenString(dst, rec.OpKind)
 	}
 	return dst, nil
 }
@@ -250,10 +273,29 @@ func decodeChangeRecordBinaryV1(p []byte) (ChangeRecord, error) {
 	}
 	if flags&flagNewItem != 0 {
 		var item types.Item
-		if item, _, err = readItem(p); err != nil {
+		if item, p, err = readItem(p); err != nil {
 			return rec, fmt.Errorf("decode change record v1 new item: %w", err)
 		}
 		rec.NewItem = item
+	}
+	if flags&flagBatchID != 0 {
+		if s, p, err = readLenString(p); err != nil {
+			return rec, fmt.Errorf("decode change record v1 batch id: %w", err)
+		}
+		rec.BatchID = s
+	}
+	if flags&flagSeqInBatch != 0 {
+		if len(p) < 4 {
+			return rec, fmt.Errorf("decode change record v1 seq in batch: short")
+		}
+		rec.SeqInBatch = int32(binary.BigEndian.Uint32(p[:4]))
+		p = p[4:]
+	}
+	if flags&flagOpKind != 0 {
+		if s, _, err = readLenString(p); err != nil {
+			return rec, fmt.Errorf("decode change record v1 op kind: %w", err)
+		}
+		rec.OpKind = s
 	}
 	return rec, nil
 }

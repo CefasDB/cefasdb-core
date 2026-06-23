@@ -235,7 +235,9 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 		return AtomicResult{}, err
 	}
 	if d.shouldAppendChangeRecord(td) {
-		if _, err := d.appendChangeRecord(b, newChangeRecord(td, ChangePut, keyItemFromItem(newItem, td.KeySchema), priorItem, newItem)); err != nil {
+		rec := newChangeRecord(td, ChangePut, keyItemFromItem(newItem, td.KeySchema), priorItem, newItem)
+		rec.BatchID = d.nextBatchID()
+		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return AtomicResult{}, fmt.Errorf("change log: %w", err)
 		}
 	}

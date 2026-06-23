@@ -415,6 +415,95 @@ func TestStreamRetentionPerTableOverride(t *testing.T) {
 	}
 }
 
+// TestChangeRecordIdempotencyMarkers exercises #524: a single
+// BatchWriteItem invocation tags every emitted ChangeRecord with
+// the same BatchID and a monotonic 0-indexed SeqInBatch, plus an
+// OpKind classification that mirrors the stream EventName.
+func TestChangeRecordIdempotencyMarkers(t *testing.T) {
+	db := openChangeLogTestDB(t)
+	td := types.TableDescriptor{
+		Name:      "Orders",
+		KeySchema: types.KeySchema{PK: "id"},
+		StreamSpecification: &types.StreamSpecification{
+			StreamEnabled:  true,
+			StreamViewType: types.StreamViewTypeNewAndOldImages,
+		},
+	}
+	ops := []BatchOp{
+		{Op: BatchOpPut, Item: types.Item{"id": streamS("o1"), "status": streamS("open")}},
+		{Op: BatchOpPut, Item: types.Item{"id": streamS("o2"), "status": streamS("open")}},
+		{Op: BatchOpPut, Item: types.Item{"id": streamS("o3"), "status": streamS("open")}},
+	}
+	if err := db.BatchWriteItem(td, ops); err != nil {
+		t.Fatalf("BatchWriteItem: %v", err)
+	}
+
+	records, _, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("StreamRecords: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records = %d, want 3", len(records))
+	}
+	batchID := records[0].BatchID
+	if batchID == "" {
+		t.Fatal("BatchID empty on first record")
+	}
+	for i, rec := range records {
+		if rec.BatchID != batchID {
+			t.Errorf("record %d BatchID = %q, want shared %q", i, rec.BatchID, batchID)
+		}
+		if int(rec.SeqInBatch) != i {
+			t.Errorf("record %d SeqInBatch = %d, want %d", i, rec.SeqInBatch, i)
+		}
+		if rec.OpKind != string(ChangeEventInsert) {
+			t.Errorf("record %d OpKind = %q, want INSERT", i, rec.OpKind)
+		}
+	}
+}
+
+// TestChangeRecord_OpKindClassification covers MODIFY (put over
+// existing row) + REMOVE (delete) classifications.
+func TestChangeRecord_OpKindClassification(t *testing.T) {
+	db := openChangeLogTestDB(t)
+	td := streamTestTable()
+
+	item := types.Item{"id": streamS("x"), "v": streamS("1")}
+	if err := db.PutItemWith(td, item, PutOptions{}); err != nil {
+		t.Fatalf("put 1: %v", err)
+	}
+	// Overwrite — MODIFY
+	item2 := types.Item{"id": streamS("x"), "v": streamS("2")}
+	if err := db.PutItemWith(td, item2, PutOptions{}); err != nil {
+		t.Fatalf("put 2: %v", err)
+	}
+	// Delete — REMOVE
+	if err := db.DeleteItemWith(td, types.Item{"id": streamS("x")}, DeleteOptions{}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	records, _, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("StreamRecords: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records = %d, want 3", len(records))
+	}
+	wantKinds := []string{
+		string(ChangeEventInsert),
+		string(ChangeEventModify),
+		string(ChangeEventRemove),
+	}
+	for i, want := range wantKinds {
+		if records[i].OpKind != want {
+			t.Errorf("record %d OpKind = %q, want %q", i, records[i].OpKind, want)
+		}
+		if records[i].BatchID == "" {
+			t.Errorf("record %d missing BatchID", i)
+		}
+	}
+}
+
 func TestStreamRetentionMetadataSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	td := streamTestTable()
