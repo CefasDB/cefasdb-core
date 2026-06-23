@@ -47,6 +47,8 @@ type cfg struct {
 	WithStream            bool
 	WithPluginIndex       string
 	WithMVEager           bool
+	WithMVFast            bool
+	MVFastIntervalSeconds int64
 	JSONOutput            string
 	Label                 string
 }
@@ -258,6 +260,8 @@ func parseFlags() cfg {
 	flag.BoolVar(&c.WithStream, "with-stream", false, "create the bench table with StreamSpecification enabled (NEW_AND_OLD_IMAGES) so write paths exercise the changelog + retention loop; required to validate Wave 1+ retention/changelog initiatives")
 	flag.StringVar(&c.WithPluginIndex, "with-plugin-index", "", "comma-separated list of plugin names. After CreateTable, attaches one bench-idx-<plugin> per name so write paths exercise applyPluginIndexPlan with as many descriptors as supplied. Empty disables.")
 	flag.BoolVar(&c.WithMVEager, "with-mv-eager", false, "after CreateTable, attach a materialized view (REFRESH EAGER) so write paths exercise applyMVEagerPut. The view's PK is the base SK, SK is the base PK — gives a non-trivial reshuffle.")
+	flag.BoolVar(&c.WithMVFast, "with-mv-fast", false, "after CreateTable, attach a materialized view (REFRESH FAST) — the base table is created with streams enabled and the view is reconciled from the changelog on the scheduler tick. Mutually exclusive with -with-mv-eager.")
+	flag.Int64Var(&c.MVFastIntervalSeconds, "mv-fast-interval", 5, "REFRESH FAST interval in seconds (used with -with-mv-fast)")
 	flag.StringVar(&c.JSONOutput, "json-output", "", "write benchmark summary JSON to this file")
 	flag.StringVar(&c.Label, "label", "", "label stored in JSON report")
 	flag.Parse()
@@ -1127,8 +1131,18 @@ func fatal(msg string, err error) {
 // produces a reshuffled MV row — useful to measure the eager hook
 // cost without the trivial identity-projection short-circuit.
 func ensureMVEager(ctx context.Context, c cfg, cs *clients) error {
-	if !c.WithMVEager {
+	if !c.WithMVEager && !c.WithMVFast {
 		return nil
+	}
+	policy := client.RefreshPolicy{Mode: client.RefreshModeEager}
+	label := "EAGER"
+	if c.WithMVFast {
+		interval := c.MVFastIntervalSeconds
+		if interval <= 0 {
+			interval = 5
+		}
+		policy = client.RefreshPolicy{Mode: client.RefreshModeFast, IntervalSeconds: interval}
+		label = fmt.Sprintf("FAST every %ds", interval)
 	}
 	mvName := "bench-mv-" + c.Table
 	for _, nodeID := range cs.order {
@@ -1137,10 +1151,10 @@ func ensureMVEager(ctx context.Context, c cfg, cs *clients) error {
 			continue
 		}
 		rpcCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_, err := cli.CreateMaterializedView(rpcCtx, mvName, c.Table, types.KeySchema{PK: "sk", SK: "pk"}, nil, client.RefreshPolicy{Mode: client.RefreshModeEager})
+		_, err := cli.CreateMaterializedView(rpcCtx, mvName, c.Table, types.KeySchema{PK: "sk", SK: "pk"}, nil, policy)
 		cancel()
 		if err == nil {
-			fmt.Printf("attached materialized view: name=%s base=%s via %s\n", mvName, c.Table, nodeID)
+			fmt.Printf("attached materialized view: name=%s base=%s mode=%s via %s\n", mvName, c.Table, label, nodeID)
 			return nil
 		}
 		msg := strings.ToLower(err.Error())
