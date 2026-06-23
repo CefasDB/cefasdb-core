@@ -147,7 +147,36 @@ service Cefas {
   // persisted on the SL descriptor and survives restart.
   rpc PauseServiceLevel(PauseServiceLevelRequest) returns (PauseServiceLevelResponse);
   rpc ResumeServiceLevel(ResumeServiceLevelRequest) returns (ResumeServiceLevelResponse);
+
+  // ===== Global secondary indexes (epic #509) =====
+  // CREATE INDEX <name> AS GLOBAL ON <base> (<col>) [PROJECT (<...>)]
+  // Phase 1 (#510) persists the descriptor only; later phases wire
+  // the write hook (#511), read routing (#512), backfill (#513).
+  rpc CreateGlobalIndex(CreateGlobalIndexRequest) returns (CreateGlobalIndexResponse);
+  rpc DescribeGlobalIndex(DescribeGlobalIndexRequest) returns (DescribeGlobalIndexResponse);
+  rpc DropGlobalIndex(DropGlobalIndexRequest) returns (DropGlobalIndexResponse);
+  rpc ListGlobalIndexes(ListGlobalIndexesRequest) returns (ListGlobalIndexesResponse);
 }
+
+message GlobalIndexDescriptor {
+  string          name                = 1;
+  string          base_table          = 2;
+  string          indexed_column      = 3;
+  repeated string projected_columns   = 4;
+  string          status              = 5;
+  int32           shards              = 6;
+  int32           replication_factor  = 7;
+  bool            paused              = 8;
+}
+
+message CreateGlobalIndexRequest    { GlobalIndexDescriptor descriptor = 1; }
+message CreateGlobalIndexResponse   { GlobalIndexDescriptor descriptor = 1; }
+message DescribeGlobalIndexRequest  { string name = 1; }
+message DescribeGlobalIndexResponse { GlobalIndexDescriptor descriptor = 1; }
+message DropGlobalIndexRequest      { string name = 1; }
+message DropGlobalIndexResponse     {}
+message ListGlobalIndexesRequest    { string base_table = 1; }
+message ListGlobalIndexesResponse   { repeated GlobalIndexDescriptor indexes = 1; }
 
 message ServiceLevelDescriptor {
   string name              = 1;

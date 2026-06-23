@@ -49,6 +49,17 @@ func PlanStmt(stmt Stmt, cat Catalog) (Plan, error) {
 		return &PlanDropServiceLevel{Name: s.Name}, nil
 	case *ListServiceLevelsStmt:
 		return &PlanListServiceLevels{}, nil
+	case *CreateGlobalIndexStmt:
+		return &PlanCreateGlobalIndex{Descriptor: types.GlobalIndexDescriptor{
+			Name:              s.Name,
+			BaseTable:         s.BaseTable,
+			IndexedColumn:     s.IndexedColumn,
+			ProjectedColumns:  append([]string(nil), s.Projected...),
+			Shards:            s.Shards,
+			ReplicationFactor: s.ReplicationFactor,
+		}}, nil
+	case *DropGlobalIndexStmt:
+		return &PlanDropGlobalIndex{Name: s.Name}, nil
 	}
 	return nil, fmt.Errorf("unsupported statement type %T", stmt)
 }

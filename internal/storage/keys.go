@@ -38,6 +38,7 @@ const (
 	pMVDesc       = pInternal + "mv/"
 	pMVCursor     = pInternal + "mv-cursor/"
 	pServiceLevel = pInternal + "service-level/"
+	pGlobalIndex  = pInternal + "global-index/"
 	pStreams      = pAdmin + "streams/by-arn/"
 	pStreamTrim   = pAdmin + "streams/retention/"
 
@@ -668,5 +669,20 @@ func KeyServiceLevel(name string) []byte {
 // at open.
 func PrefixServiceLevels() (lower, upper []byte) {
 	p := []byte(pServiceLevel)
+	return p, prefixUpper(p)
+}
+
+// KeyGlobalIndex stores a global secondary index descriptor under
+// the internal namespace. Pointer rows in the index live under a
+// separate prefix once Phase 2 (#511) lands; the descriptor is
+// independent.
+func KeyGlobalIndex(name string) []byte {
+	return []byte(pGlobalIndex + escapeKeySegment(name))
+}
+
+// PrefixGlobalIndexes covers every persisted descriptor — used by
+// the catalog to bootstrap its in-memory map at open.
+func PrefixGlobalIndexes() (lower, upper []byte) {
+	p := []byte(pGlobalIndex)
 	return p, prefixUpper(p)
 }

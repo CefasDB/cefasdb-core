@@ -184,6 +184,28 @@ type DropServiceLevelStmt struct {
 // ListServiceLevelsStmt is LIST SERVICE LEVELS.
 type ListServiceLevelsStmt struct{}
 
+// CreateGlobalIndexStmt is
+//
+//	CREATE INDEX <name> AS GLOBAL ON <table> (<column>)
+//	  [PROJECT (<col> [, <col>]+)]
+//	  [WITH SHARDS=N REPLICATION_FACTOR=R]
+//
+// The projection list is optional; empty means "pointer only" (the
+// reader will GetItem the base for non-projected columns).
+type CreateGlobalIndexStmt struct {
+	Name              string
+	BaseTable         string
+	IndexedColumn     string
+	Projected         []string
+	Shards            int
+	ReplicationFactor int
+}
+
+// DropGlobalIndexStmt is DROP INDEX <name>.
+type DropGlobalIndexStmt struct {
+	Name string
+}
+
 func (*SelectStmt) stmt()                 {}
 func (*InsertStmt) stmt()                 {}
 func (*UpdateStmt) stmt()                 {}
@@ -196,6 +218,8 @@ func (*CreateServiceLevelStmt) stmt()     {}
 func (*AlterServiceLevelStmt) stmt()      {}
 func (*DropServiceLevelStmt) stmt()       {}
 func (*ListServiceLevelsStmt) stmt()      {}
+func (*CreateGlobalIndexStmt) stmt()      {}
+func (*DropGlobalIndexStmt) stmt()        {}
 
 // Expr is the predicate / value-expression node interface.
 type Expr interface {

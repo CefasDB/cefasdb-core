@@ -162,6 +162,16 @@ type PlanDropServiceLevel struct {
 // PlanListServiceLevels is LIST SERVICE LEVELS.
 type PlanListServiceLevels struct{}
 
+// PlanCreateGlobalIndex is CREATE INDEX ... AS GLOBAL.
+type PlanCreateGlobalIndex struct {
+	Descriptor types.GlobalIndexDescriptor
+}
+
+// PlanDropGlobalIndex is DROP INDEX.
+type PlanDropGlobalIndex struct {
+	Name string
+}
+
 func (*PlanCreateTable) plan()            {}
 func (*PlanDropTable) plan()              {}
 func (*PlanGetItem) plan()                {}
@@ -178,6 +188,8 @@ func (*PlanCreateServiceLevel) plan()     {}
 func (*PlanAlterServiceLevel) plan()      {}
 func (*PlanDropServiceLevel) plan()       {}
 func (*PlanListServiceLevels) plan()      {}
+func (*PlanCreateGlobalIndex) plan()      {}
+func (*PlanDropGlobalIndex) plan()        {}
 
 // Explain renders the ANN plan for EXPLAIN output. The hybrid
 // filter node is stitched under the ANN scan so callers see both

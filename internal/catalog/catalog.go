@@ -29,6 +29,7 @@ type Catalog struct {
 	tables        map[string]types.TableDescriptor
 	views         map[string]types.MaterializedViewDescriptor
 	serviceLevels map[string]types.ServiceLevelDescriptor
+	globalIndexes map[string]types.GlobalIndexDescriptor
 
 	slUpdateMu        sync.RWMutex
 	slUpdateListeners []func(name string)
@@ -61,6 +62,7 @@ func New(db *pebble.DB) (*Catalog, error) {
 		tables:        make(map[string]types.TableDescriptor),
 		views:         make(map[string]types.MaterializedViewDescriptor),
 		serviceLevels: make(map[string]types.ServiceLevelDescriptor),
+		globalIndexes: make(map[string]types.GlobalIndexDescriptor),
 	}
 	if err := c.loadAll(); err != nil {
 		return nil, fmt.Errorf("catalog load: %w", err)
@@ -70,6 +72,9 @@ func New(db *pebble.DB) (*Catalog, error) {
 	}
 	if err := c.loadAllServiceLevels(); err != nil {
 		return nil, fmt.Errorf("catalog service-level load: %w", err)
+	}
+	if err := c.loadAllGlobalIndexes(); err != nil {
+		return nil, fmt.Errorf("catalog global-index load: %w", err)
 	}
 	return c, nil
 }

@@ -300,11 +300,41 @@ var (
 	ErrServiceLevelNotFound  = errors.New("cefas: service level not found")
 	ErrServiceLevelExists    = errors.New("cefas: service level already exists")
 	ErrServiceLevelReserved  = errors.New("cefas: service level name is reserved")
+	ErrGlobalIndexNotFound   = errors.New("cefas: global index not found")
+	ErrGlobalIndexExists     = errors.New("cefas: global index already exists")
 )
 
 // DefaultServiceLevelName is the implicit service level every caller
 // falls back to when no explicit SL is resolved. Cannot be dropped.
 const DefaultServiceLevelName = "default"
+
+// GlobalIndexDescriptor describes a ScyllaDB-style global secondary
+// index. Unlike the native DynamoDB-shaped GSI (#475), the index has
+// its own partitioning by the IndexedColumn's value — queries hit
+// exactly one shard and writes cross-shard cascade.
+//
+// Phase 1 of #509 ships the descriptor only; Phase 2 (#511) wires
+// the write hook, Phase 3 (#512) the read routing, Phase 4 (#513)
+// backfill.
+type GlobalIndexDescriptor struct {
+	Name              string   `json:"name"`
+	BaseTable         string   `json:"baseTable"`
+	IndexedColumn     string   `json:"indexedColumn"`
+	ProjectedColumns  []string `json:"projectedColumns,omitempty"`
+	Status            string   `json:"status,omitempty"`
+	Shards            int      `json:"shards,omitempty"`
+	ReplicationFactor int      `json:"replicationFactor,omitempty"`
+	Paused            bool     `json:"paused,omitempty"`
+}
+
+// GlobalIndexStatus constants mirror the materialized-view status
+// model (#488) so operators reading the catalog see the same shape.
+const (
+	GlobalIndexStatusBuilding = "building"
+	GlobalIndexStatusActive   = "active"
+	GlobalIndexStatusFailed   = "failed"
+	GlobalIndexStatusPaused   = "paused"
+)
 
 // ServiceLevelDescriptor is the catalog object the workload
 // prioritization scheduler reads to size per-SL lanes. Shares is the

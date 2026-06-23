@@ -91,6 +91,9 @@ func (p *parser) parseStatement() (Stmt, error) {
 		if p.peekAt(1).Kind == tService {
 			return p.parseCreateServiceLevel()
 		}
+		if p.peekAt(1).Kind == tIndex {
+			return p.parseCreateGlobalIndex()
+		}
 		return p.parseCreate()
 	case tDrop:
 		if p.peekAt(1).Kind == tMaterialized {
@@ -98,6 +101,9 @@ func (p *parser) parseStatement() (Stmt, error) {
 		}
 		if p.peekAt(1).Kind == tService {
 			return p.parseDropServiceLevel()
+		}
+		if p.peekAt(1).Kind == tIndex {
+			return p.parseDropGlobalIndex()
 		}
 		return p.parseDrop()
 	case tAlter:
@@ -1205,4 +1211,122 @@ func (p *parser) parseOptionalServiceLevelWith() (ServiceLevelSpec, error) {
 		p.consume()
 	}
 	return spec, nil
+}
+
+// parseCreateGlobalIndex parses
+//
+//	CREATE INDEX <name> AS GLOBAL ON <table> (<column>)
+//	  [PROJECT (<col> [, <col>]+)]
+//	  [WITH SHARDS=N [, REPLICATION_FACTOR=R]]
+//
+// USE INDEX in SELECT is the *consumer*; this is the *producer*.
+func (p *parser) parseCreateGlobalIndex() (*CreateGlobalIndexStmt, error) {
+	p.consume() // CREATE
+	if _, err := p.expect(tIndex, "INDEX"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "index name")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tAs, "AS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tGlobal, "GLOBAL"); err != nil {
+		return nil, err
+	}
+	// tOnDemand IS the ON keyword (lexer collapses ON DEMAND into a
+	// pair of tOnDemand + tDemand). Reusing tOnDemand here is just
+	// "expect the ON token".
+	if _, err := p.expect(tOnDemand, "ON"); err != nil {
+		return nil, err
+	}
+	tn, err := p.expect(tIdent, "base table")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLParen, "("); err != nil {
+		return nil, err
+	}
+	col, err := p.expect(tIdent, "indexed column")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tRParen, ")"); err != nil {
+		return nil, err
+	}
+
+	stmt := &CreateGlobalIndexStmt{
+		Name:          name.Lit,
+		BaseTable:     tn.Lit,
+		IndexedColumn: col.Lit,
+	}
+
+	if p.peek().Kind == tProject {
+		p.consume()
+		if _, err := p.expect(tLParen, "("); err != nil {
+			return nil, err
+		}
+		for {
+			c, err := p.expect(tIdent, "projected column")
+			if err != nil {
+				return nil, err
+			}
+			stmt.Projected = append(stmt.Projected, c.Lit)
+			if p.peek().Kind != tComma {
+				break
+			}
+			p.consume()
+		}
+		if _, err := p.expect(tRParen, ")"); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.peek().Kind == tWith {
+		p.consume()
+		for {
+			key, err := p.expect(tIdent, "option name")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(tEq, "="); err != nil {
+				return nil, err
+			}
+			val, err := p.expect(tNumber, "integer value")
+			if err != nil {
+				return nil, err
+			}
+			v, perr := strconv.Atoi(val.Lit)
+			if perr != nil {
+				return nil, fmt.Errorf("option %q: %w", key.Lit, perr)
+			}
+			switch strings.ToUpper(key.Lit) {
+			case "SHARDS":
+				stmt.Shards = v
+			case "REPLICATION_FACTOR":
+				stmt.ReplicationFactor = v
+			default:
+				return nil, fmt.Errorf("unknown option %q", key.Lit)
+			}
+			if p.peek().Kind != tComma {
+				break
+			}
+			p.consume()
+		}
+	}
+	return stmt, nil
+}
+
+// parseDropGlobalIndex parses DROP INDEX <name>.
+func (p *parser) parseDropGlobalIndex() (*DropGlobalIndexStmt, error) {
+	p.consume() // DROP
+	if _, err := p.expect(tIndex, "INDEX"); err != nil {
+		return nil, err
+	}
+	name, err := p.expect(tIdent, "index name")
+	if err != nil {
+		return nil, err
+	}
+	return &DropGlobalIndexStmt{Name: name.Lit}, nil
 }

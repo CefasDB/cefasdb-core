@@ -2099,6 +2099,10 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMVNotFound):
 		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, types.ErrGlobalIndexNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, types.ErrGlobalIndexExists):
+		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, types.ErrStreamNotFound), errors.Is(err, types.ErrStreamShardNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrTableAlreadyExists):
