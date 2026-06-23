@@ -156,6 +156,11 @@ service Cefas {
   rpc DescribeGlobalIndex(DescribeGlobalIndexRequest) returns (DescribeGlobalIndexResponse);
   rpc DropGlobalIndex(DropGlobalIndexRequest) returns (DropGlobalIndexResponse);
   rpc ListGlobalIndexes(ListGlobalIndexesRequest) returns (ListGlobalIndexesResponse);
+  // RebuildGlobalIndex scans the base table and derives a pointer
+  // row for each base item, writing it to the index's owning shard.
+  // Idempotent (pointer writes are upserts) and concurrent with
+  // live mutations — last-writer-wins per (indexed value, base PK).
+  rpc RebuildGlobalIndex(RebuildGlobalIndexRequest) returns (RebuildGlobalIndexResponse);
 }
 
 message GlobalIndexDescriptor {
@@ -177,6 +182,8 @@ message DropGlobalIndexRequest      { string name = 1; }
 message DropGlobalIndexResponse     {}
 message ListGlobalIndexesRequest    { string base_table = 1; }
 message ListGlobalIndexesResponse   { repeated GlobalIndexDescriptor indexes = 1; }
+message RebuildGlobalIndexRequest   { string name = 1; }
+message RebuildGlobalIndexResponse  { int64 rows_indexed = 1; }
 
 message ServiceLevelDescriptor {
   string name              = 1;

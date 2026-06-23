@@ -102,6 +102,7 @@ const (
 	Cefas_DescribeGlobalIndex_FullMethodName      = "/cefas.v1.Cefas/DescribeGlobalIndex"
 	Cefas_DropGlobalIndex_FullMethodName          = "/cefas.v1.Cefas/DropGlobalIndex"
 	Cefas_ListGlobalIndexes_FullMethodName        = "/cefas.v1.Cefas/ListGlobalIndexes"
+	Cefas_RebuildGlobalIndex_FullMethodName       = "/cefas.v1.Cefas/RebuildGlobalIndex"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -229,6 +230,11 @@ type CefasClient interface {
 	DescribeGlobalIndex(ctx context.Context, in *DescribeGlobalIndexRequest, opts ...grpc.CallOption) (*DescribeGlobalIndexResponse, error)
 	DropGlobalIndex(ctx context.Context, in *DropGlobalIndexRequest, opts ...grpc.CallOption) (*DropGlobalIndexResponse, error)
 	ListGlobalIndexes(ctx context.Context, in *ListGlobalIndexesRequest, opts ...grpc.CallOption) (*ListGlobalIndexesResponse, error)
+	// RebuildGlobalIndex scans the base table and derives a pointer
+	// row for each base item, writing it to the index's owning shard.
+	// Idempotent (pointer writes are upserts) and concurrent with
+	// live mutations — last-writer-wins per (indexed value, base PK).
+	RebuildGlobalIndex(ctx context.Context, in *RebuildGlobalIndexRequest, opts ...grpc.CallOption) (*RebuildGlobalIndexResponse, error)
 }
 
 type cefasClient struct {
@@ -1044,6 +1050,16 @@ func (c *cefasClient) ListGlobalIndexes(ctx context.Context, in *ListGlobalIndex
 	return out, nil
 }
 
+func (c *cefasClient) RebuildGlobalIndex(ctx context.Context, in *RebuildGlobalIndexRequest, opts ...grpc.CallOption) (*RebuildGlobalIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RebuildGlobalIndexResponse)
+	err := c.cc.Invoke(ctx, Cefas_RebuildGlobalIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -1169,6 +1185,11 @@ type CefasServer interface {
 	DescribeGlobalIndex(context.Context, *DescribeGlobalIndexRequest) (*DescribeGlobalIndexResponse, error)
 	DropGlobalIndex(context.Context, *DropGlobalIndexRequest) (*DropGlobalIndexResponse, error)
 	ListGlobalIndexes(context.Context, *ListGlobalIndexesRequest) (*ListGlobalIndexesResponse, error)
+	// RebuildGlobalIndex scans the base table and derives a pointer
+	// row for each base item, writing it to the index's owning shard.
+	// Idempotent (pointer writes are upserts) and concurrent with
+	// live mutations — last-writer-wins per (indexed value, base PK).
+	RebuildGlobalIndex(context.Context, *RebuildGlobalIndexRequest) (*RebuildGlobalIndexResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -1406,6 +1427,9 @@ func (UnimplementedCefasServer) DropGlobalIndex(context.Context, *DropGlobalInde
 }
 func (UnimplementedCefasServer) ListGlobalIndexes(context.Context, *ListGlobalIndexesRequest) (*ListGlobalIndexesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListGlobalIndexes not implemented")
+}
+func (UnimplementedCefasServer) RebuildGlobalIndex(context.Context, *RebuildGlobalIndexRequest) (*RebuildGlobalIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RebuildGlobalIndex not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -2761,6 +2785,24 @@ func _Cefas_ListGlobalIndexes_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_RebuildGlobalIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RebuildGlobalIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).RebuildGlobalIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_RebuildGlobalIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).RebuildGlobalIndex(ctx, req.(*RebuildGlobalIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3051,6 +3093,10 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListGlobalIndexes",
 			Handler:    _Cefas_ListGlobalIndexes_Handler,
+		},
+		{
+			MethodName: "RebuildGlobalIndex",
+			Handler:    _Cefas_RebuildGlobalIndex_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
