@@ -172,6 +172,15 @@ func (c *Catalog) Describe(name string) (types.TableDescriptor, error) {
 	if ok {
 		return domain.CloneTableDescriptor(td), nil
 	}
+	// CDC alias (#523): "<base>_cdc" is a synthetic queryable shape
+	// over the existing changelog. Falls through here so Scan / Query
+	// can dispatch to scanCDC without a separate Describe surface.
+	if base, ok := cdcAliasBase(name); ok {
+		baseTD, err := c.describeUncached(base)
+		if err == nil {
+			return cdcSyntheticDescriptor(baseTD), nil
+		}
+	}
 	raw, err := c.db.Get(storage.KeyCatalog(name))
 	if err == pebble.ErrNotFound {
 		// Cross-shard MV cascade: peer nodes receive BatchWriteItem

@@ -878,6 +878,10 @@ func (s *GRPCServer) Scan(req *cefaspb.ScanRequest, stream cefaspb.Cefas_ScanSer
 	if _, err := s.cat.Describe(req.GetTable()); err != nil {
 		return mapStorageErr(err)
 	}
+	// CDC alias (#523): redirect to the changelog scan handler.
+	if base, isCDC := cdcAliasBase(req.GetTable()); isCDC {
+		return s.scanCDCStream(req, base, stream)
+	}
 	s.maybeSetMVStalenessHeader(grpcStreamHeaderCtx{stream: stream}, req.GetTable())
 	cond, err := storage.ParseCondition(req.GetFilterExpression())
 	if err != nil {
