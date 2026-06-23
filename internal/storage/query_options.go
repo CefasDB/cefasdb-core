@@ -10,6 +10,11 @@ type PutOptions struct {
 	Condition string
 	// Binds resolves :name placeholders in Condition.
 	Binds map[string]types.AttributeValue
+	// AllowCounterWrite is reserved for internal read-modify-write
+	// paths that have already validated the counter mutation semantics
+	// (AtomicUpdate, SQL UPDATE on non-counter columns, replication
+	// mirrors). Regular PutItem/BatchWrite callers must leave it false.
+	AllowCounterWrite bool
 }
 
 // DeleteOptions mirrors PutOptions for deletes.

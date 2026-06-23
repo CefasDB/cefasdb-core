@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/CefasDb/cefasdb/internal/server"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/server"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
@@ -103,6 +103,68 @@ func TestAtomicIncrReturnRoundtrip(t *testing.T) {
 	}
 	if got := resp.GetReturnedValues()[0].GetN(); got != "6" {
 		t.Fatalf("returned[0] = %q, want \"6\"", got)
+	}
+}
+
+func TestCounterColumnEnforcesAtomicIncrement(t *testing.T) {
+	cefas, atomic, cleanup := startAtomicFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+	if _, err := cefas.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "SchemaCounters",
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+			AttributeDefinitions: []*cefaspb.AttributeDefinition{{
+				Name: "count",
+				Type: "COUNTER",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("create counter table: %v", err)
+	}
+
+	_, err := cefas.PutItem(ctx, &cefaspb.PutItemRequest{
+		Table: "SchemaCounters",
+		Item: map[string]*cefaspb.AttributeValue{
+			"id":    {Value: &cefaspb.AttributeValue_S{S: "views"}},
+			"count": {Value: &cefaspb.AttributeValue_N{N: "0"}},
+		},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("PutItem counter code = %v, want InvalidArgument (%v)", status.Code(err), err)
+	}
+
+	resp, err := atomic.AtomicUpdate(ctx, &cefaspb.AtomicUpdateRequest{
+		Table: "SchemaCounters",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "views"}},
+		},
+		Actions: []*cefaspb.AtomicAction{{
+			Kind:      cefaspb.AtomicActionKind_ATOMIC_INCR_RETURN,
+			Attribute: "count",
+			Value:     &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_N{N: "1"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AtomicUpdate counter increment: %v", err)
+	}
+	if got := resp.GetItem()["count"].GetN(); got != "1" {
+		t.Fatalf("count = %q, want 1", got)
+	}
+
+	_, err = atomic.AtomicUpdate(ctx, &cefaspb.AtomicUpdateRequest{
+		Table: "SchemaCounters",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "views"}},
+		},
+		Actions: []*cefaspb.AtomicAction{{
+			Kind:      cefaspb.AtomicActionKind_ATOMIC_SET,
+			Attribute: "count",
+			Value:     &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_N{N: "10"}},
+		}},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("AtomicUpdate SET counter code = %v, want InvalidArgument (%v)", status.Code(err), err)
 	}
 }
 

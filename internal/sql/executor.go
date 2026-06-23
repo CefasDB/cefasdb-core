@@ -279,11 +279,14 @@ func (e *Executor) execUpdate(p *PlanUpdate) (*Result, error) {
 	}
 	oldImage := cloneItem(prior)
 	for _, a := range p.Actions {
+		if isCounterAttribute(p.Descriptor, a.Column) {
+			return nil, fmt.Errorf("UPDATE cannot modify counter column %q; use AtomicUpdate", a.Column)
+		}
 		if err := applyAction(prior, a); err != nil {
 			return nil, fmt.Errorf("UPDATE %s %q: %w", actionKindName(a.Kind), a.Column, err)
 		}
 	}
-	if err := e.Storage.PutItemWith(p.Descriptor, prior, pebble.PutOptions{}); err != nil {
+	if err := e.Storage.PutItemWith(p.Descriptor, prior, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
 		return nil, err
 	}
 	if e.MutationHook != nil {

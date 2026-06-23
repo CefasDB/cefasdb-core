@@ -2132,6 +2132,8 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMissingKey), errors.Is(err, types.ErrInvalidKeyType):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, types.ErrInvalidAttributeDefinition):
+		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, pebble.ErrBackupNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, pebble.ErrBackupInUse):
@@ -2154,6 +2156,8 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, storage.ErrConditionFailed):
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, storage.ErrInvalidCounterMutation):
+		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, pebble.ErrNotLeader):
 		var nle *pebble.NotLeaderError
 		if errors.As(err, &nle) && nle.LeaderURL != "" {

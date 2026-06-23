@@ -78,6 +78,9 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 	if err := validateDescriptorItem(td, item); err != nil {
 		return err
 	}
+	if err := validatePutItemCounters(td, nil, item, opts.AllowCounterWrite); err != nil {
+		return err
+	}
 	pk, sk, err := extractKeyBytes(item, td.KeySchema)
 	if err != nil {
 		return err
@@ -111,6 +114,9 @@ func (d *DB) PutItemWith(td types.TableDescriptor, item types.Item, opts PutOpti
 		if err != nil {
 			return fmt.Errorf("decode prior: %w", err)
 		}
+	}
+	if err := validatePutItemCounters(td, priorItem, item, opts.AllowCounterWrite); err != nil {
+		return err
 	}
 
 	if !cond.IsZero() {
@@ -178,6 +184,9 @@ func (d *DB) putItemCanSkipPrior(td types.TableDescriptor, condition string) boo
 		return false
 	}
 	if len(td.GSIs) > 0 || len(td.LSIs) > 0 || len(td.SpatialIndexes) > 0 || td.TTLAttribute != "" {
+		return false
+	}
+	if tableHasCounterDefinition(td) {
 		return false
 	}
 	return !d.shouldAppendChangeRecord(td)
@@ -708,6 +717,9 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 			if err := validateDescriptorItem(td, op.Item); err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
 			}
+			if err := validatePutItemCounters(td, nil, op.Item, false); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
+			}
 			pk, sk, err := extractKeyBytes(op.Item, td.KeySchema)
 			if err != nil {
 				return fmt.Errorf("op %d: %w", i, err)
@@ -720,6 +732,9 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 			priorItem, err := readSnapshotItem(snap, primaryKey)
 			if err != nil {
 				return fmt.Errorf("op %d prior: %w", i, err)
+			}
+			if err := validatePutItemCounters(td, priorItem, op.Item, false); err != nil {
+				return fmt.Errorf("op %d: %w", i, err)
 			}
 			gsiOps, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, priorItem, op.Item)
 			if err != nil {
@@ -867,6 +882,9 @@ func (d *DB) batchPutItemsWithoutPriorImpl(td types.TableDescriptor, ops []Batch
 	var memDeltas []memDelta
 	for i, op := range ops {
 		if err := validateDescriptorItem(td, op.Item); err != nil {
+			return fmt.Errorf("op %d: %w", i, err)
+		}
+		if err := validatePutItemCounters(td, nil, op.Item, false); err != nil {
 			return fmt.Errorf("op %d: %w", i, err)
 		}
 		pk, sk, err := extractKeyBytes(op.Item, td.KeySchema)

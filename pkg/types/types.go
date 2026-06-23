@@ -134,6 +134,22 @@ type AttributeDefinition struct {
 }
 
 const (
+	AttributeTypeString  = "S"
+	AttributeTypeNumber  = "N"
+	AttributeTypeBinary  = "B"
+	AttributeTypeVector  = "V"
+	AttributeTypeCounter = "COUNTER"
+)
+
+func NormalizeAttributeType(t string) string {
+	return strings.ToUpper(strings.TrimSpace(t))
+}
+
+func IsCounterAttributeType(t string) bool {
+	return NormalizeAttributeType(t) == AttributeTypeCounter
+}
+
+const (
 	StorageClassDisk   = "disk"
 	StorageClassMemory = "memory"
 )
@@ -311,25 +327,26 @@ type MaterializedViewDescriptor struct {
 // Errors surfaced by the public API. Server code maps these to HTTP /
 // gRPC status codes at the boundary.
 var (
-	ErrTableNotFound         = errors.New("cefas: table not found")
-	ErrTableAlreadyExists    = errors.New("cefas: table already exists")
-	ErrItemNotFound          = errors.New("cefas: item not found")
-	ErrMissingKey            = errors.New("cefas: item missing key attribute")
-	ErrInvalidKeyType        = errors.New("cefas: key attribute must be S, N, or B")
-	ErrSpatialNotFound       = errors.New("cefas: spatial index not found")
-	ErrInvalidSpatial        = errors.New("cefas: invalid spatial index descriptor")
-	ErrStreamNotFound        = errors.New("cefas: stream not found")
-	ErrStreamShardNotFound   = errors.New("cefas: stream shard not found")
-	ErrStreamIteratorInvalid = errors.New("cefas: stream iterator invalid")
-	ErrStreamIteratorExpired = errors.New("cefas: stream iterator expired")
-	ErrStreamTrimmed         = errors.New("cefas: stream sequence has been trimmed")
-	ErrMVNotFound            = errors.New("cefas: materialized view not found")
-	ErrMVAlreadyExists       = errors.New("cefas: materialized view already exists")
-	ErrServiceLevelNotFound  = errors.New("cefas: service level not found")
-	ErrServiceLevelExists    = errors.New("cefas: service level already exists")
-	ErrServiceLevelReserved  = errors.New("cefas: service level name is reserved")
-	ErrGlobalIndexNotFound   = errors.New("cefas: global index not found")
-	ErrGlobalIndexExists     = errors.New("cefas: global index already exists")
+	ErrTableNotFound              = errors.New("cefas: table not found")
+	ErrTableAlreadyExists         = errors.New("cefas: table already exists")
+	ErrItemNotFound               = errors.New("cefas: item not found")
+	ErrMissingKey                 = errors.New("cefas: item missing key attribute")
+	ErrInvalidKeyType             = errors.New("cefas: key attribute must be S, N, or B")
+	ErrSpatialNotFound            = errors.New("cefas: spatial index not found")
+	ErrInvalidSpatial             = errors.New("cefas: invalid spatial index descriptor")
+	ErrStreamNotFound             = errors.New("cefas: stream not found")
+	ErrStreamShardNotFound        = errors.New("cefas: stream shard not found")
+	ErrStreamIteratorInvalid      = errors.New("cefas: stream iterator invalid")
+	ErrStreamIteratorExpired      = errors.New("cefas: stream iterator expired")
+	ErrStreamTrimmed              = errors.New("cefas: stream sequence has been trimmed")
+	ErrMVNotFound                 = errors.New("cefas: materialized view not found")
+	ErrMVAlreadyExists            = errors.New("cefas: materialized view already exists")
+	ErrServiceLevelNotFound       = errors.New("cefas: service level not found")
+	ErrServiceLevelExists         = errors.New("cefas: service level already exists")
+	ErrServiceLevelReserved       = errors.New("cefas: service level name is reserved")
+	ErrGlobalIndexNotFound        = errors.New("cefas: global index not found")
+	ErrGlobalIndexExists          = errors.New("cefas: global index already exists")
+	ErrInvalidAttributeDefinition = errors.New("cefas: invalid attribute definition")
 )
 
 // DefaultServiceLevelName is the implicit service level every caller

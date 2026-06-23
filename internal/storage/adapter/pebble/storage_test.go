@@ -1,6 +1,7 @@
 package pebble_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -171,6 +172,48 @@ func TestMissingKeyAttribute(t *testing.T) {
 	err := db.PutItem("singles", ks, types.Item{"other": sAttr("x")})
 	if err == nil {
 		t.Fatalf("expected ErrMissingKey, got nil")
+	}
+}
+
+func TestCounterColumnRequiresAtomicUpdate(t *testing.T) {
+	db := openTestDB(t)
+	td := types.TableDescriptor{
+		Name:      "Counters",
+		KeySchema: types.KeySchema{PK: "id"},
+		AttributeDefinitions: []types.AttributeDefinition{{
+			Name: "count",
+			Type: types.AttributeTypeCounter,
+		}},
+	}
+
+	err := db.PutItemWith(td, types.Item{
+		"id":    sAttr("views"),
+		"count": nAttr("0"),
+	}, pebble.PutOptions{})
+	if !errors.Is(err, storage.ErrInvalidCounterMutation) {
+		t.Fatalf("direct counter PutItem error = %v, want ErrInvalidCounterMutation", err)
+	}
+
+	res, err := db.AtomicUpdate(td, types.Item{"id": sAttr("views")}, pebble.AtomicOptions{
+		Actions: []pebble.AtomicAction{{
+			Kind:      pebble.AtomicActionIncrReturn,
+			Attribute: "count",
+			Value:     nAttr("2"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("atomic counter increment: %v", err)
+	}
+	if got := res.Item["count"].N; got != "2" {
+		t.Fatalf("count = %q, want 2", got)
+	}
+
+	err = db.PutItemWith(td, types.Item{
+		"id":   sAttr("views"),
+		"note": sAttr("replace"),
+	}, pebble.PutOptions{})
+	if !errors.Is(err, storage.ErrInvalidCounterMutation) {
+		t.Fatalf("counter-erasing PutItem error = %v, want ErrInvalidCounterMutation", err)
 	}
 }
 

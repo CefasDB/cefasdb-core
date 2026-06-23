@@ -160,9 +160,21 @@ func planUpdate(s *UpdateStmt, cat Catalog) (*PlanUpdate, error) {
 		if a.Column == td.KeySchema.PK || a.Column == td.KeySchema.SK {
 			return nil, fmt.Errorf("UPDATE cannot modify key column %q", a.Column)
 		}
+		if isCounterAttribute(td, a.Column) {
+			return nil, fmt.Errorf("UPDATE cannot modify counter column %q; use AtomicUpdate", a.Column)
+		}
 	}
 	cond := refinePKShortcut(s.If, td.KeySchema.PK)
 	return &PlanUpdate{Table: s.Table, Key: key, Actions: s.Assignments, Descriptor: td, If: cond, Returning: s.Returning}, nil
+}
+
+func isCounterAttribute(td types.TableDescriptor, name string) bool {
+	for _, def := range td.AttributeDefinitions {
+		if def.Name == name && types.IsCounterAttributeType(def.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 func planDelete(s *DeleteStmt, cat Catalog) (*PlanDelete, error) {
