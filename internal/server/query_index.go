@@ -9,6 +9,12 @@ import (
 )
 
 func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
+	// ScyllaDB-style GLOBAL index — partitioned by the indexed value
+	// (#509). One shard owns the partition, so the query lands on
+	// exactly one DB. Same RF=1 contract as #537 MV cascade.
+	if hasGlobalIndex(td, indexName) {
+		return s.queryByGlobalIndex(td, indexName, pkVal, opts)
+	}
 	if hasGSI(td, indexName) {
 		dbs, err := s.readShardStores()
 		if err != nil {
@@ -28,6 +34,49 @@ func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pk
 		return db.QueryByLSI(td, indexName, pkVal, opts)
 	}
 	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
+}
+
+// queryByGlobalIndex resolves the GI descriptor, routes by the
+// indexed value's hash, and reads pointer rows from that single
+// shard. Multi-node clients should be route-aware: a node that
+// does not host the GI shard returns codes.Unavailable so the
+// client retries against the leader (the route-aware-reads path
+// from #421 handles this automatically).
+//
+// Pointer rows carry: { IndexedColumn, base_pk_column,
+// projected... }. Callers that need non-projected base columns
+// follow up with GetItem against the base table — one extra read
+// per pointer in the worst case, documented as the GSI v1 read
+// shape in ADR 0005 §3.
+func (s *GRPCServer) queryByGlobalIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
+	if s.cat == nil {
+		return nil, fmt.Errorf("catalog not attached")
+	}
+	gi, err := s.cat.DescribeGlobalIndex(indexName)
+	if err != nil {
+		return nil, err
+	}
+	// Use the requested base table's PK column as the synthetic GI
+	// SK — same shape the write hook used to construct pointers.
+	giTD := giSyntheticTableDescriptor(gi, td.KeySchema.PK)
+	pkBytes, err := storage.AttrCanonicalBytes(pkVal)
+	if err != nil {
+		return nil, fmt.Errorf("indexed value: %w", err)
+	}
+	db, err := s.readStorageFor(pkBytes)
+	if err != nil {
+		return nil, err
+	}
+	return db.QueryByPK(giTD.Name, giTD.KeySchema, pkVal, opts.Limit)
+}
+
+func hasGlobalIndex(td types.TableDescriptor, name string) bool {
+	for _, n := range td.GlobalIndexes {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
