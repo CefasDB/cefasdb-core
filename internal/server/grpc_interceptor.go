@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	identitymw "github.com/codecompany/identity-middleware/pkg/identitymiddleware"
@@ -107,7 +108,7 @@ func SLQuotaInterceptor(quota *SLQuotaController) (grpc.UnaryServerInterceptor, 
 		sl := auth.ServiceLevelFromContext(ctx)
 		release, err := quota.Begin(sl)
 		if err != nil {
-			return nil, status.Errorf(codes.ResourceExhausted, "service level %s rate cap exceeded", sl)
+			return nil, mapQuotaErr(sl, err)
 		}
 		defer release()
 		return handler(ctx, req)
@@ -119,12 +120,19 @@ func SLQuotaInterceptor(quota *SLQuotaController) (grpc.UnaryServerInterceptor, 
 		sl := auth.ServiceLevelFromContext(ss.Context())
 		release, err := quota.Begin(sl)
 		if err != nil {
-			return status.Errorf(codes.ResourceExhausted, "service level %s rate cap exceeded", sl)
+			return mapQuotaErr(sl, err)
 		}
 		defer release()
 		return handler(srv, ss)
 	}
 	return unary, stream
+}
+
+func mapQuotaErr(sl string, err error) error {
+	if errors.Is(err, ErrSLPaused) {
+		return status.Errorf(codes.Unavailable, "service level %s is paused", sl)
+	}
+	return status.Errorf(codes.ResourceExhausted, "service level %s rate cap exceeded", sl)
 }
 
 func extractBearerFromMD(md metadata.MD) (string, error) {

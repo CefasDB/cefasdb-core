@@ -316,4 +316,8 @@ type ServiceLevelDescriptor struct {
 	MaxInFlight    int    `json:"maxInFlight,omitempty"`
 	MaxRowsPerSec  int64  `json:"maxRowsPerSec,omitempty"`
 	MaxBytesPerSec int64  `json:"maxBytesPerSec,omitempty"`
+	// Paused, when true, causes the quota controller to reject every
+	// admission for this SL with codes.Unavailable. Resume restores
+	// the previous shares / caps without rewriting the descriptor.
+	Paused bool `json:"paused,omitempty"`
 }

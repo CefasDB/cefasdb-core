@@ -96,6 +96,8 @@ const (
 	Cefas_AlterServiceLevel_FullMethodName        = "/cefas.v1.Cefas/AlterServiceLevel"
 	Cefas_DropServiceLevel_FullMethodName         = "/cefas.v1.Cefas/DropServiceLevel"
 	Cefas_ListServiceLevels_FullMethodName        = "/cefas.v1.Cefas/ListServiceLevels"
+	Cefas_PauseServiceLevel_FullMethodName        = "/cefas.v1.Cefas/PauseServiceLevel"
+	Cefas_ResumeServiceLevel_FullMethodName       = "/cefas.v1.Cefas/ResumeServiceLevel"
 )
 
 // CefasClient is the client API for Cefas service.
@@ -210,6 +212,11 @@ type CefasClient interface {
 	AlterServiceLevel(ctx context.Context, in *AlterServiceLevelRequest, opts ...grpc.CallOption) (*AlterServiceLevelResponse, error)
 	DropServiceLevel(ctx context.Context, in *DropServiceLevelRequest, opts ...grpc.CallOption) (*DropServiceLevelResponse, error)
 	ListServiceLevels(ctx context.Context, in *ListServiceLevelsRequest, opts ...grpc.CallOption) (*ListServiceLevelsResponse, error)
+	// Pause / Resume reject every admission for the named SL with
+	// codes.Unavailable until Resume restores it. The Pause state is
+	// persisted on the SL descriptor and survives restart.
+	PauseServiceLevel(ctx context.Context, in *PauseServiceLevelRequest, opts ...grpc.CallOption) (*PauseServiceLevelResponse, error)
+	ResumeServiceLevel(ctx context.Context, in *ResumeServiceLevelRequest, opts ...grpc.CallOption) (*ResumeServiceLevelResponse, error)
 }
 
 type cefasClient struct {
@@ -965,6 +972,26 @@ func (c *cefasClient) ListServiceLevels(ctx context.Context, in *ListServiceLeve
 	return out, nil
 }
 
+func (c *cefasClient) PauseServiceLevel(ctx context.Context, in *PauseServiceLevelRequest, opts ...grpc.CallOption) (*PauseServiceLevelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PauseServiceLevelResponse)
+	err := c.cc.Invoke(ctx, Cefas_PauseServiceLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cefasClient) ResumeServiceLevel(ctx context.Context, in *ResumeServiceLevelRequest, opts ...grpc.CallOption) (*ResumeServiceLevelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeServiceLevelResponse)
+	err := c.cc.Invoke(ctx, Cefas_ResumeServiceLevel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CefasServer is the server API for Cefas service.
 // All implementations must embed UnimplementedCefasServer
 // for forward compatibility.
@@ -1077,6 +1104,11 @@ type CefasServer interface {
 	AlterServiceLevel(context.Context, *AlterServiceLevelRequest) (*AlterServiceLevelResponse, error)
 	DropServiceLevel(context.Context, *DropServiceLevelRequest) (*DropServiceLevelResponse, error)
 	ListServiceLevels(context.Context, *ListServiceLevelsRequest) (*ListServiceLevelsResponse, error)
+	// Pause / Resume reject every admission for the named SL with
+	// codes.Unavailable until Resume restores it. The Pause state is
+	// persisted on the SL descriptor and survives restart.
+	PauseServiceLevel(context.Context, *PauseServiceLevelRequest) (*PauseServiceLevelResponse, error)
+	ResumeServiceLevel(context.Context, *ResumeServiceLevelRequest) (*ResumeServiceLevelResponse, error)
 	mustEmbedUnimplementedCefasServer()
 }
 
@@ -1296,6 +1328,12 @@ func (UnimplementedCefasServer) DropServiceLevel(context.Context, *DropServiceLe
 }
 func (UnimplementedCefasServer) ListServiceLevels(context.Context, *ListServiceLevelsRequest) (*ListServiceLevelsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListServiceLevels not implemented")
+}
+func (UnimplementedCefasServer) PauseServiceLevel(context.Context, *PauseServiceLevelRequest) (*PauseServiceLevelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PauseServiceLevel not implemented")
+}
+func (UnimplementedCefasServer) ResumeServiceLevel(context.Context, *ResumeServiceLevelRequest) (*ResumeServiceLevelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResumeServiceLevel not implemented")
 }
 func (UnimplementedCefasServer) mustEmbedUnimplementedCefasServer() {}
 func (UnimplementedCefasServer) testEmbeddedByValue()               {}
@@ -2543,6 +2581,42 @@ func _Cefas_ListServiceLevels_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cefas_PauseServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseServiceLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).PauseServiceLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_PauseServiceLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).PauseServiceLevel(ctx, req.(*PauseServiceLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Cefas_ResumeServiceLevel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeServiceLevelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CefasServer).ResumeServiceLevel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cefas_ResumeServiceLevel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CefasServer).ResumeServiceLevel(ctx, req.(*ResumeServiceLevelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cefas_ServiceDesc is the grpc.ServiceDesc for Cefas service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2809,6 +2883,14 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListServiceLevels",
 			Handler:    _Cefas_ListServiceLevels_Handler,
+		},
+		{
+			MethodName: "PauseServiceLevel",
+			Handler:    _Cefas_PauseServiceLevel_Handler,
+		},
+		{
+			MethodName: "ResumeServiceLevel",
+			Handler:    _Cefas_ResumeServiceLevel_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

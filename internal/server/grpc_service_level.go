@@ -64,6 +64,38 @@ func (s *GRPCServer) DropServiceLevel(ctx context.Context, req *cefaspb.DropServ
 	return &cefaspb.DropServiceLevelResponse{}, nil
 }
 
+func (s *GRPCServer) PauseServiceLevel(ctx context.Context, req *cefaspb.PauseServiceLevelRequest) (*cefaspb.PauseServiceLevelResponse, error) {
+	_, span := tracing.Tracer().Start(ctx, "PauseServiceLevel")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name required")
+	}
+	updated, err := s.cat.PauseServiceLevel(req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.PauseServiceLevelResponse{Descriptor_: serviceLevelDescriptorToPB(updated)}, nil
+}
+
+func (s *GRPCServer) ResumeServiceLevel(ctx context.Context, req *cefaspb.ResumeServiceLevelRequest) (*cefaspb.ResumeServiceLevelResponse, error) {
+	_, span := tracing.Tracer().Start(ctx, "ResumeServiceLevel")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name required")
+	}
+	updated, err := s.cat.ResumeServiceLevel(req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.ResumeServiceLevelResponse{Descriptor_: serviceLevelDescriptorToPB(updated)}, nil
+}
+
 func (s *GRPCServer) ListServiceLevels(ctx context.Context, req *cefaspb.ListServiceLevelsRequest) (*cefaspb.ListServiceLevelsResponse, error) {
 	_, span := tracing.Tracer().Start(ctx, "ListServiceLevels")
 	defer span.End()
@@ -86,6 +118,7 @@ func serviceLevelDescriptorToPB(sl types.ServiceLevelDescriptor) *cefaspb.Servic
 		MaxInFlight:    int32(sl.MaxInFlight),
 		MaxRowsPerSec:  sl.MaxRowsPerSec,
 		MaxBytesPerSec: sl.MaxBytesPerSec,
+		Paused:         sl.Paused,
 	}
 }
 
@@ -99,5 +132,6 @@ func pbToServiceLevelDescriptor(pb *cefaspb.ServiceLevelDescriptor) types.Servic
 		MaxInFlight:    int(pb.GetMaxInFlight()),
 		MaxRowsPerSec:  pb.GetMaxRowsPerSec(),
 		MaxBytesPerSec: pb.GetMaxBytesPerSec(),
+		Paused:         pb.GetPaused(),
 	}
 }
