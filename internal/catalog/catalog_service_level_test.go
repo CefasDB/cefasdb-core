@@ -85,6 +85,67 @@ func TestServiceLevel_DropAndDup(t *testing.T) {
 	}
 }
 
+func TestServiceLevel_PauseResume(t *testing.T) {
+	c := newTestCatalog(t)
+	if _, err := c.CreateServiceLevel(types.ServiceLevelDescriptor{Name: "olap", Shares: 20}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	paused, err := c.PauseServiceLevel("olap")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if !paused.Paused {
+		t.Error("Paused = false, want true after PauseServiceLevel")
+	}
+	got, _ := c.GetServiceLevel("olap")
+	if !got.Paused {
+		t.Error("GetServiceLevel did not surface the persisted Paused state")
+	}
+	resumed, err := c.ResumeServiceLevel("olap")
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.Paused {
+		t.Error("Resumed.Paused = true, want false")
+	}
+}
+
+func TestServiceLevel_PauseDefaultReject(t *testing.T) {
+	c := newTestCatalog(t)
+	if _, err := c.PauseServiceLevel(types.DefaultServiceLevelName); !errors.Is(err, types.ErrServiceLevelReserved) {
+		t.Fatalf("Pause default = %v, want ErrServiceLevelReserved", err)
+	}
+}
+
+func TestServiceLevel_PauseMissing(t *testing.T) {
+	c := newTestCatalog(t)
+	if _, err := c.PauseServiceLevel("nope"); !errors.Is(err, types.ErrServiceLevelNotFound) {
+		t.Fatalf("Pause missing = %v, want ErrServiceLevelNotFound", err)
+	}
+}
+
+func TestServiceLevel_PauseTriggersChangeListener(t *testing.T) {
+	c := newTestCatalog(t)
+	if _, err := c.CreateServiceLevel(types.ServiceLevelDescriptor{Name: "olap", Shares: 20}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var fired int
+	c.OnServiceLevelChanged(func(name string) {
+		if name == "olap" {
+			fired++
+		}
+	})
+	if _, err := c.PauseServiceLevel("olap"); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if _, err := c.ResumeServiceLevel("olap"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if fired != 2 {
+		t.Errorf("OnServiceLevelChanged fired %d times, want 2 (pause + resume)", fired)
+	}
+}
+
 func TestServiceLevel_ListIncludesDefault(t *testing.T) {
 	c := newTestCatalog(t)
 	if _, err := c.CreateServiceLevel(types.ServiceLevelDescriptor{Name: "oltp", Shares: 80}); err != nil {

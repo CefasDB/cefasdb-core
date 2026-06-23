@@ -132,6 +132,63 @@ func TestQuotaController_InvalidateRefreshes(t *testing.T) {
 	}
 }
 
+func TestQuotaController_PausedRejectsWithErrSLPaused(t *testing.T) {
+	cat := &fakeQuotaCatalog{
+		get: func(name string) (types.ServiceLevelDescriptor, error) {
+			return types.ServiceLevelDescriptor{Name: name, Shares: 10, Paused: true}, nil
+		},
+	}
+	var pauseEvents atomic.Int64
+	observer := func(sl, reason string) {
+		if reason == "paused" {
+			pauseEvents.Add(1)
+		}
+	}
+	q := NewSLQuotaController(cat, observer)
+	if _, err := q.Begin("olap"); !errors.Is(err, ErrSLPaused) {
+		t.Fatalf("paused Begin = %v, want ErrSLPaused", err)
+	}
+	if got := pauseEvents.Load(); got != 1 {
+		t.Errorf("observer count = %d, want 1", got)
+	}
+}
+
+func TestQuotaController_PausedSurvivesHotReload(t *testing.T) {
+	var paused atomic.Bool
+	cat := &fakeQuotaCatalog{
+		get: func(name string) (types.ServiceLevelDescriptor, error) {
+			return types.ServiceLevelDescriptor{
+				Name:   name,
+				Shares: 10,
+				Paused: paused.Load(),
+			}, nil
+		},
+	}
+	q := NewSLQuotaController(cat, nil)
+
+	// Pre-pause: requests pass.
+	r, err := q.Begin("batch")
+	if err != nil {
+		t.Fatalf("pre-pause Begin: %v", err)
+	}
+	r()
+
+	// Pause via catalog + invalidate.
+	paused.Store(true)
+	q.Invalidate("batch")
+
+	if _, err := q.Begin("batch"); !errors.Is(err, ErrSLPaused) {
+		t.Fatalf("post-pause Begin = %v, want ErrSLPaused", err)
+	}
+
+	// Resume + invalidate.
+	paused.Store(false)
+	q.Invalidate("batch")
+	if _, err := q.Begin("batch"); err != nil {
+		t.Fatalf("post-resume Begin: %v", err)
+	}
+}
+
 func TestQuotaController_SLWithoutCapsShortCircuits(t *testing.T) {
 	cat := &fakeQuotaCatalog{
 		get: func(name string) (types.ServiceLevelDescriptor, error) {

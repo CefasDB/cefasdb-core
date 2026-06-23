@@ -16,6 +16,11 @@ import (
 // message naming the SL so clients can react.
 var ErrSLQuotaExceeded = errors.New("service level quota exceeded")
 
+// ErrSLPaused is returned by SLQuotaController.Begin when the named
+// service level has been administratively paused (#500). The
+// interceptor maps it to codes.Unavailable.
+var ErrSLPaused = errors.New("service level paused")
+
 // SLQuotaCatalog is the slice of catalog.Catalog the quota controller
 // needs. Decoupled via interface so tests can drive it without a
 // pebble store.
@@ -54,6 +59,7 @@ type slBucket struct {
 	maxInFlight    int
 	maxRowsPerSec  int64
 	maxBytesPerSec int64
+	paused         bool
 
 	rowsLimiter  *rate.Limiter
 	bytesLimiter *rate.Limiter
@@ -92,6 +98,10 @@ func (c *SLQuotaController) Begin(slName string) (release func(), err error) {
 	}
 	if bucket == nil {
 		return func() {}, nil
+	}
+	if bucket.paused {
+		c.fireObserver(slName, "paused")
+		return func() {}, ErrSLPaused
 	}
 
 	if bucket.maxInFlight > 0 {
@@ -142,7 +152,7 @@ func (c *SLQuotaController) bucketFor(slName string) (*slBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sl.MaxInFlight <= 0 && sl.MaxRowsPerSec <= 0 && sl.MaxBytesPerSec <= 0 {
+	if !sl.Paused && sl.MaxInFlight <= 0 && sl.MaxRowsPerSec <= 0 && sl.MaxBytesPerSec <= 0 {
 		c.buckets.Delete(slName)
 		return nil, nil
 	}
@@ -151,6 +161,7 @@ func (c *SLQuotaController) bucketFor(slName string) (*slBucket, error) {
 		maxInFlight:    sl.MaxInFlight,
 		maxRowsPerSec:  sl.MaxRowsPerSec,
 		maxBytesPerSec: sl.MaxBytesPerSec,
+		paused:         sl.Paused,
 	}
 	if sl.MaxRowsPerSec > 0 {
 		burst := int(sl.MaxRowsPerSec)

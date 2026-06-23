@@ -742,6 +742,46 @@ func (c *Catalog) DropServiceLevel(name string) error {
 	return nil
 }
 
+// PauseServiceLevel sets the SL's Paused flag and persists the
+// descriptor. The default SL cannot be paused.
+func (c *Catalog) PauseServiceLevel(name string) (types.ServiceLevelDescriptor, error) {
+	return c.setServiceLevelPaused(name, true)
+}
+
+// ResumeServiceLevel clears the Paused flag.
+func (c *Catalog) ResumeServiceLevel(name string) (types.ServiceLevelDescriptor, error) {
+	return c.setServiceLevelPaused(name, false)
+}
+
+func (c *Catalog) setServiceLevelPaused(name string, paused bool) (types.ServiceLevelDescriptor, error) {
+	if name == "" {
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("service level name required")
+	}
+	if name == types.DefaultServiceLevelName {
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelReserved
+	}
+	c.mu.Lock()
+	sl, ok := c.serviceLevels[name]
+	if !ok {
+		c.mu.Unlock()
+		return types.ServiceLevelDescriptor{}, types.ErrServiceLevelNotFound
+	}
+	sl.Paused = paused
+	raw, err := json.Marshal(sl)
+	if err != nil {
+		c.mu.Unlock()
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("marshal service-level: %w", err)
+	}
+	if err := c.db.Set(storage.KeyServiceLevel(name), raw); err != nil {
+		c.mu.Unlock()
+		return types.ServiceLevelDescriptor{}, fmt.Errorf("persist service-level: %w", err)
+	}
+	c.serviceLevels[name] = sl
+	c.mu.Unlock()
+	c.notifyServiceLevelChanged(name)
+	return sl, nil
+}
+
 // GetServiceLevel returns the descriptor for name. The implicit
 // "default" service level is served from a synthetic descriptor with
 // shares=1 and no caps when no explicit record exists.
