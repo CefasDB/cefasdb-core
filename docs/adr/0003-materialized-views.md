@@ -59,6 +59,8 @@ type MaterializedViewDescriptor struct {
     BaseTable           string
     KeySchema           KeySchema   // own PK + optional SK
     ProjectedAttributes []string    // empty → all base attributes
+    GroupBy             []string    // aggregate views: must match key
+    Aggregations        []MaterializedViewAggregation
     RefreshPolicy       RefreshPolicy
     Status              string      // building | active | paused | failed
     LastRefreshAtUnix   int64
@@ -88,6 +90,17 @@ EAGER hook (Phase 2 / #491):
 4. Block the caller's response until every EAGER MV write has
    succeeded. On failure: log, increment error metric, return
    error to the caller.
+
+Aggregating EAGER MVs support `COUNT(*)` and `SUM(col)` only. The
+`GROUP BY` list must match the MV primary key, and aggregate output
+columns are stored as counter columns. The write hook captures the
+old image when needed, combines old/new contributions per MV key,
+then applies the resulting deltas through the internal
+`Replica.AtomicUpdateMV` path. Updates that keep the same group become
+a net SUM delta with no COUNT change; group moves decrement the old
+group and increment the new group. Deleting the final row in a group
+leaves a zero-valued aggregate row; compaction/removal of zero rows is
+left to a future maintenance policy.
 
 SCHEDULED / ON_DEMAND writes do not touch the hot path. They go
 through a shared **refresh-complete engine** (Phase 4 / #493)
@@ -198,7 +211,10 @@ the same base) handles most cases.
 - **MV must carry the base PK in its row schema**: yes (otherwise
   same base row maps to multiple MV rows with no deterministic
   delete).
-- **Filter / aggregate / join in view**: out of scope for v1.
+- **Filter / join in view**: out of scope for v1.
+- **Aggregates in view**: `COUNT(*)` and `SUM(col)` for EAGER views
+  only; MIN / MAX / AVG and general query-time GROUP BY stay out of
+  scope.
 - **Multiple MVs per base table**: yes, each independently
   maintained per its own policy.
 - **Schema evolution**: ALTER on a base column the MV depends on

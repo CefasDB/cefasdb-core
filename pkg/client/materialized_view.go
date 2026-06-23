@@ -93,6 +93,8 @@ func mvFromPB(pb *cefaspb.MaterializedViewDescriptor) types.MaterializedViewDesc
 		Name:                pb.GetName(),
 		BaseTable:           pb.GetBaseTable(),
 		ProjectedAttributes: append([]string(nil), pb.GetProjectedAttributes()...),
+		GroupBy:             append([]string(nil), pb.GetGroupBy()...),
+		Aggregations:        mvAggregationsFromPB(pb.GetAggregations()),
 		Status:              pb.GetStatus(),
 		LastRefreshAtUnix:   pb.GetLastRefreshAtUnix(),
 	}
@@ -113,4 +115,30 @@ func mvFromPB(pb *cefaspb.MaterializedViewDescriptor) types.MaterializedViewDesc
 		out.RefreshPolicy.IntervalSeconds = rp.GetIntervalSeconds()
 	}
 	return out
+}
+
+func mvAggregationsFromPB(in []*cefaspb.MaterializedViewAggregation) []types.MaterializedViewAggregation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]types.MaterializedViewAggregation, 0, len(in))
+	for _, agg := range in {
+		out = append(out, types.MaterializedViewAggregation{
+			Function:        mvAggregationFunctionFromPB(agg.GetFunction()),
+			SourceAttribute: agg.GetSourceAttribute(),
+			TargetAttribute: agg.GetTargetAttribute(),
+		})
+	}
+	return out
+}
+
+func mvAggregationFunctionFromPB(fn cefaspb.MaterializedViewAggregation_Function) string {
+	switch fn {
+	case cefaspb.MaterializedViewAggregation_COUNT:
+		return types.MVAggregationCount
+	case cefaspb.MaterializedViewAggregation_SUM:
+		return types.MVAggregationSum
+	default:
+		return ""
+	}
 }

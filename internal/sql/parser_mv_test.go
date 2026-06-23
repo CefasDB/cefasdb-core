@@ -8,15 +8,17 @@ import "testing"
 // verify the AST.
 func TestParseCreateMaterializedView(t *testing.T) {
 	cases := []struct {
-		name     string
-		input    string
-		wantName string
-		wantBase string
-		wantPK   string
-		wantSK   string
-		wantProj []string
-		wantMode string
-		wantSecs int64
+		name      string
+		input     string
+		wantName  string
+		wantBase  string
+		wantPK    string
+		wantSK    string
+		wantProj  []string
+		wantGroup []string
+		wantAggs  []MVAggregationSpec
+		wantMode  string
+		wantSecs  int64
 	}{
 		{
 			name:     "eager default by omission",
@@ -80,6 +82,20 @@ func TestParseCreateMaterializedView(t *testing.T) {
 			wantMode: "fast",
 			wantSecs: 300,
 		},
+		{
+			name:      "aggregate count and sum",
+			input:     "CREATE MATERIALIZED VIEW sales_by_region AS SELECT region, COUNT(*) AS order_count, SUM(total) AS total_sales FROM orders GROUP BY region PRIMARY KEY (region)",
+			wantName:  "sales_by_region",
+			wantBase:  "orders",
+			wantPK:    "region",
+			wantProj:  []string{"region"},
+			wantGroup: []string{"region"},
+			wantAggs: []MVAggregationSpec{
+				{Function: "COUNT", Target: "order_count"},
+				{Function: "SUM", Source: "total", Target: "total_sales"},
+			},
+			wantMode: "eager",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,6 +132,26 @@ func TestParseCreateMaterializedView(t *testing.T) {
 				for i, p := range tc.wantProj {
 					if mv.Projected[i] != p {
 						t.Errorf("Projected[%d] = %q, want %q", i, mv.Projected[i], p)
+					}
+				}
+			}
+			if len(tc.wantGroup) > 0 {
+				if len(mv.GroupBy) != len(tc.wantGroup) {
+					t.Fatalf("GroupBy len = %d, want %d", len(mv.GroupBy), len(tc.wantGroup))
+				}
+				for i, p := range tc.wantGroup {
+					if mv.GroupBy[i] != p {
+						t.Errorf("GroupBy[%d] = %q, want %q", i, mv.GroupBy[i], p)
+					}
+				}
+			}
+			if len(tc.wantAggs) > 0 {
+				if len(mv.Aggregations) != len(tc.wantAggs) {
+					t.Fatalf("Aggregations len = %d, want %d", len(mv.Aggregations), len(tc.wantAggs))
+				}
+				for i, want := range tc.wantAggs {
+					if mv.Aggregations[i] != want {
+						t.Errorf("Aggregations[%d] = %+v, want %+v", i, mv.Aggregations[i], want)
 					}
 				}
 			}

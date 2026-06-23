@@ -312,16 +312,32 @@ const (
 	MVStatusFailed   = "failed"
 )
 
+const (
+	MVAggregationCount = "COUNT"
+	MVAggregationSum   = "SUM"
+)
+
+// MaterializedViewAggregation describes a counter-style aggregate
+// maintained on a materialized view row. COUNT does not use
+// SourceAttribute; SUM reads a numeric base-row attribute.
+type MaterializedViewAggregation struct {
+	Function        string `json:"function"`
+	SourceAttribute string `json:"sourceAttribute,omitempty"`
+	TargetAttribute string `json:"targetAttribute"`
+}
+
 // MaterializedViewDescriptor is the persisted shape of a materialized
 // view. Stored under cefas/internal/mv/<name>.
 type MaterializedViewDescriptor struct {
-	Name                string        `json:"name"`
-	BaseTable           string        `json:"baseTable"`
-	KeySchema           KeySchema     `json:"keySchema"`
-	ProjectedAttributes []string      `json:"projectedAttributes,omitempty"`
-	RefreshPolicy       RefreshPolicy `json:"refreshPolicy"`
-	Status              string        `json:"status"`
-	LastRefreshAtUnix   int64         `json:"lastRefreshAtUnix,omitempty"`
+	Name                string                        `json:"name"`
+	BaseTable           string                        `json:"baseTable"`
+	KeySchema           KeySchema                     `json:"keySchema"`
+	ProjectedAttributes []string                      `json:"projectedAttributes,omitempty"`
+	GroupBy             []string                      `json:"groupBy,omitempty"`
+	Aggregations        []MaterializedViewAggregation `json:"aggregations,omitempty"`
+	RefreshPolicy       RefreshPolicy                 `json:"refreshPolicy"`
+	Status              string                        `json:"status"`
+	LastRefreshAtUnix   int64                         `json:"lastRefreshAtUnix,omitempty"`
 }
 
 // Errors surfaced by the public API. Server code maps these to HTTP /

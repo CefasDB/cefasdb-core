@@ -3258,10 +3258,11 @@ var Cefas_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Replica_ScanShard_FullMethodName    = "/cefas.v1.Replica/ScanShard"
-	Replica_QueryIndex_FullMethodName   = "/cefas.v1.Replica/QueryIndex"
-	Replica_BatchWriteMV_FullMethodName = "/cefas.v1.Replica/BatchWriteMV"
-	Replica_BatchWriteGI_FullMethodName = "/cefas.v1.Replica/BatchWriteGI"
+	Replica_ScanShard_FullMethodName      = "/cefas.v1.Replica/ScanShard"
+	Replica_QueryIndex_FullMethodName     = "/cefas.v1.Replica/QueryIndex"
+	Replica_BatchWriteMV_FullMethodName   = "/cefas.v1.Replica/BatchWriteMV"
+	Replica_AtomicUpdateMV_FullMethodName = "/cefas.v1.Replica/AtomicUpdateMV"
+	Replica_BatchWriteGI_FullMethodName   = "/cefas.v1.Replica/BatchWriteGI"
 )
 
 // ReplicaClient is the client API for Replica service.
@@ -3290,6 +3291,11 @@ type ReplicaClient interface {
 	// RefreshMaterializedView. Skipping consensus eliminates the
 	// cascade's per-shard raft latency on every base BatchWriteItem.
 	BatchWriteMV(ctx context.Context, in *BatchWriteMVRequest, opts ...grpc.CallOption) (*BatchWriteMVResponse, error)
+	// AtomicUpdateMV applies counter deltas to an aggregate materialized
+	// view row on the receiving node. Same RF=1 ownership model as
+	// BatchWriteMV: the coordinator routes by the MV key and the owner
+	// mutates its local view row directly.
+	AtomicUpdateMV(ctx context.Context, in *AtomicUpdateMVRequest, opts ...grpc.CallOption) (*AtomicUpdateMVResponse, error)
 	// BatchWriteGI applies a global-secondary-index cascade directly
 	// to the receiving node's local pebble store, bypassing raft.
 	// Same RF=1 rationale as BatchWriteMV: pointer rows are
@@ -3353,6 +3359,16 @@ func (c *replicaClient) BatchWriteMV(ctx context.Context, in *BatchWriteMVReques
 	return out, nil
 }
 
+func (c *replicaClient) AtomicUpdateMV(ctx context.Context, in *AtomicUpdateMVRequest, opts ...grpc.CallOption) (*AtomicUpdateMVResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AtomicUpdateMVResponse)
+	err := c.cc.Invoke(ctx, Replica_AtomicUpdateMV_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *replicaClient) BatchWriteGI(ctx context.Context, in *BatchWriteGIRequest, opts ...grpc.CallOption) (*BatchWriteGIResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BatchWriteGIResponse)
@@ -3389,6 +3405,11 @@ type ReplicaServer interface {
 	// RefreshMaterializedView. Skipping consensus eliminates the
 	// cascade's per-shard raft latency on every base BatchWriteItem.
 	BatchWriteMV(context.Context, *BatchWriteMVRequest) (*BatchWriteMVResponse, error)
+	// AtomicUpdateMV applies counter deltas to an aggregate materialized
+	// view row on the receiving node. Same RF=1 ownership model as
+	// BatchWriteMV: the coordinator routes by the MV key and the owner
+	// mutates its local view row directly.
+	AtomicUpdateMV(context.Context, *AtomicUpdateMVRequest) (*AtomicUpdateMVResponse, error)
 	// BatchWriteGI applies a global-secondary-index cascade directly
 	// to the receiving node's local pebble store, bypassing raft.
 	// Same RF=1 rationale as BatchWriteMV: pointer rows are
@@ -3412,6 +3433,9 @@ func (UnimplementedReplicaServer) QueryIndex(*QueryIndexRequest, grpc.ServerStre
 }
 func (UnimplementedReplicaServer) BatchWriteMV(context.Context, *BatchWriteMVRequest) (*BatchWriteMVResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchWriteMV not implemented")
+}
+func (UnimplementedReplicaServer) AtomicUpdateMV(context.Context, *AtomicUpdateMVRequest) (*AtomicUpdateMVResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AtomicUpdateMV not implemented")
 }
 func (UnimplementedReplicaServer) BatchWriteGI(context.Context, *BatchWriteGIRequest) (*BatchWriteGIResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchWriteGI not implemented")
@@ -3477,6 +3501,24 @@ func _Replica_BatchWriteMV_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Replica_AtomicUpdateMV_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AtomicUpdateMVRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReplicaServer).AtomicUpdateMV(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Replica_AtomicUpdateMV_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReplicaServer).AtomicUpdateMV(ctx, req.(*AtomicUpdateMVRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Replica_BatchWriteGI_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BatchWriteGIRequest)
 	if err := dec(in); err != nil {
@@ -3505,6 +3547,10 @@ var Replica_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchWriteMV",
 			Handler:    _Replica_BatchWriteMV_Handler,
+		},
+		{
+			MethodName: "AtomicUpdateMV",
+			Handler:    _Replica_AtomicUpdateMV_Handler,
 		},
 		{
 			MethodName: "BatchWriteGI",

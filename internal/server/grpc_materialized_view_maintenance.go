@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -9,10 +12,17 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
+
+type mvBaseMutation struct {
+	OldItem   types.Item
+	NewItem   types.Item
+	DeleteKey types.Item
+}
 
 // applyMVEagerPut runs every EAGER materialized view attached to td
 // against the just-written base item. SCHEDULED / ON_DEMAND views
@@ -30,6 +40,10 @@ import (
 // break the view. The caller's gRPC status surfaces the offending
 // view name in the message for operability.
 func (s *GRPCServer) applyMVEagerPut(ctx context.Context, td types.TableDescriptor, item types.Item) error {
+	return s.applyMVEagerMutation(ctx, td, mvBaseMutation{NewItem: item})
+}
+
+func (s *GRPCServer) applyMVEagerMutation(ctx context.Context, td types.TableDescriptor, mut mvBaseMutation) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
@@ -46,19 +60,42 @@ func (s *GRPCServer) applyMVEagerPut(ctx context.Context, td types.TableDescript
 			s.mvObserveDuration(mv.Name, "skip_non_eager", time.Now())
 			continue
 		}
-		mvItem := deriveMVItem(mv, item)
-		if mvItem == nil {
-			// Base row missing the MV PK / SK — cannot place the
-			// derived row deterministically. Drop with a metric so
-			// operators can flag schema drift.
-			s.mvObserveDuration(mv.Name, "skip_missing_key", time.Now())
+		started := time.Now()
+		if mvHasAggregations(mv) {
+			if err := s.applyMVAggregateMutations(ctx, mv, []mvBaseMutation{mut}); err != nil {
+				return status.Errorf(codes.Internal, "mv %s aggregate: %v", mv.Name, err)
+			}
+			s.mvObserveDuration(mv.Name, "aggregate", started)
 			continue
 		}
-		started := time.Now()
-		if err := s.writeMVRow(ctx, mv, mvItem); err != nil {
-			return status.Errorf(codes.Internal, "mv %s write: %v", mv.Name, err)
+		if mut.NewItem != nil {
+			mvItem := deriveMVItem(mv, mut.NewItem)
+			if mvItem == nil {
+				// Base row missing the MV PK / SK — cannot place the
+				// derived row deterministically. Drop with a metric so
+				// operators can flag schema drift.
+				s.mvObserveDuration(mv.Name, "skip_missing_key", time.Now())
+				continue
+			}
+			if err := s.writeMVRow(ctx, mv, mvItem); err != nil {
+				return status.Errorf(codes.Internal, "mv %s write: %v", mv.Name, err)
+			}
+			s.mvObserveDuration(mv.Name, "put", started)
+			continue
 		}
-		s.mvObserveDuration(mv.Name, "put", started)
+		base := mut.OldItem
+		if base == nil {
+			base = mut.DeleteKey
+		}
+		mvItem := deriveMVItem(mv, base)
+		if mvItem == nil {
+			continue
+		}
+		mvKey := itemKeyOnly(mvItem, mv.KeySchema)
+		if err := s.deleteMVRow(ctx, mv, mvKey); err != nil {
+			return status.Errorf(codes.Internal, "mv %s delete: %v", mv.Name, err)
+		}
+		s.mvObserveDuration(mv.Name, "delete", started)
 	}
 	return nil
 }
@@ -74,7 +111,7 @@ func (s *GRPCServer) applyMVEagerPut(ctx context.Context, td types.TableDescript
 // collapsed the 8-node cluster under realistic load (issue #531).
 // EAGER consistency is preserved: the call blocks until every
 // bucket commits.
-func (s *GRPCServer) applyMVEagerBatch(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp) error {
+func (s *GRPCServer) applyMVEagerBatch(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp, muts []mvBaseMutation) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
@@ -89,6 +126,14 @@ func (s *GRPCServer) applyMVEagerBatch(ctx context.Context, td types.TableDescri
 		}
 		if mv.RefreshPolicy.Mode != types.RefreshModeEager {
 			s.mvObserveDuration(mv.Name, "skip_non_eager", time.Now())
+			continue
+		}
+		if mvHasAggregations(mv) {
+			started := time.Now()
+			if err := s.applyMVAggregateMutations(ctx, mv, muts); err != nil {
+				return status.Errorf(codes.Internal, "mv %s aggregate: %v", mv.Name, err)
+			}
+			s.mvObserveDuration(mv.Name, "aggregate_batch", started)
 			continue
 		}
 		if err := s.applyMVEagerBatchOneView(ctx, mv, ops); err != nil {
@@ -262,29 +307,253 @@ func mvBatchOpsToMVPB(view string, ops []pebble.BatchOp) *cefaspb.BatchWriteMVRe
 // carried (the catalog's KeySchema for the base table guarantees the
 // fields the MV will need are present in the request).
 func (s *GRPCServer) applyMVEagerDelete(ctx context.Context, td types.TableDescriptor, baseKey types.Item) error {
+	return s.applyMVEagerMutation(ctx, td, mvBaseMutation{DeleteKey: baseKey})
+}
+
+func mvHasAggregations(mv types.MaterializedViewDescriptor) bool {
+	return len(mv.Aggregations) > 0
+}
+
+func (s *GRPCServer) tableHasAggregatingEagerMV(td types.TableDescriptor) (bool, error) {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
-		return nil
+		return false, nil
 	}
 	for _, viewName := range td.MaterializedViews {
 		mv, err := s.cat.DescribeView(viewName)
 		if err != nil {
-			return status.Errorf(codes.Internal, "mv lookup %s: %v", viewName, err)
+			return false, status.Errorf(codes.Internal, "mv lookup %s: %v", viewName, err)
 		}
-		if mv.RefreshPolicy.Mode != types.RefreshModeEager {
+		if mv.RefreshPolicy.Mode == types.RefreshModeEager && mv.Status != types.MVStatusPaused && mvHasAggregations(mv) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func captureMVEagerMutation(db *pebble.DB, td types.TableDescriptor, newItem, deleteKey types.Item) (mvBaseMutation, error) {
+	mut := mvBaseMutation{NewItem: newItem, DeleteKey: deleteKey}
+	if db == nil {
+		return mut, nil
+	}
+	probe := newItem
+	if probe == nil {
+		probe = deleteKey
+	}
+	if probe == nil {
+		return mut, nil
+	}
+	oldItem, err := db.GetItem(td.Name, td.KeySchema, itemKeyOnly(probe, td.KeySchema))
+	if errors.Is(err, types.ErrItemNotFound) {
+		return mut, nil
+	}
+	if err != nil {
+		return mut, err
+	}
+	mut.OldItem = oldItem
+	return mut, nil
+}
+
+func captureMVEagerBatchMutations(dbForOp func(int) *pebble.DB, td types.TableDescriptor, ops []pebble.BatchOp) ([]mvBaseMutation, error) {
+	muts := make([]mvBaseMutation, 0, len(ops))
+	for i, op := range ops {
+		db := dbForOp(i)
+		switch op.Op {
+		case pebble.BatchOpPut:
+			mut, err := captureMVEagerMutation(db, td, op.Item, nil)
+			if err != nil {
+				return nil, fmt.Errorf("op %d prior: %w", i, err)
+			}
+			muts = append(muts, mut)
+		case pebble.BatchOpDelete:
+			mut, err := captureMVEagerMutation(db, td, nil, op.Key)
+			if err != nil {
+				return nil, fmt.Errorf("op %d prior: %w", i, err)
+			}
+			muts = append(muts, mut)
+		}
+	}
+	return muts, nil
+}
+
+type mvAggregateDelta struct {
+	key    types.Item
+	values map[string]float64
+}
+
+func (s *GRPCServer) applyMVAggregateMutations(ctx context.Context, mv types.MaterializedViewDescriptor, muts []mvBaseMutation) error {
+	if len(muts) == 0 {
+		return nil
+	}
+	deltas := make(map[string]*mvAggregateDelta)
+	for _, mut := range muts {
+		if mut.OldItem != nil {
+			if err := addMVAggregateContribution(mv, deltas, mut.OldItem, -1); err != nil {
+				return err
+			}
+		}
+		if mut.NewItem != nil {
+			if err := addMVAggregateContribution(mv, deltas, mut.NewItem, 1); err != nil {
+				return err
+			}
+		}
+	}
+	for _, delta := range deltas {
+		actions := make([]pebble.AtomicAction, 0, len(delta.values))
+		for attr, value := range delta.values {
+			if value == 0 {
+				continue
+			}
+			actions = append(actions, pebble.AtomicAction{
+				Kind:      pebble.AtomicActionAddReturn,
+				Attribute: attr,
+				Value:     types.AttributeValue{T: types.AttrN, N: formatMVNumber(value)},
+			})
+		}
+		if len(actions) == 0 {
 			continue
 		}
-		mvItem := deriveMVItem(mv, baseKey)
-		if mvItem == nil {
-			continue
+		if err := s.dispatchMVAtomicUpdate(ctx, mv, delta.key, actions); err != nil {
+			return err
 		}
-		mvKey := itemKeyOnly(mvItem, mv.KeySchema)
-		started := time.Now()
-		if err := s.deleteMVRow(ctx, mv, mvKey); err != nil {
-			return status.Errorf(codes.Internal, "mv %s delete: %v", mv.Name, err)
-		}
-		s.mvObserveDuration(mv.Name, "delete", started)
 	}
 	return nil
+}
+
+func addMVAggregateContribution(mv types.MaterializedViewDescriptor, deltas map[string]*mvAggregateDelta, base types.Item, sign float64) error {
+	key := deriveMVGroupKey(mv, base)
+	if key == nil {
+		return nil
+	}
+	keyID, err := mvAggregateKeyID(mv, key)
+	if err != nil {
+		return err
+	}
+	delta := deltas[keyID]
+	if delta == nil {
+		delta = &mvAggregateDelta{key: key, values: make(map[string]float64, len(mv.Aggregations))}
+		deltas[keyID] = delta
+	}
+	for _, agg := range mv.Aggregations {
+		switch agg.Function {
+		case types.MVAggregationCount:
+			delta.values[agg.TargetAttribute] += sign
+		case types.MVAggregationSum:
+			av, ok := base[agg.SourceAttribute]
+			if !ok || av.T == types.AttrNull {
+				continue
+			}
+			if av.T != types.AttrN {
+				return fmt.Errorf("SUM(%s) source is %v, want N", agg.SourceAttribute, av.T)
+			}
+			n, err := strconv.ParseFloat(av.N, 64)
+			if err != nil {
+				return fmt.Errorf("SUM(%s) parse %q: %w", agg.SourceAttribute, av.N, err)
+			}
+			delta.values[agg.TargetAttribute] += sign * n
+		}
+	}
+	return nil
+}
+
+func deriveMVGroupKey(mv types.MaterializedViewDescriptor, base types.Item) types.Item {
+	if base == nil {
+		return nil
+	}
+	pkVal, ok := base[mv.KeySchema.PK]
+	if !ok {
+		return nil
+	}
+	key := types.Item{mv.KeySchema.PK: pkVal}
+	if mv.KeySchema.SK != "" {
+		skVal, ok := base[mv.KeySchema.SK]
+		if !ok {
+			return nil
+		}
+		key[mv.KeySchema.SK] = skVal
+	}
+	return key
+}
+
+func mvAggregateKeyID(mv types.MaterializedViewDescriptor, key types.Item) (string, error) {
+	pk, err := storage.AttrCanonicalBytes(key[mv.KeySchema.PK])
+	if err != nil {
+		return "", err
+	}
+	var sk []byte
+	if mv.KeySchema.SK != "" {
+		sk, err = storage.AttrCanonicalBytes(key[mv.KeySchema.SK])
+		if err != nil {
+			return "", err
+		}
+	}
+	return string(storage.KeyPrimary(mv.Name, pk, sk)), nil
+}
+
+func formatMVNumber(f float64) string {
+	if f == float64(int64(f)) {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64)
+}
+
+func (s *GRPCServer) dispatchMVAtomicUpdate(ctx context.Context, mv types.MaterializedViewDescriptor, key types.Item, actions []pebble.AtomicAction) error {
+	td := mvSyntheticTableDescriptor(mv)
+	if s.manager == nil {
+		_, err := s.db.AtomicUpdate(td, key, pebble.AtomicOptions{Actions: actions})
+		return err
+	}
+	pkBytes, err := pkBytesFromItem(key, td.KeySchema)
+	if err != nil {
+		return err
+	}
+	shardID, err := s.manager.Router().ShardForPK(pkBytes)
+	if err != nil {
+		return err
+	}
+	peerID, addr, isSelf, err := s.manager.LeaderEndpoint(shardID)
+	if err != nil {
+		return err
+	}
+	if isSelf {
+		sh, ok := s.manager.Shard(shardID)
+		if !ok || sh == nil || sh.Storage == nil {
+			return status.Errorf(codes.Internal, "mv %s shard %d not local", mv.Name, shardID)
+		}
+		_, err := sh.Storage.AtomicUpdate(td, key, pebble.AtomicOptions{Actions: actions})
+		return err
+	}
+	return s.manager.AtomicUpdateMVToPeer(ctx, peerID, addr, &cefaspb.AtomicUpdateMVRequest{
+		View:    mv.Name,
+		Key:     itemToPB(key),
+		Actions: mvAtomicActionsToPB(actions),
+	})
+}
+
+func mvAtomicActionsToPB(actions []pebble.AtomicAction) []*cefaspb.AtomicAction {
+	out := make([]*cefaspb.AtomicAction, 0, len(actions))
+	for _, action := range actions {
+		out = append(out, &cefaspb.AtomicAction{
+			Kind:      mvAtomicKindToPB(action.Kind),
+			Attribute: action.Attribute,
+			Value:     attrToPB(action.Value),
+		})
+	}
+	return out
+}
+
+func mvAtomicKindToPB(kind pebble.AtomicActionKind) cefaspb.AtomicActionKind {
+	switch kind {
+	case pebble.AtomicActionSet:
+		return cefaspb.AtomicActionKind_ATOMIC_SET
+	case pebble.AtomicActionIncrReturn:
+		return cefaspb.AtomicActionKind_ATOMIC_INCR_RETURN
+	case pebble.AtomicActionAddReturn:
+		return cefaspb.AtomicActionKind_ATOMIC_ADD_RETURN
+	case pebble.AtomicActionApply:
+		return cefaspb.AtomicActionKind_ATOMIC_APPLY
+	default:
+		return cefaspb.AtomicActionKind_ATOMIC_ACTION_UNSPECIFIED
+	}
 }
 
 // deriveMVItem projects the base item into the view's row. The view
@@ -329,10 +598,20 @@ func deriveMVItem(mv types.MaterializedViewDescriptor, base types.Item) types.It
 }
 
 func mvSyntheticTableDescriptor(mv types.MaterializedViewDescriptor) types.TableDescriptor {
-	return types.TableDescriptor{
+	td := types.TableDescriptor{
 		Name:      mv.Name,
 		KeySchema: mv.KeySchema,
 	}
+	if len(mv.Aggregations) > 0 {
+		td.AttributeDefinitions = make([]types.AttributeDefinition, 0, len(mv.Aggregations))
+		for _, agg := range mv.Aggregations {
+			td.AttributeDefinitions = append(td.AttributeDefinitions, types.AttributeDefinition{
+				Name: agg.TargetAttribute,
+				Type: types.AttributeTypeCounter,
+			})
+		}
+	}
+	return td
 }
 
 func (s *GRPCServer) writeMVRow(ctx context.Context, mv types.MaterializedViewDescriptor, mvItem types.Item) error {

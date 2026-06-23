@@ -80,10 +80,21 @@ func planCreateMaterializedView(s *CreateMaterializedViewStmt) (*PlanCreateMater
 		BaseTable:           s.BaseTable,
 		KeySchema:           types.KeySchema{PK: s.PK, SK: s.SK},
 		ProjectedAttributes: append([]string(nil), s.Projected...),
+		GroupBy:             append([]string(nil), s.GroupBy...),
 		RefreshPolicy: types.RefreshPolicy{
 			Mode:            types.RefreshMode(s.Refresh.Mode),
 			IntervalSeconds: s.Refresh.IntervalSeconds,
 		},
+	}
+	if len(s.Aggregations) > 0 {
+		mv.Aggregations = make([]types.MaterializedViewAggregation, 0, len(s.Aggregations))
+		for _, agg := range s.Aggregations {
+			mv.Aggregations = append(mv.Aggregations, types.MaterializedViewAggregation{
+				Function:        agg.Function,
+				SourceAttribute: agg.Source,
+				TargetAttribute: agg.Target,
+			})
+		}
 	}
 	return &PlanCreateMaterializedView{Descriptor: mv}, nil
 }

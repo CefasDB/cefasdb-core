@@ -351,14 +351,31 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
+	hasAggMV, err := s.tableHasAggregatingEagerMV(td)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
+	var mvMut mvBaseMutation
+	if hasAggMV {
+		mvMut, err = captureMVEagerMutation(targets.primary, td, item, nil)
+		if err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
+	}
 	if err := targets.PutItemWith(td, item, pebble.PutOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := s.applyMVEagerPut(ctx, td, item); err != nil {
-		return nil, mapWriteMutationErr(err)
+	if hasAggMV {
+		if err := s.applyMVEagerMutation(ctx, td, mvMut); err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
+	} else {
+		if err := s.applyMVEagerPut(ctx, td, item); err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
 	}
 	if err := s.applyGlobalIndexPut(ctx, td, item); err != nil {
 		return nil, mapWriteMutationErr(err)
@@ -457,6 +474,19 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 	}
 	defer targets.Release()
 	db := targets.primary
+	hasAggMV, err := s.tableHasAggregatingEagerMV(td)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
+	var oldForMV types.Item
+	if hasAggMV {
+		oldForMV, err = db.GetItem(req.GetTable(), td.KeySchema, key)
+		if errors.Is(err, types.ErrItemNotFound) {
+			oldForMV = nil
+		} else if err != nil {
+			return nil, mapStorageErr(err)
+		}
+	}
 	plan, err := cefassql.PlanStmt(stmt, s.cat)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("plan: %v", err))
@@ -468,20 +498,26 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 		return nil, mapWriteMutationErr(err)
 	}
 	var finalItem types.Item
-	if len(targets.mirrors) > 0 || len(td.MaterializedViews) > 0 {
+	if res.AffectedRows > 0 && (len(targets.mirrors) > 0 || len(td.MaterializedViews) > 0) {
 		finalItem, err = db.GetItem(req.GetTable(), td.KeySchema, key)
 		if err != nil {
 			return nil, mapStorageErr(err)
 		}
 	}
-	if len(targets.mirrors) > 0 {
+	if len(targets.mirrors) > 0 && res.AffectedRows > 0 {
 		if err := targets.MirrorPutItem(td, finalItem); err != nil {
 			return nil, mapStorageErr(err)
 		}
 	}
-	if len(td.MaterializedViews) > 0 {
-		if err := s.applyMVEagerPut(ctx, td, finalItem); err != nil {
-			return nil, mapWriteMutationErr(err)
+	if len(td.MaterializedViews) > 0 && res.AffectedRows > 0 {
+		if hasAggMV {
+			if err := s.applyMVEagerMutation(ctx, td, mvBaseMutation{OldItem: oldForMV, NewItem: finalItem}); err != nil {
+				return nil, mapWriteMutationErr(err)
+			}
+		} else {
+			if err := s.applyMVEagerPut(ctx, td, finalItem); err != nil {
+				return nil, mapWriteMutationErr(err)
+			}
 		}
 	}
 	if len(td.GlobalIndexes) > 0 {
@@ -549,14 +585,31 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
+	hasAggMV, err := s.tableHasAggregatingEagerMV(td)
+	if err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
+	mvMut := mvBaseMutation{DeleteKey: key}
+	if hasAggMV {
+		mvMut, err = captureMVEagerMutation(targets.primary, td, nil, key)
+		if err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
+	}
 	if err := targets.DeleteItemWith(td, key, pebble.DeleteOptions{Condition: req.GetCondition(), Binds: binds}); err != nil {
 		return nil, mapStorageErr(err)
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := s.applyMVEagerDelete(ctx, td, key); err != nil {
-		return nil, mapWriteMutationErr(err)
+	if hasAggMV {
+		if err := s.applyMVEagerMutation(ctx, td, mvMut); err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
+	} else {
+		if err := s.applyMVEagerDelete(ctx, td, key); err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
 	}
 	if err := s.applyGlobalIndexDelete(ctx, td, key); err != nil {
 		return nil, mapWriteMutationErr(err)
@@ -644,13 +697,24 @@ func (s *GRPCServer) batchWriteFanOutSingleShard(ctx context.Context, td types.T
 		}
 		observations = append(observations, obs{pkBytes: append([]byte(nil), pkBytes...), approxBytes: approxBytes})
 	}
+	hasAggMV, err := s.tableHasAggregatingEagerMV(td)
+	if err != nil {
+		return err
+	}
+	var mvMuts []mvBaseMutation
+	if hasAggMV {
+		mvMuts, err = captureMVEagerBatchMutations(func(int) *pebble.DB { return s.db }, td, ops)
+		if err != nil {
+			return err
+		}
+	}
 	if err := s.db.BatchWriteItem(td, ops); err != nil {
 		return err
 	}
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return err
 	}
-	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
+	if err := s.applyMVEagerBatch(ctx, td, ops, mvMuts); err != nil {
 		return err
 	}
 	if err := s.applyGlobalIndexBatch(ctx, td, ops); err != nil {
@@ -732,6 +796,19 @@ func (s *GRPCServer) batchWriteFanOutMultiShard(ctx context.Context, td types.Ta
 		}
 		pluginPlans = append(pluginPlans, pluginPlan)
 	}
+	hasAggMV, err := s.tableHasAggregatingEagerMV(td)
+	if err != nil {
+		return err
+	}
+	var mvMuts []mvBaseMutation
+	if hasAggMV {
+		mvMuts, err = captureMVEagerBatchMutations(func(i int) *pebble.DB {
+			return routes[metas[i].routeIdx].primary
+		}, td, ops)
+		if err != nil {
+			return err
+		}
+	}
 	if err := batchWriteBuckets(td, primaryBuckets); err != nil {
 		return err
 	}
@@ -743,7 +820,7 @@ func (s *GRPCServer) batchWriteFanOutMultiShard(ctx context.Context, td types.Ta
 			return err
 		}
 	}
-	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
+	if err := s.applyMVEagerBatch(ctx, td, ops, mvMuts); err != nil {
 		return err
 	}
 	if err := s.applyGlobalIndexBatch(ctx, td, ops); err != nil {
@@ -1142,7 +1219,10 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 		DistanceResolver:     s.sqlDistanceResolver,
 		ANNCandidateResolver: s.sqlANNCandidateResolver,
 	}
-	ex.MutationHook = s.pluginIndexMutationHookForPlan(plan)
+	ex.MutationHook = combineMutationHooks(
+		s.pluginIndexMutationHookForPlan(plan),
+		s.mvMutationHookForPlan(ctx, plan),
+	)
 	res, err := ex.Execute(plan)
 	if err != nil {
 		if _, ok := status.FromError(err); ok {
@@ -1164,6 +1244,50 @@ func (s *GRPCServer) sqlDistanceResolver(table, field string, target types.Attri
 func (s *GRPCServer) sqlANNCandidateResolver(table, field string, target types.AttributeValue, limit int) ([]cquery.TopKResult, bool, error) {
 	ann, ok, err := s.indexedANNTopK(table, field, target, limit, "")
 	return ann.rows, ok, err
+}
+
+func combineMutationHooks(hooks ...cefassql.MutationHook) cefassql.MutationHook {
+	active := make([]cefassql.MutationHook, 0, len(hooks))
+	for _, hook := range hooks {
+		if hook != nil {
+			active = append(active, hook)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return func(mut cefassql.ItemMutation) error {
+		for _, hook := range active {
+			if err := hook(mut); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func (s *GRPCServer) mvMutationHookForPlan(ctx context.Context, plan cefassql.Plan) cefassql.MutationHook {
+	var td types.TableDescriptor
+	switch p := plan.(type) {
+	case *cefassql.PlanPutItem:
+		td = p.Descriptor
+	case *cefassql.PlanUpdate:
+		td = p.Descriptor
+	case *cefassql.PlanDelete:
+		td = p.Descriptor
+	default:
+		return nil
+	}
+	if len(td.MaterializedViews) == 0 {
+		return nil
+	}
+	return func(mut cefassql.ItemMutation) error {
+		return s.applyMVEagerMutation(ctx, td, mvBaseMutation{
+			OldItem:   mut.OldItem,
+			NewItem:   mut.NewItem,
+			DeleteKey: mut.DeleteKey,
+		})
+	}
 }
 
 func sqlScopeCheck(ctx context.Context, stmt cefassql.Stmt) error {

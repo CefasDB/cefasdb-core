@@ -223,6 +223,146 @@ func TestEagerHook_AppliesDeleteItem(t *testing.T) {
 	}
 }
 
+func TestEagerHook_AggregatesCountAndSum(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "OrdersAgg",
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if _, err := stub.CreateMaterializedView(ctx, &cefaspb.CreateMaterializedViewRequest{
+		Descriptor_: &cefaspb.MaterializedViewDescriptor{
+			Name:      "OrdersAgg_by_region",
+			BaseTable: "OrdersAgg",
+			KeySchema: &cefaspb.KeySchema{Pk: "region"},
+			GroupBy:   []string{"region"},
+			Aggregations: []*cefaspb.MaterializedViewAggregation{
+				{
+					Function:        cefaspb.MaterializedViewAggregation_COUNT,
+					TargetAttribute: "order_count",
+				},
+				{
+					Function:        cefaspb.MaterializedViewAggregation_SUM,
+					SourceAttribute: "amount",
+					TargetAttribute: "total_amount",
+				},
+			},
+			RefreshPolicy: &cefaspb.RefreshPolicy{Mode: cefaspb.RefreshPolicy_EAGER},
+		},
+	}); err != nil {
+		t.Fatalf("create aggregate view: %v", err)
+	}
+
+	put := func(id, region, amount string) {
+		t.Helper()
+		if _, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+			Table: "OrdersAgg",
+			Item: map[string]*cefaspb.AttributeValue{
+				"id":     {Value: &cefaspb.AttributeValue_S{S: id}},
+				"region": {Value: &cefaspb.AttributeValue_S{S: region}},
+				"amount": {Value: &cefaspb.AttributeValue_N{N: amount}},
+			},
+		}); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	assertAgg := func(region, wantCount, wantTotal string) {
+		t.Helper()
+		got, err := stub.GetItem(ctx, &cefaspb.GetItemRequest{
+			Table: "OrdersAgg_by_region",
+			Key: map[string]*cefaspb.AttributeValue{
+				"region": {Value: &cefaspb.AttributeValue_S{S: region}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("get aggregate %s: %v", region, err)
+		}
+		if !got.GetFound() {
+			t.Fatalf("aggregate row %s missing", region)
+		}
+		if got.GetItem()["order_count"].GetN() != wantCount {
+			t.Fatalf("%s order_count = %q, want %q", region, got.GetItem()["order_count"].GetN(), wantCount)
+		}
+		if got.GetItem()["total_amount"].GetN() != wantTotal {
+			t.Fatalf("%s total_amount = %q, want %q", region, got.GetItem()["total_amount"].GetN(), wantTotal)
+		}
+	}
+
+	put("o1", "us", "10")
+	put("o2", "us", "7")
+	assertAgg("us", "2", "17")
+
+	if _, err := stub.UpdateItem(ctx, &cefaspb.UpdateItemRequest{
+		Table: "OrdersAgg",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "o2"}},
+		},
+		UpdateExpression: "SET amount = :amount",
+		ExpressionAttributeValues: map[string]*cefaspb.AttributeValue{
+			":amount": {Value: &cefaspb.AttributeValue_N{N: "9"}},
+		},
+	}); err != nil {
+		t.Fatalf("update amount: %v", err)
+	}
+	assertAgg("us", "2", "19")
+
+	put("o1", "eu", "3")
+	assertAgg("us", "1", "9")
+	assertAgg("eu", "1", "3")
+
+	if _, err := stub.DeleteItem(ctx, &cefaspb.DeleteItemRequest{
+		Table: "OrdersAgg",
+		Key: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "o2"}},
+		},
+	}); err != nil {
+		t.Fatalf("delete o2: %v", err)
+	}
+	assertAgg("us", "0", "0")
+}
+
+func TestSQLMaterializedViewAggregates(t *testing.T) {
+	stub, cleanup := startUnsecuredFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	execSQL := func(q string) {
+		t.Helper()
+		if _, err := stub.Sql(ctx, &cefaspb.SqlRequest{Query: q}); err != nil {
+			t.Fatalf("sql %q: %v", q, err)
+		}
+	}
+	execSQL("CREATE TABLE SqlOrdersAgg (id S, region S, amount N, PRIMARY KEY (id))")
+	execSQL("CREATE MATERIALIZED VIEW SqlOrdersAgg_by_region AS SELECT region, COUNT(*), SUM(amount) FROM SqlOrdersAgg GROUP BY region PRIMARY KEY (region)")
+	execSQL("INSERT INTO SqlOrdersAgg (id, region, amount) VALUES ('o1', 'us', 5)")
+	execSQL("UPDATE SqlOrdersAgg SET amount = 8 WHERE id = 'o1'")
+
+	got, err := stub.GetItem(ctx, &cefaspb.GetItemRequest{
+		Table: "SqlOrdersAgg_by_region",
+		Key: map[string]*cefaspb.AttributeValue{
+			"region": {Value: &cefaspb.AttributeValue_S{S: "us"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("get aggregate: %v", err)
+	}
+	if !got.GetFound() {
+		t.Fatal("aggregate row missing")
+	}
+	if got.GetItem()["count"].GetN() != "1" {
+		t.Fatalf("count = %q, want 1", got.GetItem()["count"].GetN())
+	}
+	if got.GetItem()["sum_amount"].GetN() != "8" {
+		t.Fatalf("sum_amount = %q, want 8", got.GetItem()["sum_amount"].GetN())
+	}
+}
+
 // TestEagerHook_BatchCoalescedAcrossMV exercises the per-(MV, shard)
 // coalescing landed in #531. Two MVs attached to the same base, batch
 // with mixed put + delete ops: both MVs must reflect every op
@@ -242,8 +382,8 @@ func TestEagerHook_BatchCoalescedAcrossMV(t *testing.T) {
 		t.Fatalf("create base: %v", err)
 	}
 	for _, spec := range []struct {
-		name    string
-		pk, sk  string
+		name   string
+		pk, sk string
 	}{
 		{"Multi_mvA", "sk", "pk"},
 		{"Multi_mvB", "pk", "sk"},
