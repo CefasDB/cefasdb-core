@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -11,6 +13,12 @@ import (
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
+
+// mvPropagationTimeout bounds how long CreateMaterializedView will
+// wait for every peer to acknowledge it can resolve the new view.
+// The propagation race only opens during shard-0 raft Apply lag —
+// in practice every peer settles in well under a second.
+const mvPropagationTimeout = 5 * time.Second
 
 // CreateMaterializedView persists a new view descriptor.
 //
@@ -31,7 +39,52 @@ func (s *GRPCServer) CreateMaterializedView(ctx context.Context, req *cefaspb.Cr
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
+	// The catalog Create call returns once the local raft Apply landed
+	// (#536 fallback handles cold-cache reads). On 8-node clusters the
+	// peers' shard 0 may still be catching up — and the cross-shard MV
+	// cascade (#535 / #537) hits the propagation race head-on. Wait
+	// until every peer can resolve the view before declaring the DDL
+	// done; the timeout is a soft bound, callers should still expect
+	// a short tail of NotFound during heavy raft lag.
+	s.waitForMVPropagation(ctx, created.Name)
 	return &cefaspb.CreateMaterializedViewResponse{Descriptor_: mvDescriptorToPB(created)}, nil
+}
+
+// waitForMVPropagation polls every peer in parallel until each
+// peer's catalog can resolve the new view via
+// DescribeMaterializedView. Returns when all peers acknowledge or
+// the soft timeout fires.
+func (s *GRPCServer) waitForMVPropagation(ctx context.Context, name string) {
+	if s.manager == nil {
+		return
+	}
+	peers := s.manager.PeerIDs()
+	if len(peers) == 0 {
+		return
+	}
+	deadline := time.Now().Add(mvPropagationTimeout)
+	var wg sync.WaitGroup
+	for _, peerID := range peers {
+		peerID := peerID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				if ctx.Err() != nil {
+					return
+				}
+				err := s.manager.PeerDescribeView(ctx, peerID, name)
+				if err == nil {
+					return
+				}
+				if status.Code(err) != codes.NotFound {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (s *GRPCServer) DescribeMaterializedView(ctx context.Context, req *cefaspb.DescribeMaterializedViewRequest) (*cefaspb.DescribeMaterializedViewResponse, error) {

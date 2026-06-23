@@ -97,6 +97,41 @@ func (m *Manager) BatchWriteMVToPeer(ctx context.Context, peerID, addr string, r
 	return err
 }
 
+// PeerDescribeView calls DescribeMaterializedView on the named peer
+// to confirm the catalog entry has propagated. Returns nil when the
+// peer's catalog can resolve the view; gRPC NotFound surfaces as a
+// distinct error so the caller can retry until raft catches up.
+func (m *Manager) PeerDescribeView(ctx context.Context, peerID, name string) error {
+	m.mu.RLock()
+	addr, ok := m.cfg.PeerGRPCAddrs[peerID]
+	m.mu.RUnlock()
+	if !ok || addr == "" {
+		return fmt.Errorf("peer %s: no gRPC address", peerID)
+	}
+	conn, err := m.peerWriteConn(ctx, peerID, addr)
+	if err != nil {
+		return fmt.Errorf("dial peer %s: %w", peerID, err)
+	}
+	_, err = cefaspb.NewCefasClient(conn).DescribeMaterializedView(ctx, &cefaspb.DescribeMaterializedViewRequest{Name: name})
+	return err
+}
+
+// PeerIDs returns every peer's SelfID excluding the local node.
+// Empty when single-node or when no PeerGRPCAddrs are configured.
+func (m *Manager) PeerIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	self := m.cfg.SelfID
+	out := make([]string, 0, len(m.cfg.PeerGRPCAddrs))
+	for id := range m.cfg.PeerGRPCAddrs {
+		if id == self {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 // closePeerWriters tears down every cached peer connection. Called from
 // Manager.Close().
 func (m *Manager) closePeerWriters() {
