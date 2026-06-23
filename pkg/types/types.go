@@ -246,11 +246,16 @@ const (
 	RefreshModeEager       RefreshMode = "eager"
 	RefreshModeScheduled   RefreshMode = "scheduled"
 	RefreshModeOnDemand    RefreshMode = "on_demand"
+	// RefreshModeFast applies the delta since the last refresh from
+	// the base table's changelog. Unlike SCHEDULED (complete rescan)
+	// it costs O(B) per tick where B is the number of base mutations
+	// in the interval, not O(|base|).
+	RefreshModeFast RefreshMode = "fast"
 )
 
 // RefreshPolicy decides when a materialized view is reconciled
 // with its base. IntervalSeconds is only meaningful when Mode is
-// RefreshModeScheduled.
+// RefreshModeScheduled or RefreshModeFast.
 type RefreshPolicy struct {
 	Mode            RefreshMode `json:"mode"`
 	IntervalSeconds int64       `json:"intervalSeconds,omitempty"`

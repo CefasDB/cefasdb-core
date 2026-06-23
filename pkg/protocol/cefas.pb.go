@@ -213,6 +213,11 @@ const (
 	RefreshPolicy_EAGER            RefreshPolicy_Mode = 1
 	RefreshPolicy_SCHEDULED        RefreshPolicy_Mode = 2
 	RefreshPolicy_ON_DEMAND        RefreshPolicy_Mode = 3
+	// FAST replays the base table's changelog into the view at each
+	// interval, applying only the delta. Requires the base table to
+	// have streams enabled so each ChangeRecord carries the prior
+	// image needed for filter / PK-shift handling.
+	RefreshPolicy_FAST RefreshPolicy_Mode = 4
 )
 
 // Enum value maps for RefreshPolicy_Mode.
@@ -222,12 +227,14 @@ var (
 		1: "EAGER",
 		2: "SCHEDULED",
 		3: "ON_DEMAND",
+		4: "FAST",
 	}
 	RefreshPolicy_Mode_value = map[string]int32{
 		"MODE_UNSPECIFIED": 0,
 		"EAGER":            1,
 		"SCHEDULED":        2,
 		"ON_DEMAND":        3,
+		"FAST":             4,
 	}
 )
 
@@ -13090,15 +13097,16 @@ const file_cefas_proto_rawDesc = "" +
 	"\x14projected_attributes\x18\x04 \x03(\tR\x13projectedAttributes\x12>\n" +
 	"\x0erefresh_policy\x18\x05 \x01(\v2\x17.cefas.v1.RefreshPolicyR\rrefreshPolicy\x12\x16\n" +
 	"\x06status\x18\x06 \x01(\tR\x06status\x12/\n" +
-	"\x14last_refresh_at_unix\x18\a \x01(\x03R\x11lastRefreshAtUnix\"\xb3\x01\n" +
+	"\x14last_refresh_at_unix\x18\a \x01(\x03R\x11lastRefreshAtUnix\"\xbd\x01\n" +
 	"\rRefreshPolicy\x120\n" +
 	"\x04mode\x18\x01 \x01(\x0e2\x1c.cefas.v1.RefreshPolicy.ModeR\x04mode\x12)\n" +
-	"\x10interval_seconds\x18\x02 \x01(\x03R\x0fintervalSeconds\"E\n" +
+	"\x10interval_seconds\x18\x02 \x01(\x03R\x0fintervalSeconds\"O\n" +
 	"\x04Mode\x12\x14\n" +
 	"\x10MODE_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05EAGER\x10\x01\x12\r\n" +
 	"\tSCHEDULED\x10\x02\x12\r\n" +
-	"\tON_DEMAND\x10\x03\"e\n" +
+	"\tON_DEMAND\x10\x03\x12\b\n" +
+	"\x04FAST\x10\x04\"e\n" +
 	"\x1dCreateMaterializedViewRequest\x12D\n" +
 	"\n" +
 	"descriptor\x18\x01 \x01(\v2$.cefas.v1.MaterializedViewDescriptorR\n" +

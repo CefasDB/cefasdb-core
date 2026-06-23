@@ -210,6 +210,11 @@ message RefreshPolicy {
     EAGER            = 1;
     SCHEDULED        = 2;
     ON_DEMAND        = 3;
+    // FAST replays the base table's changelog into the view at each
+    // interval, applying only the delta. Requires the base table to
+    // have streams enabled so each ChangeRecord carries the prior
+    // image needed for filter / PK-shift handling.
+    FAST             = 4;
   }
   Mode  mode             = 1;
   int64 interval_seconds = 2;

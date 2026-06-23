@@ -256,6 +256,10 @@ func NormalizeMVDescriptor(mv *types.MaterializedViewDescriptor) error {
 		if mv.RefreshPolicy.IntervalSeconds <= 0 {
 			return fmt.Errorf("materialized view %q: REFRESH EVERY requires interval > 0", mv.Name)
 		}
+	case types.RefreshModeFast:
+		if mv.RefreshPolicy.IntervalSeconds <= 0 {
+			return fmt.Errorf("materialized view %q: REFRESH FAST requires interval > 0", mv.Name)
+		}
 	case types.RefreshModeOnDemand:
 		mv.RefreshPolicy.IntervalSeconds = 0
 	default:

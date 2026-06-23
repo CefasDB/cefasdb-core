@@ -174,6 +174,8 @@ func refreshPolicyToPB(rp types.RefreshPolicy) *cefaspb.RefreshPolicy {
 		out.Mode = cefaspb.RefreshPolicy_SCHEDULED
 	case types.RefreshModeOnDemand:
 		out.Mode = cefaspb.RefreshPolicy_ON_DEMAND
+	case types.RefreshModeFast:
+		out.Mode = cefaspb.RefreshPolicy_FAST
 	default:
 		out.Mode = cefaspb.RefreshPolicy_MODE_UNSPECIFIED
 	}
@@ -188,6 +190,8 @@ func pbRefreshModeToTypes(m cefaspb.RefreshPolicy_Mode) types.RefreshMode {
 		return types.RefreshModeScheduled
 	case cefaspb.RefreshPolicy_ON_DEMAND:
 		return types.RefreshModeOnDemand
+	case cefaspb.RefreshPolicy_FAST:
+		return types.RefreshModeFast
 	default:
 		return types.RefreshModeUnspecified
 	}
