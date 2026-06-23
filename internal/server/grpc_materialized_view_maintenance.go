@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -8,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -26,7 +29,7 @@ import (
 // read-your-write for EAGER, so a partial update would silently
 // break the view. The caller's gRPC status surfaces the offending
 // view name in the message for operability.
-func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) error {
+func (s *GRPCServer) applyMVEagerPut(ctx context.Context, td types.TableDescriptor, item types.Item) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
@@ -52,7 +55,7 @@ func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) 
 			continue
 		}
 		started := time.Now()
-		if err := s.writeMVRow(mv, mvItem); err != nil {
+		if err := s.writeMVRow(ctx, mv, mvItem); err != nil {
 			return status.Errorf(codes.Internal, "mv %s write: %v", mv.Name, err)
 		}
 		s.mvObserveDuration(mv.Name, "put", started)
@@ -71,7 +74,7 @@ func (s *GRPCServer) applyMVEagerPut(td types.TableDescriptor, item types.Item) 
 // collapsed the 8-node cluster under realistic load (issue #531).
 // EAGER consistency is preserved: the call blocks until every
 // bucket commits.
-func (s *GRPCServer) applyMVEagerBatch(td types.TableDescriptor, ops []pebble.BatchOp) error {
+func (s *GRPCServer) applyMVEagerBatch(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
@@ -88,24 +91,28 @@ func (s *GRPCServer) applyMVEagerBatch(td types.TableDescriptor, ops []pebble.Ba
 			s.mvObserveDuration(mv.Name, "skip_non_eager", time.Now())
 			continue
 		}
-		if err := s.applyMVEagerBatchOneView(mv, ops); err != nil {
+		if err := s.applyMVEagerBatchOneView(ctx, mv, ops); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// applyMVEagerBatchOneView fans out a base-table batch into a single
-// MV. Steps:
+// applyMVEagerBatchOneView fans out a base-table batch into a single MV.
 //
-//  1. Derive every MV row up front; ops that lack the MV PK / SK are
+// Layout:
+//
+//  1. Derive every MV row up front; ops missing the MV PK / SK are
 //     dropped with a metric (schema drift).
-//  2. Dedupe routing per MV PK so writeTargetsForPK runs once per
-//     unique MV PK, not per op.
-//  3. Bucket the resulting MV ops by primary shard + mirror shards.
-//  4. Submit each bucket with batchWriteBuckets — one raft entry per
-//     (MV, shard) bucket.
-func (s *GRPCServer) applyMVEagerBatchOneView(mv types.MaterializedViewDescriptor, ops []pebble.BatchOp) error {
+//  2. Group MV ops by the shard that currently owns the MV PK. A
+//     single MV write may land on a different shard than the base
+//     table — when MV PK ≠ base PK the routing diverges.
+//  3. For each (MV, shard) bucket: dispatch in parallel. Local-leader
+//     buckets write directly to the shard's pebble.DB; remote-leader
+//     buckets are forwarded to the peer via cluster.BatchWriteItemToPeer.
+//     EAGER read-your-write is preserved: the call blocks until every
+//     bucket has committed (locally or remotely).
+func (s *GRPCServer) applyMVEagerBatchOneView(ctx context.Context, mv types.MaterializedViewDescriptor, ops []pebble.BatchOp) error {
 	mvTD := mvSyntheticTableDescriptor(mv)
 	mvOps := make([]pebble.BatchOp, 0, len(ops))
 	for _, op := range ops {
@@ -129,19 +136,20 @@ func (s *GRPCServer) applyMVEagerBatchOneView(mv types.MaterializedViewDescripto
 		return nil
 	}
 
-	// Routing dedup for the MV ops.
-	type pending struct {
-		op       pebble.BatchOp
-		routeIdx int
-	}
-	pendings := make([]pending, 0, len(mvOps))
-	keyToRoute := make(map[string]int, len(mvOps))
-	routes := make([]routedWriteTargets, 0, len(mvOps))
-	releaseRoutes := func() {
-		for i := len(routes) - 1; i >= 0; i-- {
-			routes[i].Release()
+	if s.manager == nil {
+		// Single-node fallback: no manager, only one pebble.DB. Write
+		// every MV op against s.db with the synthetic descriptor — same
+		// behaviour the pre-cross-shard cascade gave for unit fixtures.
+		started := time.Now()
+		if err := s.db.BatchWriteItem(mvTD, mvOps); err != nil {
+			return status.Errorf(codes.Internal, "mv %s: %v", mv.Name, err)
 		}
+		s.mvObserveDuration(mv.Name, "batch", started)
+		return nil
 	}
+
+	router := s.manager.Router()
+	buckets := make(map[uint32][]pebble.BatchOp, 16)
 	for _, op := range mvOps {
 		probe := op.Item
 		if op.Op == pebble.BatchOpDelete {
@@ -149,63 +157,112 @@ func (s *GRPCServer) applyMVEagerBatchOneView(mv types.MaterializedViewDescripto
 		}
 		pkBytes, err := pkBytesFromItem(probe, mv.KeySchema)
 		if err != nil {
-			releaseRoutes()
 			return status.Errorf(codes.Internal, "mv %s pk: %v", mv.Name, err)
 		}
-		key := string(pkBytes)
-		idx, ok := keyToRoute[key]
-		if !ok {
-			targets, err := s.writeTargetsForPK(pkBytes)
-			if err != nil {
-				releaseRoutes()
-				return status.Errorf(codes.Internal, "mv %s route: %v", mv.Name, err)
-			}
-			idx = len(routes)
-			routes = append(routes, targets)
-			keyToRoute[key] = idx
+		shardID, err := router.ShardForPK(pkBytes)
+		if err != nil {
+			return status.Errorf(codes.Internal, "mv %s shard: %v", mv.Name, err)
 		}
-		pendings = append(pendings, pending{op: op, routeIdx: idx})
-	}
-
-	primaryBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
-	mirrorBuckets := make(map[*pebble.DB][]pebble.BatchOp, len(routes))
-	for _, r := range routes {
-		if _, ok := primaryBuckets[r.primary]; !ok {
-			primaryBuckets[r.primary] = make([]pebble.BatchOp, 0, len(pendings))
-		}
-		for _, m := range r.mirrors {
-			if _, ok := mirrorBuckets[m]; !ok {
-				mirrorBuckets[m] = make([]pebble.BatchOp, 0, len(pendings))
-			}
-		}
-	}
-	for _, p := range pendings {
-		r := routes[p.routeIdx]
-		primaryBuckets[r.primary] = append(primaryBuckets[r.primary], p.op)
-		for _, m := range r.mirrors {
-			mirrorBuckets[m] = append(mirrorBuckets[m], p.op)
-		}
+		buckets[shardID] = append(buckets[shardID], op)
 	}
 
 	started := time.Now()
-	if err := batchWriteBuckets(mvTD, primaryBuckets); err != nil {
-		releaseRoutes()
-		return status.Errorf(codes.Internal, "mv %s primary: %v", mv.Name, err)
+	if err := s.dispatchMVBuckets(ctx, mvTD, buckets); err != nil {
+		return status.Errorf(codes.Internal, "mv %s: %v", mv.Name, err)
 	}
-	if err := batchWriteBuckets(mvTD, mirrorBuckets); err != nil {
-		releaseRoutes()
-		return status.Errorf(codes.Internal, "mv %s mirror: %v", mv.Name, err)
-	}
-	releaseRoutes()
 	s.mvObserveDuration(mv.Name, "batch", started)
 	return nil
+}
+
+// dispatchMVBuckets runs every (shardID → ops) bucket in parallel,
+// returning the first error after all goroutines drain. Each bucket
+// routes through dispatchMVBucket which decides local vs remote.
+func (s *GRPCServer) dispatchMVBuckets(ctx context.Context, mvTD types.TableDescriptor, buckets map[uint32][]pebble.BatchOp) error {
+	switch len(buckets) {
+	case 0:
+		return nil
+	case 1:
+		for shardID, ops := range buckets {
+			return s.dispatchMVBucket(ctx, mvTD, shardID, ops)
+		}
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(buckets))
+	for shardID, ops := range buckets {
+		shardID, ops := shardID, ops
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.dispatchMVBucket(ctx, mvTD, shardID, ops); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dispatchMVBucket commits one bucket of MV ops. If the local node
+// is the leader for shardID, the write goes through the shard's local
+// pebble.DB (which routes through raft). Otherwise the bucket is sent
+// to the leader peer as a BatchWriteItem RPC.
+//
+// MV synthetic descriptors carry no attached MVs of their own, so the
+// peer's BatchWriteItem handler does not recurse into another cascade.
+func (s *GRPCServer) dispatchMVBucket(ctx context.Context, mvTD types.TableDescriptor, shardID uint32, ops []pebble.BatchOp) error {
+	peerID, addr, isSelf, err := s.manager.LeaderEndpoint(shardID)
+	if err != nil {
+		return err
+	}
+	if isSelf {
+		sh, ok := s.manager.Shard(shardID)
+		if !ok || sh == nil || sh.Storage == nil {
+			return status.Errorf(codes.Internal, "mv %s shard %d not local", mvTD.Name, shardID)
+		}
+		return sh.Storage.BatchWriteItem(mvTD, ops)
+	}
+	req, err := mvBatchOpsToPB(mvTD.Name, ops)
+	if err != nil {
+		return err
+	}
+	return s.manager.BatchWriteItemToPeer(ctx, peerID, addr, req)
+}
+
+// mvBatchOpsToPB converts MV-side BatchOps to the protobuf BatchWriteItem
+// request format used for peer-to-peer cascade dispatch.
+func mvBatchOpsToPB(table string, ops []pebble.BatchOp) (*cefaspb.BatchWriteItemRequest, error) {
+	out := &cefaspb.BatchWriteItemRequest{
+		Table: table,
+		Ops:   make([]*cefaspb.BatchWriteOp, 0, len(ops)),
+	}
+	for _, op := range ops {
+		switch op.Op {
+		case pebble.BatchOpPut:
+			out.Ops = append(out.Ops, &cefaspb.BatchWriteOp{
+				Kind: cefaspb.BatchWriteOp_KIND_PUT,
+				Item: itemToPB(op.Item),
+			})
+		case pebble.BatchOpDelete:
+			out.Ops = append(out.Ops, &cefaspb.BatchWriteOp{
+				Kind: cefaspb.BatchWriteOp_KIND_DELETE,
+				Key:  itemToPB(op.Key),
+			})
+		}
+	}
+	return out, nil
 }
 
 // applyMVEagerDelete cascades a base delete to every attached EAGER
 // MV. Computes the MV key from the same base item the delete request
 // carried (the catalog's KeySchema for the base table guarantees the
 // fields the MV will need are present in the request).
-func (s *GRPCServer) applyMVEagerDelete(td types.TableDescriptor, baseKey types.Item) error {
+func (s *GRPCServer) applyMVEagerDelete(ctx context.Context, td types.TableDescriptor, baseKey types.Item) error {
 	if len(td.MaterializedViews) == 0 || s.cat == nil {
 		return nil
 	}
@@ -223,7 +280,7 @@ func (s *GRPCServer) applyMVEagerDelete(td types.TableDescriptor, baseKey types.
 		}
 		mvKey := itemKeyOnly(mvItem, mv.KeySchema)
 		started := time.Now()
-		if err := s.deleteMVRow(mv, mvKey); err != nil {
+		if err := s.deleteMVRow(ctx, mv, mvKey); err != nil {
 			return status.Errorf(codes.Internal, "mv %s delete: %v", mv.Name, err)
 		}
 		s.mvObserveDuration(mv.Name, "delete", started)
@@ -279,32 +336,36 @@ func mvSyntheticTableDescriptor(mv types.MaterializedViewDescriptor) types.Table
 	}
 }
 
-func (s *GRPCServer) writeMVRow(mv types.MaterializedViewDescriptor, mvItem types.Item) error {
+func (s *GRPCServer) writeMVRow(ctx context.Context, mv types.MaterializedViewDescriptor, mvItem types.Item) error {
 	td := mvSyntheticTableDescriptor(mv)
+	if s.manager == nil {
+		return s.db.PutItemWith(td, mvItem, pebble.PutOptions{})
+	}
 	pkBytes, err := pkBytesFromItem(mvItem, td.KeySchema)
 	if err != nil {
 		return err
 	}
-	targets, err := s.writeTargetsForPK(pkBytes)
+	shardID, err := s.manager.Router().ShardForPK(pkBytes)
 	if err != nil {
 		return err
 	}
-	defer targets.Release()
-	return targets.PutItemWith(td, mvItem, pebble.PutOptions{})
+	return s.dispatchMVBucket(ctx, td, shardID, []pebble.BatchOp{{Op: pebble.BatchOpPut, Item: mvItem}})
 }
 
-func (s *GRPCServer) deleteMVRow(mv types.MaterializedViewDescriptor, mvKey types.Item) error {
+func (s *GRPCServer) deleteMVRow(ctx context.Context, mv types.MaterializedViewDescriptor, mvKey types.Item) error {
 	td := mvSyntheticTableDescriptor(mv)
+	if s.manager == nil {
+		return s.db.DeleteItemWith(td, mvKey, pebble.DeleteOptions{})
+	}
 	pkBytes, err := pkBytesFromItem(mvKey, td.KeySchema)
 	if err != nil {
 		return err
 	}
-	targets, err := s.writeTargetsForPK(pkBytes)
+	shardID, err := s.manager.Router().ShardForPK(pkBytes)
 	if err != nil {
 		return err
 	}
-	defer targets.Release()
-	return targets.DeleteItemWith(td, mvKey, pebble.DeleteOptions{})
+	return s.dispatchMVBucket(ctx, td, shardID, []pebble.BatchOp{{Op: pebble.BatchOpDelete, Key: mvKey}})
 }
 
 // mvObserveDuration records a per-view write latency sample if

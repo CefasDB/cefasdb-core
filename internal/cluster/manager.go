@@ -159,6 +159,10 @@ type Manager struct {
 	// non-nil in tests that need to swap real gRPC for an in-process
 	// connection.
 	peerDialer peerDialer
+
+	// peerWriters caches one *grpc.ClientConn per peer SelfID for the
+	// cross-shard cascade path (see cross_shard_writer.go).
+	peerWriters peerWriterCache
 }
 
 const (
@@ -989,5 +993,6 @@ func (m *Manager) Close() error {
 	if mux != nil {
 		_ = mux.Close()
 	}
+	m.closePeerWriters()
 	return firstErr
 }

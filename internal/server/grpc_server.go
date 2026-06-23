@@ -357,7 +357,7 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := s.applyMVEagerPut(td, item); err != nil {
+	if err := s.applyMVEagerPut(ctx, td, item); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
@@ -477,7 +477,7 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 		}
 	}
 	if len(td.MaterializedViews) > 0 {
-		if err := s.applyMVEagerPut(td, finalItem); err != nil {
+		if err := s.applyMVEagerPut(ctx, td, finalItem); err != nil {
 			return nil, mapWriteMutationErr(err)
 		}
 	}
@@ -547,7 +547,7 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
-	if err := s.applyMVEagerDelete(td, key); err != nil {
+	if err := s.applyMVEagerDelete(ctx, td, key); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
@@ -585,17 +585,17 @@ func (s *GRPCServer) BatchWriteItem(ctx context.Context, req *cefaspb.BatchWrite
 			return nil, status.Errorf(codes.InvalidArgument, "op %d: unknown kind", i)
 		}
 	}
-	if err := s.batchWriteFanOut(td, ops); err != nil {
+	if err := s.batchWriteFanOut(ctx, td, ops); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
 	return &cefaspb.BatchWriteItemResponse{}, nil
 }
 
-func (s *GRPCServer) batchWriteFanOut(td types.TableDescriptor, ops []pebble.BatchOp) error {
+func (s *GRPCServer) batchWriteFanOut(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp) error {
 	if s.manager == nil {
-		return s.batchWriteFanOutSingleShard(td, ops)
+		return s.batchWriteFanOutSingleShard(ctx, td, ops)
 	}
-	return s.batchWriteFanOutMultiShard(td, ops)
+	return s.batchWriteFanOutMultiShard(ctx, td, ops)
 }
 
 type batchWriteOpMeta struct {
@@ -615,7 +615,7 @@ func extractBatchOpMeta(op pebble.BatchOp, ks types.KeySchema) (pkBytes []byte, 
 	return pkBytes, approxBytes, err
 }
 
-func (s *GRPCServer) batchWriteFanOutSingleShard(td types.TableDescriptor, ops []pebble.BatchOp) error {
+func (s *GRPCServer) batchWriteFanOutSingleShard(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp) error {
 	started := time.Now()
 	pluginPlan, err := s.planPluginIndexBatch(s.db, td, ops)
 	if err != nil {
@@ -639,7 +639,7 @@ func (s *GRPCServer) batchWriteFanOutSingleShard(td types.TableDescriptor, ops [
 	if err := s.applyPluginIndexPlan(pluginPlan); err != nil {
 		return err
 	}
-	if err := s.applyMVEagerBatch(td, ops); err != nil {
+	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
 		return err
 	}
 	for _, o := range observations {
@@ -655,7 +655,7 @@ func (s *GRPCServer) batchWriteFanOutSingleShard(td types.TableDescriptor, ops [
 // cycles. The new shape splits the work in two passes: first a
 // routing dedup that hits writeTargetsForPK once per unique PK, then
 // a single bucket-fill loop on pre-sized slices.
-func (s *GRPCServer) batchWriteFanOutMultiShard(td types.TableDescriptor, ops []pebble.BatchOp) error {
+func (s *GRPCServer) batchWriteFanOutMultiShard(ctx context.Context, td types.TableDescriptor, ops []pebble.BatchOp) error {
 	metas := make([]batchWriteOpMeta, 0, len(ops))
 	keyToRoute := make(map[string]int, len(ops))
 	routes := make([]routedWriteTargets, 0, len(ops))
@@ -729,7 +729,7 @@ func (s *GRPCServer) batchWriteFanOutMultiShard(td types.TableDescriptor, ops []
 			return err
 		}
 	}
-	if err := s.applyMVEagerBatch(td, ops); err != nil {
+	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
 		return err
 	}
 	for _, meta := range metas {
