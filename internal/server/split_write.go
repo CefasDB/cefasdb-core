@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/CefasDb/cefasdb/internal/cluster"
@@ -53,11 +54,15 @@ func (t routedWriteTargets) Release() {
 }
 
 func (t routedWriteTargets) PutItemWith(td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error {
-	if err := t.primary.PutItemWith(td, item, opts); err != nil {
+	return t.PutItemWithCtx(context.Background(), td, item, opts)
+}
+
+func (t routedWriteTargets) PutItemWithCtx(ctx context.Context, td types.TableDescriptor, item types.Item, opts pebble.PutOptions) error {
+	if err := t.primary.PutItemWithCtx(ctx, td, item, opts); err != nil {
 		return err
 	}
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
+		if err := mirror.PutItemWithCtx(ctx, td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
 			return err
 		}
 	}
@@ -65,11 +70,15 @@ func (t routedWriteTargets) PutItemWith(td types.TableDescriptor, item types.Ite
 }
 
 func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error {
-	if err := t.primary.DeleteItemWith(td, key, opts); err != nil {
+	return t.DeleteItemWithCtx(context.Background(), td, key, opts)
+}
+
+func (t routedWriteTargets) DeleteItemWithCtx(ctx context.Context, td types.TableDescriptor, key types.Item, opts pebble.DeleteOptions) error {
+	if err := t.primary.DeleteItemWithCtx(ctx, td, key, opts); err != nil {
 		return err
 	}
 	for _, mirror := range t.mirrors {
-		if err := mirror.DeleteItemWith(td, key, pebble.DeleteOptions{}); err != nil {
+		if err := mirror.DeleteItemWithCtx(ctx, td, key, pebble.DeleteOptions{}); err != nil {
 			return err
 		}
 	}
@@ -77,8 +86,12 @@ func (t routedWriteTargets) DeleteItemWith(td types.TableDescriptor, key types.I
 }
 
 func (t routedWriteTargets) MirrorPutItem(td types.TableDescriptor, item types.Item) error {
+	return t.MirrorPutItemCtx(context.Background(), td, item)
+}
+
+func (t routedWriteTargets) MirrorPutItemCtx(ctx context.Context, td types.TableDescriptor, item types.Item) error {
 	for _, mirror := range t.mirrors {
-		if err := mirror.PutItemWith(td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
+		if err := mirror.PutItemWithCtx(ctx, td, item, pebble.PutOptions{AllowCounterWrite: true}); err != nil {
 			return err
 		}
 	}

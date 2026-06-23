@@ -147,7 +147,7 @@ func newLaneExecutor(name string, workers, fastQueue int) *laneExecutor {
 		workers:     workers,
 		fastDefault: make(chan laneJob, fastQueue),
 		queues:      make(map[string]*slQueue),
-		dispatch:    make(chan laneJob, workers*2),
+		dispatch:    make(chan laneJob),
 		refreshCh:   make(chan struct{}, 1),
 		closeCh:     make(chan struct{}),
 	}

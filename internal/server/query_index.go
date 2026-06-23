@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
@@ -8,19 +9,19 @@ import (
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
-func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
+func (s *GRPCServer) queryByIndex(ctx context.Context, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	// ScyllaDB-style GLOBAL index — partitioned by the indexed value
 	// (#509). One shard owns the partition, so the query lands on
 	// exactly one DB. Same RF=1 contract as #537 MV cascade.
 	if hasGlobalIndex(td, indexName) {
-		return s.queryByGlobalIndex(td, indexName, pkVal, opts)
+		return s.queryByGlobalIndex(ctx, td, indexName, pkVal, opts)
 	}
 	if hasGSI(td, indexName) {
 		dbs, err := s.readShardStores()
 		if err != nil {
 			return nil, err
 		}
-		return queryGSIAcrossShards(dbs, td, indexName, pkVal, opts)
+		return queryGSIAcrossShards(ctx, dbs, td, indexName, pkVal, opts)
 	}
 	if hasLSI(td, indexName) {
 		pkBytes, err := storage.AttrCanonicalBytes(pkVal)
@@ -31,7 +32,7 @@ func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pk
 		if err != nil {
 			return nil, err
 		}
-		return db.QueryByLSI(td, indexName, pkVal, opts)
+		return db.QueryByLSICtx(ctx, td, indexName, pkVal, opts)
 	}
 	return nil, fmt.Errorf("table %q has no index named %q", td.Name, indexName)
 }
@@ -48,7 +49,7 @@ func (s *GRPCServer) queryByIndex(td types.TableDescriptor, indexName string, pk
 // follow up with GetItem against the base table — one extra read
 // per pointer in the worst case, documented as the GSI v1 read
 // shape in ADR 0005 §3.
-func (s *GRPCServer) queryByGlobalIndex(td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
+func (s *GRPCServer) queryByGlobalIndex(ctx context.Context, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	if s.cat == nil {
 		return nil, fmt.Errorf("catalog not attached")
 	}
@@ -67,7 +68,7 @@ func (s *GRPCServer) queryByGlobalIndex(td types.TableDescriptor, indexName stri
 	if err != nil {
 		return nil, err
 	}
-	return db.QueryByPK(giTD.Name, giTD.KeySchema, pkVal, opts.Limit)
+	return db.QueryByPKCtx(ctx, giTD.Name, giTD.KeySchema, pkVal, opts.Limit)
 }
 
 func hasGlobalIndex(td types.TableDescriptor, name string) bool {
@@ -79,7 +80,7 @@ func hasGlobalIndex(td types.TableDescriptor, name string) bool {
 	return false
 }
 
-func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
+func queryGSIAcrossShards(ctx context.Context, dbs []*pebble.DB, td types.TableDescriptor, indexName string, pkVal types.AttributeValue, opts pebble.QueryOptions) ([]types.Item, error) {
 	var out []types.Item
 	seen := make(map[string]struct{})
 
@@ -94,7 +95,7 @@ func queryGSIAcrossShards(dbs []*pebble.DB, td types.TableDescriptor, indexName 
 	// only by transferring the entire partition from every shard.
 	shardOpts := opts
 	for _, db := range dbs {
-		got, err := db.QueryByGSI(td, indexName, pkVal, shardOpts)
+		got, err := db.QueryByGSICtx(ctx, td, indexName, pkVal, shardOpts)
 		if err != nil {
 			return nil, err
 		}

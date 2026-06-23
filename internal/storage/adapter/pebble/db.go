@@ -103,6 +103,10 @@ type DB struct {
 	bp      backpressureController
 	lanes   *dbLanes
 
+	slSharesMu       sync.RWMutex
+	slSharesResolver ServiceLevelSharesResolver
+	slSharesCache    sync.Map
+
 	backupMu             sync.Mutex
 	activeBackupRestores map[string]int
 
@@ -476,6 +480,22 @@ func (d *DB) commitLoop() {
 
 // Iter returns a new iterator scoped to [lower, upper). Caller MUST Close.
 func (d *DB) Iter(lower, upper []byte) (*pebbledb.Iterator, error) {
+	return d.IterCtx(context.Background(), lower, upper)
+}
+
+// IterCtx returns a new iterator after admitting the request to the
+// service level read lane. Caller MUST Close.
+func (d *DB) IterCtx(ctx context.Context, lower, upper []byte) (*pebbledb.Iterator, error) {
+	var it *pebbledb.Iterator
+	err := d.runReadCtx(ctx, func() error {
+		var err error
+		it, err = d.iterNoLane(lower, upper)
+		return err
+	})
+	return it, err
+}
+
+func (d *DB) iterNoLane(lower, upper []byte) (*pebbledb.Iterator, error) {
 	return d.db.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 }
 

@@ -186,7 +186,7 @@ func (s *GRPCServer) applyMVEagerBatchOneView(ctx context.Context, mv types.Mate
 		// every MV op against s.db with the synthetic descriptor — same
 		// behaviour the pre-cross-shard cascade gave for unit fixtures.
 		started := time.Now()
-		if err := s.db.BatchWriteItem(mvTD, mvOps); err != nil {
+		if err := s.db.BatchWriteItemCtx(ctx, mvTD, mvOps); err != nil {
 			return status.Errorf(codes.Internal, "mv %s: %v", mv.Name, err)
 		}
 		s.mvObserveDuration(mv.Name, "batch", started)
@@ -617,7 +617,7 @@ func mvSyntheticTableDescriptor(mv types.MaterializedViewDescriptor) types.Table
 func (s *GRPCServer) writeMVRow(ctx context.Context, mv types.MaterializedViewDescriptor, mvItem types.Item) error {
 	td := mvSyntheticTableDescriptor(mv)
 	if s.manager == nil {
-		return s.db.PutItemWith(td, mvItem, pebble.PutOptions{})
+		return s.db.PutItemWithCtx(ctx, td, mvItem, pebble.PutOptions{})
 	}
 	pkBytes, err := pkBytesFromItem(mvItem, td.KeySchema)
 	if err != nil {
@@ -633,7 +633,7 @@ func (s *GRPCServer) writeMVRow(ctx context.Context, mv types.MaterializedViewDe
 func (s *GRPCServer) deleteMVRow(ctx context.Context, mv types.MaterializedViewDescriptor, mvKey types.Item) error {
 	td := mvSyntheticTableDescriptor(mv)
 	if s.manager == nil {
-		return s.db.DeleteItemWith(td, mvKey, pebble.DeleteOptions{})
+		return s.db.DeleteItemWithCtx(ctx, td, mvKey, pebble.DeleteOptions{})
 	}
 	pkBytes, err := pkBytesFromItem(mvKey, td.KeySchema)
 	if err != nil {
