@@ -92,6 +92,41 @@ func ServiceLevelInterceptor() (grpc.UnaryServerInterceptor, grpc.StreamServerIn
 	return unary, stream
 }
 
+// SLQuotaInterceptor admits requests through the per-SL quota
+// controller (#499). Runs after ServiceLevelInterceptor so the
+// SL tag is already attached to ctx; on rejection returns
+// codes.ResourceExhausted with the offending SL name in the
+// message.
+//
+// A nil controller short-circuits to a no-op pass-through.
+func SLQuotaInterceptor(quota *SLQuotaController) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if quota == nil {
+			return handler(ctx, req)
+		}
+		sl := auth.ServiceLevelFromContext(ctx)
+		release, err := quota.Begin(sl)
+		if err != nil {
+			return nil, status.Errorf(codes.ResourceExhausted, "service level %s rate cap exceeded", sl)
+		}
+		defer release()
+		return handler(ctx, req)
+	}
+	stream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if quota == nil {
+			return handler(srv, ss)
+		}
+		sl := auth.ServiceLevelFromContext(ss.Context())
+		release, err := quota.Begin(sl)
+		if err != nil {
+			return status.Errorf(codes.ResourceExhausted, "service level %s rate cap exceeded", sl)
+		}
+		defer release()
+		return handler(srv, ss)
+	}
+	return unary, stream
+}
+
 func extractBearerFromMD(md metadata.MD) (string, error) {
 	auths := md.Get("authorization")
 	if len(auths) == 0 {

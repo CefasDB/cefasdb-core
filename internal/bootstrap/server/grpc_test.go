@@ -19,7 +19,7 @@ import (
 // level interceptor still gets wired (always-on for #489), so we
 // expect the two interceptor-chain options.
 func TestBuildGRPCOpts_NoTLS_NoValidator(t *testing.T) {
-	opts, err := BuildGRPCOpts(nil, "", "", "")
+	opts, err := BuildGRPCOpts(nil, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,10 +30,10 @@ func TestBuildGRPCOpts_NoTLS_NoValidator(t *testing.T) {
 
 // TestBuildGRPCOpts_TLSMissingKey rejects half-configured TLS.
 func TestBuildGRPCOpts_TLSMissingKey(t *testing.T) {
-	if _, err := BuildGRPCOpts(nil, "cert.pem", "", ""); err == nil {
+	if _, err := BuildGRPCOpts(nil, "cert.pem", "", "", nil); err == nil {
 		t.Fatalf("expected error when key path is empty")
 	}
-	if _, err := BuildGRPCOpts(nil, "", "key.pem", ""); err == nil {
+	if _, err := BuildGRPCOpts(nil, "", "key.pem", "", nil); err == nil {
 		t.Fatalf("expected error when cert path is empty")
 	}
 }
@@ -43,7 +43,7 @@ func TestBuildGRPCOpts_TLSMissingKey(t *testing.T) {
 func TestBuildGRPCOpts_InvalidCertPath(t *testing.T) {
 	dir := t.TempDir()
 	bogus := filepath.Join(dir, "missing.pem")
-	if _, err := BuildGRPCOpts(nil, bogus, bogus, ""); err == nil {
+	if _, err := BuildGRPCOpts(nil, bogus, bogus, "", nil); err == nil {
 		t.Fatalf("expected error for missing cert/key files")
 	}
 }
@@ -53,7 +53,7 @@ func TestBuildGRPCOpts_InvalidCertPath(t *testing.T) {
 // the cert-loading / option-assembly section.
 func TestBuildGRPCOpts_TLS(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t)
-	opts, err := BuildGRPCOpts(nil, certPath, keyPath, "")
+	opts, err := BuildGRPCOpts(nil, certPath, keyPath, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestBuildGRPCOpts_TLS(t *testing.T) {
 // cert as the client CA bundle to keep the test hermetic.
 func TestBuildGRPCOpts_MTLS(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t)
-	opts, err := BuildGRPCOpts(nil, certPath, keyPath, certPath)
+	opts, err := BuildGRPCOpts(nil, certPath, keyPath, certPath, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBuildGRPCOpts_MTLS_BadCABundle(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("not a pem block"), 0o600); err != nil {
 		t.Fatalf("write bad ca: %v", err)
 	}
-	if _, err := BuildGRPCOpts(nil, certPath, keyPath, bad); err == nil {
+	if _, err := BuildGRPCOpts(nil, certPath, keyPath, bad, nil); err == nil {
 		t.Fatalf("expected error for non-PEM ca bundle")
 	}
 }
