@@ -645,10 +645,20 @@ func removeViewName(xs []string, x string) []string {
 }
 
 func mvToTableDescriptor(mv types.MaterializedViewDescriptor) types.TableDescriptor {
-	return types.TableDescriptor{
+	td := types.TableDescriptor{
 		Name:      mv.Name,
 		KeySchema: mv.KeySchema,
 	}
+	if len(mv.Aggregations) > 0 {
+		td.AttributeDefinitions = make([]types.AttributeDefinition, 0, len(mv.Aggregations))
+		for _, agg := range mv.Aggregations {
+			td.AttributeDefinitions = append(td.AttributeDefinitions, types.AttributeDefinition{
+				Name: agg.TargetAttribute,
+				Type: types.AttributeTypeCounter,
+			})
+		}
+	}
+	return td
 }
 
 // loadAllServiceLevels hydrates the in-memory map from pebble on open.

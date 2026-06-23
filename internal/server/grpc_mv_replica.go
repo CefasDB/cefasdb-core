@@ -86,3 +86,49 @@ func (s *GRPCServer) BatchWriteMV(ctx context.Context, req *cefaspb.BatchWriteMV
 	}
 	return &cefaspb.BatchWriteMVResponse{}, nil
 }
+
+// AtomicUpdateMV is the receiver side for aggregate-MV counter
+// maintenance. The coordinator has already routed by the MV key; this
+// method accepts only shards hosted by the receiving node.
+func (s *GRPCServer) AtomicUpdateMV(ctx context.Context, req *cefaspb.AtomicUpdateMVRequest) (*cefaspb.AtomicUpdateMVResponse, error) {
+	if s.cat == nil {
+		return nil, status.Error(codes.FailedPrecondition, "catalog not attached")
+	}
+	mv, err := s.cat.DescribeView(req.GetView())
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "view %s: %v", req.GetView(), err)
+	}
+	mvTD := mvSyntheticTableDescriptor(mv)
+	key, err := pbToItem(req.GetKey())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "key: %v", err)
+	}
+	actions, err := pbToAtomicActions(req.GetActions())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	if s.manager == nil {
+		if _, err := s.db.AtomicUpdate(mvTD, key, pebble.AtomicOptions{Actions: actions}); err != nil {
+			return nil, status.Errorf(codes.Internal, "mv %s: %v", mv.Name, err)
+		}
+		return &cefaspb.AtomicUpdateMVResponse{}, nil
+	}
+
+	pkBytes, err := pkBytesFromItem(key, mv.KeySchema)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "mv %s pk: %v", mv.Name, err)
+	}
+	shardID, err := s.manager.Router().ShardForPK(pkBytes)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "mv %s shard: %v", mv.Name, err)
+	}
+	sh, ok := s.manager.Shard(shardID)
+	if !ok || sh == nil || sh.Storage == nil {
+		return nil, status.Errorf(codes.Unavailable, "mv %s shard %d not local", mv.Name, shardID)
+	}
+	if _, err := sh.Storage.AtomicUpdate(mvTD, key, pebble.AtomicOptions{Actions: actions}); err != nil {
+		return nil, status.Errorf(codes.Internal, "mv %s shard %d: %v", mv.Name, shardID, err)
+	}
+	return &cefaspb.AtomicUpdateMVResponse{}, nil
+}

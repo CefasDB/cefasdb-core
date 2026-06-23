@@ -133,12 +133,22 @@ type DropTableStmt struct {
 // AS SELECT cols FROM <base> PRIMARY KEY (<pk> [, <sk>])
 // [REFRESH EAGER | EVERY N <unit> | ON DEMAND].
 type CreateMaterializedViewStmt struct {
-	Name      string
-	BaseTable string
-	Projected []string
-	PK        string
-	SK        string
-	Refresh   MVRefreshSpec
+	Name         string
+	BaseTable    string
+	Projected    []string
+	GroupBy      []string
+	Aggregations []MVAggregationSpec
+	PK           string
+	SK           string
+	Refresh      MVRefreshSpec
+}
+
+// MVAggregationSpec is one COUNT/SUM item in a CREATE MATERIALIZED VIEW
+// SELECT list.
+type MVAggregationSpec struct {
+	Function string
+	Source   string
+	Target   string
 }
 
 // MVRefreshSpec parses the REFRESH clause. Mode is one of "eager",

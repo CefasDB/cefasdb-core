@@ -97,6 +97,17 @@ func (m *Manager) BatchWriteMVToPeer(ctx context.Context, peerID, addr string, r
 	return err
 }
 
+// AtomicUpdateMVToPeer forwards aggregate-MV counter deltas to the
+// peer that owns the routed view row.
+func (m *Manager) AtomicUpdateMVToPeer(ctx context.Context, peerID, addr string, req *cefaspb.AtomicUpdateMVRequest) error {
+	conn, err := m.peerWriteConn(ctx, peerID, addr)
+	if err != nil {
+		return fmt.Errorf("dial peer %s: %w", peerID, err)
+	}
+	_, err = cefaspb.NewReplicaClient(conn).AtomicUpdateMV(ctx, req)
+	return err
+}
+
 // BatchWriteGIToPeer forwards a global-index cascade bucket. Same
 // RF=1 contract as BatchWriteMVToPeer; see Replica.BatchWriteGI.
 func (m *Manager) BatchWriteGIToPeer(ctx context.Context, peerID, addr string, req *cefaspb.BatchWriteGIRequest) error {

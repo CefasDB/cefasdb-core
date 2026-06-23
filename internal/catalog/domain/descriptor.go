@@ -318,6 +318,72 @@ func NormalizeMVDescriptor(mv *types.MaterializedViewDescriptor) error {
 		}
 		mv.ProjectedAttributes = out
 	}
+	if mv.GroupBy != nil {
+		seen := map[string]struct{}{}
+		out := make([]string, 0, len(mv.GroupBy))
+		for _, a := range mv.GroupBy {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			if _, dup := seen[a]; dup {
+				continue
+			}
+			seen[a] = struct{}{}
+			out = append(out, a)
+		}
+		mv.GroupBy = out
+	}
+	if len(mv.Aggregations) > 0 {
+		if mv.RefreshPolicy.Mode != types.RefreshModeEager {
+			return fmt.Errorf("materialized view %q: aggregate views require REFRESH EAGER", mv.Name)
+		}
+		if len(mv.GroupBy) == 0 {
+			mv.GroupBy = []string{mv.KeySchema.PK}
+			if mv.KeySchema.SK != "" {
+				mv.GroupBy = append(mv.GroupBy, mv.KeySchema.SK)
+			}
+		}
+		if len(mv.GroupBy) != 1 && len(mv.GroupBy) != 2 {
+			return fmt.Errorf("materialized view %q: aggregate GROUP BY must match the primary key", mv.Name)
+		}
+		if mv.GroupBy[0] != mv.KeySchema.PK {
+			return fmt.Errorf("materialized view %q: GROUP BY %q must match primary key %q", mv.Name, mv.GroupBy[0], mv.KeySchema.PK)
+		}
+		if mv.KeySchema.SK == "" && len(mv.GroupBy) > 1 {
+			return fmt.Errorf("materialized view %q: GROUP BY has sort key %q but view key has no SK", mv.Name, mv.GroupBy[1])
+		}
+		if mv.KeySchema.SK != "" && (len(mv.GroupBy) != 2 || mv.GroupBy[1] != mv.KeySchema.SK) {
+			return fmt.Errorf("materialized view %q: GROUP BY must include sort key %q", mv.Name, mv.KeySchema.SK)
+		}
+		seenTargets := map[string]struct{}{mv.KeySchema.PK: {}}
+		if mv.KeySchema.SK != "" {
+			seenTargets[mv.KeySchema.SK] = struct{}{}
+		}
+		for i := range mv.Aggregations {
+			agg := &mv.Aggregations[i]
+			agg.Function = strings.ToUpper(strings.TrimSpace(agg.Function))
+			agg.SourceAttribute = strings.TrimSpace(agg.SourceAttribute)
+			agg.TargetAttribute = strings.TrimSpace(agg.TargetAttribute)
+			if agg.TargetAttribute == "" {
+				return fmt.Errorf("materialized view %q: aggregation %d target attribute required", mv.Name, i)
+			}
+			if _, dup := seenTargets[agg.TargetAttribute]; dup {
+				return fmt.Errorf("materialized view %q: duplicate aggregation target %q", mv.Name, agg.TargetAttribute)
+			}
+			seenTargets[agg.TargetAttribute] = struct{}{}
+			switch agg.Function {
+			case types.MVAggregationCount:
+				agg.SourceAttribute = ""
+			case types.MVAggregationSum:
+				if agg.SourceAttribute == "" {
+					return fmt.Errorf("materialized view %q: SUM aggregation requires source attribute", mv.Name)
+				}
+			default:
+				return fmt.Errorf("materialized view %q: unsupported aggregation %q", mv.Name, agg.Function)
+			}
+		}
+	}
 	return nil
 }
 
@@ -326,6 +392,12 @@ func CloneMVDescriptor(in types.MaterializedViewDescriptor) types.MaterializedVi
 	out := in
 	if in.ProjectedAttributes != nil {
 		out.ProjectedAttributes = append([]string(nil), in.ProjectedAttributes...)
+	}
+	if in.GroupBy != nil {
+		out.GroupBy = append([]string(nil), in.GroupBy...)
+	}
+	if in.Aggregations != nil {
+		out.Aggregations = append([]types.MaterializedViewAggregation(nil), in.Aggregations...)
 	}
 	return out
 }

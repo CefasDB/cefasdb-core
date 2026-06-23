@@ -133,6 +133,8 @@ func mvDescriptorToPB(mv types.MaterializedViewDescriptor) *cefaspb.Materialized
 		BaseTable:           mv.BaseTable,
 		KeySchema:           &cefaspb.KeySchema{Pk: mv.KeySchema.PK, Sk: mv.KeySchema.SK},
 		ProjectedAttributes: append([]string(nil), mv.ProjectedAttributes...),
+		GroupBy:             append([]string(nil), mv.GroupBy...),
+		Aggregations:        mvAggregationsToPB(mv.Aggregations),
 		RefreshPolicy:       refreshPolicyToPB(mv.RefreshPolicy),
 		Status:              mv.Status,
 		LastRefreshAtUnix:   mv.LastRefreshAtUnix,
@@ -148,6 +150,8 @@ func pbToMVDescriptor(pb *cefaspb.MaterializedViewDescriptor) types.Materialized
 		Name:                pb.GetName(),
 		BaseTable:           pb.GetBaseTable(),
 		ProjectedAttributes: append([]string(nil), pb.GetProjectedAttributes()...),
+		GroupBy:             append([]string(nil), pb.GetGroupBy()...),
+		Aggregations:        pbAggregationsToTypes(pb.GetAggregations()),
 		Status:              pb.GetStatus(),
 		LastRefreshAtUnix:   pb.GetLastRefreshAtUnix(),
 	}
@@ -161,6 +165,58 @@ func pbToMVDescriptor(pb *cefaspb.MaterializedViewDescriptor) types.Materialized
 		}
 	}
 	return out
+}
+
+func mvAggregationsToPB(in []types.MaterializedViewAggregation) []*cefaspb.MaterializedViewAggregation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*cefaspb.MaterializedViewAggregation, 0, len(in))
+	for _, agg := range in {
+		out = append(out, &cefaspb.MaterializedViewAggregation{
+			Function:        mvAggregationFunctionToPB(agg.Function),
+			SourceAttribute: agg.SourceAttribute,
+			TargetAttribute: agg.TargetAttribute,
+		})
+	}
+	return out
+}
+
+func pbAggregationsToTypes(in []*cefaspb.MaterializedViewAggregation) []types.MaterializedViewAggregation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]types.MaterializedViewAggregation, 0, len(in))
+	for _, agg := range in {
+		out = append(out, types.MaterializedViewAggregation{
+			Function:        pbAggregationFunctionToTypes(agg.GetFunction()),
+			SourceAttribute: agg.GetSourceAttribute(),
+			TargetAttribute: agg.GetTargetAttribute(),
+		})
+	}
+	return out
+}
+
+func mvAggregationFunctionToPB(fn string) cefaspb.MaterializedViewAggregation_Function {
+	switch fn {
+	case types.MVAggregationCount:
+		return cefaspb.MaterializedViewAggregation_COUNT
+	case types.MVAggregationSum:
+		return cefaspb.MaterializedViewAggregation_SUM
+	default:
+		return cefaspb.MaterializedViewAggregation_FUNCTION_UNSPECIFIED
+	}
+}
+
+func pbAggregationFunctionToTypes(fn cefaspb.MaterializedViewAggregation_Function) string {
+	switch fn {
+	case cefaspb.MaterializedViewAggregation_COUNT:
+		return types.MVAggregationCount
+	case cefaspb.MaterializedViewAggregation_SUM:
+		return types.MVAggregationSum
+	default:
+		return ""
+	}
 }
 
 func refreshPolicyToPB(rp types.RefreshPolicy) *cefaspb.RefreshPolicy {

@@ -247,6 +247,12 @@ service Replica {
   // cascade's per-shard raft latency on every base BatchWriteItem.
   rpc BatchWriteMV(BatchWriteMVRequest) returns (BatchWriteMVResponse);
 
+  // AtomicUpdateMV applies counter deltas to an aggregate materialized
+  // view row on the receiving node. Same RF=1 ownership model as
+  // BatchWriteMV: the coordinator routes by the MV key and the owner
+  // mutates its local view row directly.
+  rpc AtomicUpdateMV(AtomicUpdateMVRequest) returns (AtomicUpdateMVResponse);
+
   // BatchWriteGI applies a global-secondary-index cascade directly
   // to the receiving node's local pebble store, bypassing raft.
   // Same RF=1 rationale as BatchWriteMV: pointer rows are
@@ -277,6 +283,14 @@ message BatchWriteMVRequest {
 
 message BatchWriteMVResponse {}
 
+message AtomicUpdateMVRequest {
+  string                       view    = 1;
+  map<string, AttributeValue>  key     = 2;
+  repeated AtomicAction        actions = 3;
+}
+
+message AtomicUpdateMVResponse {}
+
 // BatchWriteGIRequest carries a coalesced global-index cascade for
 // the named index. The receiver resolves the index descriptor and
 // writes pointer rows to its local pebble store without raft.
@@ -304,6 +318,19 @@ message MaterializedViewDescriptor {
   RefreshPolicy          refresh_policy       = 5;
   string                 status               = 6;
   int64                  last_refresh_at_unix = 7;
+  repeated string        group_by             = 8;
+  repeated MaterializedViewAggregation aggregations = 9;
+}
+
+message MaterializedViewAggregation {
+  enum Function {
+    FUNCTION_UNSPECIFIED = 0;
+    COUNT                = 1;
+    SUM                  = 2;
+  }
+  Function function         = 1;
+  string   source_attribute = 2;
+  string   target_attribute = 3;
 }
 
 message RefreshPolicy {

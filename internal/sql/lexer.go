@@ -92,6 +92,7 @@ const (
 	tAdd
 	tRemove
 	tCount
+	tSum
 	tReturning
 	tNew
 	tOld
@@ -126,6 +127,7 @@ const (
 	tAlter
 	tList
 	tGlobal
+	tGroup
 	tProject
 	tCounter
 )
@@ -174,6 +176,7 @@ var keywords = map[string]TokenKind{
 	"ADD":          tAdd,
 	"REMOVE":       tRemove,
 	"COUNT":        tCount,
+	"SUM":          tSum,
 	"RETURNING":    tReturning,
 	"NEW":          tNew,
 	"OLD":          tOld,
@@ -208,6 +211,7 @@ var keywords = map[string]TokenKind{
 	"ALTER":        tAlter,
 	"LIST":         tList,
 	"GLOBAL":       tGlobal,
+	"GROUP":        tGroup,
 	"PROJECT":      tProject,
 	"COUNTER":      tCounter,
 }

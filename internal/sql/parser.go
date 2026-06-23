@@ -986,11 +986,9 @@ func (p *parser) parseCreateMaterializedView() (*CreateMaterializedViewStmt, err
 		p.consume()
 	} else {
 		for {
-			col, err := p.expect(tIdent, "projected attribute")
-			if err != nil {
+			if err := p.parseMaterializedViewSelectItem(stmt); err != nil {
 				return nil, err
 			}
-			stmt.Projected = append(stmt.Projected, col.Lit)
 			if p.peek().Kind != tComma {
 				break
 			}
@@ -1005,6 +1003,24 @@ func (p *parser) parseCreateMaterializedView() (*CreateMaterializedViewStmt, err
 		return nil, err
 	}
 	stmt.BaseTable = base.Lit
+
+	if p.peek().Kind == tGroup {
+		p.consume()
+		if _, err := p.expect(tBy, "BY"); err != nil {
+			return nil, err
+		}
+		for {
+			col, err := p.expect(tIdent, "GROUP BY column")
+			if err != nil {
+				return nil, err
+			}
+			stmt.GroupBy = append(stmt.GroupBy, col.Lit)
+			if p.peek().Kind != tComma {
+				break
+			}
+			p.consume()
+		}
+	}
 
 	if _, err := p.expect(tPrimary, "PRIMARY"); err != nil {
 		return nil, err
@@ -1043,6 +1059,71 @@ func (p *parser) parseCreateMaterializedView() (*CreateMaterializedViewStmt, err
 		stmt.Refresh = MVRefreshSpec{Mode: "eager"}
 	}
 	return stmt, nil
+}
+
+func (p *parser) parseMaterializedViewSelectItem(stmt *CreateMaterializedViewStmt) error {
+	switch p.peek().Kind {
+	case tIdent:
+		col := p.consume()
+		stmt.Projected = append(stmt.Projected, col.Lit)
+		return nil
+	case tCount:
+		p.consume()
+		if _, err := p.expect(tLParen, "("); err != nil {
+			return err
+		}
+		if _, err := p.expect(tStar, "*"); err != nil {
+			return fmt.Errorf("COUNT in materialized view requires COUNT(*)")
+		}
+		if _, err := p.expect(tRParen, ")"); err != nil {
+			return err
+		}
+		target, err := p.parseOptionalAggregationAlias("count")
+		if err != nil {
+			return err
+		}
+		stmt.Aggregations = append(stmt.Aggregations, MVAggregationSpec{
+			Function: "COUNT",
+			Target:   target,
+		})
+		return nil
+	case tSum:
+		p.consume()
+		if _, err := p.expect(tLParen, "("); err != nil {
+			return err
+		}
+		source, err := p.expect(tIdent, "SUM source column")
+		if err != nil {
+			return err
+		}
+		if _, err := p.expect(tRParen, ")"); err != nil {
+			return err
+		}
+		target, err := p.parseOptionalAggregationAlias("sum_" + source.Lit)
+		if err != nil {
+			return err
+		}
+		stmt.Aggregations = append(stmt.Aggregations, MVAggregationSpec{
+			Function: "SUM",
+			Source:   source.Lit,
+			Target:   target,
+		})
+		return nil
+	default:
+		return fmt.Errorf("expected projected attribute or aggregate, got %q", p.peek().Lit)
+	}
+}
+
+func (p *parser) parseOptionalAggregationAlias(defaultTarget string) (string, error) {
+	if p.peek().Kind != tAs {
+		return defaultTarget, nil
+	}
+	p.consume()
+	alias, err := p.expect(tIdent, "aggregation alias")
+	if err != nil {
+		return "", err
+	}
+	return alias.Lit, nil
 }
 
 func (p *parser) parseRefreshClause() (MVRefreshSpec, error) {
