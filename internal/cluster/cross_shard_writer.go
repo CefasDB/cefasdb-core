@@ -85,6 +85,18 @@ func (m *Manager) BatchWriteItemToPeer(ctx context.Context, peerID, addr string,
 	return err
 }
 
+// BatchWriteMVToPeer forwards an MV cascade bucket to the peer that
+// owns the routed shard. The receiver applies the ops without raft —
+// MVs are RF=1 by design (see Replica.BatchWriteMV in cefas.proto).
+func (m *Manager) BatchWriteMVToPeer(ctx context.Context, peerID, addr string, req *cefaspb.BatchWriteMVRequest) error {
+	conn, err := m.peerWriteConn(ctx, peerID, addr)
+	if err != nil {
+		return fmt.Errorf("dial peer %s: %w", peerID, err)
+	}
+	_, err = cefaspb.NewReplicaClient(conn).BatchWriteMV(ctx, req)
+	return err
+}
+
 // closePeerWriters tears down every cached peer connection. Called from
 // Manager.Close().
 func (m *Manager) closePeerWriters() {

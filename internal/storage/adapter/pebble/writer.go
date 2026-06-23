@@ -655,6 +655,20 @@ func (d *DB) scanItemsWith(lower, upper []byte, visit func(types.Item) bool) err
 // reordering of writes on the same primary key is undefined. Callers
 // should not include two ops targeting the same key in a single batch.
 func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
+	return d.batchWriteItemImpl(td, ops, false)
+}
+
+// BatchWriteItemLocal applies the batch directly to this node's
+// pebble store, bypassing any attached replicator. Used by the
+// materialized-view RF=1 cascade: MV writes are explicitly
+// single-replica (the owning leader) — losing the leader means the
+// view must be rebuilt via RefreshMaterializedView, not recovered
+// from followers, so consensus per cascade bucket is pure overhead.
+func (d *DB) BatchWriteItemLocal(td types.TableDescriptor, ops []BatchOp) error {
+	return d.batchWriteItemImpl(td, ops, true)
+}
+
+func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassRepl bool) error {
 	if len(ops) == 0 {
 		return nil
 	}
@@ -662,7 +676,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 		return err
 	}
 	if d.batchPutItemsCanSkipPrior(td, ops) {
-		return d.batchPutItemsWithoutPrior(td, ops)
+		return d.batchPutItemsWithoutPriorImpl(td, ops, bypassRepl)
 	}
 	snap := d.db.NewSnapshot()
 	defer snap.Close()
@@ -787,7 +801,7 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 			return fmt.Errorf("op %d: unknown kind %d", i, op.Op)
 		}
 	}
-	if err := d.CommitBatch(b); err != nil {
+	if err := d.commitBatchMaybeLocal(b, bypassRepl); err != nil {
 		return err
 	}
 	if isMemoryTable(td) {
@@ -800,6 +814,13 @@ func (d *DB) BatchWriteItem(td types.TableDescriptor, ops []BatchOp) error {
 		}
 	}
 	return nil
+}
+
+func (d *DB) commitBatchMaybeLocal(b *pebbledb.Batch, bypassRepl bool) error {
+	if bypassRepl {
+		return d.CommitBatchLocal(b)
+	}
+	return d.CommitBatch(b)
 }
 
 func (d *DB) batchPutItemsCanSkipPrior(td types.TableDescriptor, ops []BatchOp) bool {
@@ -815,6 +836,10 @@ func (d *DB) batchPutItemsCanSkipPrior(td types.TableDescriptor, ops []BatchOp) 
 }
 
 func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) error {
+	return d.batchPutItemsWithoutPriorImpl(td, ops, false)
+}
+
+func (d *DB) batchPutItemsWithoutPriorImpl(td types.TableDescriptor, ops []BatchOp, bypassRepl bool) error {
 	b := d.Batch()
 	defer b.Close()
 	type memDelta struct {
@@ -842,7 +867,7 @@ func (d *DB) batchPutItemsWithoutPrior(td types.TableDescriptor, ops []BatchOp) 
 			memDeltas = append(memDeltas, memDelta{key: append([]byte(nil), primaryKey...), value: append([]byte(nil), enc...)})
 		}
 	}
-	if err := d.CommitBatch(b); err != nil {
+	if err := d.commitBatchMaybeLocal(b, bypassRepl); err != nil {
 		return err
 	}
 	if isMemoryTable(td) {

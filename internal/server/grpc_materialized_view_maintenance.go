@@ -208,13 +208,15 @@ func (s *GRPCServer) dispatchMVBuckets(ctx context.Context, mvTD types.TableDesc
 	return nil
 }
 
-// dispatchMVBucket commits one bucket of MV ops. If the local node
-// is the leader for shardID, the write goes through the shard's local
-// pebble.DB (which routes through raft). Otherwise the bucket is sent
-// to the leader peer as a BatchWriteItem RPC.
+// dispatchMVBucket commits one bucket of MV ops to its owning shard.
+// MVs are RF=1: only the owning leader carries authoritative state.
+// If the local node is the current leader the bucket is written
+// directly to local pebble via BatchWriteItemLocal (no raft).
+// Otherwise the bucket is forwarded to the leader peer through
+// Replica.BatchWriteMV, which also writes locally without raft.
 //
-// MV synthetic descriptors carry no attached MVs of their own, so the
-// peer's BatchWriteItem handler does not recurse into another cascade.
+// MV synthetic descriptors carry no attached MVs of their own, so
+// no recursive cascade fires on either side.
 func (s *GRPCServer) dispatchMVBucket(ctx context.Context, mvTD types.TableDescriptor, shardID uint32, ops []pebble.BatchOp) error {
 	peerID, addr, isSelf, err := s.manager.LeaderEndpoint(shardID)
 	if err != nil {
@@ -225,21 +227,18 @@ func (s *GRPCServer) dispatchMVBucket(ctx context.Context, mvTD types.TableDescr
 		if !ok || sh == nil || sh.Storage == nil {
 			return status.Errorf(codes.Internal, "mv %s shard %d not local", mvTD.Name, shardID)
 		}
-		return sh.Storage.BatchWriteItem(mvTD, ops)
+		return sh.Storage.BatchWriteItemLocal(mvTD, ops)
 	}
-	req, err := mvBatchOpsToPB(mvTD.Name, ops)
-	if err != nil {
-		return err
-	}
-	return s.manager.BatchWriteItemToPeer(ctx, peerID, addr, req)
+	req := mvBatchOpsToMVPB(mvTD.Name, ops)
+	return s.manager.BatchWriteMVToPeer(ctx, peerID, addr, req)
 }
 
-// mvBatchOpsToPB converts MV-side BatchOps to the protobuf BatchWriteItem
-// request format used for peer-to-peer cascade dispatch.
-func mvBatchOpsToPB(table string, ops []pebble.BatchOp) (*cefaspb.BatchWriteItemRequest, error) {
-	out := &cefaspb.BatchWriteItemRequest{
-		Table: table,
-		Ops:   make([]*cefaspb.BatchWriteOp, 0, len(ops)),
+// mvBatchOpsToMVPB converts MV-side BatchOps to the protobuf
+// BatchWriteMV request format used for peer dispatch.
+func mvBatchOpsToMVPB(view string, ops []pebble.BatchOp) *cefaspb.BatchWriteMVRequest {
+	out := &cefaspb.BatchWriteMVRequest{
+		View: view,
+		Ops:  make([]*cefaspb.BatchWriteOp, 0, len(ops)),
 	}
 	for _, op := range ops {
 		switch op.Op {
@@ -255,7 +254,7 @@ func mvBatchOpsToPB(table string, ops []pebble.BatchOp) (*cefaspb.BatchWriteItem
 			})
 		}
 	}
-	return out, nil
+	return out
 }
 
 // applyMVEagerDelete cascades a base delete to every attached EAGER
