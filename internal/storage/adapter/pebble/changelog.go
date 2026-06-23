@@ -566,6 +566,32 @@ func (d *DB) ChangeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 	return d.changeRecordsAfter(table, fromExclusive, toInclusive, untilUnixNano)
 }
 
+// ScanCDC returns every changelog record for table within the
+// inclusive [fromIndex, toIndex] window (0,0 means "all"), bounded
+// by limit. Used by the CDC queryable-table alias (#523) so a
+// Scan / Query against "<table>_cdc" sees the raw changelog as
+// rows. The result is naturally ordered by Index (monotonic).
+func (d *DB) ScanCDC(table string, fromIndex, toIndex uint64, limit int) ([]ChangeRecord, error) {
+	if table == "" {
+		return nil, fmt.Errorf("cdc scan: table required")
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	from := fromIndex
+	if from > 0 {
+		from -= 1 // changeRecordsAfter excludes the lower bound
+	}
+	all, err := d.changeRecordsAfter(table, from, toIndex, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
 func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
 	lower := storage.KeyChangeLog(fromExclusive + 1)
 	_, upperAll := storage.PrefixChangeLog()

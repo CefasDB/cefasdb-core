@@ -312,6 +312,12 @@ var (
 // falls back to when no explicit SL is resolved. Cannot be dropped.
 const DefaultServiceLevelName = "default"
 
+// CDCTableSuffix is the synthetic-table suffix that exposes a base
+// table's changelog as a queryable stream (#523). A Scan/Query
+// against "<base>_cdc" walks the underlying pebble changelog and
+// decodes each ChangeRecord into a row.
+const CDCTableSuffix = "_cdc"
+
 // GlobalIndexDescriptor describes a ScyllaDB-style global secondary
 // index. Unlike the native DynamoDB-shaped GSI (#475), the index has
 // its own partitioning by the IndexedColumn's value — queries hit
