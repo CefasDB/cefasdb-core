@@ -2097,6 +2097,8 @@ func mapStorageErr(err error) error {
 	switch {
 	case errors.Is(err, types.ErrTableNotFound):
 		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, types.ErrMVNotFound):
+		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrStreamNotFound), errors.Is(err, types.ErrStreamShardNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrTableAlreadyExists):
