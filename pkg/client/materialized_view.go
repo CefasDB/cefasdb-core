@@ -16,6 +16,7 @@ const (
 	RefreshModeEager     RefreshMode = "eager"
 	RefreshModeScheduled RefreshMode = "scheduled"
 	RefreshModeOnDemand  RefreshMode = "on_demand"
+	RefreshModeFast      RefreshMode = "fast"
 )
 
 // RefreshPolicy is the per-view refresh contract.
@@ -76,6 +77,8 @@ func refreshPolicyToPBClient(p RefreshPolicy) *cefaspb.RefreshPolicy {
 		out.Mode = cefaspb.RefreshPolicy_SCHEDULED
 	case RefreshModeOnDemand:
 		out.Mode = cefaspb.RefreshPolicy_ON_DEMAND
+	case RefreshModeFast:
+		out.Mode = cefaspb.RefreshPolicy_FAST
 	default:
 		out.Mode = cefaspb.RefreshPolicy_MODE_UNSPECIFIED
 	}
