@@ -11,6 +11,13 @@ import (
 )
 
 func TestCtxAwareMethodsUseServiceLevelShares(t *testing.T) {
+	// Only read-side Ctx entries route through a per-SL lane queue.
+	// Write-side entries (PutItemWithCtx, BatchWriteItemCtx,
+	// DeleteItemWithCtx) intentionally bypass the lane to avoid the
+	// FSM re-entry deadlock — ApplyCommittedBatch on the leader still
+	// takes the write lane after raft commit. SL accounting on writes
+	// would have to be threaded through CommitBatch's payload, not the
+	// caller's goroutine.
 	db := openLaneTestDB(t)
 	var shares atomic.Int64
 	shares.Store(7)
@@ -36,20 +43,29 @@ func TestCtxAwareMethodsUseServiceLevelShares(t *testing.T) {
 	}
 
 	stats := laneStatsByName(db.LaneStats())
-	assertSLLane(t, stats["write"], "interactive", 7)
 	assertSLLane(t, stats["read"], "interactive", 7)
+	assertNoSLLane(t, stats["write"], "interactive")
 
 	shares.Store(11)
-	if err := db.PutItemWithCtx(ctx, td, types.Item{"id": {T: types.AttrS, S: "b"}}, pebble.PutOptions{}); err != nil {
-		t.Fatalf("second PutItemWithCtx: %v", err)
+	if _, err := db.GetItemCtx(ctx, td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: "a"}}); err != nil {
+		t.Fatalf("second GetItemCtx: %v", err)
 	}
-	assertSLLane(t, laneStatsByName(db.LaneStats())["write"], "interactive", 7)
+	assertSLLane(t, laneStatsByName(db.LaneStats())["read"], "interactive", 7)
 
 	db.InvalidateServiceLevelShares("interactive")
-	if err := db.PutItemWithCtx(ctx, td, types.Item{"id": {T: types.AttrS, S: "c"}}, pebble.PutOptions{}); err != nil {
-		t.Fatalf("third PutItemWithCtx: %v", err)
+	if _, err := db.GetItemCtx(ctx, td.Name, td.KeySchema, types.Item{"id": {T: types.AttrS, S: "a"}}); err != nil {
+		t.Fatalf("third GetItemCtx: %v", err)
 	}
-	assertSLLane(t, laneStatsByName(db.LaneStats())["write"], "interactive", 11)
+	assertSLLane(t, laneStatsByName(db.LaneStats())["read"], "interactive", 11)
+}
+
+func assertNoSLLane(t *testing.T, snap pebble.LaneSnapshot, name string) {
+	t.Helper()
+	for _, sl := range snap.ServiceLevels {
+		if sl.Name == name {
+			t.Fatalf("%s lane unexpectedly registered SL %q: %+v", snap.Lane, name, snap.ServiceLevels)
+		}
+	}
 }
 
 func assertSLLane(t *testing.T, snap pebble.LaneSnapshot, name string, shares int) {
