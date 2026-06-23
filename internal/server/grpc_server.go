@@ -360,6 +360,9 @@ func (s *GRPCServer) PutItem(ctx context.Context, req *cefaspb.PutItemRequest) (
 	if err := s.applyMVEagerPut(ctx, td, item); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
+	if err := s.applyGlobalIndexPut(ctx, td, item); err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, estimatedItemBytes(item), started)
 	return &cefaspb.PutItemResponse{}, nil
 }
@@ -481,6 +484,11 @@ func (s *GRPCServer) UpdateItem(ctx context.Context, req *cefaspb.UpdateItemRequ
 			return nil, mapWriteMutationErr(err)
 		}
 	}
+	if len(td.GlobalIndexes) > 0 {
+		if err := s.applyGlobalIndexPut(ctx, td, finalItem); err != nil {
+			return nil, mapWriteMutationErr(err)
+		}
+	}
 	resp := &cefaspb.UpdateItemResponse{}
 	if wantImage != "" && len(res.Rows) > 0 {
 		resp.Attributes = itemToPB(res.Rows[0])
@@ -548,6 +556,9 @@ func (s *GRPCServer) DeleteItem(ctx context.Context, req *cefaspb.DeleteItemRequ
 		return nil, mapWriteMutationErr(err)
 	}
 	if err := s.applyMVEagerDelete(ctx, td, key); err != nil {
+		return nil, mapWriteMutationErr(err)
+	}
+	if err := s.applyGlobalIndexDelete(ctx, td, key); err != nil {
 		return nil, mapWriteMutationErr(err)
 	}
 	s.observeRangeMetric(rangeMetricWrite, pkBytes, uint64(len(pkBytes)), started)
@@ -642,6 +653,9 @@ func (s *GRPCServer) batchWriteFanOutSingleShard(ctx context.Context, td types.T
 	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
 		return err
 	}
+	if err := s.applyGlobalIndexBatch(ctx, td, ops); err != nil {
+		return err
+	}
 	for _, o := range observations {
 		s.observeRangeMetric(rangeMetricWrite, o.pkBytes, o.approxBytes, started)
 	}
@@ -730,6 +744,9 @@ func (s *GRPCServer) batchWriteFanOutMultiShard(ctx context.Context, td types.Ta
 		}
 	}
 	if err := s.applyMVEagerBatch(ctx, td, ops); err != nil {
+		return err
+	}
+	if err := s.applyGlobalIndexBatch(ctx, td, ops); err != nil {
 		return err
 	}
 	for _, meta := range metas {
