@@ -81,6 +81,8 @@ type CatalogMutator interface {
 	UpdateServiceLevel(sl types.ServiceLevelDescriptor) (types.ServiceLevelDescriptor, error)
 	DropServiceLevel(name string) error
 	ListServiceLevels() []types.ServiceLevelDescriptor
+	CreateGlobalIndex(gi types.GlobalIndexDescriptor) (types.GlobalIndexDescriptor, error)
+	DropGlobalIndex(name string) error
 }
 
 // Executor runs a compiled Plan against the storage + catalog.
@@ -128,6 +130,10 @@ func (e *Executor) Execute(plan Plan) (*Result, error) {
 		return e.execDropServiceLevel(p)
 	case *PlanListServiceLevels:
 		return e.execListServiceLevels(p)
+	case *PlanCreateGlobalIndex:
+		return e.execCreateGlobalIndex(p)
+	case *PlanDropGlobalIndex:
+		return e.execDropGlobalIndex(p)
 	}
 	return nil, fmt.Errorf("unsupported plan type %T", plan)
 }
@@ -167,6 +173,20 @@ func (e *Executor) execListServiceLevels(p *PlanListServiceLevels) (*Result, err
 		})
 	}
 	return res, nil
+}
+
+func (e *Executor) execCreateGlobalIndex(p *PlanCreateGlobalIndex) (*Result, error) {
+	if _, err := e.Catalog.CreateGlobalIndex(p.Descriptor); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
+}
+
+func (e *Executor) execDropGlobalIndex(p *PlanDropGlobalIndex) (*Result, error) {
+	if err := e.Catalog.DropGlobalIndex(p.Name); err != nil {
+		return nil, err
+	}
+	return &Result{AffectedRows: 1}, nil
 }
 
 func nAttrFromInt64(v int64) types.AttributeValue {
