@@ -504,6 +504,121 @@ func TestChangeRecord_OpKindClassification(t *testing.T) {
 	}
 }
 
+// TestDeltaImage_EmitsOnlyChangedColumns exercises #522: with the
+// DELTA_IMAGE view type, an UpdateItem that touches a single
+// column produces a stream record whose NewItem carries only that
+// column (plus the key shape). INSERT still keeps the full image;
+// DELETE emits key only.
+func TestDeltaImage_EmitsOnlyChangedColumns(t *testing.T) {
+	db := openChangeLogTestDB(t)
+	td := streamTestTableWithView(types.StreamViewTypeDeltaImage)
+
+	// INSERT — DELTA still emits the full new image.
+	first := types.Item{
+		"id":     streamS("o1"),
+		"status": streamS("open"),
+		"qty":    streamN("10"),
+	}
+	if err := db.PutItemWith(td, first, PutOptions{}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// MODIFY — only `status` changes. DELTA NewItem carries only it.
+	second := types.Item{
+		"id":     streamS("o1"),
+		"status": streamS("closed"),
+		"qty":    streamN("10"),
+	}
+	if err := db.PutItemWith(td, second, PutOptions{}); err != nil {
+		t.Fatalf("modify: %v", err)
+	}
+
+	// DELETE — DELTA emits the key, no NewItem.
+	if err := db.DeleteItemWith(td, types.Item{"id": streamS("o1")}, DeleteOptions{}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	records, _, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("StreamRecords: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records = %d, want 3", len(records))
+	}
+
+	// INSERT — full new image preserved (no diff target).
+	insert := records[0]
+	if insert.EventName != ChangeEventInsert {
+		t.Fatalf("record 0 event = %q, want INSERT", insert.EventName)
+	}
+	if len(insert.NewItem) != 3 {
+		t.Errorf("insert NewItem fields = %d, want 3", len(insert.NewItem))
+	}
+
+	// MODIFY — only `status` should appear.
+	modify := records[1]
+	if modify.EventName != ChangeEventModify {
+		t.Fatalf("record 1 event = %q, want MODIFY", modify.EventName)
+	}
+	if len(modify.NewItem) != 1 {
+		t.Fatalf("modify NewItem fields = %d, want 1 (only 'status')", len(modify.NewItem))
+	}
+	if got, ok := modify.NewItem["status"]; !ok || got.S != "closed" {
+		t.Errorf("modify NewItem[status] = %+v, want S=closed", got)
+	}
+
+	// DELETE — NewItem empty, OldItem absent under DELTA contract.
+	rem := records[2]
+	if rem.EventName != ChangeEventRemove {
+		t.Fatalf("record 2 event = %q, want REMOVE", rem.EventName)
+	}
+	if len(rem.NewItem) != 0 {
+		t.Errorf("remove NewItem fields = %d, want 0", len(rem.NewItem))
+	}
+}
+
+// TestDeltaImage_AttributeRemovedMarkedNull verifies that an
+// attribute present in oldItem but absent in newItem surfaces as
+// an AttrNull marker so consumers can drop it.
+func TestDeltaImage_AttributeRemovedMarkedNull(t *testing.T) {
+	db := openChangeLogTestDB(t)
+	td := streamTestTableWithView(types.StreamViewTypeDeltaImage)
+
+	before := types.Item{
+		"id":     streamS("o1"),
+		"status": streamS("open"),
+		"flag":   {T: types.AttrBOOL, BOOL: true},
+	}
+	if err := db.PutItemWith(td, before, PutOptions{}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// `flag` dropped, `status` still "open" (unchanged).
+	after := types.Item{
+		"id":     streamS("o1"),
+		"status": streamS("open"),
+	}
+	if err := db.PutItemWith(td, after, PutOptions{}); err != nil {
+		t.Fatalf("modify: %v", err)
+	}
+
+	records, _, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("StreamRecords: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	modify := records[1]
+	if got, ok := modify.NewItem["flag"]; !ok {
+		t.Error("modify NewItem missing 'flag' tombstone")
+	} else if got.T != types.AttrNull {
+		t.Errorf("modify NewItem[flag] type = %v, want AttrNull", got.T)
+	}
+	if _, ok := modify.NewItem["status"]; ok {
+		t.Error("modify NewItem should not carry unchanged 'status'")
+	}
+}
+
 func TestStreamRetentionMetadataSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	td := streamTestTable()

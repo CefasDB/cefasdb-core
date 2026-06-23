@@ -194,6 +194,13 @@ func applyStreamRecordFields(td types.TableDescriptor, rec *ChangeRecord, oldIte
 	if streamRecordIncludesNewImage(view, rec.EventName) {
 		rec.NewItem = cloneChangeItem(newItem)
 	}
+	// DELTA_IMAGE (#522): when an UpdateItem touches only a subset
+	// of columns, emit just those columns in NewItem. INSERT keeps
+	// the full row (no diff target); DELETE keeps key only and
+	// returns early above without populating NewItem.
+	if view == types.StreamViewTypeDeltaImage && rec.EventName == ChangeEventModify {
+		rec.NewItem = deltaImageItem(oldItem, newItem)
+	}
 	rec.StreamRecord = true
 	rec.StreamViewType = view
 }
@@ -202,14 +209,150 @@ func streamRecordIncludesOldImage(view string, event ChangeEventName) bool {
 	if event == ChangeEventInsert {
 		return false
 	}
-	return view == types.StreamViewTypeOldImage || view == types.StreamViewTypeNewAndOldImages
+	switch view {
+	case types.StreamViewTypeOldImage, types.StreamViewTypeNewAndOldImages:
+		return true
+	}
+	return false
 }
 
 func streamRecordIncludesNewImage(view string, event ChangeEventName) bool {
 	if event == ChangeEventRemove {
 		return false
 	}
-	return view == types.StreamViewTypeNewImage || view == types.StreamViewTypeNewAndOldImages
+	switch view {
+	case types.StreamViewTypeNewImage,
+		types.StreamViewTypeNewAndOldImages,
+		types.StreamViewTypeDeltaImage:
+		// DELTA_IMAGE on INSERT keeps the full new image (handled in
+		// the standard path); the MODIFY override happens after, in
+		// applyStreamRecordFields, replacing the full image with the
+		// diff.
+		return true
+	}
+	return false
+}
+
+// deltaImageItem returns only the attributes that differ between
+// oldItem and newItem (#522). Equality is value-shape-aware: any
+// difference in T / S / N / B / SS / NS / BS / L / M / Vec /
+// BOOL / NULL marks the attribute as changed. The returned map
+// always carries no fields beyond the changed ones — the consumer
+// reconstructs the rest from prior state upstream.
+func deltaImageItem(oldItem, newItem types.Item) types.Item {
+	if newItem == nil {
+		return nil
+	}
+	if oldItem == nil {
+		// No prior — every attribute is "new". This branch is
+		// defensive; INSERT short-circuits before this function
+		// runs (handled in the caller).
+		return cloneChangeItem(newItem)
+	}
+	out := types.Item{}
+	for k, nv := range newItem {
+		if ov, ok := oldItem[k]; !ok || !attributeValuesEqual(ov, nv) {
+			out[k] = cloneChangeAttr(nv)
+		}
+	}
+	// Attribute removed in the new image — record a Null-typed
+	// marker so consumers know to drop it.
+	for k := range oldItem {
+		if _, ok := newItem[k]; !ok {
+			out[k] = types.AttributeValue{T: types.AttrNull}
+		}
+	}
+	return out
+}
+
+// attributeValuesEqual compares two AttributeValue records for
+// "no observable change". Aliased into the same package so it can
+// stay decoupled from the protobuf wire shape.
+func attributeValuesEqual(a, b types.AttributeValue) bool {
+	if a.T != b.T {
+		return false
+	}
+	if a.S != b.S || a.N != b.N || a.BOOL != b.BOOL {
+		return false
+	}
+	if !bytesEqual(a.B, b.B) {
+		return false
+	}
+	if !stringSlicesEqual(a.SS, b.SS) || !stringSlicesEqual(a.NS, b.NS) {
+		return false
+	}
+	if !byteSlicesEqual(a.BS, b.BS) {
+		return false
+	}
+	if len(a.L) != len(b.L) {
+		return false
+	}
+	for i := range a.L {
+		if !attributeValuesEqual(a.L[i], b.L[i]) {
+			return false
+		}
+	}
+	if len(a.M) != len(b.M) {
+		return false
+	}
+	for k, av := range a.M {
+		bv, ok := b.M[k]
+		if !ok || !attributeValuesEqual(av, bv) {
+			return false
+		}
+	}
+	if !float64SlicesEqual(a.Vec, b.Vec) {
+		return false
+	}
+	return true
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func byteSlicesEqual(a, b [][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !bytesEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func float64SlicesEqual(a, b []float64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // estimateChangeRecordSize returns a cheap O(n) estimate of the serialized
