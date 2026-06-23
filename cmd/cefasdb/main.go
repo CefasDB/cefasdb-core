@@ -450,7 +450,13 @@ func main() {
 	// gRPC listener (optional).
 	var gsrv *grpc.Server
 	if cfg.GRPC.Addr != "" {
-		opts, err := bootstrapserver.BuildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath)
+		// Workload prioritization (#499): wire the per-SL quota
+		// controller against the catalog. Hot reload via
+		// OnServiceLevelChanged so an ALTER SERVICE LEVEL takes
+		// effect on the next request.
+		slQuota := server.NewSLQuotaController(cat, nil)
+		cat.OnServiceLevelChanged(slQuota.Invalidate)
+		opts, err := bootstrapserver.BuildGRPCOpts(validator, cfg.GRPC.TLSCertPath, cfg.GRPC.TLSKeyPath, cfg.GRPC.MTLSCAPath, slQuota)
 		if err != nil {
 			logger.Error("grpc opts", "err", err)
 			os.Exit(1)

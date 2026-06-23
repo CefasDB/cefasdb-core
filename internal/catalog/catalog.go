@@ -29,6 +29,30 @@ type Catalog struct {
 	tables        map[string]types.TableDescriptor
 	views         map[string]types.MaterializedViewDescriptor
 	serviceLevels map[string]types.ServiceLevelDescriptor
+
+	slUpdateMu        sync.RWMutex
+	slUpdateListeners []func(name string)
+}
+
+// OnServiceLevelChanged registers fn to be invoked whenever a
+// service-level descriptor is created, altered, or dropped. The
+// callback receives the SL name. Used by the quota controller
+// (#499) for hot reload: it invalidates its cached bucket so the
+// next Begin call rebuilds from the fresh descriptor.
+func (c *Catalog) OnServiceLevelChanged(fn func(name string)) {
+	c.slUpdateMu.Lock()
+	c.slUpdateListeners = append(c.slUpdateListeners, fn)
+	c.slUpdateMu.Unlock()
+}
+
+func (c *Catalog) notifyServiceLevelChanged(name string) {
+	c.slUpdateMu.RLock()
+	listeners := make([]func(string), len(c.slUpdateListeners))
+	copy(listeners, c.slUpdateListeners)
+	c.slUpdateMu.RUnlock()
+	for _, fn := range listeners {
+		fn(name)
+	}
 }
 
 func New(db *pebble.DB) (*Catalog, error) {
@@ -660,6 +684,7 @@ func (c *Catalog) CreateServiceLevel(sl types.ServiceLevelDescriptor) (types.Ser
 		return types.ServiceLevelDescriptor{}, fmt.Errorf("persist service-level: %w", err)
 	}
 	c.serviceLevels[sl.Name] = sl
+	c.notifyServiceLevelChanged(sl.Name)
 	return sl, nil
 }
 
@@ -691,6 +716,7 @@ func (c *Catalog) UpdateServiceLevel(sl types.ServiceLevelDescriptor) (types.Ser
 		return types.ServiceLevelDescriptor{}, fmt.Errorf("persist service-level: %w", err)
 	}
 	c.serviceLevels[sl.Name] = sl
+	c.notifyServiceLevelChanged(sl.Name)
 	return sl, nil
 }
 
@@ -712,6 +738,7 @@ func (c *Catalog) DropServiceLevel(name string) error {
 		return fmt.Errorf("delete service-level: %w", err)
 	}
 	delete(c.serviceLevels, name)
+	c.notifyServiceLevelChanged(name)
 	return nil
 }
 

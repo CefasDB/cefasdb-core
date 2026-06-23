@@ -19,8 +19,10 @@ import (
 
 // BuildGRPCOpts assembles ServerOptions for the gRPC server: auth
 // interceptors (if a validator is configured) + TLS / mTLS credentials
-// when cert paths are supplied.
-func BuildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grpc.ServerOption, error) {
+// when cert paths are supplied. quota may be nil — when non-nil it
+// is wired into the chain after ServiceLevelInterceptor so per-SL
+// caps (#499) can short-circuit before handlers run.
+func BuildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string, quota *apiserver.SLQuotaController) ([]grpc.ServerOption, error) {
 	var opts []grpc.ServerOption
 
 	if certPath != "" || keyPath != "" {
@@ -53,6 +55,12 @@ func BuildGRPCOpts(v *auth.Validator, certPath, keyPath, caBundle string) ([]grp
 	slUnary, slStream := apiserver.ServiceLevelInterceptor()
 	unaryChain := []grpc.UnaryServerInterceptor{slUnary}
 	streamChain := []grpc.StreamServerInterceptor{slStream}
+
+	if quota != nil {
+		qUnary, qStream := apiserver.SLQuotaInterceptor(quota)
+		unaryChain = append(unaryChain, qUnary)
+		streamChain = append(streamChain, qStream)
+	}
 
 	if v != nil {
 		// Reflection probe stays available without a token so
