@@ -1589,6 +1589,10 @@ message AtomicUpdateRequest {
   string                       condition = 3;
   map<string, AttributeValue>  binds     = 4;
   repeated AtomicAction        actions   = 5;
+  // Optional client-generated idempotency key. Retries with the same
+  // request_id for the same table/key within the server's short dedup
+  // window return the cached response without applying actions again.
+  string                       request_id = 6;
 }
 
 message AtomicUpdateResponse {

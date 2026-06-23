@@ -88,6 +88,7 @@ func (s *AtomicServer) AtomicUpdate(ctx context.Context, req *cefaspb.AtomicUpda
 	res, err := targets.primary.AtomicUpdate(td, key, pebble.AtomicOptions{
 		Condition: req.GetCondition(),
 		Binds:     binds,
+		RequestID: req.GetRequestId(),
 		Actions:   actions,
 	})
 	if err != nil {

@@ -39,6 +39,7 @@ type AtomicAction struct {
 type AtomicOptions struct {
 	Condition string
 	Binds     map[string]types.AttributeValue
+	RequestID string
 	Actions   []AtomicAction
 }
 
@@ -91,6 +92,7 @@ func (c *Client) AtomicUpdate(ctx context.Context, table string, key types.Item,
 		Condition: opts.Condition,
 		Binds:     itemAttrMap(types.Item(opts.Binds)),
 		Actions:   actions,
+		RequestId: opts.RequestID,
 	})
 	if err != nil {
 		return AtomicResult{}, err

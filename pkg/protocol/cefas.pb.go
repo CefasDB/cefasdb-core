@@ -14291,12 +14291,16 @@ func (x *AtomicAction) GetExpression() string {
 }
 
 type AtomicUpdateRequest struct {
-	state         protoimpl.MessageState     `protogen:"open.v1"`
-	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
-	Key           map[string]*AttributeValue `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Condition     string                     `protobuf:"bytes,3,opt,name=condition,proto3" json:"condition,omitempty"`
-	Binds         map[string]*AttributeValue `protobuf:"bytes,4,rep,name=binds,proto3" json:"binds,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Actions       []*AtomicAction            `protobuf:"bytes,5,rep,name=actions,proto3" json:"actions,omitempty"`
+	state     protoimpl.MessageState     `protogen:"open.v1"`
+	Table     string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	Key       map[string]*AttributeValue `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Condition string                     `protobuf:"bytes,3,opt,name=condition,proto3" json:"condition,omitempty"`
+	Binds     map[string]*AttributeValue `protobuf:"bytes,4,rep,name=binds,proto3" json:"binds,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Actions   []*AtomicAction            `protobuf:"bytes,5,rep,name=actions,proto3" json:"actions,omitempty"`
+	// Optional client-generated idempotency key. Retries with the same
+	// request_id for the same table/key within the server's short dedup
+	// window return the cached response without applying actions again.
+	RequestId     string `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14364,6 +14368,13 @@ func (x *AtomicUpdateRequest) GetActions() []*AtomicAction {
 		return x.Actions
 	}
 	return nil
+}
+
+func (x *AtomicUpdateRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 type AtomicUpdateResponse struct {
@@ -15802,13 +15813,15 @@ const file_cefas_proto_rawDesc = "" +
 	"\x05value\x18\x03 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x04 \x01(\tR\n" +
-	"expression\"\x9b\x03\n" +
+	"expression\"\xba\x03\n" +
 	"\x13AtomicUpdateRequest\x12\x14\n" +
 	"\x05table\x18\x01 \x01(\tR\x05table\x128\n" +
 	"\x03key\x18\x02 \x03(\v2&.cefas.v1.AtomicUpdateRequest.KeyEntryR\x03key\x12\x1c\n" +
 	"\tcondition\x18\x03 \x01(\tR\tcondition\x12>\n" +
 	"\x05binds\x18\x04 \x03(\v2(.cefas.v1.AtomicUpdateRequest.BindsEntryR\x05binds\x120\n" +
-	"\aactions\x18\x05 \x03(\v2\x16.cefas.v1.AtomicActionR\aactions\x1aP\n" +
+	"\aactions\x18\x05 \x03(\v2\x16.cefas.v1.AtomicActionR\aactions\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\x1aP\n" +
 	"\bKeyEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
 	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\x1aR\n" +
