@@ -186,6 +186,48 @@ func (c *Catalog) ListGlobalIndexes(baseTable string) []types.GlobalIndexDescrip
 	return out
 }
 
+// PauseGlobalIndex flips the Paused flag and persists. The Phase 2
+// write hook reads this on every cascade — paused indexes skip
+// pointer updates until Resume restores the flag. Existing pointer
+// data is left alone; Resume + Rebuild closes the gap.
+func (c *Catalog) PauseGlobalIndex(name string) (types.GlobalIndexDescriptor, error) {
+	return c.setGlobalIndexPaused(name, true)
+}
+
+// ResumeGlobalIndex clears the Paused flag. The next cascade reads
+// the refreshed descriptor (Phase 2 hook calls DescribeGlobalIndex
+// per mutation; no caching layer to bust).
+func (c *Catalog) ResumeGlobalIndex(name string) (types.GlobalIndexDescriptor, error) {
+	return c.setGlobalIndexPaused(name, false)
+}
+
+func (c *Catalog) setGlobalIndexPaused(name string, paused bool) (types.GlobalIndexDescriptor, error) {
+	if name == "" {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("global index name required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	gi, ok := c.globalIndexes[name]
+	if !ok {
+		return types.GlobalIndexDescriptor{}, types.ErrGlobalIndexNotFound
+	}
+	gi.Paused = paused
+	if paused {
+		gi.Status = types.GlobalIndexStatusPaused
+	} else if gi.Status == types.GlobalIndexStatusPaused {
+		gi.Status = types.GlobalIndexStatusActive
+	}
+	raw, err := json.Marshal(gi)
+	if err != nil {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("marshal global-index: %w", err)
+	}
+	if err := c.db.Set(storage.KeyGlobalIndex(name), raw); err != nil {
+		return types.GlobalIndexDescriptor{}, fmt.Errorf("persist global-index: %w", err)
+	}
+	c.globalIndexes[name] = gi
+	return gi, nil
+}
+
 // UpdateGlobalIndex replaces the persisted descriptor. Phase 2+
 // status updates (building → active, paused, etc.) go through here.
 func (c *Catalog) UpdateGlobalIndex(gi types.GlobalIndexDescriptor) (types.GlobalIndexDescriptor, error) {

@@ -57,6 +57,38 @@ func (s *GRPCServer) DropGlobalIndex(ctx context.Context, req *cefaspb.DropGloba
 	return &cefaspb.DropGlobalIndexResponse{}, nil
 }
 
+func (s *GRPCServer) PauseGlobalIndex(ctx context.Context, req *cefaspb.PauseGlobalIndexRequest) (*cefaspb.PauseGlobalIndexResponse, error) {
+	_, span := tracing.Tracer().Start(ctx, "PauseGlobalIndex")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name required")
+	}
+	updated, err := s.cat.PauseGlobalIndex(req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.PauseGlobalIndexResponse{Descriptor_: globalIndexDescriptorToPB(updated)}, nil
+}
+
+func (s *GRPCServer) ResumeGlobalIndex(ctx context.Context, req *cefaspb.ResumeGlobalIndexRequest) (*cefaspb.ResumeGlobalIndexResponse, error) {
+	_, span := tracing.Tracer().Start(ctx, "ResumeGlobalIndex")
+	defer span.End()
+	if err := requireScope(ctx, auth.ScopeTableCreate); err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name required")
+	}
+	updated, err := s.cat.ResumeGlobalIndex(req.GetName())
+	if err != nil {
+		return nil, mapStorageErr(err)
+	}
+	return &cefaspb.ResumeGlobalIndexResponse{Descriptor_: globalIndexDescriptorToPB(updated)}, nil
+}
+
 func (s *GRPCServer) ListGlobalIndexes(ctx context.Context, req *cefaspb.ListGlobalIndexesRequest) (*cefaspb.ListGlobalIndexesResponse, error) {
 	_, span := tracing.Tracer().Start(ctx, "ListGlobalIndexes")
 	defer span.End()

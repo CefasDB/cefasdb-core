@@ -326,6 +326,86 @@ func itoa(n int) string {
 	return string(b)
 }
 
+func TestGlobalIndex_PauseStopsCascade(t *testing.T) {
+	stub, _, _, cleanup := startGIFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := stub.CreateTable(ctx, &cefaspb.CreateTableRequest{
+		Descriptor_: &cefaspb.TableDescriptor{
+			Name:      "Users",
+			KeySchema: &cefaspb.KeySchema{Pk: "id"},
+		},
+	}); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := stub.CreateGlobalIndex(ctx, &cefaspb.CreateGlobalIndexRequest{
+		Descriptor_: &cefaspb.GlobalIndexDescriptor{
+			Name:          "idx_email",
+			BaseTable:     "Users",
+			IndexedColumn: "email",
+		},
+	}); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+
+	// Pre-pause: cascade should land a pointer.
+	if _, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+		Table: "Users",
+		Item: map[string]*cefaspb.AttributeValue{
+			"id":    {Value: &cefaspb.AttributeValue_S{S: "u1"}},
+			"email": {Value: &cefaspb.AttributeValue_S{S: "alice@x"}},
+		},
+	}); err != nil {
+		t.Fatalf("PutItem pre-pause: %v", err)
+	}
+
+	// Pause the index.
+	if _, err := stub.PauseGlobalIndex(ctx, &cefaspb.PauseGlobalIndexRequest{Name: "idx_email"}); err != nil {
+		t.Fatalf("PauseGlobalIndex: %v", err)
+	}
+
+	// Post-pause put: base write succeeds, cascade is a no-op.
+	if _, err := stub.PutItem(ctx, &cefaspb.PutItemRequest{
+		Table: "Users",
+		Item: map[string]*cefaspb.AttributeValue{
+			"id":    {Value: &cefaspb.AttributeValue_S{S: "u2"}},
+			"email": {Value: &cefaspb.AttributeValue_S{S: "bob@x"}},
+		},
+	}); err != nil {
+		t.Fatalf("PutItem during pause: %v", err)
+	}
+
+	// Resume + rebuild closes the gap.
+	if _, err := stub.ResumeGlobalIndex(ctx, &cefaspb.ResumeGlobalIndexRequest{Name: "idx_email"}); err != nil {
+		t.Fatalf("ResumeGlobalIndex: %v", err)
+	}
+	if _, err := stub.RebuildGlobalIndex(ctx, &cefaspb.RebuildGlobalIndexRequest{Name: "idx_email"}); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Both pointers visible.
+	stream, err := stub.Query(ctx, &cefaspb.QueryRequest{
+		Table:     "Users",
+		IndexName: "idx_email",
+		PkValue:   &cefaspb.AttributeValue{Value: &cefaspb.AttributeValue_S{S: "bob@x"}},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	rows := 0
+	for {
+		it, err := stream.Recv()
+		if err != nil || it == nil {
+			break
+		}
+		rows++
+	}
+	if rows == 0 {
+		t.Error("post-rebuild Query for bob@x returned 0 rows; expected the gap to be filled")
+	}
+}
+
 func TestGlobalIndex_EagerHook_SkipsWhenItemLacksIndexedColumn(t *testing.T) {
 	stub, _, _, cleanup := startGIFixture(t)
 	defer cleanup()

@@ -161,6 +161,12 @@ service Cefas {
   // Idempotent (pointer writes are upserts) and concurrent with
   // live mutations — last-writer-wins per (indexed value, base PK).
   rpc RebuildGlobalIndex(RebuildGlobalIndexRequest) returns (RebuildGlobalIndexResponse);
+  // Pause / Resume — operator emergency surface. Paused indexes
+  // are skipped by the Phase 2 write hook; Resume restores the
+  // cascade and a follow-up Rebuild closes the gap accumulated
+  // during the pause.
+  rpc PauseGlobalIndex(PauseGlobalIndexRequest) returns (PauseGlobalIndexResponse);
+  rpc ResumeGlobalIndex(ResumeGlobalIndexRequest) returns (ResumeGlobalIndexResponse);
 }
 
 message GlobalIndexDescriptor {
@@ -184,6 +190,10 @@ message ListGlobalIndexesRequest    { string base_table = 1; }
 message ListGlobalIndexesResponse   { repeated GlobalIndexDescriptor indexes = 1; }
 message RebuildGlobalIndexRequest   { string name = 1; }
 message RebuildGlobalIndexResponse  { int64 rows_indexed = 1; }
+message PauseGlobalIndexRequest     { string name = 1; }
+message PauseGlobalIndexResponse    { GlobalIndexDescriptor descriptor = 1; }
+message ResumeGlobalIndexRequest    { string name = 1; }
+message ResumeGlobalIndexResponse   { GlobalIndexDescriptor descriptor = 1; }
 
 message ServiceLevelDescriptor {
   string name              = 1;
