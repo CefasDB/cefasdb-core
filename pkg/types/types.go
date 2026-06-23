@@ -143,6 +143,13 @@ const (
 	StreamViewTypeNewImage        = "NEW_IMAGE"
 	StreamViewTypeOldImage        = "OLD_IMAGE"
 	StreamViewTypeNewAndOldImages = "NEW_AND_OLD_IMAGES"
+	// DELTA_IMAGE emits only the columns that changed on an
+	// UpdateItem. INSERT keeps the full new image (no diff
+	// available); DELETE keeps key only (no "changed columns"
+	// semantics). Designed for bandwidth-sensitive replication
+	// and audit subscribers that already hold the prior state
+	// upstream (#522).
+	StreamViewTypeDeltaImage = "DELTA_IMAGE"
 
 	StreamStatusEnabling  = "ENABLING"
 	StreamStatusEnabled   = "ENABLED"
@@ -215,7 +222,11 @@ func NormalizeStreamViewType(view string) string {
 
 func IsValidStreamViewType(view string) bool {
 	switch NormalizeStreamViewType(view) {
-	case StreamViewTypeKeysOnly, StreamViewTypeNewImage, StreamViewTypeOldImage, StreamViewTypeNewAndOldImages:
+	case StreamViewTypeKeysOnly,
+		StreamViewTypeNewImage,
+		StreamViewTypeOldImage,
+		StreamViewTypeNewAndOldImages,
+		StreamViewTypeDeltaImage:
 		return true
 	default:
 		return false

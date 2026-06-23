@@ -67,12 +67,13 @@ func NormalizeStreamDescriptor(td *types.TableDescriptor) error {
 		view = types.StreamViewTypeNewAndOldImages
 	}
 	if !types.IsValidStreamViewType(view) {
-		return fmt.Errorf("streamViewType %q must be one of %q, %q, %q, %q",
+		return fmt.Errorf("streamViewType %q must be one of %q, %q, %q, %q, %q",
 			td.StreamSpecification.StreamViewType,
 			types.StreamViewTypeKeysOnly,
 			types.StreamViewTypeNewImage,
 			types.StreamViewTypeOldImage,
-			types.StreamViewTypeNewAndOldImages)
+			types.StreamViewTypeNewAndOldImages,
+			types.StreamViewTypeDeltaImage)
 	}
 	retention := td.StreamSpecification.RetentionSeconds
 	if retention != 0 {
