@@ -559,6 +559,13 @@ func (d *DB) computeStreamRetentionStats(table string, records []streamRetention
 	return stats
 }
 
+// ChangeRecordsAfter exposes changeRecordsAfter for FAST refresh
+// consumers that need to drain the changelog for a single base
+// table since a cursor.
+func (d *DB) ChangeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
+	return d.changeRecordsAfter(table, fromExclusive, toInclusive, untilUnixNano)
+}
+
 func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
 	lower := storage.KeyChangeLog(fromExclusive + 1)
 	_, upperAll := storage.PrefixChangeLog()

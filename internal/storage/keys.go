@@ -36,6 +36,7 @@ const (
 
 	pPluginIndex = pInternal + "plugin-index/"
 	pMVDesc      = pInternal + "mv/"
+	pMVCursor    = pInternal + "mv-cursor/"
 	pStreams     = pAdmin + "streams/by-arn/"
 	pStreamTrim  = pAdmin + "streams/retention/"
 
@@ -646,4 +647,11 @@ func KeyMaterializedView(name string) []byte {
 func PrefixMaterializedViews() (lower, upper []byte) {
 	p := []byte(pMVDesc)
 	return p, prefixUpper(p)
+}
+
+// KeyMVRefreshCursor stores the last changelog index applied by a
+// FAST refresh consumer for the named view. Persisted on shard 0 so
+// the cursor survives leader churn and gets replicated to followers.
+func KeyMVRefreshCursor(name string) []byte {
+	return []byte(pMVCursor + escapeKeySegment(name))
 }

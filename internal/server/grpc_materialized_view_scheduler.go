@@ -71,20 +71,25 @@ func (m *mvScheduler) tick(ctx context.Context) {
 	}
 	now := time.Now().Unix()
 	for _, mv := range m.srv.cat.ListViews("") {
-		if mv.RefreshPolicy.Mode != types.RefreshModeScheduled {
-			continue
-		}
 		if mv.Status == types.MVStatusPaused {
 			continue
 		}
 		if !dueForRefreshUnix(mv, now) {
 			continue
 		}
-		// Fire-and-forget: refreshComplete has its own single-flight
-		// guard. Errors are surfaced via mv.Status = failed.
-		go func(name string) {
-			_, _ = m.srv.refreshComplete(ctx, name)
-		}(mv.Name)
+		switch mv.RefreshPolicy.Mode {
+		case types.RefreshModeScheduled:
+			// Complete rescan; refreshComplete has its own single-flight.
+			go func(name string) {
+				_, _ = m.srv.refreshComplete(ctx, name)
+			}(mv.Name)
+		case types.RefreshModeFast:
+			// Incremental from changelog; refreshFast has its own
+			// single-flight via refreshSingleFlight.
+			go func(name string) {
+				_, _ = m.srv.refreshFast(ctx, name)
+			}(mv.Name)
+		}
 	}
 }
 
