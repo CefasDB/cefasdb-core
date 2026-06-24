@@ -125,7 +125,9 @@ func TestStreamChangeRecordsCaptureImagesAndEventNames(t *testing.T) {
 }
 
 func TestChangeLogKeepsPITRRecordWithoutStreamRecord(t *testing.T) {
-	db := openChangeLogTestDB(t)
+	// Default is streams-only, so this test must opt into always mode
+	// to exercise the "PITR record for non-stream tables" path.
+	db := openChangeLogTestDBWithOptions(t, Options{ChangeLogMode: ChangeLogModeAlways})
 	td := types.TableDescriptor{Name: "Events", KeySchema: types.KeySchema{PK: "id"}}
 	if err := db.PutItemWith(td, types.Item{"id": streamS("1"), "status": streamS("new")}, PutOptions{}); err != nil {
 		t.Fatalf("put: %v", err)

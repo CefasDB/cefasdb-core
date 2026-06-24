@@ -241,7 +241,18 @@ func TestCreateTablePersistsStreamDescriptor(t *testing.T) {
 }
 
 func TestStreamDescriptorStartingSequenceUsesNextChangeIndex(t *testing.T) {
-	c, db := openCatWithDB(t)
+	// Use always mode so the non-stream Audit put bumps the global
+	// change index — that bump is the input the test is asserting on.
+	dir := t.TempDir()
+	db, err := pebble.Open(pebble.Options{Path: dir, ChangeLogMode: pebble.ChangeLogModeAlways})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	c, err := catalog.New(db)
+	if err != nil {
+		t.Fatalf("new catalog: %v", err)
+	}
 	if err := db.PutItem("Audit", types.KeySchema{PK: "pk"}, types.Item{
 		"pk": {T: types.AttrS, S: "existing"},
 	}); err != nil {
