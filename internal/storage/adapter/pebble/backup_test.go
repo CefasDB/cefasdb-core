@@ -18,7 +18,13 @@ import (
 func openDB(t *testing.T) *pebble.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := pebble.Open(pebble.Options{Path: dir})
+	db, err := pebble.Open(pebble.Options{
+		Path: dir,
+		// Backup tests assert ChangeIndex / ChangeUnixNano captured on
+		// non-stream tables. Default mode is streams-only, so opt into
+		// always to keep that contract here.
+		ChangeLogMode: pebble.ChangeLogModeAlways,
+	})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

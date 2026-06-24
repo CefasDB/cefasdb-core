@@ -105,11 +105,12 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if err != nil {
 		return rec, fmt.Errorf("encode change record: %w", err)
 	}
-	var counter [8]byte
-	binary.BigEndian.PutUint64(counter[:], rec.Index)
-	if err := b.Set(storage.ChangeCounterKey, counter[:], nil); err != nil {
-		return rec, err
-	}
+	// The persisted index lives implicitly in the largest KeyChangeLog
+	// suffix. seedChangeIndex recovers from that scan on Open, so the
+	// old hot-key write of storage.ChangeCounterKey is unnecessary and
+	// only added one rewrite of the same key per mutation. Old
+	// deployments still keep the key on disk; loadPersistedChangeIndex
+	// reads it for forward compatibility and the max with the scan wins.
 	if err := b.Set(storage.KeyChangeLog(rec.Index), raw, nil); err != nil {
 		return rec, err
 	}

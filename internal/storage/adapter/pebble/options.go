@@ -113,16 +113,20 @@ func normalizeProfile(profile string) string {
 	}
 }
 
+// normalizeChangeLogMode resolves the wire string into the canonical
+// mode. Empty input maps to "streams-only" — only tables with stream
+// enabled pay the per-mutation changelog write. Operators who need
+// PITR over every table opt in explicitly with "always".
 func normalizeChangeLogMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", ChangeLogModeAlways:
-		return ChangeLogModeAlways
-	case ChangeLogModeStreamsOnly, "streams", "stream":
+	case "", ChangeLogModeStreamsOnly, "streams", "stream":
 		return ChangeLogModeStreamsOnly
+	case ChangeLogModeAlways:
+		return ChangeLogModeAlways
 	case ChangeLogModeOff, "disabled", "none":
 		return ChangeLogModeOff
 	default:
-		return ChangeLogModeAlways
+		return ChangeLogModeStreamsOnly
 	}
 }
 

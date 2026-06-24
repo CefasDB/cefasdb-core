@@ -48,13 +48,13 @@ func TestPlainPutPriorReadFastPathEligibility(t *testing.T) {
 		t.Fatal("streaming put must read prior item")
 	}
 
-	defaultLogDB, err := Open(Options{Path: t.TempDir()})
+	alwaysLogDB, err := Open(Options{Path: t.TempDir(), ChangeLogMode: ChangeLogModeAlways})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer defaultLogDB.Close()
-	if defaultLogDB.putItemCanSkipPrior(simple, "") {
-		t.Fatal("default changelog mode must read prior item")
+	defer alwaysLogDB.Close()
+	if alwaysLogDB.putItemCanSkipPrior(simple, "") {
+		t.Fatal("always changelog mode must read prior item")
 	}
 }
 
