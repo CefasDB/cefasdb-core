@@ -5,7 +5,7 @@ BIN_DIR := ./bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: help build server cli install clean fmt lint vet test cover mut sec bench tools ci
+.PHONY: help build server cli install clean fmt lint vet test cover mut sec bench helm-test tools ci
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -72,5 +72,8 @@ sec: ## Run govulncheck, gosec, osv-scanner.
 
 bench: ## Run benchmarks across all packages.
 	go test -run=^$$ -bench=. -benchmem ./...
+
+helm-test: ## Render-test Helm resilience profiles.
+	scripts/test_helm_resilience.sh
 
 ci: vet lint test cover sec ## Full quality gate (mirror of CI workflow).

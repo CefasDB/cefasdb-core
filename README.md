@@ -90,6 +90,12 @@ For the full flag surface:
 ./bin/cefas   --help
 ```
 
+### Kubernetes
+
+The Helm chart includes an RF=3 resilience profile for StatefulSet
+placement, PVC-backed storage, disruption control, and database resource
+policy. See [`docs/helm-resilience.md`](docs/helm-resilience.md).
+
 ## APIs
 
 CefasDB exposes the same surface on three transports:

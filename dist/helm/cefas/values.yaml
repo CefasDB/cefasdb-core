@@ -1,8 +1,7 @@
 # cefas Helm chart values.
 #
-# Defaults bring up a single replica StatefulSet on hostPort-style
-# Services with persistent storage. Multi-node clusters require
-# replicaCount ≥ 3 and the multi-Raft flags below.
+# Defaults bring up a single replica StatefulSet for local development.
+# Set resilience.enabled=true for an RF=3-safe Kubernetes profile.
 
 image:
   repository: ghcr.io/cefasdb/cefasdb
@@ -14,6 +13,37 @@ replicaCount: 1
 serviceAccount:
   create: true
   name: ""
+
+resilience:
+  enabled: false
+  # Used when resilience.enabled=true. The rendered StatefulSet uses
+  # max(replicaCount, resilience.replicas) so `--set resilience.enabled=true`
+  # is enough to render three database Pods.
+  replicas: 3
+  replicationFactor: 3
+  requirePersistentStorage: true
+  allowEphemeralStorage: false
+  startupProbe:
+    # 120*2s gives recovering Pods up to four minutes for bootstrap,
+    # log replay, and shard startup before kubelet restarts the process.
+    failureThreshold: 120
+    periodSeconds: 2
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+    minAvailable: ""
+  scheduling:
+    antiAffinity:
+      enabled: true
+      topologyKey: kubernetes.io/hostname
+      weight: 100
+    topologySpread:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKeys:
+        - kubernetes.io/hostname
+        - cefasdb.io/failure-domain
 
 manager:
   enabled: true
@@ -33,6 +63,13 @@ manager:
     limits:
       cpu: "500m"
       memory: "512Mi"
+
+resourcePolicy:
+  # Database performance tests and dedicated DB nodes usually should not
+  # use CPU limits; set this true to omit resources.limits.cpu while
+  # retaining memory limits.
+  disableCPULimits: false
+  requireMemoryLimit: true
 
 resources:
   requests:
@@ -67,6 +104,9 @@ lifecycle:
 # Multi-Raft sharding. shards>1 turns on the mux transport.
 cluster:
   shards: 1
+  # 0 means "use every peer". With resilience.enabled=true this resolves
+  # to resilience.replicationFactor unless explicitly set to >=3.
+  replicationFactor: 0
   bootstrap: true
   fsyncOnCommit: false
 
@@ -110,6 +150,11 @@ podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8080"
   prometheus.io/path: "/metrics"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
 
 securityContext:
   runAsNonRoot: true

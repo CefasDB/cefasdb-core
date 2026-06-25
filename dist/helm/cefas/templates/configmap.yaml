@@ -20,8 +20,24 @@ data:
       fsyncOnCommit: {{ .Values.cluster.fsyncOnCommit }}
     cluster:
       shards: {{ .Values.cluster.shards }}
+      replicationFactor: {{ include "cefas.resolvedReplicationFactor" . }}
       muxAddr: ":{{ .Values.service.mux }}"
       bootstrap: {{ .Values.cluster.bootstrap }}
+      {{- $replicas := include "cefas.resolvedReplicaCount" . | int }}
+      {{- if gt $replicas 1 }}
+      peers:
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.mux | quote }}
+        {{- end }}
+      httpPeers:
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "http://%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.http | quote }}
+        {{- end }}
+      grpcPeers:
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.grpc | quote }}
+        {{- end }}
+      {{- end }}
     metrics:
       enabled: {{ .Values.metrics.enabled }}
     identity:
