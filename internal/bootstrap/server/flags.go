@@ -341,6 +341,23 @@ func OverlayRaftIdentityLeaseFlags(
 	}
 }
 
+// OverlayLifecycleFlags keeps shutdown/drain tuning separate from the
+// large historical OverlayFlags signature.
+func OverlayLifecycleFlags(
+	cfg *config.Config,
+	shutdownGracePeriod, drainDelay, leadershipTransferTimeout time.Duration,
+) {
+	if shutdownGracePeriod > 0 {
+		cfg.Lifecycle.ShutdownGracePeriod = shutdownGracePeriod
+	}
+	if drainDelay >= 0 {
+		cfg.Lifecycle.DrainDelay = drainDelay
+	}
+	if leadershipTransferTimeout > 0 {
+		cfg.Lifecycle.LeadershipTransferTimeout = leadershipTransferTimeout
+	}
+}
+
 // SplitCSVFlag splits a comma-separated CLI flag value into a trimmed
 // slice. Blank entries are dropped, so "a, ,b" yields ["a","b"].
 func SplitCSVFlag(in string) []string {

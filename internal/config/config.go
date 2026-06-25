@@ -25,6 +25,11 @@ type Config struct {
 	HTTP struct {
 		Addr string `yaml:"addr"`
 	} `yaml:"http"`
+	Lifecycle struct {
+		ShutdownGracePeriod       time.Duration `yaml:"shutdownGracePeriod"`
+		DrainDelay                time.Duration `yaml:"drainDelay"`
+		LeadershipTransferTimeout time.Duration `yaml:"leadershipTransferTimeout"`
+	} `yaml:"lifecycle"`
 	GRPC struct {
 		Addr        string `yaml:"addr"`
 		Reflection  bool   `yaml:"reflection"`
@@ -157,6 +162,9 @@ func Defaults() Config {
 	var c Config
 	c.Data = "./cefas-data"
 	c.HTTP.Addr = ":8080"
+	c.Lifecycle.ShutdownGracePeriod = 25 * time.Second
+	c.Lifecycle.DrainDelay = 2 * time.Second
+	c.Lifecycle.LeadershipTransferTimeout = 5 * time.Second
 	c.Identity.ClockSkew = 30 * time.Second
 	c.Metrics.Enabled = true
 	c.Metrics.HotspotBuckets = 64
@@ -284,6 +292,9 @@ func ApplyEnv(cfg *Config) error {
 
 	cfg.Data = str("DATA", cfg.Data)
 	cfg.HTTP.Addr = str("HTTP_ADDR", cfg.HTTP.Addr)
+	cfg.Lifecycle.ShutdownGracePeriod = dur("LIFECYCLE_SHUTDOWN_GRACE_PERIOD", cfg.Lifecycle.ShutdownGracePeriod)
+	cfg.Lifecycle.DrainDelay = dur("LIFECYCLE_DRAIN_DELAY", cfg.Lifecycle.DrainDelay)
+	cfg.Lifecycle.LeadershipTransferTimeout = dur("LIFECYCLE_LEADERSHIP_TRANSFER_TIMEOUT", cfg.Lifecycle.LeadershipTransferTimeout)
 	cfg.GRPC.Addr = str("GRPC_ADDR", cfg.GRPC.Addr)
 	cfg.GRPC.Reflection = boolean("GRPC_REFLECTION", cfg.GRPC.Reflection)
 	cfg.GRPC.TLSCertPath = str("GRPC_TLS_CERT", cfg.GRPC.TLSCertPath)

@@ -27,7 +27,7 @@ metadata:
 spec:
   type: ClusterIP
   clusterIP: None
-  publishNotReadyAddresses: true
+  publishNotReadyAddresses: {{ .Values.service.headless.publishNotReadyAddresses }}
   selector:
     {{- include "cefas.selectorLabels" . | nindent 4 }}
   ports:

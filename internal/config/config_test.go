@@ -17,6 +17,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Identity.ClockSkew != 30*time.Second {
 		t.Errorf("clock skew default = %v", d.Identity.ClockSkew)
 	}
+	if d.Lifecycle.ShutdownGracePeriod != 25*time.Second || d.Lifecycle.DrainDelay != 2*time.Second || d.Lifecycle.LeadershipTransferTimeout != 5*time.Second {
+		t.Errorf("lifecycle defaults not populated: %+v", d.Lifecycle)
+	}
 	if !d.Metrics.Enabled {
 		t.Errorf("metrics should default on")
 	}
@@ -69,6 +72,10 @@ func TestLoadFileYAML(t *testing.T) {
 data: /var/lib/cefas-test
 http:
   addr: ":18080"
+lifecycle:
+  shutdownGracePeriod: 20s
+  drainDelay: 1500ms
+  leadershipTransferTimeout: 4s
 cluster:
   shards: 3
   replicationFactor: 2
@@ -141,6 +148,9 @@ backupScheduler:
 	if cfg.Identity.ClockSkew != 45*time.Second {
 		t.Fatalf("clock skew = %v", cfg.Identity.ClockSkew)
 	}
+	if cfg.Lifecycle.ShutdownGracePeriod != 20*time.Second || cfg.Lifecycle.DrainDelay != 1500*time.Millisecond || cfg.Lifecycle.LeadershipTransferTimeout != 4*time.Second {
+		t.Fatalf("lifecycle config not loaded: %+v", cfg.Lifecycle)
+	}
 	if cfg.Storage.ChangeLogMode != "streams-only" {
 		t.Fatalf("storage changelog mode config not loaded: %+v", cfg.Storage)
 	}
@@ -187,6 +197,9 @@ backupScheduler:
 
 func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_HTTP_ADDR", ":19090")
+	t.Setenv("CEFAS_LIFECYCLE_SHUTDOWN_GRACE_PERIOD", "21s")
+	t.Setenv("CEFAS_LIFECYCLE_DRAIN_DELAY", "750ms")
+	t.Setenv("CEFAS_LIFECYCLE_LEADERSHIP_TRANSFER_TIMEOUT", "6s")
 	t.Setenv("CEFAS_CLUSTER_SHARDS", "4")
 	t.Setenv("CEFAS_CLUSTER_REPLICATION_FACTOR", "3")
 	t.Setenv("CEFAS_RAFT_HEARTBEAT_TIMEOUT", "2500ms")
@@ -234,6 +247,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.HTTP.Addr != ":19090" {
 		t.Errorf("http addr override: %q", cfg.HTTP.Addr)
+	}
+	if cfg.Lifecycle.ShutdownGracePeriod != 21*time.Second || cfg.Lifecycle.DrainDelay != 750*time.Millisecond || cfg.Lifecycle.LeadershipTransferTimeout != 6*time.Second {
+		t.Errorf("lifecycle env not applied: %+v", cfg.Lifecycle)
 	}
 	if cfg.Cluster.Shards != 4 {
 		t.Errorf("shards override: %d", cfg.Cluster.Shards)

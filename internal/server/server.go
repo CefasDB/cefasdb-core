@@ -42,6 +42,7 @@ import (
 // when the server runs in Raft mode. nil means single-node.
 type Cluster interface {
 	IsLeader() bool
+	LeaderInfo() (id, addr string)
 	LeaderHTTPAddr() string
 	AddVoter(id, addr string, timeout time.Duration) error
 	RemoveServer(id string, timeout time.Duration) error
@@ -81,6 +82,7 @@ type Server struct {
 	validator *auth.Validator  // nil when auth disabled (dev mode)
 	metrics   *metrics.Metrics // nil when metrics disabled
 	backups   BackupSchedulerStatusProvider
+	lifecycle *Lifecycle
 }
 
 type BackupSchedulerStatusProvider interface {
@@ -130,7 +132,7 @@ func (s *Server) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.back
 func (s *Server) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
 func New(db *pebble.DB, cat *catalog.Catalog) *Server {
-	return &Server{db: db, cat: cat}
+	return &Server{db: db, cat: cat, lifecycle: NewLifecycle()}
 }
 
 // AttachManager wires the multi-shard manager. Pass nil to keep the
@@ -237,6 +239,10 @@ func (s *Server) AttachAuth(v *auth.Validator) { s.validator = v }
 var publicPaths = map[string]bool{
 	"/v1/Health":         true,
 	"/v1/cluster/status": true,
+	"/livez":             true,
+	"/readyz":            true,
+	"/startupz":          true,
+	"/raftz":             true,
 }
 
 // Routes attaches cefas HTTP endpoints onto mux. Path layout follows
@@ -303,6 +309,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/DeleteBackup", backupHandlers.HandleDeleteBackup)
 	register("/v1/ApplyBackupRetention", backupHandlers.HandleApplyBackupRetention)
 	register("/v1/Health", s.handleHealth)
+	register("/livez", s.handleLivez)
+	register("/readyz", s.handleReadyz)
+	register("/startupz", s.handleStartupz)
+	register("/raftz", s.handleRaftz)
 	clusterHandlers := clusterhttp.New(s.cluster, s.manager, writeWriteErr, s.clusterStatusExtras)
 	register("/v1/cluster/status", clusterHandlers.HandleStatus)
 	register("/v1/cluster/AddVoter", clusterHandlers.HandleAddVoter)
@@ -670,6 +680,9 @@ func mapWriteErr(err error) int {
 		return http.StatusTemporaryRedirect
 	}
 	if errors.Is(err, craft.ErrNotLeader) {
+		return http.StatusServiceUnavailable
+	}
+	if errors.Is(err, pebble.ErrDraining) {
 		return http.StatusServiceUnavailable
 	}
 	if errors.Is(err, pebble.ErrThrottled) {
