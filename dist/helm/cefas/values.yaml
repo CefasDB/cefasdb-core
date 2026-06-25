@@ -15,6 +15,25 @@ serviceAccount:
   create: true
   name: ""
 
+manager:
+  enabled: true
+  replicaCount: 2
+  repairMode: observe
+  interval: 30s
+  timeout: 30s
+  leaderLeaseTTL: 30s
+  approveFencing: false
+  auditLog: /tmp/cefas-manager-audit.jsonl
+  tokenSecretName: ""
+  tokenSecretKey: token
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
 resources:
   requests:
     cpu: "200m"

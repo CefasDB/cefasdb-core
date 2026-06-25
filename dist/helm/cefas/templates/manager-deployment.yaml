@@ -1,0 +1,71 @@
+{{- if .Values.manager.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cefas.fullname" . }}-manager
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+spec:
+  replicas: {{ .Values.manager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cefas.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        {{- include "cefas.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: manager
+    spec:
+      serviceAccountName: {{ include "cefas.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: cefas-manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /usr/local/bin/cefas-manager
+          args:
+            - controller
+            - --leader-election
+            - --leader-lease-name={{ include "cefas.fullname" . }}-manager
+            - --leader-lease-ttl={{ .Values.manager.leaderLeaseTTL }}
+            - --endpoint=$(CEFAS_ENDPOINT)
+            - --http-endpoint=$(CEFAS_HTTP_ENDPOINT)
+            - --namespace=$(POD_NAMESPACE)
+            - --selector=$(CEFAS_KUBE_SELECTOR)
+            - --repair-mode={{ .Values.manager.repairMode }}
+            - --interval={{ .Values.manager.interval }}
+            - --timeout={{ .Values.manager.timeout }}
+            - --audit-log={{ .Values.manager.auditLog }}
+            - --insecure=true
+            {{- if .Values.manager.approveFencing }}
+            - --approve-fencing
+            {{- end }}
+          env:
+            - name: CEFAS_ENDPOINT
+              value: "{{ include "cefas.fullname" . }}:{{ .Values.service.grpc }}"
+            - name: CEFAS_HTTP_ENDPOINT
+              value: "http://{{ include "cefas.fullname" . }}:{{ .Values.service.http }}"
+            - name: CEFAS_KUBE_SELECTOR
+              value: "app.kubernetes.io/name={{ include "cefas.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+            - name: CEFAS_MANAGER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- if .Values.manager.tokenSecretName }}
+            - name: CEFAS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.manager.tokenSecretName }}
+                  key: {{ .Values.manager.tokenSecretKey }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.manager.resources | nindent 12 }}
+{{- end }}
