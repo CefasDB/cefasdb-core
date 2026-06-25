@@ -90,6 +90,16 @@ type Config struct {
 		LogCompressionMinSavingsRatio float64       `yaml:"logCompressionMinSavingsRatio"`
 		LogCompressionSkipCooldown    time.Duration `yaml:"logCompressionSkipCooldown"`
 	} `yaml:"raft"`
+	RaftIdentity struct {
+		LeaseBackend             string        `yaml:"leaseBackend"`
+		LeasePath                string        `yaml:"leasePath"`
+		LeaseName                string        `yaml:"leaseName"`
+		LeaseNamespace           string        `yaml:"leaseNamespace"`
+		LeaseTTL                 time.Duration `yaml:"leaseTtl"`
+		LeaseRenewInterval       time.Duration `yaml:"leaseRenewInterval"`
+		KubernetesAPIURL         string        `yaml:"kubernetesApiUrl"`
+		KubernetesServiceAccount string        `yaml:"kubernetesServiceAccount"`
+	} `yaml:"raftIdentity"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
 		Issuer    string        `yaml:"issuer"`
@@ -179,6 +189,9 @@ func Defaults() Config {
 	c.Raft.LogCompressionMinBytes = 1024
 	c.Raft.LogCompressionMinSavingsRatio = 0.05
 	c.Raft.LogCompressionSkipCooldown = time.Second
+	c.RaftIdentity.LeaseBackend = "file"
+	c.RaftIdentity.LeaseTTL = 30 * time.Second
+	c.RaftIdentity.LeaseRenewInterval = 10 * time.Second
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -331,6 +344,14 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Raft.LogCompressionMinBytes = integer("RAFT_LOG_COMPRESSION_MIN_BYTES", cfg.Raft.LogCompressionMinBytes)
 	cfg.Raft.LogCompressionMinSavingsRatio = flt("RAFT_LOG_COMPRESSION_MIN_SAVINGS_RATIO", cfg.Raft.LogCompressionMinSavingsRatio)
 	cfg.Raft.LogCompressionSkipCooldown = dur("RAFT_LOG_COMPRESSION_SKIP_COOLDOWN", cfg.Raft.LogCompressionSkipCooldown)
+	cfg.RaftIdentity.LeaseBackend = str("RAFT_IDENTITY_LEASE_BACKEND", cfg.RaftIdentity.LeaseBackend)
+	cfg.RaftIdentity.LeasePath = str("RAFT_IDENTITY_LEASE_PATH", cfg.RaftIdentity.LeasePath)
+	cfg.RaftIdentity.LeaseName = str("RAFT_IDENTITY_LEASE_NAME", cfg.RaftIdentity.LeaseName)
+	cfg.RaftIdentity.LeaseNamespace = str("RAFT_IDENTITY_LEASE_NAMESPACE", cfg.RaftIdentity.LeaseNamespace)
+	cfg.RaftIdentity.LeaseTTL = dur("RAFT_IDENTITY_LEASE_TTL", cfg.RaftIdentity.LeaseTTL)
+	cfg.RaftIdentity.LeaseRenewInterval = dur("RAFT_IDENTITY_LEASE_RENEW_INTERVAL", cfg.RaftIdentity.LeaseRenewInterval)
+	cfg.RaftIdentity.KubernetesAPIURL = str("RAFT_IDENTITY_KUBERNETES_API_URL", cfg.RaftIdentity.KubernetesAPIURL)
+	cfg.RaftIdentity.KubernetesServiceAccount = str("RAFT_IDENTITY_KUBERNETES_SERVICE_ACCOUNT", cfg.RaftIdentity.KubernetesServiceAccount)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)

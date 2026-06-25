@@ -297,6 +297,24 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	}
 }
 
+func TestOverlayRaftIdentityLeaseFlags(t *testing.T) {
+	cfg := baseCfg()
+	OverlayRaftIdentityLeaseFlags(&cfg, "kubernetes", "/leases", "lease-n1", "cefasdb", "https://kubernetes.default.svc", 45*time.Second, 15*time.Second)
+
+	if cfg.RaftIdentity.LeaseBackend != "kubernetes" {
+		t.Errorf("LeaseBackend = %q", cfg.RaftIdentity.LeaseBackend)
+	}
+	if cfg.RaftIdentity.LeasePath != "/leases" || cfg.RaftIdentity.LeaseName != "lease-n1" || cfg.RaftIdentity.LeaseNamespace != "cefasdb" {
+		t.Errorf("lease identity fields = %+v", cfg.RaftIdentity)
+	}
+	if cfg.RaftIdentity.KubernetesAPIURL != "https://kubernetes.default.svc" {
+		t.Errorf("KubernetesAPIURL = %q", cfg.RaftIdentity.KubernetesAPIURL)
+	}
+	if cfg.RaftIdentity.LeaseTTL != 45*time.Second || cfg.RaftIdentity.LeaseRenewInterval != 15*time.Second {
+		t.Errorf("lease durations = %+v", cfg.RaftIdentity)
+	}
+}
+
 func TestOverlayFlags_PeerSetGroup(t *testing.T) {
 	cfg := baseCfg()
 	args := zeroArgs()
