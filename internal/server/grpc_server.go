@@ -36,14 +36,15 @@ type GRPCServer struct {
 	cefaspb.UnimplementedCefasServer
 	cefaspb.UnimplementedReplicaServer
 
-	db      *pebble.DB
-	cat     *catalog.Catalog
-	cluster Cluster          // nil in single-node mode
-	stream  ChangeStream     // nil when no CDC source attached
-	manager *cluster.Manager // nil in single-shard mode
-	plugins *plugin.Registry // nil → uses plugin.Default
-	metrics *metrics.Metrics // nil when metrics disabled
-	backups BackupSchedulerStatusProvider
+	db        *pebble.DB
+	cat       *catalog.Catalog
+	cluster   Cluster          // nil in single-node mode
+	stream    ChangeStream     // nil when no CDC source attached
+	manager   *cluster.Manager // nil in single-shard mode
+	plugins   *plugin.Registry // nil → uses plugin.Default
+	metrics   *metrics.Metrics // nil when metrics disabled
+	backups   BackupSchedulerStatusProvider
+	lifecycle *Lifecycle
 
 	mvScheduler *mvScheduler
 }
@@ -2330,6 +2331,8 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, craft.ErrNotLeader):
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, pebble.ErrDraining):
+		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, pebble.ErrThrottled):
 		return status.Error(codes.ResourceExhausted, err.Error())
 	}

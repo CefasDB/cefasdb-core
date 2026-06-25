@@ -36,6 +36,11 @@ var _ storage.Engine = (*DB)(nil)
 // carrying the leader's HTTP URL when known.
 var ErrNotLeader = errors.New("cefas/storage: not leader")
 
+// ErrDraining is returned by caller-facing write APIs after the
+// process has entered shutdown drain. Raft FSM apply paths bypass this
+// gate so already-committed entries can still flush cleanly.
+var ErrDraining = errors.New("cefas/storage: writes disabled")
+
 // ErrNotFound is the sentinel for missing keys — re-exported from Pebble.
 var ErrNotFound = pebbledb.ErrNotFound
 
@@ -52,6 +57,19 @@ func (e *NotLeaderError) Error() string {
 
 func (e *NotLeaderError) LeaderHTTPAddr() string { return e.LeaderURL }
 func (e *NotLeaderError) Is(target error) bool   { return target == ErrNotLeader }
+
+type DrainingError struct {
+	Reason string
+}
+
+func (e *DrainingError) Error() string {
+	if e.Reason == "" {
+		return ErrDraining.Error()
+	}
+	return ErrDraining.Error() + ": " + e.Reason
+}
+
+func (e *DrainingError) Is(target error) bool { return target == ErrDraining }
 
 // Options configures the engine. Mirrors codeq's Options for parity.
 type Options struct {
@@ -102,6 +120,9 @@ type DB struct {
 	repl    Replicator
 	bp      backpressureController
 	lanes   *dbLanes
+
+	writeDraining       atomic.Bool
+	writeDrainingReason atomic.Value // string
 
 	slSharesMu       sync.RWMutex
 	slSharesResolver ServiceLevelSharesResolver
@@ -229,6 +250,38 @@ func (d *DB) AttachStreamRetentionResolver(fn func(table string) int64) {
 // Must be called before any concurrent writes are in flight.
 func (d *DB) AttachReplicator(r Replicator) { d.repl = r }
 
+// RejectWrites flips this handle into drain mode. New caller-facing
+// writes fail fast, while ApplyCommittedBatch continues to accept
+// already-committed Raft entries during shutdown.
+func (d *DB) RejectWrites(reason string) {
+	if d == nil {
+		return
+	}
+	if reason == "" {
+		reason = "draining"
+	}
+	d.writeDrainingReason.Store(reason)
+	d.writeDraining.Store(true)
+}
+
+// AllowWrites clears drain mode. Tests use it to prove the gate is
+// reversible; production normally only calls RejectWrites during exit.
+func (d *DB) AllowWrites() {
+	if d == nil {
+		return
+	}
+	d.writeDraining.Store(false)
+	d.writeDrainingReason.Store("")
+}
+
+func (d *DB) rejectWriteErr() error {
+	if d == nil || !d.writeDraining.Load() {
+		return nil
+	}
+	reason, _ := d.writeDrainingReason.Load().(string)
+	return &DrainingError{Reason: reason}
+}
+
 func (d *DB) Close() error {
 	if d == nil || d.db == nil {
 		return nil
@@ -321,6 +374,9 @@ func (d *DB) hasNoLane(key []byte) (bool, error) {
 // Set writes a single key/value. With a replicator attached, it flows
 // through Replicate as a 1-op batch.
 func (d *DB) Set(key, value []byte) error {
+	if err := d.rejectWriteErr(); err != nil {
+		return err
+	}
 	if d.repl != nil {
 		if !d.repl.IsLeader() {
 			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
@@ -339,6 +395,9 @@ func (d *DB) Set(key, value []byte) error {
 
 // Delete removes a key.
 func (d *DB) Delete(key []byte) error {
+	if err := d.rejectWriteErr(); err != nil {
+		return err
+	}
 	if d.repl != nil {
 		if !d.repl.IsLeader() {
 			return &NotLeaderError{LeaderURL: d.repl.LeaderHTTPAddr()}
@@ -370,6 +429,9 @@ func (d *DB) Batch() *pebbledb.Batch { return d.db.NewBatch() }
 // commitLoop's maxMergeBatch coalescer. Callers pay only the cheap
 // goroutine park on <-req.done, which scales freely.
 func (d *DB) CommitBatch(b *pebbledb.Batch) error {
+	if err := d.rejectWriteErr(); err != nil {
+		return err
+	}
 	if d.workload != nil {
 		d.workload.recordWrite()
 	}
@@ -388,6 +450,9 @@ func (d *DB) CommitBatch(b *pebbledb.Batch) error {
 // responsible for ensuring the receiving node is the right owner —
 // followers will not see the resulting state.
 func (d *DB) CommitBatchLocal(b *pebbledb.Batch) error {
+	if err := d.rejectWriteErr(); err != nil {
+		return err
+	}
 	if d.workload != nil {
 		d.workload.recordWrite()
 	}

@@ -315,6 +315,21 @@ func TestOverlayRaftIdentityLeaseFlags(t *testing.T) {
 	}
 }
 
+func TestOverlayLifecycleFlags(t *testing.T) {
+	cfg := baseCfg()
+	OverlayLifecycleFlags(&cfg, 20*time.Second, 500*time.Millisecond, 3*time.Second)
+
+	if cfg.Lifecycle.ShutdownGracePeriod != 20*time.Second {
+		t.Errorf("ShutdownGracePeriod = %v", cfg.Lifecycle.ShutdownGracePeriod)
+	}
+	if cfg.Lifecycle.DrainDelay != 500*time.Millisecond {
+		t.Errorf("DrainDelay = %v", cfg.Lifecycle.DrainDelay)
+	}
+	if cfg.Lifecycle.LeadershipTransferTimeout != 3*time.Second {
+		t.Errorf("LeadershipTransferTimeout = %v", cfg.Lifecycle.LeadershipTransferTimeout)
+	}
+}
+
 func TestOverlayFlags_PeerSetGroup(t *testing.T) {
 	cfg := baseCfg()
 	args := zeroArgs()

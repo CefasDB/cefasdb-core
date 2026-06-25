@@ -33,6 +33,17 @@ service:
   http: 8080
   grpc: 9090
   mux: 9100
+  headless:
+    # Required for StatefulSet peer bootstrap: Pods can resolve each
+    # other before readiness passes. Client traffic uses the regular
+    # service above, which does not publish non-ready endpoints.
+    publishNotReadyAddresses: true
+
+lifecycle:
+  terminationGracePeriodSeconds: 30
+  shutdownGracePeriod: 25s
+  drainDelay: 2s
+  leadershipTransferTimeout: 5s
 
 # Multi-Raft sharding. shards>1 turns on the mux transport.
 cluster:
@@ -85,17 +96,24 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 65532
 
-# Probes target the cheap /v1/Health endpoint.
 livenessProbe:
   httpGet:
-    path: /v1/Health
+    path: /livez
     port: 8080
   initialDelaySeconds: 15
   periodSeconds: 30
 
 readinessProbe:
   httpGet:
-    path: /v1/Health
+    path: /readyz
     port: 8080
   initialDelaySeconds: 5
   periodSeconds: 10
+  failureThreshold: 1
+
+startupProbe:
+  httpGet:
+    path: /startupz
+    port: 8080
+  failureThreshold: 30
+  periodSeconds: 2

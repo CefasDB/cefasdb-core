@@ -9,6 +9,10 @@ data:
     data: /var/lib/cefas
     http:
       addr: ":{{ .Values.service.http }}"
+    lifecycle:
+      shutdownGracePeriod: {{ .Values.lifecycle.shutdownGracePeriod | quote }}
+      drainDelay: {{ .Values.lifecycle.drainDelay | quote }}
+      leadershipTransferTimeout: {{ .Values.lifecycle.leadershipTransferTimeout | quote }}
     grpc:
       addr: ":{{ .Values.service.grpc }}"
       reflection: true
