@@ -1,0 +1,17 @@
+{{- if and .Values.resilience.enabled .Values.resilience.podDisruptionBudget.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cefas.fullname" . }}
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.resilience.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.resilience.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.resilience.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cefas.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -10,12 +10,14 @@ spec:
   replicas: {{ .Values.manager.replicaCount }}
   selector:
     matchLabels:
-      {{- include "cefas.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/name: {{ include "cefas.name" . }}-manager
+      app.kubernetes.io/instance: {{ .Release.Name }}
       app.kubernetes.io/component: manager
   template:
     metadata:
       labels:
-        {{- include "cefas.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: {{ include "cefas.name" . }}-manager
+        app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: manager
     spec:
       serviceAccountName: {{ include "cefas.serviceAccountName" . }}
