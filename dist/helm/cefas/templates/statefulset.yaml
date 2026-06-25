@@ -84,6 +84,8 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: data
+        labels:
+          {{- include "cefas.selectorLabels" . | nindent 10 }}
       spec:
         accessModes: ["ReadWriteOnce"]
         {{- if .Values.persistence.storageClass }}
