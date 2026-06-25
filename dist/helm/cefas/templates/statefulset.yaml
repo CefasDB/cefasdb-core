@@ -18,6 +18,7 @@ spec:
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "cefas.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
       terminationGracePeriodSeconds: 30
@@ -30,11 +31,30 @@ spec:
             - "/etc/cefas/cefas.yaml"
             - "-raft-id"
             - "$(POD_NAME)"
+            {{- if .Values.raftIdentity.lease.enabled }}
+            - "-raft-identity-lease-backend"
+            - {{ .Values.raftIdentity.lease.backend | quote }}
+            - "-raft-identity-lease-name"
+            - "{{ default (include "cefas.fullname" .) .Values.raftIdentity.lease.namePrefix }}-$(POD_NAME)"
+            - "-raft-identity-lease-namespace"
+            - "$(POD_NAMESPACE)"
+            - "-raft-identity-lease-ttl"
+            - {{ .Values.raftIdentity.lease.ttl | quote }}
+            - "-raft-identity-lease-renew-interval"
+            - {{ .Values.raftIdentity.lease.renewInterval | quote }}
+            {{- else }}
+            - "-raft-identity-lease-backend"
+            - "off"
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           ports:
             - name: http
               containerPort: {{ .Values.service.http }}

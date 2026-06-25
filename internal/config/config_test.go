@@ -44,6 +44,9 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Raft.LogCompressionMinBytes != 1024 || d.Raft.LogCompressionMinSavingsRatio != 0.05 || d.Raft.LogCompressionSkipCooldown != time.Second {
 		t.Errorf("raft log compression guardrail defaults not populated: %+v", d.Raft)
 	}
+	if d.RaftIdentity.LeaseBackend != "file" || d.RaftIdentity.LeaseTTL != 30*time.Second || d.RaftIdentity.LeaseRenewInterval != 10*time.Second {
+		t.Errorf("raft identity lease defaults not populated: %+v", d.RaftIdentity)
+	}
 	if d.Storage.Lanes != "auto" {
 		t.Errorf("storage lanes default = %q", d.Storage.Lanes)
 	}
@@ -91,6 +94,12 @@ raft:
   logCompressionMinBytes: 2048
   logCompressionMinSavingsRatio: 0.2
   logCompressionSkipCooldown: 2s
+raftIdentity:
+  leaseBackend: kubernetes
+  leaseName: cefasdb-geo-cefas-0
+  leaseNamespace: cefasdb
+  leaseTtl: 45s
+  leaseRenewInterval: 15s
 identity:
   jwksUrl: https://tikti.example.com/jwks.json
   clockSkew: 45s
@@ -153,6 +162,12 @@ backupScheduler:
 	if cfg.Raft.LogCompressionMinBytes != 2048 || cfg.Raft.LogCompressionMinSavingsRatio != 0.2 || cfg.Raft.LogCompressionSkipCooldown != 2*time.Second {
 		t.Fatalf("raft log compression guardrail config not loaded: %+v", cfg.Raft)
 	}
+	if cfg.RaftIdentity.LeaseBackend != "kubernetes" || cfg.RaftIdentity.LeaseName != "cefasdb-geo-cefas-0" || cfg.RaftIdentity.LeaseNamespace != "cefasdb" {
+		t.Fatalf("raft identity lease config not loaded: %+v", cfg.RaftIdentity)
+	}
+	if cfg.RaftIdentity.LeaseTTL != 45*time.Second || cfg.RaftIdentity.LeaseRenewInterval != 15*time.Second {
+		t.Fatalf("raft identity lease durations not loaded: %+v", cfg.RaftIdentity)
+	}
 	if cfg.Metrics.HotspotBuckets != 16 || cfg.Metrics.HotspotWriteThreshold != 42 || cfg.Metrics.HotspotLatencyThreshold != 75*time.Millisecond {
 		t.Fatalf("hotspot metrics config not loaded: %+v", cfg.Metrics)
 	}
@@ -184,6 +199,11 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_MIN_BYTES", "4096")
 	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_MIN_SAVINGS_RATIO", "0.25")
 	t.Setenv("CEFAS_RAFT_LOG_COMPRESSION_SKIP_COOLDOWN", "3s")
+	t.Setenv("CEFAS_RAFT_IDENTITY_LEASE_BACKEND", "kubernetes")
+	t.Setenv("CEFAS_RAFT_IDENTITY_LEASE_NAME", "lease-n1")
+	t.Setenv("CEFAS_RAFT_IDENTITY_LEASE_NAMESPACE", "cefasdb")
+	t.Setenv("CEFAS_RAFT_IDENTITY_LEASE_TTL", "40s")
+	t.Setenv("CEFAS_RAFT_IDENTITY_LEASE_RENEW_INTERVAL", "10s")
 	t.Setenv("CEFAS_METRICS_ENABLED", "false")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_BUCKETS", "32")
 	t.Setenv("CEFAS_METRICS_HOTSPOT_WRITE_THRESHOLD", "99")
@@ -235,6 +255,12 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Raft.LogCompressionMinBytes != 4096 || cfg.Raft.LogCompressionMinSavingsRatio != 0.25 || cfg.Raft.LogCompressionSkipCooldown != 3*time.Second {
 		t.Errorf("raft log compression guardrail env not applied: %+v", cfg.Raft)
+	}
+	if cfg.RaftIdentity.LeaseBackend != "kubernetes" || cfg.RaftIdentity.LeaseName != "lease-n1" || cfg.RaftIdentity.LeaseNamespace != "cefasdb" {
+		t.Errorf("raft identity lease env not applied: %+v", cfg.RaftIdentity)
+	}
+	if cfg.RaftIdentity.LeaseTTL != 40*time.Second || cfg.RaftIdentity.LeaseRenewInterval != 10*time.Second {
+		t.Errorf("raft identity lease duration env not applied: %+v", cfg.RaftIdentity)
 	}
 	if cfg.Storage.ChangeLogMode != "off" {
 		t.Errorf("storage changelog mode env not applied: %+v", cfg.Storage)

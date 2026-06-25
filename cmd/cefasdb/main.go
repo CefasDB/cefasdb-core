@@ -24,6 +24,7 @@ import (
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/cluster"
 	"github.com/CefasDb/cefasdb/internal/config"
+	"github.com/CefasDb/cefasdb/internal/identitylease"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
@@ -63,6 +64,13 @@ func main() {
 		raftLogCompMinBytes        = flag.Int("raft-log-compression-min-bytes", 0, "Minimum raft log payload bytes before compression. 0 inherits config/default.")
 		raftLogCompMinSavingsRatio = flag.Float64("raft-log-compression-min-savings-ratio", -1, "Minimum compression savings ratio required to keep compressed payloads. Negative inherits config/default.")
 		raftLogCompSkipCooldown    = flag.Duration("raft-log-compression-skip-cooldown", -1, "Cooldown after an unhelpful compression attempt. Negative inherits config/default; 0 disables cooldown.")
+		raftIdentityLeaseBackend   = flag.String("raft-identity-lease-backend", "", "Raft identity lease backend: file, kubernetes, auto, or off. Empty inherits config/default.")
+		raftIdentityLeasePath      = flag.String("raft-identity-lease-path", "", "Directory for file-backed raft identity leases. Empty defaults to -data/raft-identity.")
+		raftIdentityLeaseName      = flag.String("raft-identity-lease-name", "", "Lease resource name for external backends. Empty derives from -raft-id.")
+		raftIdentityLeaseNamespace = flag.String("raft-identity-lease-namespace", "", "Kubernetes namespace for raft identity Lease objects. Empty uses in-cluster namespace.")
+		raftIdentityLeaseAPIURL    = flag.String("raft-identity-kubernetes-api-url", "", "Kubernetes API URL for raft identity leases. Empty uses in-cluster service discovery.")
+		raftIdentityLeaseTTL       = flag.Duration("raft-identity-lease-ttl", 0, "Raft identity lease TTL. 0 inherits config/default.")
+		raftIdentityLeaseRenew     = flag.Duration("raft-identity-lease-renew-interval", 0, "Raft identity lease renew interval. 0 inherits config/default.")
 
 		// Storage tuning.
 		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
@@ -198,6 +206,10 @@ func main() {
 		*backupSchedulerEnabled, *backupSchedulerDisabled, *backupSchedulerDryRun,
 		*backupSchedulerInterval, *backupSchedulerNameTemplate, *backupSchedulerTables,
 		*backupSchedulerRetentionKeepLatest, *backupSchedulerRetentionMaxAge, *backupSchedulerRetentionDryRun)
+	bootstrapserver.OverlayRaftIdentityLeaseFlags(&cfg,
+		*raftIdentityLeaseBackend, *raftIdentityLeasePath, *raftIdentityLeaseName,
+		*raftIdentityLeaseNamespace, *raftIdentityLeaseAPIURL,
+		*raftIdentityLeaseTTL, *raftIdentityLeaseRenew)
 
 	// Initialise tracing first so subsequent setup gets spans on
 	// failure. tracingShutdown is a no-op when no endpoint is set.
@@ -230,6 +242,49 @@ func main() {
 	if err != nil {
 		logger.Error("pprof", "err", err)
 		os.Exit(1)
+	}
+
+	leaseCtx, leaseCancel := context.WithCancel(context.Background())
+	defer leaseCancel()
+	leaseLost := make(chan error, 1)
+	var raftIdentityGuard *identitylease.Guard
+	if raftIdentityLeaseRequired(cfg) {
+		raftIdentityGuard, err = identitylease.Acquire(context.Background(), identitylease.Options{
+			NodeID:                cfg.Cluster.SelfID,
+			DataDir:               cfg.Data,
+			Backend:               cfg.RaftIdentity.LeaseBackend,
+			LeasePath:             cfg.RaftIdentity.LeasePath,
+			LeaseName:             cfg.RaftIdentity.LeaseName,
+			LeaseTTL:              cfg.RaftIdentity.LeaseTTL,
+			RenewInterval:         cfg.RaftIdentity.LeaseRenewInterval,
+			KubernetesNamespace:   cfg.RaftIdentity.LeaseNamespace,
+			KubernetesAPIURL:      cfg.RaftIdentity.KubernetesAPIURL,
+			KubernetesBearerToken: "",
+			KubernetesCAFile:      "",
+			HTTPClient:            nil,
+		})
+		if err != nil {
+			logger.Error("raft identity lease", "err", err, "raftID", cfg.Cluster.SelfID, "backend", cfg.RaftIdentity.LeaseBackend)
+			os.Exit(1)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := raftIdentityGuard.Close(ctx); err != nil {
+				logger.Error("release raft identity lease", "err", err, "raftID", cfg.Cluster.SelfID)
+			}
+		}()
+		rec := raftIdentityGuard.Record()
+		logger.Info("raft identity lease acquired", "raftID", rec.NodeID, "holder", rec.HolderID, "epoch", rec.Epoch, "backend", rec.Backend, "resource", rec.Resource, "expires", rec.ExpiresAt)
+		go raftIdentityGuard.RenewLoop(leaseCtx, func(err error) {
+			logger.Error("raft identity lease lost", "err", err, "raftID", cfg.Cluster.SelfID)
+			select {
+			case leaseLost <- err:
+			default:
+			}
+		})
+	} else if cfg.Cluster.SelfID != "" && cfg.RaftIdentity.LeaseBackend == identitylease.BackendOff {
+		logger.Info("raft identity lease disabled", "raftID", cfg.Cluster.SelfID)
 	}
 
 	var (
@@ -517,8 +572,15 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	logger.Info("shutting down")
+	shutdownReason := "signal"
+	select {
+	case sig := <-stop:
+		shutdownReason = sig.String()
+	case err := <-leaseLost:
+		shutdownReason = "raft identity lease lost: " + err.Error()
+	}
+	logger.Info("shutting down", "reason", shutdownReason)
+	leaseCancel()
 	runtimeCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -528,4 +590,11 @@ func main() {
 	if gsrv != nil {
 		gsrv.GracefulStop()
 	}
+}
+
+func raftIdentityLeaseRequired(cfg config.Config) bool {
+	if cfg.Cluster.SelfID == "" || cfg.RaftIdentity.LeaseBackend == identitylease.BackendOff {
+		return false
+	}
+	return cfg.Cluster.Shards > 0 || cfg.Raft.Bind != ""
 }

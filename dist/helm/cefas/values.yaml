@@ -11,6 +11,10 @@ image:
 
 replicaCount: 1
 
+serviceAccount:
+  create: true
+  name: ""
+
 resources:
   requests:
     cpu: "200m"
@@ -36,6 +40,16 @@ cluster:
   bootstrap: true
   fsyncOnCommit: false
 
+# Guards each raft-id with a persistent lease so a stale process cannot
+# keep serving after Kubernetes starts a replacement with the same id.
+raftIdentity:
+  lease:
+    enabled: true
+    backend: kubernetes
+    ttl: 30s
+    renewInterval: 10s
+    namePrefix: ""
+
 # Optional identity provider (Tikti JWKS).
 identity:
   jwksUrl: ""
@@ -51,6 +65,16 @@ tracing:
 # Metrics endpoint always exposed unless explicitly disabled.
 metrics:
   enabled: true
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  prefix: /
+  stripPrefix:
+    enabled: false
+  hosts: []
+  tls: []
 
 podAnnotations:
   prometheus.io/scrape: "true"
