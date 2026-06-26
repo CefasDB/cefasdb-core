@@ -5,7 +5,7 @@ BIN_DIR := ./bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: help build server cli install clean fmt lint vet test cover mut sec bench helm-test tools ci
+.PHONY: help build server cli install clean fmt lint vet test cover mut sec bench helm-test k8s-resilience tools ci
 
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -75,5 +75,8 @@ bench: ## Run benchmarks across all packages.
 
 helm-test: ## Render-test Helm resilience profiles.
 	scripts/test_helm_resilience.sh
+
+k8s-resilience: ## Run the Kubernetes resilience suite in dry-run mode by default.
+	scripts/k8s_resilience_suite.sh
 
 ci: vet lint test cover sec ## Full quality gate (mirror of CI workflow).

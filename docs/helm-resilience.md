@@ -96,3 +96,9 @@ Run the chart smoke tests:
 ```sh
 scripts/test_helm_resilience.sh
 ```
+
+Run the Kubernetes resilience acceptance suite in CI-safe dry-run mode:
+
+```sh
+MODE=dry-run scripts/k8s_resilience_suite.sh
+```
