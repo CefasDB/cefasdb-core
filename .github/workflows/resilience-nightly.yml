@@ -1,0 +1,55 @@
+name: resilience-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run or live"
+        required: false
+        default: dry-run
+      namespace:
+        description: "Kubernetes namespace for live mode"
+        required: false
+        default: cefas-resilience
+      release:
+        description: "Helm release name"
+        required: false
+        default: cefas-resilience
+      kube_context:
+        description: "kubectl context for live mode"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resilience-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  k8s-resilience:
+    name: kubernetes resilience suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'dry-run' }}
+      NAMESPACE: ${{ github.event_name == 'workflow_dispatch' && inputs.namespace || 'cefas-resilience' }}
+      RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release || 'cefas-resilience' }}
+      KUBE_CONTEXT: ${{ github.event_name == 'workflow_dispatch' && inputs.kube_context || '' }}
+      ARTIFACT_DIR: ${{ runner.temp }}/cefas-resilience/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Run resilience suite
+        run: scripts/k8s_resilience_suite.sh
+      - name: Upload resilience artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: resilience-suite
+          path: ${{ runner.temp }}/cefas-resilience
+          if-no-files-found: warn
