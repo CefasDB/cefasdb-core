@@ -110,6 +110,11 @@ cluster:
   bootstrap: true
   fsyncOnCommit: false
 
+storage:
+  # Physical CDC retention cleanup. Negative interval disables the cleaner.
+  streamRetentionInterval: 30s
+  streamRetentionCleanupBatchSize: 65536
+
 # Guards each raft-id with a persistent lease so a stale process cannot
 # keep serving after Kubernetes starts a replacement with the same id.
 raftIdentity:

@@ -41,6 +41,8 @@ const (
 	pGlobalIndex  = pInternal + "global-index/"
 	pStreams      = pAdmin + "streams/by-arn/"
 	pStreamTrim   = pAdmin + "streams/retention/"
+	pChangeLog    = pAdmin + "change/log/"
+	pChangeExpire = pAdmin + "change/expire/"
 
 	SegPrimary = "/p/"
 	segGSI     = "/gsi/"
@@ -53,7 +55,7 @@ const (
 var ChangeCounterKey = []byte(pAdmin + "change/counter")
 
 func KeyChangeLog(index uint64) []byte {
-	base := []byte(pAdmin + "change/log/")
+	base := []byte(pChangeLog)
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], index)
 	out := make([]byte, 0, len(base)+len(b))
@@ -63,7 +65,7 @@ func KeyChangeLog(index uint64) []byte {
 }
 
 func PrefixChangeLog() (lower, upper []byte) {
-	p := []byte(pAdmin + "change/log/")
+	p := []byte(pChangeLog)
 	return p, prefixUpper(p)
 }
 
@@ -71,7 +73,7 @@ func PrefixChangeLog() (lower, upper []byte) {
 // a key produced by KeyChangeLog. Returns an error on malformed keys so
 // callers can flag a corrupt iterator entry instead of silently zeroing.
 func ChangeLogIndexFromKey(key []byte) (uint64, error) {
-	prefix := []byte(pAdmin + "change/log/")
+	prefix := []byte(pChangeLog)
 	if len(key) != len(prefix)+8 {
 		return 0, fmt.Errorf("change log key length %d, want %d", len(key), len(prefix)+8)
 	}
@@ -81,6 +83,44 @@ func ChangeLogIndexFromKey(key []byte) (uint64, error) {
 		}
 	}
 	return binary.BigEndian.Uint64(key[len(prefix):]), nil
+}
+
+// KeyChangeLogExpiration builds the time-ordered pointer used by the CDC
+// retention cleaner. The changelog record itself remains addressed by
+// KeyChangeLog(index); this pointer lets the cleaner visit only expired
+// records instead of scanning the full changelog.
+//
+//	cefas/admin/change/expire/<expire_unix_nano_be8>/<index_be8>
+func KeyChangeLogExpiration(expireUnixNano int64, index uint64) []byte {
+	base := []byte(pChangeExpire)
+	var exp, idx [8]byte
+	binary.BigEndian.PutUint64(exp[:], uint64(expireUnixNano))
+	binary.BigEndian.PutUint64(idx[:], index)
+	out := make([]byte, 0, len(base)+len(exp)+len(idx))
+	out = append(out, base...)
+	out = append(out, exp[:]...)
+	out = append(out, idx[:]...)
+	return out
+}
+
+// PrefixChangeLogExpirationBefore returns the range covering expiration
+// pointers with expire_unix_nano < beforeUnixNano.
+func PrefixChangeLogExpirationBefore(beforeUnixNano int64) (lower, upper []byte) {
+	p := []byte(pChangeExpire)
+	lower = p
+	upper = make([]byte, 0, len(p)+8)
+	upper = append(upper, p...)
+	upper = append(upper, be8(uint64(beforeUnixNano))...)
+	return lower, upper
+}
+
+func ParseChangeLogExpirationKey(key []byte) (expireUnixNano int64, index uint64, ok bool) {
+	prefix := []byte(pChangeExpire)
+	if len(key) != len(prefix)+16 || !bytes.HasPrefix(key, prefix) {
+		return 0, 0, false
+	}
+	rest := key[len(prefix):]
+	return int64(binary.BigEndian.Uint64(rest[:8])), binary.BigEndian.Uint64(rest[8:]), true
 }
 
 // KeyStreamDescriptor stores persisted DynamoDB Streams metadata by ARN.

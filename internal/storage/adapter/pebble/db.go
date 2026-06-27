@@ -87,12 +87,13 @@ type Options struct {
 	// Backpressure slows or rejects caller-facing writes when Pebble
 	// LSM pressure crosses configured thresholds.
 	Backpressure BackpressureOptions
-	// StreamRetention bounds the logical DynamoDB Streams retention
-	// window. The physical changelog is preserved for PITR/backup.
+	// StreamRetention bounds the DynamoDB Streams / CDC retention window.
+	// Expired changelog records are physically removed by the bounded cleanup
+	// loop; PITR and FAST materialized views depend on the retained window.
 	StreamRetention StreamRetentionOptions
-	// ChangeLogMode controls physical changelog writes. "always" preserves
-	// PITR/backup records for every write; "streams-only" only writes records
-	// for stream-enabled tables; "off" disables changelog writes.
+	// ChangeLogMode controls physical changelog writes. "always" writes
+	// retention-bound PITR/backup records for every write; "streams-only" only
+	// writes records for stream-enabled tables; "off" disables changelog writes.
 	ChangeLogMode string
 	// Lanes configures the read/write worker lanes above this Pebble handle.
 	Lanes LaneOptions
