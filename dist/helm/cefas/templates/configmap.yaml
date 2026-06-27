@@ -18,6 +18,7 @@ data:
       reflection: true
     storage:
       fsyncOnCommit: {{ .Values.cluster.fsyncOnCommit }}
+      streamRetentionInterval: {{ .Values.storage.streamRetentionInterval | quote }}
     cluster:
       shards: {{ .Values.cluster.shards }}
       replicationFactor: {{ include "cefas.resolvedReplicationFactor" . }}

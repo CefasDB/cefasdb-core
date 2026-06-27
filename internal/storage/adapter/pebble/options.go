@@ -66,8 +66,8 @@ type BackpressureOptions struct {
 }
 
 const (
-	DefaultStreamRetention         = 24 * time.Hour
-	DefaultStreamRetentionInterval = 30 * time.Second
+	DefaultStreamRetention             = 24 * time.Hour
+	DefaultStreamRetentionLoopInterval = -1 * time.Second
 )
 
 // StreamRetentionOptions controls logical DynamoDB Streams retention.
@@ -76,9 +76,10 @@ const (
 // high-water marks but keeps the physical changelog for PITR.
 //
 // Interval controls how often the background loop scans stream-enabled
-// tables and applies retention. Defaults to 30s. Set to a negative
-// duration to disable the loop (callers can still invoke
-// ApplyStreamRetention explicitly). Zero inherits the default.
+// tables and applies retention. The loop is disabled by default because
+// retention is implemented as a full changelog scan per tick. Set a positive
+// interval to opt in. Explicit ApplyStreamRetention calls still work when the
+// loop is disabled.
 type StreamRetentionOptions struct {
 	Retention time.Duration
 	MaxBytes  int64
@@ -93,7 +94,7 @@ func normalizeStreamRetentionOptions(o StreamRetentionOptions) StreamRetentionOp
 		o.MaxBytes = 0
 	}
 	if o.Interval == 0 {
-		o.Interval = DefaultStreamRetentionInterval
+		o.Interval = DefaultStreamRetentionLoopInterval
 	}
 	return o
 }

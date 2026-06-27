@@ -7,10 +7,29 @@ import (
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
-// TestRetentionLoopFiresOnTick exercises the happy path: writes to a
-// stream-enabled table without calling ApplyStreamRetention explicitly,
-// then waits for one tick and asserts persisted state appeared.
-func TestRetentionLoopFiresOnTick(t *testing.T) {
+func TestRetentionLoopDisabledByDefault(t *testing.T) {
+	db := openChangeLogTestDBWithOptions(t, Options{
+		ChangeLogMode: ChangeLogModeStreamsOnly,
+	})
+	if db.retentionStopCh != nil {
+		t.Fatalf("loop should not start without explicit positive interval")
+	}
+	td := streamTestTable()
+	if err := db.PutItemWith(td, types.Item{
+		"id":     streamS("k"),
+		"status": streamS("v"),
+	}, PutOptions{}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if _, ok, _ := db.loadStreamRetentionState(td.Name); ok {
+		t.Fatalf("retention state should not exist without explicit apply")
+	}
+}
+
+// TestRetentionLoopFiresOnExplicitInterval exercises the opt-in path: writes to
+// a stream-enabled table without calling ApplyStreamRetention explicitly, then
+// waits for one tick and asserts persisted state appeared.
+func TestRetentionLoopFiresOnExplicitInterval(t *testing.T) {
 	db := openChangeLogTestDBWithOptions(t, Options{
 		ChangeLogMode: ChangeLogModeStreamsOnly,
 		StreamRetention: StreamRetentionOptions{

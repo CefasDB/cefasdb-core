@@ -33,7 +33,7 @@ func OverlayFlags(
 	backpressureWarnDebt, backpressureCriticalDebt uint64,
 	backpressureWarnReadAmp, backpressureCriticalReadAmp int,
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
-	streamRetention time.Duration, streamRetentionMaxBytes int64,
+	streamRetention, streamRetentionInterval time.Duration, streamRetentionMaxBytes int64,
 	storageChangeLogMode string,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
 	shardsN, replicationFactor int, muxAddr string,
@@ -199,6 +199,9 @@ func OverlayFlags(
 	}
 	if streamRetention > 0 {
 		cfg.Storage.StreamRetention = streamRetention
+	}
+	if streamRetentionInterval != 0 {
+		cfg.Storage.StreamRetentionInterval = streamRetentionInterval
 	}
 	if streamRetentionMaxBytes > 0 {
 		cfg.Storage.StreamRetentionMaxBytes = streamRetentionMaxBytes

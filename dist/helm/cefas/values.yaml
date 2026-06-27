@@ -110,6 +110,11 @@ cluster:
   bootstrap: true
   fsyncOnCommit: false
 
+storage:
+  # Disabled by default. Positive values opt into the background stream
+  # retention scanner.
+  streamRetentionInterval: -1s
+
 # Guards each raft-id with a persistent lease so a stale process cannot
 # keep serving after Kubernetes starts a replacement with the same id.
 raftIdentity:

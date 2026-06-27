@@ -105,6 +105,7 @@ func main() {
 		backpressureWarnDelay    = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
 		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
 		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
+		streamRetentionInterval  = flag.Duration("storage-stream-retention-interval", 0, "Background stream retention scan interval. Positive enables; negative disables. 0 inherits config/default disabled.")
 		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
 		storageChangeLogMode     = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
 		storageAdaptiveMode      = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
@@ -200,7 +201,7 @@ func main() {
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
-		*streamRetention, *streamRetentionMaxBytes, *storageChangeLogMode,
+		*streamRetention, *streamRetentionInterval, *streamRetentionMaxBytes, *storageChangeLogMode,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *replicationFactor, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,

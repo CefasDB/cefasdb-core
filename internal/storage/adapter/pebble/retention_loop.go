@@ -6,8 +6,8 @@ import (
 
 // startRetentionLoop launches the background goroutine that periodically
 // invokes ApplyStreamRetention for every stream-enabled table that has
-// produced at least one change record. It is a no-op when the configured
-// interval is negative.
+// produced at least one change record. It is opt-in: the loop is a no-op unless
+// the configured interval is positive.
 //
 // Tables are discovered lazily via trackStreamTable, called from
 // appendChangeRecord when the record carries StreamRecord == true. The
@@ -20,10 +20,10 @@ import (
 // Hot writes used to call refreshStreamRetentionAfterWrite at the end
 // of every PutItem / DeleteItem / BatchWrite / Atomic / TTL evict path,
 // which scanned the entire changelog prefix and committed an extra
-// batch per write — O(N) on the live changelog per write. The
-// background loop replaces that with an O(stream-tables) sweep every
-// Interval, paid amortized across every write that fired during the
-// window.
+// batch per write — O(N) on the live changelog per write. The background loop
+// is still a full changelog scan per table on each tick, so production
+// deployments must enable it only with an explicit interval and a bounded
+// changelog.
 func (d *DB) startRetentionLoop() {
 	if d == nil {
 		return
