@@ -69,6 +69,7 @@ type Config struct {
 		StreamRetention             time.Duration `yaml:"streamRetention"`
 		StreamRetentionMaxBytes     int64         `yaml:"streamRetentionMaxBytes"`
 		StreamRetentionInterval     time.Duration `yaml:"streamRetentionInterval"`
+		StreamRetentionCleanupBatch int           `yaml:"streamRetentionCleanupBatchSize"`
 		ChangeLogMode               string        `yaml:"changeLogMode"`
 	} `yaml:"storage"`
 	Cluster struct {
@@ -188,7 +189,8 @@ func Defaults() Config {
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Storage.Lanes = "auto"
 	c.Storage.StreamRetention = 24 * time.Hour
-	c.Storage.StreamRetentionInterval = -1 * time.Second
+	c.Storage.StreamRetentionInterval = 30 * time.Second
+	c.Storage.StreamRetentionCleanupBatch = 65536
 	c.Raft.HeartbeatTimeout = 2 * time.Second
 	c.Raft.ElectionTimeout = 10 * time.Second
 	c.Raft.LeaderLeaseTimeout = 2 * time.Second
@@ -334,6 +336,7 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.StreamRetention = dur("STORAGE_STREAM_RETENTION", cfg.Storage.StreamRetention)
 	cfg.Storage.StreamRetentionMaxBytes = integer64("STORAGE_STREAM_RETENTION_MAX_BYTES", cfg.Storage.StreamRetentionMaxBytes)
 	cfg.Storage.StreamRetentionInterval = dur("STORAGE_STREAM_RETENTION_INTERVAL", cfg.Storage.StreamRetentionInterval)
+	cfg.Storage.StreamRetentionCleanupBatch = integer("STORAGE_STREAM_RETENTION_CLEANUP_BATCH_SIZE", cfg.Storage.StreamRetentionCleanupBatch)
 	cfg.Storage.ChangeLogMode = str("STORAGE_CHANGELOG_MODE", cfg.Storage.ChangeLogMode)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)

@@ -138,6 +138,7 @@ func StreamRetentionOptions(cfg config.Config) pebble.StreamRetentionOptions {
 		Retention: cfg.Storage.StreamRetention,
 		MaxBytes:  cfg.Storage.StreamRetentionMaxBytes,
 		Interval:  cfg.Storage.StreamRetentionInterval,
+		BatchSize: cfg.Storage.StreamRetentionCleanupBatch,
 	}
 }
 

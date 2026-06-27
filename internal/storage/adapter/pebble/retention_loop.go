@@ -5,25 +5,12 @@ import (
 )
 
 // startRetentionLoop launches the background goroutine that periodically
-// invokes ApplyStreamRetention for every stream-enabled table that has
-// produced at least one change record. It is opt-in: the loop is a no-op unless
-// the configured interval is positive.
+// removes expired CDC/changelog entries. It is a no-op when the configured
+// interval is negative.
 //
-// Tables are discovered lazily via trackStreamTable, called from
-// appendChangeRecord when the record carries StreamRecord == true. The
-// loop never blocks foreground writes — it acquires only the read side
-// of streamTablesMu to snapshot the table set, then drives
-// ApplyStreamRetention serially on the snapshot. ApplyStreamRetention
-// takes changeMu like any other writer, so its overhead is bounded by
-// the normal write-coalescer.
-//
-// Hot writes used to call refreshStreamRetentionAfterWrite at the end
-// of every PutItem / DeleteItem / BatchWrite / Atomic / TTL evict path,
-// which scanned the entire changelog prefix and committed an extra
-// batch per write — O(N) on the live changelog per write. The background loop
-// is still a full changelog scan per table on each tick, so production
-// deployments must enable it only with an explicit interval and a bounded
-// changelog.
+// The loop is bounded by StreamRetentionOptions.BatchSize. It scans only the
+// time-ordered expiration prefix, so an idle database with no expired CDC
+// records performs a tiny range probe instead of walking the changelog.
 func (d *DB) startRetentionLoop() {
 	if d == nil {
 		return
@@ -59,20 +46,11 @@ func (d *DB) runRetentionLoop(interval time.Duration) {
 	}
 }
 
-// tickRetention snapshots the known stream-enabled tables and applies
-// retention to each. Errors are intentionally swallowed: a transient
-// failure on one table must not block the others, and there is no
-// foreground caller to return the error to. The next tick will retry.
+// tickRetention applies one bounded physical cleanup pass. Errors are
+// intentionally swallowed because there is no foreground caller to return them
+// to; the next tick retries.
 func (d *DB) tickRetention(now time.Time) {
-	d.streamTablesMu.RLock()
-	tables := make([]string, 0, len(d.streamTables))
-	for name := range d.streamTables {
-		tables = append(tables, name)
-	}
-	d.streamTablesMu.RUnlock()
-	for _, name := range tables {
-		_, _ = d.ApplyStreamRetention(name, now)
-	}
+	_, _ = d.applyExpiredChangeLogRetention(now)
 }
 
 func (d *DB) stopRetentionLoop() {

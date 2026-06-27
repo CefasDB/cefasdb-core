@@ -53,8 +53,11 @@ func TestDefaultsPopulated(t *testing.T) {
 	if d.Storage.Lanes != "auto" {
 		t.Errorf("storage lanes default = %q", d.Storage.Lanes)
 	}
-	if d.Storage.StreamRetentionInterval >= 0 {
-		t.Errorf("storage stream retention loop should default disabled, got %v", d.Storage.StreamRetentionInterval)
+	if d.Storage.StreamRetentionInterval != 30*time.Second {
+		t.Errorf("storage stream retention interval default = %v, want 30s", d.Storage.StreamRetentionInterval)
+	}
+	if d.Storage.StreamRetentionCleanupBatch != 65536 {
+		t.Errorf("storage stream retention cleanup batch default = %d, want 65536", d.Storage.StreamRetentionCleanupBatch)
 	}
 }
 
@@ -89,6 +92,7 @@ cluster:
 storage:
   changeLogMode: streams-only
   streamRetentionInterval: 5m
+  streamRetentionCleanupBatchSize: 12345
   lanes: off
   laneReadWorkers: 4
   laneWriteWorkers: 3
@@ -160,6 +164,9 @@ backupScheduler:
 	}
 	if cfg.Storage.StreamRetentionInterval != 5*time.Minute {
 		t.Fatalf("storage stream retention interval config not loaded: %+v", cfg.Storage)
+	}
+	if cfg.Storage.StreamRetentionCleanupBatch != 12345 {
+		t.Fatalf("storage stream retention cleanup batch config not loaded: %+v", cfg.Storage)
 	}
 	if cfg.Storage.Lanes != "off" || cfg.Storage.LaneReadWorkers != 4 || cfg.Storage.LaneWriteWorkers != 3 || cfg.Storage.LaneReadQueue != 128 || cfg.Storage.LaneWriteQueue != 64 {
 		t.Fatalf("storage lanes config not loaded: %+v", cfg.Storage)
@@ -243,6 +250,7 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("CEFAS_BACKUP_SCHEDULER_RETENTION_DRY_RUN", "true")
 	t.Setenv("CEFAS_STORAGE_CHANGELOG_MODE", "off")
 	t.Setenv("CEFAS_STORAGE_STREAM_RETENTION_INTERVAL", "10m")
+	t.Setenv("CEFAS_STORAGE_STREAM_RETENTION_CLEANUP_BATCH_SIZE", "54321")
 	t.Setenv("CEFAS_STORAGE_LANES", "on")
 	t.Setenv("CEFAS_STORAGE_LANE_READ_WORKERS", "5")
 	t.Setenv("CEFAS_STORAGE_LANE_WRITE_WORKERS", "4")
@@ -291,6 +299,9 @@ func TestApplyEnv(t *testing.T) {
 	}
 	if cfg.Storage.StreamRetentionInterval != 10*time.Minute {
 		t.Errorf("storage stream retention interval env not applied: %+v", cfg.Storage)
+	}
+	if cfg.Storage.StreamRetentionCleanupBatch != 54321 {
+		t.Errorf("storage stream retention cleanup batch env not applied: %+v", cfg.Storage)
 	}
 	if cfg.Storage.Lanes != "on" || cfg.Storage.LaneReadWorkers != 5 || cfg.Storage.LaneWriteWorkers != 4 || cfg.Storage.LaneReadQueue != 256 || cfg.Storage.LaneWriteQueue != 128 {
 		t.Errorf("storage lanes env not applied: %+v", cfg.Storage)

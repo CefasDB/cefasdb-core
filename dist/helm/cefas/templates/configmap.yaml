@@ -19,6 +19,7 @@ data:
     storage:
       fsyncOnCommit: {{ .Values.cluster.fsyncOnCommit }}
       streamRetentionInterval: {{ .Values.storage.streamRetentionInterval | quote }}
+      streamRetentionCleanupBatchSize: {{ .Values.storage.streamRetentionCleanupBatchSize }}
     cluster:
       shards: {{ .Values.cluster.shards }}
       replicationFactor: {{ include "cefas.resolvedReplicationFactor" . }}

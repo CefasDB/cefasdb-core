@@ -94,21 +94,22 @@ func main() {
 		storageLaneWriteQueue     = flag.Int("storage-lane-write-queue", 0, "Write lane queue capacity. 0 inherits default.")
 
 		// Adaptive write backpressure.
-		backpressureEnabled      = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
-		backpressureReject       = flag.Bool("storage-backpressure-reject-critical", false, "Reject writes instead of only sleeping when pressure is critical.")
-		backpressureWarnL0       = flag.Int64("storage-backpressure-warning-l0-files", 0, "Warning L0 file threshold. 0 uses default.")
-		backpressureCriticalL0   = flag.Int64("storage-backpressure-critical-l0-files", 0, "Critical L0 file threshold. 0 uses default.")
-		backpressureWarnDebt     = flag.Uint64("storage-backpressure-warning-debt", 0, "Warning compaction debt threshold in bytes. 0 uses default.")
-		backpressureCriticalDebt = flag.Uint64("storage-backpressure-critical-debt", 0, "Critical compaction debt threshold in bytes. 0 uses default.")
-		backpressureWarnReadAmp  = flag.Int("storage-backpressure-warning-read-amp", 0, "Warning Pebble read amplification threshold. 0 uses default.")
-		backpressureCritReadAmp  = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
-		backpressureWarnDelay    = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
-		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
-		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
-		streamRetentionInterval  = flag.Duration("storage-stream-retention-interval", 0, "Background stream retention scan interval. Positive enables; negative disables. 0 inherits config/default disabled.")
-		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
-		storageChangeLogMode     = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
-		storageAdaptiveMode      = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
+		backpressureEnabled         = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
+		backpressureReject          = flag.Bool("storage-backpressure-reject-critical", false, "Reject writes instead of only sleeping when pressure is critical.")
+		backpressureWarnL0          = flag.Int64("storage-backpressure-warning-l0-files", 0, "Warning L0 file threshold. 0 uses default.")
+		backpressureCriticalL0      = flag.Int64("storage-backpressure-critical-l0-files", 0, "Critical L0 file threshold. 0 uses default.")
+		backpressureWarnDebt        = flag.Uint64("storage-backpressure-warning-debt", 0, "Warning compaction debt threshold in bytes. 0 uses default.")
+		backpressureCriticalDebt    = flag.Uint64("storage-backpressure-critical-debt", 0, "Critical compaction debt threshold in bytes. 0 uses default.")
+		backpressureWarnReadAmp     = flag.Int("storage-backpressure-warning-read-amp", 0, "Warning Pebble read amplification threshold. 0 uses default.")
+		backpressureCritReadAmp     = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
+		backpressureWarnDelay       = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
+		backpressureCritDelay       = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
+		streamRetention             = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
+		streamRetentionInterval     = flag.Duration("storage-stream-retention-interval", 0, "Background CDC retention cleanup interval. Positive enables; negative disables. 0 inherits config/default.")
+		streamRetentionMaxBytes     = flag.Int64("storage-stream-retention-max-bytes", 0, "Deprecated compatibility knob; physical CDC retention is time-window based.")
+		streamRetentionCleanupBatch = flag.Int("storage-stream-retention-cleanup-batch-size", 0, "Maximum expired CDC records removed per cleanup tick. 0 inherits config/default.")
+		storageChangeLogMode        = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
+		storageAdaptiveMode         = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -201,7 +202,7 @@ func main() {
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
-		*streamRetention, *streamRetentionInterval, *streamRetentionMaxBytes, *storageChangeLogMode,
+		*streamRetention, *streamRetentionInterval, *streamRetentionMaxBytes, *streamRetentionCleanupBatch, *storageChangeLogMode,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *replicationFactor, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
@@ -369,7 +370,7 @@ func main() {
 	// for any stream-enabled table that declares
 	// StreamSpecification.RetentionSeconds. Zero means "inherit
 	// cluster default".
-	db.AttachStreamRetentionResolver(func(table string) int64 {
+	streamRetentionResolver := func(table string) int64 {
 		if cat == nil {
 			return 0
 		}
@@ -378,7 +379,15 @@ func main() {
 			return 0
 		}
 		return td.StreamSpecification.RetentionSeconds
-	})
+	}
+	db.AttachStreamRetentionResolver(streamRetentionResolver)
+	if mgr != nil {
+		for _, sh := range mgr.Shards() {
+			if sh != nil && sh.Storage != nil {
+				sh.Storage.AttachStreamRetentionResolver(streamRetentionResolver)
+			}
+		}
+	}
 
 	var raftStore *pebble.DB
 	if mgr == nil && cfg.Raft.Bind != "" {
