@@ -64,6 +64,9 @@ jobs:
                 -ldflags "-s -w -X github.com/CefasDb/cefasdb/cmd/cefasctl/cmd.Version=${VERSION}" \
                 -o "dist/${BIN_NAME}-${GOOS}-${GOARCH}${ext}" \
                 ./cmd/cefasctl
+              if [ "$GOOS" = "windows" ]; then
+                continue
+              fi
               echo "Building cefasdb $GOOS/$GOARCH"
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath \
