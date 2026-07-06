@@ -1,49 +1,450 @@
 {
   "title": "cefas overview",
+  "uid": "744273da-82e0-4fa2-ab5a-d664cfea8758",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 4,
+  "refresh": "5s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
+      "id": 1,
       "type": "stat",
-      "title": "Ops / sec",
+      "title": "Write Ops / sec",
       "targets": [
-        {"expr": "sum(rate(cefas_op_total[1m]))", "refId": "A"}
+        {
+          "expr": "sum(rate(cefas_range_ops_total{op=\"write\"}[$__rate_interval]))",
+          "legendFormat": "writes",
+          "refId": "A"
+        }
       ],
-      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "max"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 0,
+        "y": 0
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Latency p50/p95/p99 (s)",
+      "id": 2,
+      "type": "stat",
+      "title": "Storage Bytes",
       "targets": [
-        {"expr": "histogram_quantile(0.5, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p50", "legendFormat": "p50"},
-        {"expr": "histogram_quantile(0.95, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p95", "legendFormat": "p95"},
-        {"expr": "histogram_quantile(0.99, sum(rate(cefas_op_duration_seconds_bucket[1m])) by (le))", "refId": "p99", "legendFormat": "p99"}
+        {
+          "expr": "sum(cefas_pebble_level_bytes)",
+          "refId": "A"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 3,
+        "y": 0
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Errors / sec by outcome",
+      "id": 3,
+      "type": "stat",
+      "title": "WAL Bytes",
       "targets": [
-        {"expr": "sum by (outcome) (rate(cefas_op_total{outcome!=\"ok\"}[1m]))", "refId": "A", "legendFormat": "{{outcome}}"}
+        {
+          "expr": "sum(cefas_pebble_wal_bytes)",
+          "refId": "A"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 6,
+        "y": 0
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Raft leader by shard",
+      "id": 4,
+      "type": "stat",
+      "title": "Memtable Bytes",
       "targets": [
-        {"expr": "cefas_raft_is_leader", "refId": "A", "legendFormat": "shard {{shard}}"}
+        {
+          "expr": "sum(cefas_pebble_memtable_bytes)",
+          "refId": "A"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      }
     },
     {
-      "type": "timeseries",
-      "title": "Auth rejections / sec",
+      "id": 5,
+      "type": "stat",
+      "title": "Backpressure State",
       "targets": [
-        {"expr": "sum by (reason) (rate(cefas_auth_rejected_total[1m]))", "refId": "A", "legendFormat": "{{reason}}"}
+        {
+          "expr": "max(cefas_backpressure_state)",
+          "refId": "A"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Stream Records",
+      "targets": [
+        {
+          "expr": "sum(cefas_stream_records_appended)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Nodes Up",
+      "targets": [
+        {
+          "expr": "sum(up{job=\"cefas\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Pebble Level Bytes",
+      "targets": [
+        {
+          "expr": "sum by (level) (cefas_pebble_level_bytes)",
+          "refId": "A",
+          "legendFormat": "L{{level}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Pebble Level Files",
+      "targets": [
+        {
+          "expr": "sum by (level) (cefas_pebble_level_files)",
+          "refId": "A",
+          "legendFormat": "L{{level}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Compaction Debt / WAL / Memtable",
+      "targets": [
+        {
+          "expr": "sum(cefas_pebble_compaction_debt_bytes)",
+          "refId": "debt",
+          "legendFormat": "compaction debt"
+        },
+        {
+          "expr": "sum(cefas_pebble_wal_bytes)",
+          "refId": "wal",
+          "legendFormat": "wal"
+        },
+        {
+          "expr": "sum(cefas_pebble_memtable_bytes)",
+          "refId": "memtable",
+          "legendFormat": "memtable"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Flush / Compaction Counts",
+      "targets": [
+        {
+          "expr": "sum(cefas_pebble_flush_count)",
+          "refId": "flush",
+          "legendFormat": "flush"
+        },
+        {
+          "expr": "sum(cefas_pebble_compaction_count)",
+          "refId": "compaction",
+          "legendFormat": "compaction"
+        },
+        {
+          "expr": "sum(cefas_pebble_compactions_in_progress)",
+          "refId": "active",
+          "legendFormat": "active compactions"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Stream Records Appended",
+      "targets": [
+        {
+          "expr": "sum by (table) (cefas_stream_records_appended)",
+          "refId": "A",
+          "legendFormat": "{{table}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Stream Retained Bytes",
+      "targets": [
+        {
+          "expr": "sum by (table) (cefas_stream_retained_bytes)",
+          "refId": "A",
+          "legendFormat": "{{table}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(cefas_op_duration_seconds_bucket[5m])) by (le))",
+          "refId": "p50",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(cefas_op_duration_seconds_bucket[5m])) by (le))",
+          "refId": "p95",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(cefas_op_duration_seconds_bucket[5m])) by (le))",
+          "refId": "p99",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Process Memory",
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"cefas\"}",
+          "refId": "rss",
+          "legendFormat": "rss"
+        },
+        {
+          "expr": "go_memstats_heap_alloc_bytes{job=\"cefas\"}",
+          "refId": "heap",
+          "legendFormat": "go heap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      }
     }
   ]
 }

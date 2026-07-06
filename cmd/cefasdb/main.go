@@ -269,6 +269,7 @@ func main() {
 			LogCompressionMinBytes:        cfg.Raft.LogCompressionMinBytes,
 			LogCompressionMinSavingsRatio: cfg.Raft.LogCompressionMinSavingsRatio,
 			LogCompressionSkipCooldown:    cfg.Raft.LogCompressionSkipCooldown,
+			LogOutput:                     os.Stderr,
 		})
 		if err != nil {
 			logger.Error("open cluster manager", "err", err)
@@ -454,6 +455,8 @@ func main() {
 		mode := "single-node"
 		if raftDB != nil {
 			mode = "raft"
+		} else if mgr != nil {
+			mode = "multi-raft"
 		}
 		logger.Info("cefasdb listening", "addr", cfg.HTTP.Addr, "data", cfg.Data, "mode", mode)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

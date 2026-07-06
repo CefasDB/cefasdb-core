@@ -1,0 +1,61 @@
+# Temporary profile for local bulk ingestion on a Mac M4 with 128 GB RAM.
+#
+# Use this only while loading large datasets. The default single-client profile
+# remains deploy/cefasdb.single-client.yml.
+
+data: /var/lib/cefas
+
+http:
+  addr: ":8080"
+
+grpc:
+  addr: ":9090"
+  reflection: true
+
+storage:
+  fsyncOnCommit: true
+
+  profile: balanced
+  blockCacheSizeBytes: 2147483648
+  memTableSizeBytes: 268435456
+  memTableStopWritesThreshold: 8
+  maxConcurrentCompactions: 8
+  l0CompactionConcurrency: 8
+  bytesPerSync: 1048576
+  walBytesPerSync: 1048576
+
+  lanes: off
+
+  backpressureEnabled: true
+  backpressureRejectCritical: false
+  backpressureWarningL0Files: 512
+  backpressureCriticalL0Files: 1024
+  backpressureWarningDebtBytes: 4294967296
+  backpressureCriticalDebtBytes: 17179869184
+  backpressureWarningReadAmp: 64
+  backpressureCriticalReadAmp: 128
+  backpressureWarningDelay: 5ms
+  backpressureCriticalDelay: 100ms
+
+  changeLogMode: streams-only
+  streamRetention: 24h
+  streamRetentionMaxBytes: 4294967296
+
+metrics:
+  enabled: true
+  hotspotBuckets: 32
+  hotspotWindow: 1m
+  hotspotCoolingWindow: 1m
+  hotspotMaxSummaries: 4
+  hotspotReadThreshold: 5000
+  hotspotWriteThreshold: 1000
+  hotspotBytesThreshold: 67108864
+  hotspotLatencyThreshold: 50ms
+  hotspotCompactionDebtThresholdBytes: 4294967296
+  hotspotThrottleStateThreshold: 1
+
+rebalancer:
+  enabled: false
+
+backupScheduler:
+  enabled: false

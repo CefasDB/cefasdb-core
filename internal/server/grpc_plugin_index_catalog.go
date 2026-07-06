@@ -3,19 +3,27 @@ package server
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/CefasDb/cefasdb/internal/core/index"
 )
 
+const pluginIndexDescriptorRefreshInterval = time.Second
+
 func cachePluginIndexDescriptor(desc index.Descriptor) {
 	pluginIndexBook.mu.Lock()
+	if pluginIndexBook.tableRefreshedAt == nil {
+		pluginIndexBook.tableRefreshedAt = map[string]time.Time{}
+	}
 	pluginIndexBook.entries[indexKey(desc.Table, desc.Name)] = desc
+	pluginIndexBook.tableRefreshedAt[desc.Table] = time.Now()
 	pluginIndexBook.mu.Unlock()
 }
 
 func removeCachedPluginIndexDescriptor(table, name string) {
 	pluginIndexBook.mu.Lock()
 	delete(pluginIndexBook.entries, indexKey(table, name))
+	delete(pluginIndexBook.tableRefreshedAt, table)
 	pluginIndexBook.mu.Unlock()
 }
 
@@ -26,6 +34,7 @@ func removeCachedPluginIndexDescriptorsForTable(table string) {
 			delete(pluginIndexBook.entries, key)
 		}
 	}
+	delete(pluginIndexBook.tableRefreshedAt, table)
 	pluginIndexBook.mu.Unlock()
 }
 
@@ -45,15 +54,41 @@ func (s *GRPCServer) lookupPluginIndexDescriptor(table, name string) (index.Desc
 // to table. Hot path: called from the mutation hook on every Put /
 // BatchWrite. The pre-#487 version did a pebble Iter + JSON decode
 // per call, which taxed write_only by ~11% on bench. Today it
-// reads from the in-memory pluginIndexBook only; hydration happens
-// at startup (hydratePluginIndexCatalog) and on Create /
-// Drop / DeleteForTable, all of which keep the cache authoritative.
+// reads from the in-memory pluginIndexBook first; if the table is
+// missing from this process's cache, it refreshes from durable
+// descriptors at most once per second. This keeps peers that did not
+// receive the CreateIndex RPC from missing plugin maintenance forever.
 //
 // When the catalog has no descriptors for the table — the common
 // case for tables without an attached plugin index — this short-
 // circuits to a single map traversal with zero allocations on the
 // happy path.
 func (s *GRPCServer) pluginIndexDescriptorsForTable(table string) ([]index.Descriptor, error) {
+	if out := cachedPluginIndexDescriptorsForTable(table); len(out) > 0 {
+		return out, nil
+	}
+
+	if !shouldRefreshPluginIndexDescriptors(table, time.Now()) {
+		return nil, nil
+	}
+	descs, err := s.db.ListPluginIndexDescriptors()
+	if err != nil {
+		return nil, err
+	}
+	pluginIndexBook.mu.Lock()
+	if pluginIndexBook.tableRefreshedAt == nil {
+		pluginIndexBook.tableRefreshedAt = map[string]time.Time{}
+	}
+	for _, desc := range descs {
+		pluginIndexBook.entries[indexKey(desc.Table, desc.Name)] = desc
+	}
+	pluginIndexBook.tableRefreshedAt[table] = time.Now()
+	pluginIndexBook.mu.Unlock()
+
+	return cachedPluginIndexDescriptorsForTable(table), nil
+}
+
+func cachedPluginIndexDescriptorsForTable(table string) []index.Descriptor {
 	pluginIndexBook.mu.RLock()
 	out := make([]index.Descriptor, 0, 4)
 	for _, desc := range pluginIndexBook.entries {
@@ -63,7 +98,7 @@ func (s *GRPCServer) pluginIndexDescriptorsForTable(table string) ([]index.Descr
 	}
 	pluginIndexBook.mu.RUnlock()
 	if len(out) == 0 {
-		return nil, nil
+		return nil
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !strings.EqualFold(out[i].PluginName, out[j].PluginName) {
@@ -71,7 +106,14 @@ func (s *GRPCServer) pluginIndexDescriptorsForTable(table string) ([]index.Descr
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out
+}
+
+func shouldRefreshPluginIndexDescriptors(table string, now time.Time) bool {
+	pluginIndexBook.mu.RLock()
+	defer pluginIndexBook.mu.RUnlock()
+	last := pluginIndexBook.tableRefreshedAt[table]
+	return last.IsZero() || now.Sub(last) >= pluginIndexDescriptorRefreshInterval
 }
 
 func (s *GRPCServer) hydratePluginIndexCatalog() error {

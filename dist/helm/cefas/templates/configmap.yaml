@@ -14,10 +14,142 @@ data:
       reflection: true
     storage:
       fsyncOnCommit: {{ .Values.cluster.fsyncOnCommit }}
+      {{- with .Values.storage.profile }}
+      profile: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.storage.raftProfile }}
+      raftProfile: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.storage.blockCacheSizeBytes }}
+      blockCacheSizeBytes: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.memTableSizeBytes }}
+      memTableSizeBytes: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.memTableStopWritesThreshold }}
+      memTableStopWritesThreshold: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.maxConcurrentCompactions }}
+      maxConcurrentCompactions: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.l0CompactionConcurrency }}
+      l0CompactionConcurrency: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.l0CompactionThreshold }}
+      l0CompactionThreshold: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.l0CompactionFileThreshold }}
+      l0CompactionFileThreshold: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.l0StopWritesThreshold }}
+      l0StopWritesThreshold: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.bytesPerSync }}
+      bytesPerSync: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.walBytesPerSync }}
+      walBytesPerSync: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.lanes }}
+      lanes: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.storage.laneReadWorkers }}
+      laneReadWorkers: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.laneWriteWorkers }}
+      laneWriteWorkers: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.laneReadQueue }}
+      laneReadQueue: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.laneWriteQueue }}
+      laneWriteQueue: {{ . }}
+      {{- end }}
+      {{- if .Values.storage.backpressure.enabled }}
+      backpressureEnabled: true
+      {{- end }}
+      {{- if .Values.storage.backpressure.rejectCritical }}
+      backpressureRejectCritical: true
+      {{- end }}
+      {{- with .Values.storage.backpressure.warningL0Files }}
+      backpressureWarningL0Files: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.criticalL0Files }}
+      backpressureCriticalL0Files: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.warningDebtBytes }}
+      backpressureWarningDebtBytes: {{ . | int64 }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.criticalDebtBytes }}
+      backpressureCriticalDebtBytes: {{ . | int64 }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.warningReadAmp }}
+      backpressureWarningReadAmp: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.criticalReadAmp }}
+      backpressureCriticalReadAmp: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.warningDelay }}
+      backpressureWarningDelay: {{ . }}
+      {{- end }}
+      {{- with .Values.storage.backpressure.criticalDelay }}
+      backpressureCriticalDelay: {{ . }}
+      {{- end }}
     cluster:
       shards: {{ .Values.cluster.shards }}
+      replicationFactor: {{ .Values.cluster.replicationFactor }}
       muxAddr: ":{{ .Values.service.mux }}"
       bootstrap: {{ .Values.cluster.bootstrap }}
+      {{- if .Values.cluster.peers }}
+      peers:
+        {{- toYaml .Values.cluster.peers | nindent 8 }}
+      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      peers:
+        {{- $fullname := include "cefas.fullname" . -}}
+        {{- $headless := include "cefas.headless" . -}}
+        {{- $namespace := .Release.Namespace -}}
+        {{- $muxPort := .Values.service.mux -}}
+        {{- range $i := until (int .Values.replicaCount) }}
+        {{ printf "%s-%d" $fullname $i }}: {{ printf "%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $muxPort | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.cluster.httpPeers }}
+      httpPeers:
+        {{- toYaml .Values.cluster.httpPeers | nindent 8 }}
+      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      httpPeers:
+        {{- $fullname := include "cefas.fullname" . -}}
+        {{- $headless := include "cefas.headless" . -}}
+        {{- $namespace := .Release.Namespace -}}
+        {{- $httpPort := .Values.service.http -}}
+        {{- range $i := until (int .Values.replicaCount) }}
+        {{ printf "%s-%d" $fullname $i }}: {{ printf "http://%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $httpPort | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.cluster.grpcPeers }}
+      grpcPeers:
+        {{- toYaml .Values.cluster.grpcPeers | nindent 8 }}
+      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      grpcPeers:
+        {{- $fullname := include "cefas.fullname" . -}}
+        {{- $headless := include "cefas.headless" . -}}
+        {{- $namespace := .Release.Namespace -}}
+        {{- $grpcPort := .Values.service.grpc -}}
+        {{- range $i := until (int .Values.replicaCount) }}
+        {{ printf "%s-%d" $fullname $i }}: {{ printf "%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $grpcPort | quote }}
+        {{- end }}
+      {{- end }}
+    raft:
+      heartbeatTimeout: {{ .Values.raft.heartbeatTimeout }}
+      electionTimeout: {{ .Values.raft.electionTimeout }}
+      leaderLeaseTimeout: {{ .Values.raft.leaderLeaseTimeout }}
+      commitTimeout: {{ .Values.raft.commitTimeout }}
+      applyTimeout: {{ .Values.raft.applyTimeout }}
+      snapshotEntries: {{ .Values.raft.snapshotEntries }}
+      logCompression: {{ .Values.raft.logCompression | quote }}
+      logCompressionMinBytes: {{ .Values.raft.logCompressionMinBytes }}
+      logCompressionMinSavingsRatio: {{ .Values.raft.logCompressionMinSavingsRatio }}
+      logCompressionSkipCooldown: {{ .Values.raft.logCompressionSkipCooldown }}
     metrics:
       enabled: {{ .Values.metrics.enabled }}
     identity:

@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: cefas
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - cefas-node-1:8080
+        labels:
+          cluster: rf3
+          node: n1
+      - targets:
+          - cefas-node-2:8080
+        labels:
+          cluster: rf3
+          node: n2
+      - targets:
+          - cefas-node-3:8080
+        labels:
+          cluster: rf3
+          node: n3

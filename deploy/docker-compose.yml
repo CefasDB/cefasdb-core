@@ -1,30 +1,54 @@
-# Single-node demo stack: one cefasdb + Prometheus + Grafana.
-# `docker compose -f deploy/docker-compose.yml up --build` brings the
-# whole thing up. cefas exposes:
-#   - HTTP / SQL on :8080
-#   - gRPC on :9090
-#   - /metrics on :8080
-# Grafana on :3000 (admin/admin), pre-provisioned with a Prometheus
-# datasource and the cefas dashboard.
+# Single-client CefasDB stack for a local client-server app:
+# Electron -> Node API -> CefasDB.
+#
+# Start only the database:
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Build the local source image instead of using the published tag:
+#   docker compose -f deploy/docker-compose.yml up --build -d
+#
+# CefasDB is available from the host at:
+#   - HTTP / SQL: http://127.0.0.1:${CEFASDB_HTTP_PORT:-8080}
+#   - gRPC:      127.0.0.1:${CEFASDB_GRPC_PORT:-9090}
+#
+# A Node service in the same compose project should use:
+#   cefasdb:9090
+#
+# Observability is optional:
+#   docker compose -f deploy/docker-compose.yml --profile observability up -d
 
 services:
-  cefas:
+  cefasdb:
+    image: ghcr.io/cefasdb/cefasdb:${CEFAS_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    ports:
-      - "8080:8080"
-      - "9090:9090"
-    volumes:
-      - cefas-data:/var/lib/cefas
+      args:
+        VERSION: ${CEFAS_IMAGE_TAG:-dev}
     command:
-      - "-data"
-      - "/var/lib/cefas"
-      - "-http"
-      - ":8080"
-      - "-grpc"
-      - ":9090"
-      - "-grpc-reflection"
+      - "-config"
+      - "/etc/cefasdb/cefasdb.yml"
+    environment:
+      GOMAXPROCS: ${CEFASDB_GOMAXPROCS:-4}
+      GOMEMLIMIT: ${CEFASDB_GOMEMLIMIT:-3GiB}
+    ports:
+      - "127.0.0.1:${CEFASDB_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${CEFASDB_GRPC_PORT:-9090}:9090"
+    volumes:
+      - cefasdb-data:/var/lib/cefas
+      - ${CEFASDB_CONFIG_FILE:-./cefasdb.single-client.yml}:/etc/cefasdb/cefasdb.yml:ro
+    networks:
+      cefasdb-local:
+        aliases:
+          - cefas
+    cpus: ${CEFASDB_CPUS:-4.0}
+    mem_limit: ${CEFASDB_MEMORY_LIMIT:-4g}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       test: ["CMD", "/usr/local/bin/cefasdb", "-help"]
       interval: 30s
@@ -33,17 +57,23 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    profiles:
+      - observability
     ports:
-      - "9091:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
-      - cefas
+      - cefasdb
+    networks:
+      - cefasdb-local
 
   grafana:
     image: grafana/grafana:latest
+    profiles:
+      - observability
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -54,6 +84,11 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+    networks:
+      - cefasdb-local
+
+networks:
+  cefasdb-local:
 
 volumes:
-  cefas-data:
+  cefasdb-data:

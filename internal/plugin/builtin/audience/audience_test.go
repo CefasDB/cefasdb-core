@@ -8,10 +8,10 @@ import (
 
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/audience"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/geohash"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/hll"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 func storeItem(pk string, lat, lon float64) model.Item {
@@ -65,6 +65,31 @@ func TestSelectAppliesHaversinePostFilter(t *testing.T) {
 	}
 	if got["far"] {
 		t.Errorf("far store (Santos) leaked through the haversine post-filter")
+	}
+}
+
+func TestSelectHonorsLimit(t *testing.T) {
+	a, geo, d := newBound(t)
+	_ = geo.Build(d, func(yield func(model.Item) bool) {
+		for i := 0; i < 10; i++ {
+			_ = yield(storeItem("near"+strconv.Itoa(i), -23.5505+float64(i)*1e-5, -46.6333))
+		}
+	})
+	cs, err := a.Select(plugin.AudienceRequest{Lat: -23.5505, Lon: -46.6333, Radius: 5000, Limit: 3})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	defer cs.Close()
+	var got int
+	for {
+		_, ok := cs.Next()
+		if !ok {
+			break
+		}
+		got++
+	}
+	if got != 3 {
+		t.Fatalf("selected %d candidates, want 3", got)
 	}
 }
 

@@ -9,7 +9,11 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 replicaCount: 1
+
+extraArgs: []
 
 resources:
   requests:
@@ -23,6 +27,12 @@ persistence:
   enabled: true
   size: 20Gi
   storageClass: ""
+  emptyDir:
+    sizeLimit: ""
+
+serviceAccount:
+  create: false
+  name: ""
 
 service:
   type: ClusterIP
@@ -33,8 +43,55 @@ service:
 # Multi-Raft sharding. shards>1 turns on the mux transport.
 cluster:
   shards: 1
+  replicationFactor: 0
   bootstrap: true
   fsyncOnCommit: false
+  generatePeers: true
+  peers: {}
+  httpPeers: {}
+  grpcPeers: {}
+
+storage:
+  profile: ""
+  raftProfile: ""
+  blockCacheSizeBytes: 0
+  memTableSizeBytes: 0
+  memTableStopWritesThreshold: 0
+  maxConcurrentCompactions: 0
+  l0CompactionConcurrency: 0
+  l0CompactionThreshold: 0
+  l0CompactionFileThreshold: 0
+  l0StopWritesThreshold: 0
+  bytesPerSync: 0
+  walBytesPerSync: 0
+  lanes: ""
+  laneReadWorkers: 0
+  laneWriteWorkers: 0
+  laneReadQueue: 0
+  laneWriteQueue: 0
+  backpressure:
+    enabled: false
+    rejectCritical: false
+    warningL0Files: 0
+    criticalL0Files: 0
+    warningDebtBytes: 0
+    criticalDebtBytes: 0
+    warningReadAmp: 0
+    criticalReadAmp: 0
+    warningDelay: ""
+    criticalDelay: ""
+
+raft:
+  heartbeatTimeout: 2s
+  electionTimeout: 10s
+  leaderLeaseTimeout: 2s
+  commitTimeout: 100ms
+  applyTimeout: 30s
+  snapshotEntries: 65536
+  logCompression: snappy
+  logCompressionMinBytes: 1024
+  logCompressionMinSavingsRatio: 0.05
+  logCompressionSkipCooldown: 1s
 
 # Optional identity provider (Tikti JWKS).
 identity:
@@ -52,6 +109,16 @@ tracing:
 metrics:
   enabled: true
 
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  prefix: /
+  stripPrefix:
+    enabled: false
+  hosts: []
+  tls: []
+
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8080"
@@ -60,6 +127,20 @@ podAnnotations:
 securityContext:
   runAsNonRoot: true
   runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
 
 # Probes target the cheap /v1/Health endpoint.
 livenessProbe:

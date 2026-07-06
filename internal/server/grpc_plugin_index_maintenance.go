@@ -241,6 +241,9 @@ func (s *GRPCServer) applyPluginIndexPlan(plan pluginIndexWritePlan) error {
 }
 
 func (s *GRPCServer) applyPluginIndexDescriptorDeltas(desc index.Descriptor, idx plugin.IndexPlugin, deltas []pluginIndexDelta) error {
+	if err := s.ensurePluginIndexLocalState(desc); err != nil {
+		return status.Errorf(codes.Internal, "plugin index %s/%s local state: %v", desc.Table, desc.Name, err)
+	}
 	for _, delta := range deltas {
 		if delta.newItem == nil {
 			key := delta.oldItem

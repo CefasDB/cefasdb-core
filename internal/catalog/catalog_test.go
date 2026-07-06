@@ -1,11 +1,13 @@
 package catalog_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/storage"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -75,12 +77,59 @@ func TestUpdateTableClearsTTL(t *testing.T) {
 	}
 }
 
+func TestListRefreshesDescriptorsAppliedOutsideCatalogCache(t *testing.T) {
+	c, db := openCatWithDB(t)
+	if err := c.Create(types.TableDescriptor{
+		Name:      "ConsumerGeoEvents",
+		KeySchema: types.KeySchema{PK: "id"},
+	}); err != nil {
+		t.Fatalf("create cached table: %v", err)
+	}
+
+	outOfBand := types.TableDescriptor{
+		Name:      "Consumers",
+		KeySchema: types.KeySchema{PK: "id"},
+	}
+	raw, err := json.Marshal(outOfBand)
+	if err != nil {
+		t.Fatalf("marshal out-of-band descriptor: %v", err)
+	}
+	if err := db.Set(storage.KeyCatalog(outOfBand.Name), raw); err != nil {
+		t.Fatalf("persist out-of-band descriptor: %v", err)
+	}
+
+	got := tableNames(c.List())
+	if !sameStrings(got, []string{"ConsumerGeoEvents", "Consumers"}) {
+		t.Fatalf("List() = %v, want both persisted tables", got)
+	}
+}
+
 func TestUpdateTableUnknownTable(t *testing.T) {
 	c := openCat(t)
 	err := c.UpdateTable(types.TableDescriptor{Name: "ghost", KeySchema: types.KeySchema{PK: "pk"}})
 	if !errors.Is(err, types.ErrTableNotFound) {
 		t.Fatalf("want ErrTableNotFound, got %v", err)
 	}
+}
+
+func tableNames(tds []types.TableDescriptor) []string {
+	names := make([]string, 0, len(tds))
+	for _, td := range tds {
+		names = append(names, td.Name)
+	}
+	return names
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCreateTableValidatesCounterColumns(t *testing.T) {

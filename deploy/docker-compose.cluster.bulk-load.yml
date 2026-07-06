@@ -1,0 +1,32 @@
+# Compose override for RF=3 bulk ingestion.
+#
+# Usage:
+#   docker compose -p cefas-rf3 \
+#     -f deploy/docker-compose.cluster.yml \
+#     -f deploy/docker-compose.cluster.bulk-load.yml \
+#     --profile observability up -d
+
+services:
+  cefas-node-1:
+    mem_limit: ${CEFAS_RF3_BULK_NODE_MEMORY_LIMIT:-12g}
+    environment:
+      GOMEMLIMIT: ${CEFAS_RF3_BULK_GOMEMLIMIT:-9GiB}
+    volumes:
+      - cefas-node-1-data:/var/lib/cefas
+      - ./cefasdb.rf3.bulk-load.yml:/etc/cefasdb/cefasdb.yml:ro
+
+  cefas-node-2:
+    mem_limit: ${CEFAS_RF3_BULK_NODE_MEMORY_LIMIT:-12g}
+    environment:
+      GOMEMLIMIT: ${CEFAS_RF3_BULK_GOMEMLIMIT:-9GiB}
+    volumes:
+      - cefas-node-2-data:/var/lib/cefas
+      - ./cefasdb.rf3.bulk-load.yml:/etc/cefasdb/cefasdb.yml:ro
+
+  cefas-node-3:
+    mem_limit: ${CEFAS_RF3_BULK_NODE_MEMORY_LIMIT:-12g}
+    environment:
+      GOMEMLIMIT: ${CEFAS_RF3_BULK_GOMEMLIMIT:-9GiB}
+    volumes:
+      - cefas-node-3-data:/var/lib/cefas
+      - ./cefasdb.rf3.bulk-load.yml:/etc/cefasdb/cefasdb.yml:ro

@@ -1,0 +1,72 @@
+# Honest local profile for a single-client app on a Mac M4 with 128 GB RAM.
+#
+# This is intentionally not a clustered or benchmark profile. It keeps CefasDB
+# small enough to coexist with Electron, a Node API, Docker Desktop, and local
+# developer tools while still giving Pebble enough cache for low/moderate use.
+
+data: /var/lib/cefas
+
+http:
+  addr: ":8080"
+
+grpc:
+  addr: ":9090"
+  reflection: true
+
+storage:
+  # Single-client durability matters more than peak write throughput.
+  fsyncOnCommit: true
+
+  # Balanced maps to 512 MiB block cache, 64 MiB memtables, and moderate
+  # compaction concurrency. The explicit values below make the intent stable
+  # even if the profile changes later.
+  profile: balanced
+  blockCacheSizeBytes: 536870912
+  memTableSizeBytes: 67108864
+  memTableStopWritesThreshold: 4
+  maxConcurrentCompactions: 4
+  l0CompactionConcurrency: 4
+  bytesPerSync: 1048576
+  walBytesPerSync: 1048576
+
+  # Single-node mode does not need the worker-lane layer used by multi-shard
+  # data stores.
+  lanes: off
+
+  # Protect the Electron/Node user experience from LSM stalls instead of
+  # allowing unlimited write pressure.
+  backpressureEnabled: true
+  backpressureRejectCritical: true
+  backpressureWarningL0Files: 64
+  backpressureCriticalL0Files: 128
+  backpressureWarningDebtBytes: 268435456
+  backpressureCriticalDebtBytes: 805306368
+  backpressureWarningReadAmp: 24
+  backpressureCriticalReadAmp: 48
+  backpressureWarningDelay: 2ms
+  backpressureCriticalDelay: 25ms
+
+  # Only stream-enabled tables write the physical changelog. Keep retention
+  # bounded for a local single-client install.
+  changeLogMode: streams-only
+  streamRetention: 24h
+  streamRetentionMaxBytes: 1073741824
+
+metrics:
+  enabled: true
+  hotspotBuckets: 32
+  hotspotWindow: 1m
+  hotspotCoolingWindow: 1m
+  hotspotMaxSummaries: 4
+  hotspotReadThreshold: 5000
+  hotspotWriteThreshold: 1000
+  hotspotBytesThreshold: 67108864
+  hotspotLatencyThreshold: 50ms
+  hotspotCompactionDebtThresholdBytes: 805306368
+  hotspotThrottleStateThreshold: 1
+
+rebalancer:
+  enabled: false
+
+backupScheduler:
+  enabled: false

@@ -86,6 +86,7 @@ type EstimatorPlugin interface {
 type AudienceRequest struct {
 	Lat, Lon     float64
 	Radius       float64 // meters
+	Limit        int
 	ActiveWithin time.Duration
 	Extra        map[string]model.AttributeValue
 }

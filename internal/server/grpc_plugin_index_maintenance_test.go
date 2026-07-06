@@ -10,11 +10,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 func TestPluginIndexMaintenanceCallsPluginForWritePaths(t *testing.T) {
@@ -149,6 +149,38 @@ func TestPluginIndexMaintenanceCallsPluginForWritePaths(t *testing.T) {
 	}
 	if deletes[2]["v"].S != "sql-update" {
 		t.Fatalf("SQL DELETE old image = %+v", deletes[2])
+	}
+}
+
+func TestPluginIndexMaintenanceDiscoversPersistedDescriptorOnWrite(t *testing.T) {
+	rec := &recordingMaintenanceIndexPlugin{}
+	reg := plugin.NewRegistry()
+	if err := reg.Register(rec); err != nil {
+		t.Fatalf("register recorder: %v", err)
+	}
+	srv, cleanup := newPluginIndexMaintenanceServer(t, reg)
+	defer cleanup()
+	ctx := context.Background()
+	createMaintenanceTable(t, ctx, srv, "MaintDocsPersisted", false)
+	createMaintenanceIndex(t, ctx, srv, "MaintDocsPersisted", rec.Manifest().Name)
+
+	clearPluginIndexBookForTest()
+
+	if _, err := srv.PutItem(ctx, &cefaspb.PutItemRequest{
+		Table: "MaintDocsPersisted",
+		Item: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "a"}},
+			"v":  {Value: &cefaspb.AttributeValue_S{S: "one"}},
+		},
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	updates, _ := rec.snapshot()
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(updates))
+	}
+	if got := updates[0].newItem["id"].S; got != "a" {
+		t.Fatalf("updated id = %q, want a", got)
 	}
 }
 

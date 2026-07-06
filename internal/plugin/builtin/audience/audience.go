@@ -19,11 +19,11 @@ import (
 
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/geohash"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/haversine"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/hll"
 	"github.com/CefasDb/cefasdb/internal/plugin/internal/pkid"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 // IndexBinding tells Select which geohash index to read. Callers set
@@ -149,6 +149,7 @@ func (p *Plugin) Select(req plugin.AudienceRequest) (plugin.CandidateSet, error)
 		Binds: map[string]model.AttributeValue{
 			":center": centerAttr(req.Lat, req.Lon),
 		},
+		Limit: candidateLimit(req.Limit),
 	})
 	if err != nil {
 		return nil, err
@@ -178,8 +179,22 @@ func (p *Plugin) Select(req plugin.AudienceRequest) (plugin.CandidateSet, error)
 			continue
 		}
 		out = append(out, plugin.Candidate{Key: c.Key, Score: d})
+		if req.Limit > 0 && len(out) >= req.Limit {
+			break
+		}
 	}
 	return &sliceSet{rows: out}, nil
+}
+
+func candidateLimit(limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	n := limit * 10
+	if n < 100 {
+		return 100
+	}
+	return n
 }
 
 // Estimate returns the approximate reach within radius. Observes

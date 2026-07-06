@@ -634,7 +634,7 @@ func (d *DB) applyLoop() {
 			continue
 		}
 		f := d.raft.Apply(cp, d.cfg.applyTimeout())
-		err = f.Error()
+		err = mapApplyError(f.Error())
 		if err != nil {
 			err = fmt.Errorf("raft apply: %w", err)
 		} else if resp := f.Response(); resp != nil {
@@ -645,6 +645,19 @@ func (d *DB) applyLoop() {
 		for _, r := range reqs {
 			r.done <- err
 		}
+	}
+}
+
+func mapApplyError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, hraft.ErrNotLeader),
+		errors.Is(err, hraft.ErrLeadershipLost),
+		errors.Is(err, hraft.ErrLeadershipTransferInProgress):
+		return ErrNotLeader
+	default:
+		return err
 	}
 }
 

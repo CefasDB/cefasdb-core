@@ -21,8 +21,8 @@ import (
 
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/internal/pkid"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 )
 
 const base32 = "0123456789bcdefghjkmnpqrstuvwxyz"
@@ -191,6 +191,9 @@ func (s *State) addLocked(id string, item model.Item) {
 	lat, lon, ok := latLon(item, s.cfg.Field)
 	if !ok {
 		return
+	}
+	if _, exists := s.hashes[id]; exists {
+		s.removeLocked(id)
 	}
 	h := Encode(lat, lon, s.cfg.Precision)
 	s.items[id] = item
@@ -419,9 +422,9 @@ func (p *Plugin) Query(d index.Descriptor, req plugin.IndexQuery) (plugin.Candid
 	centerHash := Encode(lat, lon, s.cfg.Precision)
 	probes := append([]string{centerHash}, Neighbors(centerHash)...)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	seen := map[string]struct{}{}
 	out := make([]plugin.Candidate, 0)
+	done := false
 	for _, h := range probes {
 		for _, id := range s.buckets[h] {
 			if _, dup := seen[id]; dup {
@@ -429,16 +432,21 @@ func (p *Plugin) Query(d index.Descriptor, req plugin.IndexQuery) (plugin.Candid
 			}
 			seen[id] = struct{}{}
 			out = append(out, plugin.Candidate{Key: cloneItem(s.items[id])})
+			if req.Limit > 0 && len(out) >= req.Limit {
+				done = true
+				break
+			}
+		}
+		if done {
+			break
 		}
 	}
+	s.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
 		ai, _ := pkid.Of(out[i].Key, s.ks)
 		aj, _ := pkid.Of(out[j].Key, s.ks)
 		return ai < aj
 	})
-	if req.Limit > 0 && req.Limit < len(out) {
-		out = out[:req.Limit]
-	}
 	return &sliceSet{rows: out}, nil
 }
 

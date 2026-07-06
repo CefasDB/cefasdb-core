@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 
 	// Side-effect imports register the builtin plugins against
 	// plugin.Default so the unsecured fixture surfaces them.
@@ -358,7 +358,17 @@ func TestGeoAudienceStreams(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	createTbl(t, stub, "Stores")
-	// Two stores near SP, one in Santos.
+	// Stores near SP plus one in Santos.
+	_, _ = stub.PutItem(ctx, &cefaspb.PutItemRequest{
+		Table: "Stores",
+		Item: map[string]*cefaspb.AttributeValue{
+			"id": {Value: &cefaspb.AttributeValue_S{S: "s0"}},
+			"loc": {Value: &cefaspb.AttributeValue_M{M: &cefaspb.Map{Values: map[string]*cefaspb.AttributeValue{
+				"lat": {Value: &cefaspb.AttributeValue_N{N: "-23.5506"}},
+				"lon": {Value: &cefaspb.AttributeValue_N{N: "-46.6334"}},
+			}}}},
+		},
+	})
 	_, _ = stub.PutItem(ctx, &cefaspb.PutItemRequest{
 		Table: "Stores",
 		Item: map[string]*cefaspb.AttributeValue{
@@ -393,11 +403,13 @@ func TestGeoAudienceStreams(t *testing.T) {
 	stream, err := stub.GeoAudience(ctx, &cefaspb.GeoAudienceRequest{
 		Table: "Stores", Index: "loc_geo",
 		Lat: -23.5505, Lon: -46.6333, RadiusMeters: 2000,
+		Limit: 1,
 	})
 	if err != nil {
 		t.Fatalf("geo audience: %v", err)
 	}
 	got := map[string]bool{}
+	count := 0
 	for {
 		it, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -407,9 +419,10 @@ func TestGeoAudienceStreams(t *testing.T) {
 			t.Fatalf("recv: %v", err)
 		}
 		got[it.GetAttributes()["id"].GetS()] = true
+		count++
 	}
-	if !got["s1"] {
-		t.Errorf("s1 should be in radius")
+	if count != 1 {
+		t.Fatalf("geo audience returned %d items, want limit 1", count)
 	}
 	if got["s2"] {
 		t.Errorf("s2 (Santos, ~55km) should not be in 2km radius")
