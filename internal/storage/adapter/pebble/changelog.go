@@ -57,9 +57,9 @@ type ChangeRecord struct {
 	OpKind     string `json:"opKind,omitempty"`
 }
 
-// StreamRetentionStats is the persisted logical retention state for one table
-// stream. OldestSequence is the first readable stream sequence. Sequences below
-// it are considered trimmed even though the physical changelog remains for PITR.
+// StreamRetentionStats is the persisted retention state for one table stream.
+// OldestSequence is the first readable stream sequence. Sequences below it were
+// physically removed by the CDC retention cleaner and are considered trimmed.
 type StreamRetentionStats struct {
 	Table            string `json:"table"`
 	OldestSequence   uint64 `json:"oldestSequence,omitempty"`
@@ -70,11 +70,7 @@ type StreamRetentionStats struct {
 	LastTrimUnixNano int64  `json:"lastTrimUnixNano,omitempty"`
 }
 
-type streamRetentionRecord struct {
-	Index    uint64
-	UnixNano int64
-	Bytes    int64
-}
+const maxUnixNano = int64(1<<63 - 1)
 
 func (d *DB) shouldAppendChangeRecord(td types.TableDescriptor) bool {
 	switch d.changeLogMode {
@@ -105,19 +101,49 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if err != nil {
 		return rec, fmt.Errorf("encode change record: %w", err)
 	}
-	// The persisted index lives implicitly in the largest KeyChangeLog
-	// suffix. seedChangeIndex recovers from that scan on Open, so the
-	// old hot-key write of storage.ChangeCounterKey is unnecessary and
-	// only added one rewrite of the same key per mutation. Old
-	// deployments still keep the key on disk; loadPersistedChangeIndex
-	// reads it for forward compatibility and the max with the scan wins.
 	if err := b.Set(storage.KeyChangeLog(rec.Index), raw, nil); err != nil {
 		return rec, err
+	}
+	if err := d.persistChangeHighWater(b, rec.Index); err != nil {
+		return rec, err
+	}
+	if expireUnixNano, ok := d.changeLogExpireUnixNano(rec); ok {
+		if err := b.Set(storage.KeyChangeLogExpiration(expireUnixNano, rec.Index), nil, nil); err != nil {
+			return rec, err
+		}
 	}
 	if rec.StreamRecord {
 		d.trackStreamTable(rec.Table)
 	}
 	return rec, nil
+}
+
+func (d *DB) persistChangeHighWater(b *pebbledb.Batch, index uint64) error {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], index)
+	return b.Set(storage.ChangeCounterKey, buf[:], nil)
+}
+
+func (d *DB) streamRetentionForTable(table string) time.Duration {
+	retention := d.streamRetention.Retention
+	if d.streamRetentionResolver != nil {
+		if secs := d.streamRetentionResolver(table); secs > 0 {
+			retention = time.Duration(secs) * time.Second
+		}
+	}
+	return retention
+}
+
+func (d *DB) changeLogExpireUnixNano(rec ChangeRecord) (int64, bool) {
+	retention := d.streamRetentionForTable(rec.Table)
+	if retention <= 0 || rec.UnixNano <= 0 {
+		return 0, false
+	}
+	delta := int64(retention)
+	if rec.UnixNano > maxUnixNano-delta {
+		return maxUnixNano, true
+	}
+	return rec.UnixNano + delta, true
 }
 
 func newChangeRecord(td types.TableDescriptor, op ChangeOp, key, oldItem, newItem types.Item) ChangeRecord {
@@ -521,9 +547,9 @@ func (d *DB) CurrentChangeIndex() (uint64, error) {
 	return d.changeIndex.Load(), nil
 }
 
-// ApplyStreamRetention advances the logical stream trim point for table using
-// the configured retention policy. It preserves physical changelog entries so
-// PITR and backups keep seeing the full change history.
+// ApplyStreamRetention runs one bounded physical CDC retention pass, then
+// returns the persisted trim state for table. It is safe to call explicitly;
+// the background loop uses the same cleaner path.
 func (d *DB) ApplyStreamRetention(table string, now time.Time) (StreamRetentionStats, error) {
 	if table == "" {
 		return StreamRetentionStats{}, fmt.Errorf("stream retention table required")
@@ -531,53 +557,48 @@ func (d *DB) ApplyStreamRetention(table string, now time.Time) (StreamRetentionS
 	if now.IsZero() {
 		now = time.Now()
 	}
-	b := d.Batch()
-	defer b.Close()
-	stats, err := d.applyStreamRetentionLocked(b, table, now, nil)
-	if err != nil {
+	if _, err := d.applyExpiredChangeLogRetention(now); err != nil {
 		return StreamRetentionStats{}, err
 	}
-	if err := d.CommitBatch(b); err != nil {
-		return StreamRetentionStats{}, err
-	}
-	return stats, nil
+	return d.StreamRetentionStats(table)
 }
 
 // StreamRetentionStats returns the latest persisted logical retention state.
-// If the state is missing (for stores created before Streams retention), it is
-// reconstructed from the preserved changelog without mutating storage.
+// Missing state means no records have been physically trimmed for the table
+// yet; callers must not backfill by scanning the full changelog.
 func (d *DB) StreamRetentionStats(table string) (StreamRetentionStats, error) {
 	if table == "" {
 		return StreamRetentionStats{}, fmt.Errorf("stream retention table required")
 	}
 	if stats, ok, err := d.loadStreamRetentionState(table); err != nil || ok {
-		return stats, err
+		if err != nil {
+			return stats, err
+		}
+		current, currentErr := d.CurrentChangeIndex()
+		if currentErr != nil {
+			return StreamRetentionStats{}, currentErr
+		}
+		if current > stats.NewestSequence {
+			stats.NewestSequence = current
+		}
+		return stats, nil
 	}
-	records, err := d.scanStreamRetentionRecords(table, nil)
+	current, err := d.CurrentChangeIndex()
 	if err != nil {
 		return StreamRetentionStats{}, err
 	}
-	return d.computeStreamRetentionStats(table, records, StreamRetentionStats{}, time.Now()), nil
+	return StreamRetentionStats{Table: table, NewestSequence: current}, nil
 }
 
-// PreviewStreamRetention computes the trim state as of now without writing it.
-// Read paths use this so stream polling stays safe on Raft followers.
+// PreviewStreamRetention returns the persisted trim state without doing cleanup.
+// Read paths intentionally avoid retention work so GetRecords/GetShardIterator
+// cannot turn into a changelog scan under load.
 func (d *DB) PreviewStreamRetention(table string, now time.Time) (StreamRetentionStats, error) {
 	if table == "" {
 		return StreamRetentionStats{}, fmt.Errorf("stream retention table required")
 	}
-	if now.IsZero() {
-		now = time.Now()
-	}
-	previous, _, err := d.loadStreamRetentionState(table)
-	if err != nil {
-		return StreamRetentionStats{}, err
-	}
-	records, err := d.scanStreamRetentionRecords(table, nil)
-	if err != nil {
-		return StreamRetentionStats{}, err
-	}
-	return d.computeStreamRetentionStats(table, records, previous, now), nil
+	_ = now
+	return d.StreamRetentionStats(table)
 }
 
 // ListStreamRetentionStats returns every persisted table stream retention
@@ -604,26 +625,6 @@ func (d *DB) ListStreamRetentionStats() ([]StreamRetentionStats, error) {
 	return out, nil
 }
 
-func (d *DB) applyStreamRetentionLocked(b *pebbledb.Batch, table string, now time.Time, extra *ChangeRecord) (StreamRetentionStats, error) {
-	previous, _, err := d.loadStreamRetentionState(table)
-	if err != nil {
-		return StreamRetentionStats{}, err
-	}
-	records, err := d.scanStreamRetentionRecords(table, extra)
-	if err != nil {
-		return StreamRetentionStats{}, err
-	}
-	stats := d.computeStreamRetentionStats(table, records, previous, now)
-	raw, err := json.Marshal(stats)
-	if err != nil {
-		return StreamRetentionStats{}, fmt.Errorf("marshal stream retention state: %w", err)
-	}
-	if err := b.Set(storage.KeyStreamRetention(table), raw, nil); err != nil {
-		return StreamRetentionStats{}, err
-	}
-	return stats, nil
-}
-
 func (d *DB) loadStreamRetentionState(table string) (StreamRetentionStats, bool, error) {
 	raw, err := d.Get(storage.KeyStreamRetention(table))
 	if errors.Is(err, ErrNotFound) {
@@ -639,116 +640,149 @@ func (d *DB) loadStreamRetentionState(table string) (StreamRetentionStats, bool,
 	return stats, true, nil
 }
 
-func (d *DB) scanStreamRetentionRecords(table string, extra *ChangeRecord) ([]streamRetentionRecord, error) {
-	lower, upper := storage.PrefixChangeLog()
+type expiredChangeLogEntry struct {
+	expireKey []byte
+	index     uint64
+	rawBytes  int64
+	record    ChangeRecord
+	hasRecord bool
+}
+
+type streamTrimUpdate struct {
+	trimmed       uint64
+	newestDeleted uint64
+	bytesDeleted  int64
+}
+
+func (d *DB) applyExpiredChangeLogRetention(now time.Time) (int, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if d.repl != nil && !d.repl.IsLeader() {
+		return 0, nil
+	}
+	before := now.UnixNano()
+	if before < maxUnixNano {
+		before++
+	}
+	lower, upper := storage.PrefixChangeLogExpirationBefore(before)
 	it, err := d.Iter(lower, upper)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer it.Close()
-	var records []streamRetentionRecord
-	for valid := it.First(); valid; valid = it.Next() {
-		rec, err := decodeChangeRecord(it.Value())
-		if err != nil {
-			return nil, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
+
+	limit := d.streamRetention.BatchSize
+	if limit <= 0 {
+		limit = DefaultStreamRetentionCleanupBatch
+	}
+	expired := make([]expiredChangeLogEntry, 0, minInt(limit, 1024))
+	for valid := it.First(); valid && len(expired) < limit; valid = it.Next() {
+		expireKey := append([]byte(nil), it.Key()...)
+		_, index, ok := storage.ParseChangeLogExpirationKey(expireKey)
+		if !ok {
+			continue
 		}
-		if rec.Table == table && rec.StreamRecord {
-			records = append(records, retentionRecordFromChange(rec))
+		entry := expiredChangeLogEntry{
+			expireKey: expireKey,
+			index:     index,
 		}
+		raw, err := d.getNoLane(storage.KeyChangeLog(index))
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return 0, err
+		}
+		if raw != nil {
+			rec, err := decodeChangeRecord(raw)
+			if err != nil {
+				return 0, fmt.Errorf("decode expired change record at index %d: %w", index, err)
+			}
+			entry.record = rec
+			entry.rawBytes = int64(len(raw))
+			entry.hasRecord = true
+		}
+		expired = append(expired, entry)
 	}
 	if err := it.Error(); err != nil {
-		return nil, err
+		return 0, err
 	}
-	if extra != nil && extra.Table == table && extra.StreamRecord {
-		records = append(records, retentionRecordFromChange(*extra))
-	}
-	return records, nil
-}
-
-func retentionRecordFromChange(rec ChangeRecord) streamRetentionRecord {
-	size := rec.SizeBytes
-	if size <= 0 {
-		size = approximateChangeRecordSize(rec)
-	}
-	return streamRetentionRecord{
-		Index:    rec.Index,
-		UnixNano: rec.UnixNano,
-		Bytes:    size,
-	}
-}
-
-func (d *DB) computeStreamRetentionStats(table string, records []streamRetentionRecord, previous StreamRetentionStats, now time.Time) StreamRetentionStats {
-	stats := StreamRetentionStats{
-		Table:            table,
-		RecordsTrimmed:   previous.RecordsTrimmed,
-		LastTrimUnixNano: previous.LastTrimUnixNano,
-	}
-	if len(records) == 0 {
-		return stats
+	if len(expired) == 0 {
+		return 0, nil
 	}
 
-	stats.RecordsAppended = uint64(len(records))
-	stats.NewestSequence = records[len(records)-1].Index
-
-	start := 0
-	retention := d.streamRetention.Retention
-	// Per-table override from #521. The resolver returns the
-	// StreamSpecification.RetentionSeconds for table or 0 when no
-	// override is set; non-zero replaces the cluster default.
-	if d.streamRetentionResolver != nil {
-		if secs := d.streamRetentionResolver(table); secs > 0 {
-			retention = time.Duration(secs) * time.Second
+	b := d.Batch()
+	defer b.Close()
+	updates := map[string]streamTrimUpdate{}
+	for _, entry := range expired {
+		if err := b.Delete(entry.expireKey, nil); err != nil {
+			return 0, err
 		}
-	}
-	if retention > 0 {
-		cutoff := now.Add(-retention).UnixNano()
-		for start < len(records) && records[start].UnixNano < cutoff {
-			start++
+		if !entry.hasRecord {
+			continue
 		}
-	}
-	if d.streamRetention.MaxBytes > 0 && start < len(records) {
-		byteStart := len(records)
-		var retained int64
-		for i := len(records) - 1; i >= start; i-- {
-			if byteStart < len(records) && retained+records[i].Bytes > d.streamRetention.MaxBytes {
-				break
+		if err := b.Delete(storage.KeyChangeLog(entry.index), nil); err != nil {
+			return 0, err
+		}
+		if entry.record.StreamRecord && entry.record.Table != "" {
+			u := updates[entry.record.Table]
+			u.trimmed++
+			if entry.record.Index > u.newestDeleted {
+				u.newestDeleted = entry.record.Index
 			}
-			retained += records[i].Bytes
-			byteStart = i
-		}
-		if byteStart == len(records) {
-			byteStart = len(records) - 1
-		}
-		if byteStart > start {
-			start = byteStart
+			u.bytesDeleted += entry.rawBytes
+			updates[entry.record.Table] = u
 		}
 	}
-	if previous.OldestSequence > 0 {
-		for start < len(records) && records[start].Index < previous.OldestSequence {
-			start++
-		}
+	if err := d.persistStreamTrimUpdates(b, updates, now); err != nil {
+		return 0, err
 	}
+	if err := d.CommitBatch(b); err != nil {
+		return 0, err
+	}
+	return len(expired), nil
+}
 
-	if start < len(records) {
-		stats.OldestSequence = records[start].Index
-		for _, rec := range records[start:] {
-			stats.RetainedBytes += rec.Bytes
+func (d *DB) persistStreamTrimUpdates(b *pebbledb.Batch, updates map[string]streamTrimUpdate, now time.Time) error {
+	for table, update := range updates {
+		if update.trimmed == 0 {
+			continue
 		}
-	} else {
-		stats.OldestSequence = stats.NewestSequence + 1
-	}
-
-	var trimmed uint64
-	for _, rec := range records {
-		if rec.Index < stats.OldestSequence {
-			trimmed++
+		stats, _, err := d.loadStreamRetentionState(table)
+		if err != nil {
+			return err
 		}
-	}
-	if trimmed > stats.RecordsTrimmed {
-		stats.RecordsTrimmed = trimmed
+		stats.Table = table
+		if floor := update.newestDeleted + 1; floor > stats.OldestSequence {
+			stats.OldestSequence = floor
+		}
+		if update.newestDeleted > stats.NewestSequence {
+			stats.NewestSequence = update.newestDeleted
+		}
+		stats.RecordsTrimmed += update.trimmed
+		if stats.RecordsAppended < stats.RecordsTrimmed {
+			stats.RecordsAppended = stats.RecordsTrimmed
+		}
+		if update.bytesDeleted >= stats.RetainedBytes {
+			stats.RetainedBytes = 0
+		} else {
+			stats.RetainedBytes -= update.bytesDeleted
+		}
 		stats.LastTrimUnixNano = now.UnixNano()
+		raw, err := json.Marshal(stats)
+		if err != nil {
+			return fmt.Errorf("marshal stream retention state: %w", err)
+		}
+		if err := b.Set(storage.KeyStreamRetention(table), raw, nil); err != nil {
+			return err
+		}
 	}
-	return stats
+	return nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // ChangeRecordsAfter exposes changeRecordsAfter for FAST refresh

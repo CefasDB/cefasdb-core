@@ -90,6 +90,37 @@ func TestPutGetDelete(t *testing.T) {
 	}
 }
 
+func TestRejectWritesBlocksCallerWritesButAllowsCommittedApply(t *testing.T) {
+	db := openTestDB(t)
+
+	b := db.Batch()
+	if err := b.Set([]byte("cefas/data/applied"), []byte("ok"), nil); err != nil {
+		t.Fatalf("batch set: %v", err)
+	}
+	repr := append([]byte(nil), b.Repr()...)
+	_ = b.Close()
+
+	db.RejectWrites("shutdown")
+	if err := db.Set([]byte("cefas/data/direct"), []byte("blocked")); !errors.Is(err, pebble.ErrDraining) {
+		t.Fatalf("Set while draining error = %v, want ErrDraining", err)
+	}
+	if err := db.ApplyCommittedBatch(repr); err != nil {
+		t.Fatalf("ApplyCommittedBatch while draining: %v", err)
+	}
+	got, err := db.Get([]byte("cefas/data/applied"))
+	if err != nil {
+		t.Fatalf("Get applied: %v", err)
+	}
+	if string(got) != "ok" {
+		t.Fatalf("applied value = %q, want ok", got)
+	}
+
+	db.AllowWrites()
+	if err := db.Set([]byte("cefas/data/direct"), []byte("allowed")); err != nil {
+		t.Fatalf("Set after AllowWrites: %v", err)
+	}
+}
+
 func TestQueryByPK(t *testing.T) {
 	db := openTestDB(t)
 	ks := types.KeySchema{PK: "user_id", SK: "ts"}

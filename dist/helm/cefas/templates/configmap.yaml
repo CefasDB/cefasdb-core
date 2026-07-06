@@ -9,6 +9,10 @@ data:
     data: /var/lib/cefas
     http:
       addr: ":{{ .Values.service.http }}"
+    lifecycle:
+      shutdownGracePeriod: {{ .Values.lifecycle.shutdownGracePeriod | quote }}
+      drainDelay: {{ .Values.lifecycle.drainDelay | quote }}
+      leadershipTransferTimeout: {{ .Values.lifecycle.leadershipTransferTimeout | quote }}
     grpc:
       addr: ":{{ .Values.service.grpc }}"
       reflection: true
@@ -95,49 +99,48 @@ data:
       {{- with .Values.storage.backpressure.criticalDelay }}
       backpressureCriticalDelay: {{ . }}
       {{- end }}
+      streamRetentionInterval: {{ .Values.storage.streamRetentionInterval | quote }}
+      streamRetentionCleanupBatchSize: {{ .Values.storage.streamRetentionCleanupBatchSize }}
     cluster:
       shards: {{ .Values.cluster.shards }}
-      replicationFactor: {{ .Values.cluster.replicationFactor }}
+      replicationFactor: {{ include "cefas.resolvedReplicationFactor" . }}
       muxAddr: ":{{ .Values.service.mux }}"
       bootstrap: {{ .Values.cluster.bootstrap }}
       {{- if .Values.cluster.peers }}
       peers:
         {{- toYaml .Values.cluster.peers | nindent 8 }}
-      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      {{- else if .Values.cluster.generatePeers }}
+      {{- $replicas := include "cefas.resolvedReplicaCount" . | int }}
+      {{- if gt $replicas 1 }}
       peers:
-        {{- $fullname := include "cefas.fullname" . -}}
-        {{- $headless := include "cefas.headless" . -}}
-        {{- $namespace := .Release.Namespace -}}
-        {{- $muxPort := .Values.service.mux -}}
-        {{- range $i := until (int .Values.replicaCount) }}
-        {{ printf "%s-%d" $fullname $i }}: {{ printf "%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $muxPort | quote }}
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.mux | quote }}
         {{- end }}
+      {{- end }}
       {{- end }}
       {{- if .Values.cluster.httpPeers }}
       httpPeers:
         {{- toYaml .Values.cluster.httpPeers | nindent 8 }}
-      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      {{- else if .Values.cluster.generatePeers }}
+      {{- $replicas := include "cefas.resolvedReplicaCount" . | int }}
+      {{- if gt $replicas 1 }}
       httpPeers:
-        {{- $fullname := include "cefas.fullname" . -}}
-        {{- $headless := include "cefas.headless" . -}}
-        {{- $namespace := .Release.Namespace -}}
-        {{- $httpPort := .Values.service.http -}}
-        {{- range $i := until (int .Values.replicaCount) }}
-        {{ printf "%s-%d" $fullname $i }}: {{ printf "http://%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $httpPort | quote }}
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "http://%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.http | quote }}
         {{- end }}
+      {{- end }}
       {{- end }}
       {{- if .Values.cluster.grpcPeers }}
       grpcPeers:
         {{- toYaml .Values.cluster.grpcPeers | nindent 8 }}
-      {{- else if and .Values.cluster.generatePeers (gt (int .Values.replicaCount) 1) }}
+      {{- else if .Values.cluster.generatePeers }}
+      {{- $replicas := include "cefas.resolvedReplicaCount" . | int }}
+      {{- if gt $replicas 1 }}
       grpcPeers:
-        {{- $fullname := include "cefas.fullname" . -}}
-        {{- $headless := include "cefas.headless" . -}}
-        {{- $namespace := .Release.Namespace -}}
-        {{- $grpcPort := .Values.service.grpc -}}
-        {{- range $i := until (int .Values.replicaCount) }}
-        {{ printf "%s-%d" $fullname $i }}: {{ printf "%s-%d.%s.%s.svc.cluster.local:%v" $fullname $i $headless $namespace $grpcPort | quote }}
+        {{- range $i := until $replicas }}
+        {{ printf "%s-%d" (include "cefas.fullname" $) $i | quote }}: {{ printf "%s:%v" (include "cefas.podDNS" (list $ $i)) $.Values.service.grpc | quote }}
         {{- end }}
+      {{- end }}
       {{- end }}
     raft:
       heartbeatTimeout: {{ .Values.raft.heartbeatTimeout }}

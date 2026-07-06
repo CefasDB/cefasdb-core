@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/cluster"
 	"github.com/CefasDb/cefasdb/internal/config"
+	"github.com/CefasDb/cefasdb/internal/identitylease"
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/rebalance"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
@@ -63,6 +66,13 @@ func main() {
 		raftLogCompMinBytes        = flag.Int("raft-log-compression-min-bytes", 0, "Minimum raft log payload bytes before compression. 0 inherits config/default.")
 		raftLogCompMinSavingsRatio = flag.Float64("raft-log-compression-min-savings-ratio", -1, "Minimum compression savings ratio required to keep compressed payloads. Negative inherits config/default.")
 		raftLogCompSkipCooldown    = flag.Duration("raft-log-compression-skip-cooldown", -1, "Cooldown after an unhelpful compression attempt. Negative inherits config/default; 0 disables cooldown.")
+		raftIdentityLeaseBackend   = flag.String("raft-identity-lease-backend", "", "Raft identity lease backend: file, kubernetes, auto, or off. Empty inherits config/default.")
+		raftIdentityLeasePath      = flag.String("raft-identity-lease-path", "", "Directory for file-backed raft identity leases. Empty defaults to -data/raft-identity.")
+		raftIdentityLeaseName      = flag.String("raft-identity-lease-name", "", "Lease resource name for external backends. Empty derives from -raft-id.")
+		raftIdentityLeaseNamespace = flag.String("raft-identity-lease-namespace", "", "Kubernetes namespace for raft identity Lease objects. Empty uses in-cluster namespace.")
+		raftIdentityLeaseAPIURL    = flag.String("raft-identity-kubernetes-api-url", "", "Kubernetes API URL for raft identity leases. Empty uses in-cluster service discovery.")
+		raftIdentityLeaseTTL       = flag.Duration("raft-identity-lease-ttl", 0, "Raft identity lease TTL. 0 inherits config/default.")
+		raftIdentityLeaseRenew     = flag.Duration("raft-identity-lease-renew-interval", 0, "Raft identity lease renew interval. 0 inherits config/default.")
 
 		// Storage tuning.
 		storageProfile            = flag.String("storage-profile", "", "Pebble profile: default, balanced, write-heavy")
@@ -84,20 +94,22 @@ func main() {
 		storageLaneWriteQueue     = flag.Int("storage-lane-write-queue", 0, "Write lane queue capacity. 0 inherits default.")
 
 		// Adaptive write backpressure.
-		backpressureEnabled      = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
-		backpressureReject       = flag.Bool("storage-backpressure-reject-critical", false, "Reject writes instead of only sleeping when pressure is critical.")
-		backpressureWarnL0       = flag.Int64("storage-backpressure-warning-l0-files", 0, "Warning L0 file threshold. 0 uses default.")
-		backpressureCriticalL0   = flag.Int64("storage-backpressure-critical-l0-files", 0, "Critical L0 file threshold. 0 uses default.")
-		backpressureWarnDebt     = flag.Uint64("storage-backpressure-warning-debt", 0, "Warning compaction debt threshold in bytes. 0 uses default.")
-		backpressureCriticalDebt = flag.Uint64("storage-backpressure-critical-debt", 0, "Critical compaction debt threshold in bytes. 0 uses default.")
-		backpressureWarnReadAmp  = flag.Int("storage-backpressure-warning-read-amp", 0, "Warning Pebble read amplification threshold. 0 uses default.")
-		backpressureCritReadAmp  = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
-		backpressureWarnDelay    = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
-		backpressureCritDelay    = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
-		streamRetention          = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
-		streamRetentionMaxBytes  = flag.Int64("storage-stream-retention-max-bytes", 0, "Maximum logical DynamoDB Streams retained bytes per table. 0 disables byte cap.")
-		storageChangeLogMode     = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
-		storageAdaptiveMode      = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
+		backpressureEnabled         = flag.Bool("storage-backpressure", false, "Enable write backpressure from Pebble pressure metrics.")
+		backpressureReject          = flag.Bool("storage-backpressure-reject-critical", false, "Reject writes instead of only sleeping when pressure is critical.")
+		backpressureWarnL0          = flag.Int64("storage-backpressure-warning-l0-files", 0, "Warning L0 file threshold. 0 uses default.")
+		backpressureCriticalL0      = flag.Int64("storage-backpressure-critical-l0-files", 0, "Critical L0 file threshold. 0 uses default.")
+		backpressureWarnDebt        = flag.Uint64("storage-backpressure-warning-debt", 0, "Warning compaction debt threshold in bytes. 0 uses default.")
+		backpressureCriticalDebt    = flag.Uint64("storage-backpressure-critical-debt", 0, "Critical compaction debt threshold in bytes. 0 uses default.")
+		backpressureWarnReadAmp     = flag.Int("storage-backpressure-warning-read-amp", 0, "Warning Pebble read amplification threshold. 0 uses default.")
+		backpressureCritReadAmp     = flag.Int("storage-backpressure-critical-read-amp", 0, "Critical Pebble read amplification threshold. 0 uses default.")
+		backpressureWarnDelay       = flag.Duration("storage-backpressure-warning-delay", 0, "Delay applied to writes in warning state. 0 uses default.")
+		backpressureCritDelay       = flag.Duration("storage-backpressure-critical-delay", 0, "Delay applied to writes in critical state. 0 uses default.")
+		streamRetention             = flag.Duration("storage-stream-retention", 0, "DynamoDB Streams retention window. 0 inherits config/default 24h.")
+		streamRetentionInterval     = flag.Duration("storage-stream-retention-interval", 0, "Background CDC retention cleanup interval. Positive enables; negative disables. 0 inherits config/default.")
+		streamRetentionMaxBytes     = flag.Int64("storage-stream-retention-max-bytes", 0, "Deprecated compatibility knob; physical CDC retention is time-window based.")
+		streamRetentionCleanupBatch = flag.Int("storage-stream-retention-cleanup-batch-size", 0, "Maximum expired CDC records removed per cleanup tick. 0 inherits config/default.")
+		storageChangeLogMode        = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
+		storageAdaptiveMode         = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -119,10 +131,13 @@ func main() {
 		mtlsCA         = flag.String("mtls-ca", "", "Path to a client-CA bundle. When set, the gRPC listener requires mTLS.")
 
 		// Observability + config.
-		configPath = flag.String("config", "", "Path to YAML config file. Flag/env values override the file.")
-		metricsOff = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
-		tracingURL = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
-		tracingIns = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
+		configPath                 = flag.String("config", "", "Path to YAML config file. Flag/env values override the file.")
+		metricsOff                 = flag.Bool("metrics-disabled", false, "Disable the /metrics Prometheus endpoint.")
+		tracingURL                 = flag.String("tracing-endpoint", "", "OTLP/gRPC collector endpoint (e.g. 'jaeger:4317'). Empty disables tracing.")
+		tracingIns                 = flag.Bool("tracing-insecure", true, "Disable TLS to the OTLP collector.")
+		shutdownGracePeriod        = flag.Duration("shutdown-grace-period", 0, "Grace period for HTTP/gRPC/Raft/storage shutdown. 0 inherits config/default.")
+		shutdownDrainDelay         = flag.Duration("shutdown-drain-delay", -1, "Delay after readiness is dropped before listener shutdown. Negative inherits config/default; 0 disables delay.")
+		shutdownLeadershipTransfer = flag.Duration("shutdown-leadership-transfer-timeout", 0, "Per-shard leadership transfer timeout during shutdown. 0 inherits config/default.")
 
 		// pprof debug listener. Default empty = disabled. Recommended
 		// bind '127.0.0.1:6060' for benchmark runs; binding to a
@@ -187,7 +202,7 @@ func main() {
 		*backpressureEnabled, *backpressureReject, *backpressureWarnL0, *backpressureCriticalL0,
 		*backpressureWarnDebt, *backpressureCriticalDebt, *backpressureWarnReadAmp,
 		*backpressureCritReadAmp, *backpressureWarnDelay, *backpressureCritDelay,
-		*streamRetention, *streamRetentionMaxBytes, *storageChangeLogMode,
+		*streamRetention, *streamRetentionInterval, *streamRetentionMaxBytes, *streamRetentionCleanupBatch, *storageChangeLogMode,
 		*identityJwks, *identityIssuer, *identityAudience, *identityClockSkew,
 		*shardsN, *replicationFactor, *muxAddr,
 		*grpcAddr, *grpcReflection, *tlsCert, *tlsKey, *mtlsCA,
@@ -198,6 +213,11 @@ func main() {
 		*backupSchedulerEnabled, *backupSchedulerDisabled, *backupSchedulerDryRun,
 		*backupSchedulerInterval, *backupSchedulerNameTemplate, *backupSchedulerTables,
 		*backupSchedulerRetentionKeepLatest, *backupSchedulerRetentionMaxAge, *backupSchedulerRetentionDryRun)
+	bootstrapserver.OverlayRaftIdentityLeaseFlags(&cfg,
+		*raftIdentityLeaseBackend, *raftIdentityLeasePath, *raftIdentityLeaseName,
+		*raftIdentityLeaseNamespace, *raftIdentityLeaseAPIURL,
+		*raftIdentityLeaseTTL, *raftIdentityLeaseRenew)
+	bootstrapserver.OverlayLifecycleFlags(&cfg, *shutdownGracePeriod, *shutdownDrainDelay, *shutdownLeadershipTransfer)
 
 	// Initialise tracing first so subsequent setup gets spans on
 	// failure. tracingShutdown is a no-op when no endpoint is set.
@@ -230,6 +250,52 @@ func main() {
 	if err != nil {
 		logger.Error("pprof", "err", err)
 		os.Exit(1)
+	}
+
+	leaseCtx, leaseCancel := context.WithCancel(context.Background())
+	defer leaseCancel()
+	leaseLost := make(chan error, 1)
+	var leaseHealthy atomic.Bool
+	var raftIdentityGuard *identitylease.Guard
+	if raftIdentityLeaseRequired(cfg) {
+		raftIdentityGuard, err = identitylease.Acquire(context.Background(), identitylease.Options{
+			NodeID:                cfg.Cluster.SelfID,
+			DataDir:               cfg.Data,
+			Backend:               cfg.RaftIdentity.LeaseBackend,
+			LeasePath:             cfg.RaftIdentity.LeasePath,
+			LeaseName:             cfg.RaftIdentity.LeaseName,
+			LeaseTTL:              cfg.RaftIdentity.LeaseTTL,
+			RenewInterval:         cfg.RaftIdentity.LeaseRenewInterval,
+			KubernetesNamespace:   cfg.RaftIdentity.LeaseNamespace,
+			KubernetesAPIURL:      cfg.RaftIdentity.KubernetesAPIURL,
+			KubernetesBearerToken: "",
+			KubernetesCAFile:      "",
+			HTTPClient:            nil,
+		})
+		if err != nil {
+			logger.Error("raft identity lease", "err", err, "raftID", cfg.Cluster.SelfID, "backend", cfg.RaftIdentity.LeaseBackend)
+			os.Exit(1)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := raftIdentityGuard.Close(ctx); err != nil {
+				logger.Error("release raft identity lease", "err", err, "raftID", cfg.Cluster.SelfID)
+			}
+		}()
+		leaseHealthy.Store(true)
+		rec := raftIdentityGuard.Record()
+		logger.Info("raft identity lease acquired", "raftID", rec.NodeID, "holder", rec.HolderID, "epoch", rec.Epoch, "backend", rec.Backend, "resource", rec.Resource, "expires", rec.ExpiresAt)
+		go raftIdentityGuard.RenewLoop(leaseCtx, func(err error) {
+			leaseHealthy.Store(false)
+			logger.Error("raft identity lease lost", "err", err, "raftID", cfg.Cluster.SelfID)
+			select {
+			case leaseLost <- err:
+			default:
+			}
+		})
+	} else if cfg.Cluster.SelfID != "" && cfg.RaftIdentity.LeaseBackend == identitylease.BackendOff {
+		logger.Info("raft identity lease disabled", "raftID", cfg.Cluster.SelfID)
 	}
 
 	var (
@@ -305,7 +371,7 @@ func main() {
 	// for any stream-enabled table that declares
 	// StreamSpecification.RetentionSeconds. Zero means "inherit
 	// cluster default".
-	db.AttachStreamRetentionResolver(func(table string) int64 {
+	streamRetentionResolver := func(table string) int64 {
 		if cat == nil {
 			return 0
 		}
@@ -314,7 +380,15 @@ func main() {
 			return 0
 		}
 		return td.StreamSpecification.RetentionSeconds
-	})
+	}
+	db.AttachStreamRetentionResolver(streamRetentionResolver)
+	if mgr != nil {
+		for _, sh := range mgr.Shards() {
+			if sh != nil && sh.Storage != nil {
+				sh.Storage.AttachStreamRetentionResolver(streamRetentionResolver)
+			}
+		}
+	}
 
 	var raftStore *pebble.DB
 	if mgr == nil && cfg.Raft.Bind != "" {
@@ -427,6 +501,21 @@ func main() {
 			}
 		}
 	}
+	if raftIdentityGuard != nil {
+		apiSrv.AddReadinessCheck("raft_identity_lease", func(context.Context) error {
+			if !leaseHealthy.Load() {
+				return fmt.Errorf("raft identity lease not healthy")
+			}
+			rec := raftIdentityGuard.Record()
+			if rec.NodeID == "" || rec.HolderID == "" || rec.Epoch == 0 {
+				return fmt.Errorf("raft identity lease incomplete")
+			}
+			if !rec.ExpiresAt.IsZero() && time.Now().UTC().After(rec.ExpiresAt) {
+				return fmt.Errorf("raft identity lease expired at %s", rec.ExpiresAt.Format(time.RFC3339Nano))
+			}
+			return nil
+		})
+	}
 	if cfg.BackupScheduler.Enabled {
 		go backupScheduler.Run(runtimeCtx)
 		logger.Info("scheduled backups enabled", "interval", cfg.BackupScheduler.Interval, "dryRun", cfg.BackupScheduler.DryRun, "template", cfg.BackupScheduler.NameTemplate, "tables", cfg.BackupScheduler.Tables)
@@ -467,6 +556,7 @@ func main() {
 
 	// gRPC listener (optional).
 	var gsrv *grpc.Server
+	var gsrvImpl *server.GRPCServer
 	if cfg.GRPC.Addr != "" {
 		// Workload prioritization (#499): wire the per-SL quota
 		// controller against the catalog. Hot reload via
@@ -488,7 +578,8 @@ func main() {
 				clu = sh.Raft
 			}
 		}
-		gsrvImpl := server.NewGRPCServer(db, cat, clu)
+		gsrvImpl = server.NewGRPCServer(db, cat, clu)
+		gsrvImpl.AttachLifecycle(apiSrv.Lifecycle())
 		if mgr != nil {
 			gsrvImpl.AttachManager(mgr)
 		}
@@ -517,18 +608,120 @@ func main() {
 			}
 		}()
 	}
+	apiSrv.MarkStarted()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	logger.Info("shutting down")
+	shutdownReason := "signal"
+	select {
+	case sig := <-stop:
+		shutdownReason = sig.String()
+	case err := <-leaseLost:
+		shutdownReason = "raft identity lease lost: " + err.Error()
+	}
+	logger.Info("shutting down", "reason", shutdownReason)
+	apiSrv.StartDraining(shutdownReason)
+	rejectWrites(db, mgr, shutdownReason)
+	if cfg.Lifecycle.DrainDelay > 0 {
+		time.Sleep(cfg.Lifecycle.DrainDelay)
+	}
+	if err := transferLeadershipOnShutdown(context.Background(), raftDB, mgr, cfg.Cluster.SelfID, cfg.Cluster.Peers, cfg.Lifecycle.LeadershipTransferTimeout); err != nil {
+		logger.Error("shutdown leadership transfer", "err", err)
+	}
+	leaseCancel()
 	runtimeCancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Lifecycle.ShutdownGracePeriod)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
 	_ = server.ShutdownPprof(ctx, pprofSrv)
-	if gsrv != nil {
-		gsrv.GracefulStop()
+	if gsrvImpl != nil {
+		gsrvImpl.StopMVScheduler()
 	}
+	if gsrv != nil {
+		done := make(chan struct{})
+		go func() {
+			gsrv.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			gsrv.Stop()
+		}
+	}
+}
+
+func raftIdentityLeaseRequired(cfg config.Config) bool {
+	if cfg.Cluster.SelfID == "" || cfg.RaftIdentity.LeaseBackend == identitylease.BackendOff {
+		return false
+	}
+	return cfg.Cluster.Shards > 0 || cfg.Raft.Bind != ""
+}
+
+func rejectWrites(db *pebble.DB, mgr *cluster.Manager, reason string) {
+	if mgr == nil {
+		if db != nil {
+			db.RejectWrites(reason)
+		}
+		return
+	}
+	for _, sh := range mgr.Shards() {
+		if sh != nil && sh.Storage != nil {
+			sh.Storage.RejectWrites(reason)
+		}
+	}
+}
+
+func transferLeadershipOnShutdown(ctx context.Context, raftDB *craft.DB, mgr *cluster.Manager, selfID string, peers map[string]string, timeout time.Duration) error {
+	if timeout <= 0 {
+		return nil
+	}
+	if mgr == nil {
+		if raftDB == nil || !raftDB.IsLeader() {
+			return nil
+		}
+		targetID, targetAddr := firstPeerTarget(selfID, peers, nil)
+		if targetID == "" {
+			return nil
+		}
+		return raftDB.TransferLeadership(targetID, targetAddr, timeout)
+	}
+	var errs []error
+	for _, sh := range mgr.Shards() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if sh == nil || sh.Raft == nil || !sh.Raft.IsLeader() {
+			continue
+		}
+		targetID, targetAddr := firstPeerTarget(selfID, peers, sh.Voters)
+		if targetID == "" {
+			continue
+		}
+		if err := sh.Raft.TransferLeadership(targetID, targetAddr, timeout); err != nil {
+			errs = append(errs, fmt.Errorf("shard %d: %w", sh.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func firstPeerTarget(selfID string, peers map[string]string, voters []string) (string, string) {
+	if len(voters) > 0 {
+		for _, id := range voters {
+			if id == "" || id == selfID {
+				continue
+			}
+			if addr := peers[id]; addr != "" {
+				return id, addr
+			}
+		}
+		return "", ""
+	}
+	for id, addr := range peers {
+		if id != "" && id != selfID && addr != "" {
+			return id, addr
+		}
+	}
+	return "", ""
 }

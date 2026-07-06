@@ -90,9 +90,11 @@ type overlayArgs struct {
 	backpressureWarnReadAmp, backpressureCritRA   int
 	backpressureWarnDelay, backpressureCritDelay  time.Duration
 
-	streamRetention         time.Duration
-	streamRetentionMaxBytes int64
-	storageChangeLogMode    string
+	streamRetention             time.Duration
+	streamRetentionInterval     time.Duration
+	streamRetentionMaxBytes     int64
+	streamRetentionCleanupBatch int
+	storageChangeLogMode        string
 
 	identityJwks, identityIssuer, identityAudience string
 	identityClockSkew                              time.Duration
@@ -157,7 +159,8 @@ func runOverlay(cfg *config.Config, a overlayArgs) {
 		a.backpressureWarnDebt, a.backpressureCriticalDbt,
 		a.backpressureWarnReadAmp, a.backpressureCritRA,
 		a.backpressureWarnDelay, a.backpressureCritDelay,
-		a.streamRetention, a.streamRetentionMaxBytes, a.storageChangeLogMode,
+		a.streamRetention, a.streamRetentionInterval, a.streamRetentionMaxBytes,
+		a.streamRetentionCleanupBatch, a.storageChangeLogMode,
 		a.identityJwks, a.identityIssuer, a.identityAudience, a.identityClockSkew,
 		a.shardsN, a.replicationFactor, a.muxAddr,
 		a.grpcAddr, a.grpcRefl, a.tlsCert, a.tlsKey, a.mCA,
@@ -297,6 +300,39 @@ func TestOverlayFlags_RaftGroup(t *testing.T) {
 	}
 }
 
+func TestOverlayRaftIdentityLeaseFlags(t *testing.T) {
+	cfg := baseCfg()
+	OverlayRaftIdentityLeaseFlags(&cfg, "kubernetes", "/leases", "lease-n1", "cefasdb", "https://kubernetes.default.svc", 45*time.Second, 15*time.Second)
+
+	if cfg.RaftIdentity.LeaseBackend != "kubernetes" {
+		t.Errorf("LeaseBackend = %q", cfg.RaftIdentity.LeaseBackend)
+	}
+	if cfg.RaftIdentity.LeasePath != "/leases" || cfg.RaftIdentity.LeaseName != "lease-n1" || cfg.RaftIdentity.LeaseNamespace != "cefasdb" {
+		t.Errorf("lease identity fields = %+v", cfg.RaftIdentity)
+	}
+	if cfg.RaftIdentity.KubernetesAPIURL != "https://kubernetes.default.svc" {
+		t.Errorf("KubernetesAPIURL = %q", cfg.RaftIdentity.KubernetesAPIURL)
+	}
+	if cfg.RaftIdentity.LeaseTTL != 45*time.Second || cfg.RaftIdentity.LeaseRenewInterval != 15*time.Second {
+		t.Errorf("lease durations = %+v", cfg.RaftIdentity)
+	}
+}
+
+func TestOverlayLifecycleFlags(t *testing.T) {
+	cfg := baseCfg()
+	OverlayLifecycleFlags(&cfg, 20*time.Second, 500*time.Millisecond, 3*time.Second)
+
+	if cfg.Lifecycle.ShutdownGracePeriod != 20*time.Second {
+		t.Errorf("ShutdownGracePeriod = %v", cfg.Lifecycle.ShutdownGracePeriod)
+	}
+	if cfg.Lifecycle.DrainDelay != 500*time.Millisecond {
+		t.Errorf("DrainDelay = %v", cfg.Lifecycle.DrainDelay)
+	}
+	if cfg.Lifecycle.LeadershipTransferTimeout != 3*time.Second {
+		t.Errorf("LeadershipTransferTimeout = %v", cfg.Lifecycle.LeadershipTransferTimeout)
+	}
+}
+
 func TestOverlayFlags_PeerSetGroup(t *testing.T) {
 	cfg := baseCfg()
 	args := zeroArgs()
@@ -357,7 +393,9 @@ func TestOverlayFlags_RetentionAndBackup(t *testing.T) {
 	cfg := baseCfg()
 	args := zeroArgs()
 	args.streamRetention = 12 * time.Hour
+	args.streamRetentionInterval = 5 * time.Minute
 	args.streamRetentionMaxBytes = 256 << 20
+	args.streamRetentionCleanupBatch = 12345
 	args.storageChangeLogMode = "streams-only"
 	args.backupSchedulerEnabled = true
 	args.backupSchedulerInterval = 2 * time.Hour
@@ -373,6 +411,12 @@ func TestOverlayFlags_RetentionAndBackup(t *testing.T) {
 	}
 	if cfg.Storage.StreamRetentionMaxBytes != 256<<20 {
 		t.Errorf("StreamRetentionMaxBytes = %d", cfg.Storage.StreamRetentionMaxBytes)
+	}
+	if cfg.Storage.StreamRetentionInterval != 5*time.Minute {
+		t.Errorf("StreamRetentionInterval = %v", cfg.Storage.StreamRetentionInterval)
+	}
+	if cfg.Storage.StreamRetentionCleanupBatch != 12345 {
+		t.Errorf("StreamRetentionCleanupBatch = %d", cfg.Storage.StreamRetentionCleanupBatch)
 	}
 	if cfg.Storage.ChangeLogMode != "streams-only" {
 		t.Errorf("ChangeLogMode = %q", cfg.Storage.ChangeLogMode)

@@ -1,33 +1,49 @@
 package pebble
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
-// TestRetentionLoopFiresOnTick exercises the happy path: writes to a
-// stream-enabled table without calling ApplyStreamRetention explicitly,
-// then waits for one tick and asserts persisted state appeared.
-func TestRetentionLoopFiresOnTick(t *testing.T) {
+func TestRetentionLoopEnabledByDefault(t *testing.T) {
+	db := openChangeLogTestDBWithOptions(t, Options{
+		ChangeLogMode: ChangeLogModeStreamsOnly,
+	})
+	if db.retentionStopCh == nil {
+		t.Fatalf("loop should start with the default positive cleanup interval")
+	}
+	td := streamTestTable()
+	if err := db.PutItemWith(td, types.Item{
+		"id":     streamS("k"),
+		"status": streamS("v"),
+	}, PutOptions{}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if _, ok, _ := db.loadStreamRetentionState(td.Name); ok {
+		t.Fatalf("retention state should not exist without explicit apply")
+	}
+}
+
+// TestRetentionLoopFiresOnExplicitInterval exercises the opt-in path: writes to
+// a stream-enabled table without calling ApplyStreamRetention explicitly, then
+// waits for one tick and asserts expired CDC state was trimmed.
+func TestRetentionLoopFiresOnExplicitInterval(t *testing.T) {
 	db := openChangeLogTestDBWithOptions(t, Options{
 		ChangeLogMode: ChangeLogModeStreamsOnly,
 		StreamRetention: StreamRetentionOptions{
-			Interval: 50 * time.Millisecond,
+			Retention: 10 * time.Millisecond,
+			Interval:  50 * time.Millisecond,
 		},
 	})
 	td := streamTestTable()
 	for i := 0; i < 5; i++ {
-		if err := db.PutItemWith(td, types.Item{
-			"id":     streamS("k"),
-			"status": streamS("v"),
-		}, PutOptions{}); err != nil {
-			t.Fatalf("put: %v", err)
-		}
+		appendStreamChangeAt(t, db, td, fmt.Sprintf("k-%d", i), time.Now().Add(-time.Second))
 	}
 
-	// Before the tick, nothing was persisted (per-write refresh is gone).
+	// Before the tick, nothing was persisted.
 	if _, ok, err := db.loadStreamRetentionState(td.Name); err != nil {
 		t.Fatalf("load: %v", err)
 	} else if ok {
@@ -62,6 +78,7 @@ func TestRetentionLoopDisabledWhenIntervalNegative(t *testing.T) {
 	if _, ok, _ := db.loadStreamRetentionState(td.Name); ok {
 		t.Fatalf("retention state should not exist without explicit apply")
 	}
+	appendStreamChangeAt(t, db, td, "old", time.Now().Add(-48*time.Hour))
 	if _, err := db.ApplyStreamRetention(td.Name, time.Now()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

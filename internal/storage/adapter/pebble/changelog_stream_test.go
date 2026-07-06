@@ -61,9 +61,6 @@ func appendStreamChangeAt(t *testing.T, db *DB, td types.TableDescriptor, id str
 	if err := db.CommitBatch(b); err != nil {
 		t.Fatalf("commit change: %v", err)
 	}
-	if _, err := db.ApplyStreamRetention(td.Name, ts); err != nil {
-		t.Fatalf("apply retention: %v", err)
-	}
 }
 
 type streamCatalog struct {
@@ -317,7 +314,7 @@ func TestTTLReaperEmitsRemoveStreamRecord(t *testing.T) {
 	}
 }
 
-func TestStreamRetentionTrimsOldRecordsLogically(t *testing.T) {
+func TestStreamRetentionDeletesOldRecordsPhysically(t *testing.T) {
 	db := openChangeLogTestDBWithOptions(t, Options{
 		Path:            t.TempDir(),
 		StreamRetention: StreamRetentionOptions{Retention: time.Hour},
@@ -333,9 +330,7 @@ func TestStreamRetentionTrimsOldRecordsLogically(t *testing.T) {
 	}
 	if stats.OldestSequence != 2 ||
 		stats.NewestSequence != 2 ||
-		stats.RecordsAppended != 2 ||
-		stats.RecordsTrimmed != 1 ||
-		stats.RetainedBytes <= 0 {
+		stats.RecordsTrimmed != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
 
@@ -354,8 +349,8 @@ func TestStreamRetentionTrimsOldRecordsLogically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pitr records: %v", err)
 	}
-	if len(all) != 2 {
-		t.Fatalf("physical changelog records = %d, want 2", len(all))
+	if len(all) != 1 {
+		t.Fatalf("physical changelog records = %d, want 1", len(all))
 	}
 }
 
@@ -658,7 +653,7 @@ func TestStreamRetentionMetadataSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestStreamRetentionMaxBytesBoundsRetainedRecords(t *testing.T) {
+func TestStreamRetentionMaxBytesDoesNotTriggerFullScan(t *testing.T) {
 	db := openChangeLogTestDBWithOptions(t, Options{
 		Path:            t.TempDir(),
 		StreamRetention: StreamRetentionOptions{Retention: 24 * time.Hour, MaxBytes: 1},
@@ -672,7 +667,14 @@ func TestStreamRetentionMaxBytesBoundsRetainedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retention: %v", err)
 	}
-	if stats.OldestSequence != 2 || stats.RecordsTrimmed != 1 {
-		t.Fatalf("stats = %+v, want only newest retained under byte cap", stats)
+	if stats.RecordsTrimmed != 0 || stats.OldestSequence != 0 {
+		t.Fatalf("stats = %+v, want no byte-cap trim without expired records", stats)
+	}
+	records, _, err := db.StreamRecords(td.Name, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("stream records: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want both records retained", len(records))
 	}
 }

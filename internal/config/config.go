@@ -25,6 +25,11 @@ type Config struct {
 	HTTP struct {
 		Addr string `yaml:"addr"`
 	} `yaml:"http"`
+	Lifecycle struct {
+		ShutdownGracePeriod       time.Duration `yaml:"shutdownGracePeriod"`
+		DrainDelay                time.Duration `yaml:"drainDelay"`
+		LeadershipTransferTimeout time.Duration `yaml:"leadershipTransferTimeout"`
+	} `yaml:"lifecycle"`
 	GRPC struct {
 		Addr        string `yaml:"addr"`
 		Reflection  bool   `yaml:"reflection"`
@@ -63,6 +68,8 @@ type Config struct {
 		BackpressureCriticalDelay   time.Duration `yaml:"backpressureCriticalDelay"`
 		StreamRetention             time.Duration `yaml:"streamRetention"`
 		StreamRetentionMaxBytes     int64         `yaml:"streamRetentionMaxBytes"`
+		StreamRetentionInterval     time.Duration `yaml:"streamRetentionInterval"`
+		StreamRetentionCleanupBatch int           `yaml:"streamRetentionCleanupBatchSize"`
 		ChangeLogMode               string        `yaml:"changeLogMode"`
 	} `yaml:"storage"`
 	Cluster struct {
@@ -90,6 +97,16 @@ type Config struct {
 		LogCompressionMinSavingsRatio float64       `yaml:"logCompressionMinSavingsRatio"`
 		LogCompressionSkipCooldown    time.Duration `yaml:"logCompressionSkipCooldown"`
 	} `yaml:"raft"`
+	RaftIdentity struct {
+		LeaseBackend             string        `yaml:"leaseBackend"`
+		LeasePath                string        `yaml:"leasePath"`
+		LeaseName                string        `yaml:"leaseName"`
+		LeaseNamespace           string        `yaml:"leaseNamespace"`
+		LeaseTTL                 time.Duration `yaml:"leaseTtl"`
+		LeaseRenewInterval       time.Duration `yaml:"leaseRenewInterval"`
+		KubernetesAPIURL         string        `yaml:"kubernetesApiUrl"`
+		KubernetesServiceAccount string        `yaml:"kubernetesServiceAccount"`
+	} `yaml:"raftIdentity"`
 	Identity struct {
 		JwksURL   string        `yaml:"jwksUrl"`
 		Issuer    string        `yaml:"issuer"`
@@ -147,6 +164,9 @@ func Defaults() Config {
 	var c Config
 	c.Data = "./cefas-data"
 	c.HTTP.Addr = ":8080"
+	c.Lifecycle.ShutdownGracePeriod = 25 * time.Second
+	c.Lifecycle.DrainDelay = 2 * time.Second
+	c.Lifecycle.LeadershipTransferTimeout = 5 * time.Second
 	c.Identity.ClockSkew = 30 * time.Second
 	c.Metrics.Enabled = true
 	c.Metrics.HotspotBuckets = 64
@@ -169,6 +189,8 @@ func Defaults() Config {
 	c.BackupScheduler.NameTemplate = "scheduled-{{timestamp}}"
 	c.Storage.Lanes = "auto"
 	c.Storage.StreamRetention = 24 * time.Hour
+	c.Storage.StreamRetentionInterval = 30 * time.Second
+	c.Storage.StreamRetentionCleanupBatch = 65536
 	c.Raft.HeartbeatTimeout = 2 * time.Second
 	c.Raft.ElectionTimeout = 10 * time.Second
 	c.Raft.LeaderLeaseTimeout = 2 * time.Second
@@ -179,6 +201,9 @@ func Defaults() Config {
 	c.Raft.LogCompressionMinBytes = 1024
 	c.Raft.LogCompressionMinSavingsRatio = 0.05
 	c.Raft.LogCompressionSkipCooldown = time.Second
+	c.RaftIdentity.LeaseBackend = "file"
+	c.RaftIdentity.LeaseTTL = 30 * time.Second
+	c.RaftIdentity.LeaseRenewInterval = 10 * time.Second
 	c.Tracing.SampleRate = 1.0
 	return c
 }
@@ -271,6 +296,9 @@ func ApplyEnv(cfg *Config) error {
 
 	cfg.Data = str("DATA", cfg.Data)
 	cfg.HTTP.Addr = str("HTTP_ADDR", cfg.HTTP.Addr)
+	cfg.Lifecycle.ShutdownGracePeriod = dur("LIFECYCLE_SHUTDOWN_GRACE_PERIOD", cfg.Lifecycle.ShutdownGracePeriod)
+	cfg.Lifecycle.DrainDelay = dur("LIFECYCLE_DRAIN_DELAY", cfg.Lifecycle.DrainDelay)
+	cfg.Lifecycle.LeadershipTransferTimeout = dur("LIFECYCLE_LEADERSHIP_TRANSFER_TIMEOUT", cfg.Lifecycle.LeadershipTransferTimeout)
 	cfg.GRPC.Addr = str("GRPC_ADDR", cfg.GRPC.Addr)
 	cfg.GRPC.Reflection = boolean("GRPC_REFLECTION", cfg.GRPC.Reflection)
 	cfg.GRPC.TLSCertPath = str("GRPC_TLS_CERT", cfg.GRPC.TLSCertPath)
@@ -307,6 +335,8 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.BackpressureCriticalDelay = dur("STORAGE_BACKPRESSURE_CRITICAL_DELAY", cfg.Storage.BackpressureCriticalDelay)
 	cfg.Storage.StreamRetention = dur("STORAGE_STREAM_RETENTION", cfg.Storage.StreamRetention)
 	cfg.Storage.StreamRetentionMaxBytes = integer64("STORAGE_STREAM_RETENTION_MAX_BYTES", cfg.Storage.StreamRetentionMaxBytes)
+	cfg.Storage.StreamRetentionInterval = dur("STORAGE_STREAM_RETENTION_INTERVAL", cfg.Storage.StreamRetentionInterval)
+	cfg.Storage.StreamRetentionCleanupBatch = integer("STORAGE_STREAM_RETENTION_CLEANUP_BATCH_SIZE", cfg.Storage.StreamRetentionCleanupBatch)
 	cfg.Storage.ChangeLogMode = str("STORAGE_CHANGELOG_MODE", cfg.Storage.ChangeLogMode)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
@@ -331,6 +361,14 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Raft.LogCompressionMinBytes = integer("RAFT_LOG_COMPRESSION_MIN_BYTES", cfg.Raft.LogCompressionMinBytes)
 	cfg.Raft.LogCompressionMinSavingsRatio = flt("RAFT_LOG_COMPRESSION_MIN_SAVINGS_RATIO", cfg.Raft.LogCompressionMinSavingsRatio)
 	cfg.Raft.LogCompressionSkipCooldown = dur("RAFT_LOG_COMPRESSION_SKIP_COOLDOWN", cfg.Raft.LogCompressionSkipCooldown)
+	cfg.RaftIdentity.LeaseBackend = str("RAFT_IDENTITY_LEASE_BACKEND", cfg.RaftIdentity.LeaseBackend)
+	cfg.RaftIdentity.LeasePath = str("RAFT_IDENTITY_LEASE_PATH", cfg.RaftIdentity.LeasePath)
+	cfg.RaftIdentity.LeaseName = str("RAFT_IDENTITY_LEASE_NAME", cfg.RaftIdentity.LeaseName)
+	cfg.RaftIdentity.LeaseNamespace = str("RAFT_IDENTITY_LEASE_NAMESPACE", cfg.RaftIdentity.LeaseNamespace)
+	cfg.RaftIdentity.LeaseTTL = dur("RAFT_IDENTITY_LEASE_TTL", cfg.RaftIdentity.LeaseTTL)
+	cfg.RaftIdentity.LeaseRenewInterval = dur("RAFT_IDENTITY_LEASE_RENEW_INTERVAL", cfg.RaftIdentity.LeaseRenewInterval)
+	cfg.RaftIdentity.KubernetesAPIURL = str("RAFT_IDENTITY_KUBERNETES_API_URL", cfg.RaftIdentity.KubernetesAPIURL)
+	cfg.RaftIdentity.KubernetesServiceAccount = str("RAFT_IDENTITY_KUBERNETES_SERVICE_ACCOUNT", cfg.RaftIdentity.KubernetesServiceAccount)
 
 	cfg.Identity.JwksURL = str("IDENTITY_JWKS_URL", cfg.Identity.JwksURL)
 	cfg.Identity.Issuer = str("IDENTITY_ISSUER", cfg.Identity.Issuer)

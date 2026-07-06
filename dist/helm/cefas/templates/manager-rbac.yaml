@@ -1,0 +1,79 @@
+{{- if .Values.manager.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cefas.fullname" . }}-manager
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - endpoints
+      - persistentvolumeclaims
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cefas.fullname" . }}-manager
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cefas.serviceAccountName" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cefas.fullname" . }}-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cefas.fullname" . }}-manager
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cefas.fullname" . }}-manager
+  labels:
+    {{- include "cefas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cefas.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cefas.fullname" . }}-manager
+{{- end }}

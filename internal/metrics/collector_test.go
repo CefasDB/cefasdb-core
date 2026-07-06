@@ -62,7 +62,10 @@ func TestRunStorageCollectorExposesPebbleAndLeaderMetrics(t *testing.T) {
 
 func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	m := New()
-	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
+	db, err := pebble.Open(pebble.Options{
+		Path:            t.TempDir(),
+		StreamRetention: pebble.StreamRetentionOptions{Retention: time.Millisecond},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +83,7 @@ func TestRunStorageCollectorExposesStreamRetentionMetrics(t *testing.T) {
 	}, pebble.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	wait.For(5 * time.Millisecond)
 	if _, err := db.ApplyStreamRetention(td.Name, time.Now()); err != nil {
 		t.Fatal(err)
 	}

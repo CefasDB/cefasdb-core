@@ -6,7 +6,7 @@ metadata:
     {{- include "cefas.labels" . | nindent 4 }}
 spec:
   serviceName: {{ include "cefas.headless" . }}
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ include "cefas.resolvedReplicaCount" . }}
   podManagementPolicy: Parallel
   selector:
     matchLabels:
@@ -30,15 +30,39 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      terminationGracePeriodSeconds: 30
+      {{- if .Values.affinity }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if and .Values.resilience.enabled .Values.resilience.scheduling.antiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: {{ .Values.resilience.scheduling.antiAffinity.weight }}
+              podAffinityTerm:
+                topologyKey: {{ .Values.resilience.scheduling.antiAffinity.topologyKey | quote }}
+                labelSelector:
+                  matchLabels:
+                    {{- include "cefas.selectorLabels" . | nindent 20 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml .Values.topologySpreadConstraints | nindent 8 }}
+      {{- else if and .Values.resilience.enabled .Values.resilience.scheduling.topologySpread.enabled }}
+      topologySpreadConstraints:
+        {{- range .Values.resilience.scheduling.topologySpread.topologyKeys }}
+        - maxSkew: {{ $.Values.resilience.scheduling.topologySpread.maxSkew }}
+          topologyKey: {{ . | quote }}
+          whenUnsatisfiable: {{ $.Values.resilience.scheduling.topologySpread.whenUnsatisfiable | quote }}
+          labelSelector:
+            matchLabels:
+              {{- include "cefas.selectorLabels" $ | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
       containers:
         - name: cefas
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -50,6 +74,21 @@ spec:
             - "/etc/cefas/cefas.yaml"
             - "-raft-id"
             - "$(POD_NAME)"
+            {{- if .Values.raftIdentity.lease.enabled }}
+            - "-raft-identity-lease-backend"
+            - {{ .Values.raftIdentity.lease.backend | quote }}
+            - "-raft-identity-lease-name"
+            - "{{ default (include "cefas.fullname" .) .Values.raftIdentity.lease.namePrefix }}-$(POD_NAME)"
+            - "-raft-identity-lease-namespace"
+            - "$(POD_NAMESPACE)"
+            - "-raft-identity-lease-ttl"
+            - {{ .Values.raftIdentity.lease.ttl | quote }}
+            - "-raft-identity-lease-renew-interval"
+            - {{ .Values.raftIdentity.lease.renewInterval | quote }}
+            {{- else }}
+            - "-raft-identity-lease-backend"
+            - "off"
+            {{- end }}
             {{- with .Values.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -58,6 +97,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           ports:
             - name: http
               containerPort: {{ .Values.service.http }}
@@ -69,6 +112,8 @@ spec:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- include "cefas.startupProbe" . | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/cefas
@@ -76,7 +121,7 @@ spec:
               mountPath: /etc/cefas
               readOnly: true
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- include "cefas.dbResources" . | nindent 12 }}
       volumes:
         - name: config
           configMap:
@@ -94,6 +139,8 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: data
+        labels:
+          {{- include "cefas.selectorLabels" . | nindent 10 }}
       spec:
         accessModes: ["ReadWriteOnce"]
         {{- if .Values.persistence.storageClass }}

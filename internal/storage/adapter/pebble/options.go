@@ -66,23 +66,25 @@ type BackpressureOptions struct {
 }
 
 const (
-	DefaultStreamRetention         = 24 * time.Hour
-	DefaultStreamRetentionInterval = 30 * time.Second
+	DefaultStreamRetention             = 24 * time.Hour
+	DefaultStreamRetentionLoopInterval = 30 * time.Second
+	DefaultStreamRetentionCleanupBatch = 65536
 )
 
-// StreamRetentionOptions controls logical DynamoDB Streams retention.
-// Retention defaults to 24h for DynamoDB parity. MaxBytes <= 0 means
-// only the time window is enforced. Trimming advances per-table stream
-// high-water marks but keeps the physical changelog for PITR.
+// StreamRetentionOptions controls DynamoDB Streams / CDC retention.
+// Retention defaults to 24h for DynamoDB parity. Expiration is physical and
+// lazy: each changelog entry receives a time-ordered expiration pointer on
+// append, and the background cleaner deletes only expired pointers in bounded
+// batches.
 //
-// Interval controls how often the background loop scans stream-enabled
-// tables and applies retention. Defaults to 30s. Set to a negative
-// duration to disable the loop (callers can still invoke
-// ApplyStreamRetention explicitly). Zero inherits the default.
+// Interval controls the cleaner cadence. Positive enables the cleaner,
+// negative disables it, and zero inherits the default. MaxBytes is retained for
+// config compatibility; the physical cleaner is time-window based.
 type StreamRetentionOptions struct {
 	Retention time.Duration
 	MaxBytes  int64
 	Interval  time.Duration
+	BatchSize int
 }
 
 func normalizeStreamRetentionOptions(o StreamRetentionOptions) StreamRetentionOptions {
@@ -93,7 +95,10 @@ func normalizeStreamRetentionOptions(o StreamRetentionOptions) StreamRetentionOp
 		o.MaxBytes = 0
 	}
 	if o.Interval == 0 {
-		o.Interval = DefaultStreamRetentionInterval
+		o.Interval = DefaultStreamRetentionLoopInterval
+	}
+	if o.BatchSize <= 0 {
+		o.BatchSize = DefaultStreamRetentionCleanupBatch
 	}
 	return o
 }
@@ -114,8 +119,8 @@ func normalizeProfile(profile string) string {
 }
 
 // normalizeChangeLogMode resolves the wire string into the canonical
-// mode. Empty input maps to "streams-only" — only tables with stream
-// enabled pay the per-mutation changelog write. Operators who need
+// mode. Empty input maps to "streams-only" — only tables with stream enabled
+// pay the per-mutation changelog write. Operators who need retention-bound
 // PITR over every table opt in explicitly with "always".
 func normalizeChangeLogMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {

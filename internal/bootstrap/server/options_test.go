@@ -45,6 +45,8 @@ func fixtureConfig() config.Config {
 
 	c.Storage.StreamRetention = 12 * time.Hour
 	c.Storage.StreamRetentionMaxBytes = 1 << 30
+	c.Storage.StreamRetentionInterval = 5 * time.Minute
+	c.Storage.StreamRetentionCleanupBatch = 12345
 	c.Storage.ChangeLogMode = "streams-only"
 
 	c.Metrics.HotspotBuckets = 32
@@ -102,6 +104,12 @@ func TestStorageOptions(t *testing.T) {
 	}
 	if opts.StreamRetention.Retention != 12*time.Hour {
 		t.Errorf("StreamRetention.Retention = %v", opts.StreamRetention.Retention)
+	}
+	if opts.StreamRetention.Interval != 5*time.Minute {
+		t.Errorf("StreamRetention.Interval = %v", opts.StreamRetention.Interval)
+	}
+	if opts.StreamRetention.BatchSize != 12345 {
+		t.Errorf("StreamRetention.BatchSize = %d", opts.StreamRetention.BatchSize)
 	}
 	if opts.ChangeLogMode != "streams-only" {
 		t.Errorf("ChangeLogMode = %q", opts.ChangeLogMode)
@@ -324,6 +332,12 @@ func TestStreamRetentionOptions(t *testing.T) {
 	}
 	if got.MaxBytes != 1<<30 {
 		t.Errorf("MaxBytes = %d", got.MaxBytes)
+	}
+	if got.Interval != 5*time.Minute {
+		t.Errorf("Interval = %v", got.Interval)
+	}
+	if got.BatchSize != 12345 {
+		t.Errorf("BatchSize = %d", got.BatchSize)
 	}
 }
 

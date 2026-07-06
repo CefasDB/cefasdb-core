@@ -33,7 +33,8 @@ func OverlayFlags(
 	backpressureWarnDebt, backpressureCriticalDebt uint64,
 	backpressureWarnReadAmp, backpressureCriticalReadAmp int,
 	backpressureWarnDelay, backpressureCriticalDelay time.Duration,
-	streamRetention time.Duration, streamRetentionMaxBytes int64,
+	streamRetention, streamRetentionInterval time.Duration, streamRetentionMaxBytes int64,
+	streamRetentionCleanupBatch int,
 	storageChangeLogMode string,
 	identityJwks, identityIssuer, identityAudience string, identityClockSkew time.Duration,
 	shardsN, replicationFactor int, muxAddr string,
@@ -200,8 +201,14 @@ func OverlayFlags(
 	if streamRetention > 0 {
 		cfg.Storage.StreamRetention = streamRetention
 	}
+	if streamRetentionInterval != 0 {
+		cfg.Storage.StreamRetentionInterval = streamRetentionInterval
+	}
 	if streamRetentionMaxBytes > 0 {
 		cfg.Storage.StreamRetentionMaxBytes = streamRetentionMaxBytes
+	}
+	if streamRetentionCleanupBatch > 0 {
+		cfg.Storage.StreamRetentionCleanupBatch = streamRetentionCleanupBatch
 	}
 	if storageChangeLogMode != "" {
 		cfg.Storage.ChangeLogMode = storageChangeLogMode
@@ -306,6 +313,55 @@ func OverlayFlags(
 	}
 	if backupSchedulerRetentionDryRun {
 		cfg.BackupScheduler.Retention.DryRun = true
+	}
+}
+
+// OverlayRaftIdentityLeaseFlags keeps the newer identity-lease flags
+// out of the already-large OverlayFlags signature while preserving the
+// same precedence rule: only explicitly non-zero flag values override
+// env/YAML/default config.
+func OverlayRaftIdentityLeaseFlags(
+	cfg *config.Config,
+	backend, path, name, namespace, kubernetesAPIURL string,
+	ttl, renewInterval time.Duration,
+) {
+	if backend != "" {
+		cfg.RaftIdentity.LeaseBackend = backend
+	}
+	if path != "" {
+		cfg.RaftIdentity.LeasePath = path
+	}
+	if name != "" {
+		cfg.RaftIdentity.LeaseName = name
+	}
+	if namespace != "" {
+		cfg.RaftIdentity.LeaseNamespace = namespace
+	}
+	if kubernetesAPIURL != "" {
+		cfg.RaftIdentity.KubernetesAPIURL = kubernetesAPIURL
+	}
+	if ttl > 0 {
+		cfg.RaftIdentity.LeaseTTL = ttl
+	}
+	if renewInterval > 0 {
+		cfg.RaftIdentity.LeaseRenewInterval = renewInterval
+	}
+}
+
+// OverlayLifecycleFlags keeps shutdown/drain tuning separate from the
+// large historical OverlayFlags signature.
+func OverlayLifecycleFlags(
+	cfg *config.Config,
+	shutdownGracePeriod, drainDelay, leadershipTransferTimeout time.Duration,
+) {
+	if shutdownGracePeriod > 0 {
+		cfg.Lifecycle.ShutdownGracePeriod = shutdownGracePeriod
+	}
+	if drainDelay >= 0 {
+		cfg.Lifecycle.DrainDelay = drainDelay
+	}
+	if leadershipTransferTimeout > 0 {
+		cfg.Lifecycle.LeadershipTransferTimeout = leadershipTransferTimeout
 	}
 }
 
