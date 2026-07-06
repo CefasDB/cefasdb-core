@@ -312,6 +312,13 @@ func (m *Manager) openShard(ctx context.Context, shardID uint32) (*Shard, error)
 }
 
 func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, meta placement.ShardPlacement) (*Shard, error) {
+	shard := shardFromPlacement(shardID, meta, m.cfg.SelfID)
+	explicitMembers := len(meta.Voters) > 0 || len(meta.NonVoters) > 0
+	multiNode := m.mux != nil || len(m.cfg.Peers) > 0
+	if multiNode && explicitMembers && !shard.IsLocalVoter && !shard.IsLocalNonVoter {
+		return shard, nil
+	}
+
 	shardDir := filepath.Join(m.cfg.Root, "shards", fmt.Sprintf("%d", shardID))
 	stateDir := filepath.Join(shardDir, "state")
 	raftDir := filepath.Join(shardDir, "raft")
@@ -340,18 +347,8 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 
 	if m.mux == nil && len(m.cfg.Peers) == 0 {
 		// Single-node mode (no raft). The pebble.DB stands alone.
-		return &Shard{
-			ID:              shardID,
-			State:           meta.State,
-			Epoch:           meta.Epoch,
-			Ranges:          append([]placement.TokenRange(nil), meta.Ranges...),
-			Voters:          append([]string(nil), meta.Voters...),
-			NonVoters:       append([]string(nil), meta.NonVoters...),
-			LeaderHint:      meta.LeaderHint,
-			IsLocalVoter:    containsString(meta.Voters, m.cfg.SelfID),
-			IsLocalNonVoter: containsString(meta.NonVoters, m.cfg.SelfID),
-			Storage:         st,
-		}, nil
+		shard.Storage = st
+		return shard, nil
 	}
 
 	raftProfile := m.cfg.RaftProfile
@@ -412,6 +409,13 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		return nil, fmt.Errorf("raft open: %w", err)
 	}
 	st.AttachReplicator(rdb)
+	shard.Storage = st
+	shard.RaftStorage = raftStore
+	shard.Raft = rdb
+	return shard, nil
+}
+
+func shardFromPlacement(shardID uint32, meta placement.ShardPlacement, selfID string) *Shard {
 	return &Shard{
 		ID:              shardID,
 		State:           meta.State,
@@ -420,12 +424,9 @@ func (m *Manager) openShardWithPlacement(ctx context.Context, shardID uint32, me
 		Voters:          append([]string(nil), meta.Voters...),
 		NonVoters:       append([]string(nil), meta.NonVoters...),
 		LeaderHint:      meta.LeaderHint,
-		IsLocalVoter:    containsString(meta.Voters, m.cfg.SelfID),
-		IsLocalNonVoter: containsString(meta.NonVoters, m.cfg.SelfID),
-		Storage:         st,
-		RaftStorage:     raftStore,
-		Raft:            rdb,
-	}, nil
+		IsLocalVoter:    containsString(meta.Voters, selfID),
+		IsLocalNonVoter: containsString(meta.NonVoters, selfID),
+	}
 }
 
 func (m *Manager) shardPlacement(shardID uint32) (placement.ShardPlacement, bool) {
@@ -832,6 +833,8 @@ func (m *Manager) applyPlacement(cat placement.PlacementCatalog, save bool) erro
 		sh.Voters = append([]string(nil), meta.Voters...)
 		sh.NonVoters = append([]string(nil), meta.NonVoters...)
 		sh.LeaderHint = meta.LeaderHint
+		sh.IsLocalVoter = containsString(meta.Voters, m.cfg.SelfID)
+		sh.IsLocalNonVoter = containsString(meta.NonVoters, m.cfg.SelfID)
 	}
 	path := m.placementPath
 	snapshot := m.cat.Clone()
@@ -913,6 +916,8 @@ func (m *Manager) recordShardVoter(shardID uint32, id string, add bool) error {
 			m.shards[shardID].Voters = append([]string(nil), m.cat.Shards[i].Voters...)
 			m.shards[shardID].NonVoters = append([]string(nil), m.cat.Shards[i].NonVoters...)
 			m.shards[shardID].Epoch = m.cat.Shards[i].Epoch
+			m.shards[shardID].IsLocalVoter = containsString(m.cat.Shards[i].Voters, m.cfg.SelfID)
+			m.shards[shardID].IsLocalNonVoter = containsString(m.cat.Shards[i].NonVoters, m.cfg.SelfID)
 		}
 		path := m.placementPath
 		snapshot := m.cat.Clone()

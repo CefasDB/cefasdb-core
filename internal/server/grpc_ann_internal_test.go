@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/cosine"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/vectorlsh"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 )
 
 func TestIndexedTopKDoesNotUseExactScanFallback(t *testing.T) {
@@ -362,5 +363,10 @@ func createANNTableAndItems(t *testing.T, ctx context.Context, srv *GRPCServer, 
 func clearPluginIndexBookForTest() {
 	pluginIndexBook.mu.Lock()
 	pluginIndexBook.entries = map[string]index.Descriptor{}
+	pluginIndexBook.tableRefreshedAt = map[string]time.Time{}
 	pluginIndexBook.mu.Unlock()
+
+	pluginIndexLocal.mu.Lock()
+	pluginIndexLocal.entries = map[string]*pluginIndexLocalSlot{}
+	pluginIndexLocal.mu.Unlock()
 }

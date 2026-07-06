@@ -80,6 +80,9 @@ func (s *GRPCServer) UpdateStreamSpecification(ctx context.Context, req *cefaspb
 			if i == 0 {
 				continue
 			}
+			if sh == nil || sh.Storage == nil {
+				continue
+			}
 			if cat, cerr := catalog.New(sh.Storage); cerr == nil {
 				_ = cat.UpdateTable(td)
 			}

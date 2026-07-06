@@ -1,0 +1,87 @@
+# Local three-node RF=3 profile for one-off bulk ingestion.
+#
+# It keeps the same shard/peer topology as cefasdb.rf3.yml, but disables the
+# autonomous rebalancer while the loader is writing tens of millions of rows.
+# Re-enable the normal profile after ingestion by restarting without the
+# docker-compose.cluster.bulk-load.yml override.
+
+data: /var/lib/cefas
+
+http:
+  addr: ":8080"
+
+grpc:
+  addr: ":9090"
+  reflection: true
+
+storage:
+  fsyncOnCommit: true
+  profile: balanced
+  raftProfile: raft
+
+  # Let the multi-shard manager derive per-shard cache/memtable budgets.
+  lanes: auto
+
+  backpressureEnabled: true
+  backpressureRejectCritical: true
+  backpressureWarningL0Files: 128
+  backpressureCriticalL0Files: 256
+  backpressureWarningDebtBytes: 1073741824
+  backpressureCriticalDebtBytes: 4294967296
+  backpressureWarningReadAmp: 32
+  backpressureCriticalReadAmp: 64
+  backpressureWarningDelay: 5ms
+  backpressureCriticalDelay: 50ms
+
+  changeLogMode: streams-only
+  streamRetention: 24h
+  streamRetentionMaxBytes: 4294967296
+
+cluster:
+  shards: 12
+  replicationFactor: 3
+  muxAddr: ":9100"
+  bootstrap: true
+  peers:
+    n1: "cefas-node-1:9100"
+    n2: "cefas-node-2:9100"
+    n3: "cefas-node-3:9100"
+  httpPeers:
+    n1: "http://cefas-node-1:8080"
+    n2: "http://cefas-node-2:8080"
+    n3: "http://cefas-node-3:8080"
+  grpcPeers:
+    n1: "cefas-node-1:9090"
+    n2: "cefas-node-2:9090"
+    n3: "cefas-node-3:9090"
+
+raft:
+  heartbeatTimeout: 2s
+  electionTimeout: 10s
+  leaderLeaseTimeout: 2s
+  commitTimeout: 100ms
+  applyTimeout: 60s
+  snapshotEntries: 65536
+  logCompression: snappy
+  logCompressionMinBytes: 1024
+  logCompressionMinSavingsRatio: 0.05
+  logCompressionSkipCooldown: 1s
+
+metrics:
+  enabled: true
+  hotspotBuckets: 64
+  hotspotWindow: 1m
+  hotspotCoolingWindow: 1m
+  hotspotMaxSummaries: 8
+  hotspotReadThreshold: 10000
+  hotspotWriteThreshold: 5000
+  hotspotBytesThreshold: 67108864
+  hotspotLatencyThreshold: 50ms
+  hotspotCompactionDebtThresholdBytes: 1073741824
+  hotspotThrottleStateThreshold: 1
+
+rebalancer:
+  enabled: false
+
+backupScheduler:
+  enabled: false

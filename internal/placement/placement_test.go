@@ -46,12 +46,21 @@ func TestDefaultPlacementWithReplicationFactorRotatesDataVoters(t *testing.T) {
 	if got := cat.Shards[0].Voters; !sameStringsPlacement(got, []string{"n1", "n2", "n3", "n4"}) {
 		t.Fatalf("metadata shard voters = %v, want every peer", got)
 	}
+	if len(cat.Shards[0].Ranges) != 0 {
+		t.Fatalf("metadata shard ranges = %+v, want none", cat.Shards[0].Ranges)
+	}
+	if len(cat.Shards[1].Ranges) != 1 || cat.Shards[1].Ranges[0].Start != 0 {
+		t.Fatalf("first data shard range = %+v, want start at 0", cat.Shards[1].Ranges)
+	}
+	if len(cat.Shards[len(cat.Shards)-1].Ranges) != 1 || cat.Shards[len(cat.Shards)-1].Ranges[0].End != 0 {
+		t.Fatalf("last data shard range = %+v, want wrap to 0", cat.Shards[len(cat.Shards)-1].Ranges)
+	}
 	want := [][]string{
 		{"n1", "n2", "n3", "n4"},
-		{"n2", "n3"},
-		{"n3", "n4"},
-		{"n1", "n4"},
-		{"n1", "n2"},
+		{"n2", "n4"},
+		{"n1", "n3"},
+		{"n2", "n4"},
+		{"n1", "n3"},
 	}
 	for i, sh := range cat.Shards {
 		if !sameStringsPlacement(sh.Voters, want[i]) {
@@ -59,6 +68,40 @@ func TestDefaultPlacementWithReplicationFactorRotatesDataVoters(t *testing.T) {
 		}
 		if !containsString(sh.Voters, sh.LeaderHint) {
 			t.Fatalf("shard %d leader hint %q is not a voter in %v", sh.ID, sh.LeaderHint, sh.Voters)
+		}
+	}
+}
+
+func TestDefaultPlacementWithReplicationFactorSpacesDataVoters(t *testing.T) {
+	cat := DefaultPlacementWithReplicationFactor(
+		6,
+		"n1",
+		map[string]string{
+			"n1": "127.0.0.1:9101",
+			"n2": "127.0.0.1:9102",
+			"n3": "127.0.0.1:9103",
+			"n4": "127.0.0.1:9104",
+			"n5": "127.0.0.1:9105",
+			"n6": "127.0.0.1:9106",
+			"n7": "127.0.0.1:9107",
+		},
+		nil,
+		NodeCapacity{},
+		PlacementStrategyTokenRange,
+		3,
+	)
+
+	want := [][]string{
+		{"n1", "n2", "n3", "n4", "n5", "n6", "n7"},
+		{"n1", "n2", "n5"},
+		{"n2", "n3", "n6"},
+		{"n3", "n4", "n7"},
+		{"n1", "n4", "n5"},
+		{"n2", "n5", "n6"},
+	}
+	for i, sh := range cat.Shards {
+		if !sameStringsPlacement(sh.Voters, want[i]) {
+			t.Fatalf("shard %d voters = %v, want %v", i, sh.Voters, want[i])
 		}
 	}
 }

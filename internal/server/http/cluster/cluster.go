@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/cluster"
-	"github.com/CefasDb/cefasdb/internal/placement"
-	"github.com/CefasDb/cefasdb/internal/tracing"
 	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/placement"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	"github.com/CefasDb/cefasdb/internal/tracing"
 )
 
 // Cluster is the minimal cluster-management surface this package
@@ -84,13 +84,14 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := clusterStatusResponse{Mode: "single-node"}
 	if h.cluster != nil {
 		resp.Mode = "raft"
-		resp.IsLeader = h.cluster.IsLeader()
 		resp.SelfID = h.cluster.SelfID()
 		resp.BindAddr = h.cluster.BindAddr()
-		resp.LeaderHTTP = h.cluster.LeaderHTTPAddr()
+		if h.manager == nil {
+			resp.IsLeader = h.cluster.IsLeader()
+			resp.LeaderHTTP = h.cluster.LeaderHTTPAddr()
+		}
 	}
 	if h.manager != nil {
-		_ = h.manager.RefreshPlacement()
 		cat := h.manager.Placement()
 		resp.RoutingEpoch = cat.Epoch
 		resp.PlacementVersion = cat.Version
@@ -99,7 +100,7 @@ func (h *Handlers) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Shards = append([]placement.ShardPlacement(nil), cat.Shards...)
 		resp.Nodes = sortedPlacementNodes(cat)
 	}
-	if h.extraStatus != nil {
+	if h.extraStatus != nil && (h.manager == nil || r.URL.Query().Get("extras") == "1") {
 		extra := h.extraStatus()
 		if v, ok := extra["hotRanges"]; ok {
 			resp.HotRanges = v

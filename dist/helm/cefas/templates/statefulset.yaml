@@ -16,9 +16,14 @@ spec:
       labels:
         {{- include "cefas.selectorLabels" . | nindent 8 }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       serviceAccountName: {{ include "cefas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
       {{- with .Values.nodeSelector }}
@@ -62,6 +67,8 @@ spec:
         - name: cefas
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           args:
             - "-config"
             - "/etc/cefas/cefas.yaml"
@@ -81,6 +88,9 @@ spec:
             {{- else }}
             - "-raft-identity-lease-backend"
             - "off"
+            {{- end }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
             - name: POD_NAME
@@ -116,6 +126,15 @@ spec:
         - name: config
           configMap:
             name: {{ include "cefas.fullname" . }}-config
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir:
+            {{- with .Values.persistence.emptyDir.sizeLimit }}
+            sizeLimit: {{ . | quote }}
+            {{- else }}
+            {}
+            {{- end }}
+        {{- end }}
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:

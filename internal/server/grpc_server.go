@@ -155,6 +155,9 @@ func (s *GRPCServer) allShards() []*pebble.DB {
 	}
 	out := make([]*pebble.DB, 0, len(s.manager.Shards()))
 	for _, sh := range s.manager.Shards() {
+		if sh == nil || sh.Storage == nil {
+			continue
+		}
 		out = append(out, sh.Storage)
 	}
 	return out
@@ -228,6 +231,9 @@ func (s *GRPCServer) CreateTable(ctx context.Context, req *cefaspb.CreateTableRe
 	if s.manager != nil {
 		for i, sh := range s.manager.Shards() {
 			if i == 0 {
+				continue
+			}
+			if sh == nil || sh.Storage == nil {
 				continue
 			}
 			if cat, err := catalog.New(sh.Storage); err == nil {
@@ -323,6 +329,9 @@ func (s *GRPCServer) UpdateTimeToLive(ctx context.Context, req *cefaspb.UpdateTi
 	if s.manager != nil {
 		for i, sh := range s.manager.Shards() {
 			if i == 0 {
+				continue
+			}
+			if sh == nil || sh.Storage == nil {
 				continue
 			}
 			if cat, cerr := catalog.New(sh.Storage); cerr == nil {
@@ -1253,18 +1262,23 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	ex := &cefassql.Executor{
-		Storage:              s.db,
-		Catalog:              s.cat,
-		TableDropHook:        s.deletePluginIndexDescriptorsForTable,
-		DistanceResolver:     s.sqlDistanceResolver,
-		ANNCandidateResolver: s.sqlANNCandidateResolver,
+	var res *cefassql.Result
+	if p, ok := plan.(*cefassql.PlanScan); ok && s.manager != nil {
+		res, err = s.executeClusterSQLScan(ctx, p)
+	} else {
+		ex := &cefassql.Executor{
+			Storage:              s.db,
+			Catalog:              s.cat,
+			TableDropHook:        s.deletePluginIndexDescriptorsForTable,
+			DistanceResolver:     s.sqlDistanceResolver,
+			ANNCandidateResolver: s.sqlANNCandidateResolver,
+		}
+		ex.MutationHook = combineMutationHooks(
+			s.pluginIndexMutationHookForPlan(plan),
+			s.mvMutationHookForPlan(ctx, plan),
+		)
+		res, err = ex.Execute(plan)
 	}
-	ex.MutationHook = combineMutationHooks(
-		s.pluginIndexMutationHookForPlan(plan),
-		s.mvMutationHookForPlan(ctx, plan),
-	)
-	res, err := ex.Execute(plan)
 	if err != nil {
 		if _, ok := status.FromError(err); ok {
 			return nil, err
@@ -1276,6 +1290,95 @@ func (s *GRPCServer) Sql(ctx context.Context, req *cefaspb.SqlRequest) (*cefaspb
 		out.Rows = append(out.Rows, &cefaspb.Item{Attributes: itemToPB(row)})
 	}
 	return out, nil
+}
+
+func (s *GRPCServer) executeClusterSQLScan(ctx context.Context, p *cefassql.PlanScan) (*cefassql.Result, error) {
+	var (
+		rows []types.Item
+		n    int
+	)
+	seen := make(map[string]struct{})
+	visit := func(it types.Item) (bool, error) {
+		id := scanItemKeyString(it)
+		if id != "" {
+			if _, dup := seen[id]; dup {
+				return true, nil
+			}
+			seen[id] = struct{}{}
+		}
+		if p.Predicate != nil {
+			keep, err := cefassql.EvalBool(p.Predicate, it, nil)
+			if err != nil {
+				return false, status.Error(codes.InvalidArgument, fmt.Sprintf("evaluate predicate: %v", err))
+			}
+			if !keep {
+				return true, nil
+			}
+		}
+		if p.Count {
+			n++
+			return p.Limit <= 0 || n < p.Limit, nil
+		}
+		rows = append(rows, projectSQLScanRow(it, p.Project))
+		return p.Limit <= 0 || len(rows) < p.Limit, nil
+	}
+	for _, sh := range s.manager.Shards() {
+		if sh == nil {
+			continue
+		}
+		if sh.IsLocalVoter || sh.IsLocalNonVoter {
+			if sh.Storage == nil {
+				return nil, status.Errorf(codes.Unavailable, "cluster: local shard %d has no storage", sh.ID)
+			}
+			var stopErr error
+			stopped := false
+			err := sh.Storage.ScanTableWithCtx(ctx, p.Table, func(it types.Item) bool {
+				cont, err := visit(it)
+				if err != nil {
+					stopErr = err
+					return false
+				}
+				if !cont {
+					stopped = true
+					return false
+				}
+				return true
+			})
+			if stopErr != nil {
+				return nil, stopErr
+			}
+			if err != nil {
+				return nil, err
+			}
+			if stopped {
+				break
+			}
+			continue
+		}
+		if err := s.scanRemoteShard(ctx, sh.ID, p.Table, visit); err != nil {
+			return nil, err
+		}
+		if (p.Count && p.Limit > 0 && n >= p.Limit) || (!p.Count && p.Limit > 0 && len(rows) >= p.Limit) {
+			break
+		}
+	}
+	if p.Count {
+		return &cefassql.Result{AffectedRows: n}, nil
+	}
+	return &cefassql.Result{Rows: rows}, nil
+}
+
+func projectSQLScanRow(it types.Item, cols []string) types.Item {
+	if len(cols) == 0 {
+		return it
+	}
+	out := make(types.Item, len(cols))
+	for _, col := range cols {
+		if av, ok := it[col]; ok {
+			out[col] = av
+		}
+	}
+	return out
 }
 
 func (s *GRPCServer) sqlDistanceResolver(table, field string, target types.AttributeValue) (cquery.DistanceOp, error) {
@@ -1424,14 +1527,19 @@ func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (peb
 		return s.db.CreateBackupForShard(name, tables, "0", 0)
 	}
 	var primary pebble.BackupMetadata
+	primarySet := false
 	coverage := make([]pebble.BackupShardCoverage, 0, len(s.manager.Shards()))
-	for i, sh := range s.manager.Shards() {
+	for _, sh := range s.manager.Shards() {
+		if sh == nil || sh.Storage == nil {
+			continue
+		}
 		meta, err := sh.Storage.CreateBackupForShard(name, tables, fmt.Sprint(sh.ID), sh.Epoch)
 		if err != nil {
 			return pebble.BackupMetadata{}, err
 		}
-		if i == 0 {
+		if !primarySet {
 			primary = meta
+			primarySet = true
 		}
 		if len(meta.ShardCoverage) > 0 {
 			coverage = append(coverage, meta.ShardCoverage[0])
@@ -1442,6 +1550,9 @@ func (s *GRPCServer) createBackupAcrossShards(name string, tables []string) (peb
 				TableStats:     meta.TableStats,
 			})
 		}
+	}
+	if !primarySet {
+		return pebble.BackupMetadata{}, fmt.Errorf("cluster: no local shards available for backup")
 	}
 	primary.ShardCoverage = coverage
 	if err := s.db.StoreBackupMetadata(primary); err != nil {
@@ -1512,6 +1623,9 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 		if s.manager != nil {
 			for i, sh := range s.manager.Shards() {
 				if i == 0 {
+					continue
+				}
+				if sh == nil || sh.Storage == nil {
 					continue
 				}
 				if cat, cerr := catalog.New(sh.Storage); cerr == nil {
@@ -1753,13 +1867,14 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 	resp := &cefaspb.ClusterStatusResponse{Mode: "single-node"}
 	if s.cluster != nil {
 		resp.Mode = "raft"
-		resp.IsLeader = s.cluster.IsLeader()
 		resp.SelfId = s.cluster.SelfID()
 		resp.BindAddr = s.cluster.BindAddr()
-		resp.LeaderHttp = s.cluster.LeaderHTTPAddr()
+		if s.manager == nil {
+			resp.IsLeader = s.cluster.IsLeader()
+			resp.LeaderHttp = s.cluster.LeaderHTTPAddr()
+		}
 	}
 	if s.manager != nil {
-		_ = s.manager.RefreshPlacement()
 		placement := s.manager.Placement()
 		resp.RoutingEpoch = placement.Epoch
 		resp.PlacementVersion = placement.Version
@@ -1768,10 +1883,10 @@ func (s *GRPCServer) ClusterStatus(ctx context.Context, _ *cefaspb.ClusterStatus
 		resp.Shards = pbShardPlacements(placement.Shards)
 		resp.Nodes = pbNodeDescriptors(sortedPlacementNodes(placement))
 	}
-	if s.metrics != nil {
+	if s.metrics != nil && s.manager == nil {
 		resp.HotRanges = pbRangeHotspotSummaries(s.metrics.RangeHotspotSummaries(0))
 	}
-	if s.backups != nil {
+	if s.backups != nil && s.manager == nil {
 		status := s.backups.Status()
 		resp.BackupScheduler = scheduledBackupStatusToPB(status)
 	}

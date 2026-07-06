@@ -6,8 +6,8 @@ import (
 
 	"github.com/CefasDb/cefasdb/internal/core/index"
 	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/internal/plugin/builtin/geohash"
+	"github.com/CefasDb/cefasdb/pkg/plugin"
 	"github.com/CefasDb/cefasdb/pkg/plugin/testharness"
 )
 
@@ -86,6 +86,65 @@ func TestQueryFindsItemsInCenterAndNeighbors(t *testing.T) {
 	}
 	if got["far"] {
 		t.Errorf("(0,0) leaked into the candidate set")
+	}
+}
+
+func TestQueryHonorsLimitDuringCandidateCollection(t *testing.T) {
+	h := testharness.New(t)
+	h.MustRegister(geohash.NewPlugin())
+	items := make([]model.Item, 0, 20)
+	for i := 0; i < 20; i++ {
+		items = append(items, item("near"+strconv.Itoa(i), -23.5505+float64(i)*1e-6, -46.6333))
+	}
+	h.SeedTable("Stores", items...)
+	if err := h.BuildIndex(desc()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	p, _ := h.Registry.Lookup("geohash")
+	ip := p.(plugin.IndexPlugin)
+	cs, err := ip.Query(desc(), plugin.IndexQuery{
+		Binds: map[string]model.AttributeValue{":center": centerAttr(-23.5505, -46.6333)},
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer cs.Close()
+	var got int
+	for {
+		_, ok := cs.Next()
+		if !ok {
+			break
+		}
+		got++
+	}
+	if got != 3 {
+		t.Fatalf("query returned %d candidates, want 3", got)
+	}
+}
+
+func TestUpdateSameItemThenDeleteLeavesNoBucketGhost(t *testing.T) {
+	p := geohash.NewPlugin()
+	d := desc()
+	row := item("same", -23.5505, -46.6333)
+	if err := p.Update(d, nil, row); err != nil {
+		t.Fatalf("first update: %v", err)
+	}
+	if err := p.Update(d, nil, row); err != nil {
+		t.Fatalf("second update: %v", err)
+	}
+	if err := p.Delete(d, row); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	cs, err := p.Query(d, plugin.IndexQuery{
+		Binds: map[string]model.AttributeValue{":center": centerAttr(-23.5505, -46.6333)},
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer cs.Close()
+	if c, ok := cs.Next(); ok {
+		t.Fatalf("got ghost candidate after delete: %+v", c.Key)
 	}
 }
 

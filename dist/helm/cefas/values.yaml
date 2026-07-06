@@ -8,7 +8,11 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 replicaCount: 1
+
+extraArgs: []
 
 serviceAccount:
   create: true
@@ -83,6 +87,8 @@ persistence:
   enabled: true
   size: 20Gi
   storageClass: ""
+  emptyDir:
+    sizeLimit: ""
 
 service:
   type: ClusterIP
@@ -109,11 +115,55 @@ cluster:
   replicationFactor: 0
   bootstrap: true
   fsyncOnCommit: false
+  generatePeers: true
+  peers: {}
+  httpPeers: {}
+  grpcPeers: {}
 
 storage:
+  profile: ""
+  raftProfile: ""
+  blockCacheSizeBytes: 0
+  memTableSizeBytes: 0
+  memTableStopWritesThreshold: 0
+  maxConcurrentCompactions: 0
+  l0CompactionConcurrency: 0
+  l0CompactionThreshold: 0
+  l0CompactionFileThreshold: 0
+  l0StopWritesThreshold: 0
+  bytesPerSync: 0
+  walBytesPerSync: 0
+  lanes: ""
+  laneReadWorkers: 0
+  laneWriteWorkers: 0
+  laneReadQueue: 0
+  laneWriteQueue: 0
+  backpressure:
+    enabled: false
+    rejectCritical: false
+    warningL0Files: 0
+    criticalL0Files: 0
+    warningDebtBytes: 0
+    criticalDebtBytes: 0
+    warningReadAmp: 0
+    criticalReadAmp: 0
+    warningDelay: ""
+    criticalDelay: ""
   # Physical CDC retention cleanup. Negative interval disables the cleaner.
   streamRetentionInterval: 30s
   streamRetentionCleanupBatchSize: 65536
+
+raft:
+  heartbeatTimeout: 2s
+  electionTimeout: 10s
+  leaderLeaseTimeout: 2s
+  commitTimeout: 100ms
+  applyTimeout: 30s
+  snapshotEntries: 65536
+  logCompression: snappy
+  logCompressionMinBytes: 1024
+  logCompressionMinSavingsRatio: 0.05
+  logCompressionSkipCooldown: 1s
 
 # Guards each raft-id with a persistent lease so a stale process cannot
 # keep serving after Kubernetes starts a replacement with the same id.
@@ -164,6 +214,14 @@ topologySpreadConstraints: []
 securityContext:
   runAsNonRoot: true
   runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
 livenessProbe:
   httpGet:

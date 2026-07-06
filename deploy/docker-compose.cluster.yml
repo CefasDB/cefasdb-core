@@ -1,128 +1,137 @@
-# Three-node Raft cluster for local load testing.
+# Three-node CefasDB multi-Raft cluster for local RF=3 testing.
 #
-# Start from a clean state:
-#   docker compose -p cefas-cluster -f deploy/docker-compose.cluster.yml down -v
-#   docker compose -p cefas-cluster -f deploy/docker-compose.cluster.yml up --build -d
+# This stack is intentionally separate from deploy/docker-compose.yml. It does
+# not mount or rewrite the single-node volume `deploy_cefasdb-data`.
 #
-# Host gRPC endpoints by default:
-#   n1: localhost:9191
-#   n2: localhost:9192
-#   n3: localhost:9193
-# Override host ports with CEFAS_NODE{1,2,3}_{HTTP,GRPC}_PORT.
-# The default storage profile is balanced so the three-node stack fits
-# Docker Desktop's local memory limit. Use STORAGE_PROFILE=write-heavy
-# when Docker has enough memory allocated for the larger Pebble caches.
+# Start the RF=3 cluster with observability:
+#   docker compose -p cefas-rf3 -f deploy/docker-compose.cluster.yml --profile observability up -d
+#
+# Host endpoints by default:
+#   n1: HTTP 127.0.0.1:18081, gRPC 127.0.0.1:9191
+#   n2: HTTP 127.0.0.1:18082, gRPC 127.0.0.1:9192
+#   n3: HTTP 127.0.0.1:18083, gRPC 127.0.0.1:9193
+#   Prometheus: http://127.0.0.1:9092
+#   Grafana:    http://127.0.0.1:3001
+#
+# Data safety note:
+#   Use `create-backup` on the single-node stack before migration. Starting
+#   multi-Raft directly against a single-node data directory would create a
+#   shard layout under /var/lib/cefas/shards and would not expose the existing
+#   single-node tables as clustered data.
 
 x-cefas-build: &cefas-build
   context: ..
   dockerfile: deploy/Dockerfile
   args:
-    VERSION: ${CEFAS_IMAGE_TAG:-latest}
+    VERSION: ${CEFAS_IMAGE_TAG:-dev}
+
+x-cefas-env: &cefas-env
+  GOMAXPROCS: ${CEFAS_RF3_GOMAXPROCS:-4}
+  GOMEMLIMIT: ${CEFAS_RF3_GOMEMLIMIT:-6GiB}
 
 x-cefas-common: &cefas-common
   image: ghcr.io/cefasdb/cefasdb:${CEFAS_IMAGE_TAG:-latest}
-  environment:
-    CEFAS_STORAGE_PROFILE: ${STORAGE_PROFILE:-balanced}
-    CEFAS_STORAGE_BACKPRESSURE_ENABLED: ${STORAGE_BACKPRESSURE_ENABLED:-true}
-    CEFAS_STORAGE_BACKPRESSURE_REJECT_CRITICAL: ${STORAGE_BACKPRESSURE_REJECT_CRITICAL:-true}
-    CEFAS_STORAGE_BACKPRESSURE_WARNING_L0_FILES: ${STORAGE_BACKPRESSURE_WARNING_L0_FILES:-64}
-    CEFAS_STORAGE_BACKPRESSURE_CRITICAL_L0_FILES: ${STORAGE_BACKPRESSURE_CRITICAL_L0_FILES:-128}
-    CEFAS_STORAGE_BACKPRESSURE_WARNING_DEBT_BYTES: ${STORAGE_BACKPRESSURE_WARNING_DEBT_BYTES:-268435456}
-    CEFAS_STORAGE_BACKPRESSURE_CRITICAL_DEBT_BYTES: ${STORAGE_BACKPRESSURE_CRITICAL_DEBT_BYTES:-805306368}
   command:
-    - "-data"
-    - "/var/lib/cefas"
-    - "-http"
-    - ":8080"
-    - "-grpc"
-    - ":9090"
-    - "-grpc-reflection"
-    - "-raft-bootstrap"
-    - "-raft-peers"
-    - "n1=cefas-node-1:7000,n2=cefas-node-2:7000,n3=cefas-node-3:7000"
-    - "-raft-http-peers"
-    - "n1=http://cefas-node-1:8080,n2=http://cefas-node-2:8080,n3=http://cefas-node-3:8080"
+    - "-config"
+    - "/etc/cefasdb/cefasdb.yml"
   expose:
-    - "7000"
     - "8080"
     - "9090"
+    - "9100"
+  cpus: ${CEFAS_RF3_NODE_CPUS:-4.0}
+  mem_limit: ${CEFAS_RF3_NODE_MEMORY_LIMIT:-8g}
+  restart: unless-stopped
+  stop_grace_period: 30s
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/cefasdb", "-help"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  networks:
+    - cefasdb-rf3
 
 services:
   cefas-node-1:
     <<: *cefas-common
     build: *cefas-build
-    command:
-      - "-data"
-      - "/var/lib/cefas"
-      - "-http"
-      - ":8080"
-      - "-grpc"
-      - ":9090"
-      - "-grpc-reflection"
-      - "-raft-bootstrap"
-      - "-raft-id"
-      - "n1"
-      - "-raft-bind"
-      - "cefas-node-1:7000"
-      - "-raft-peers"
-      - "n1=cefas-node-1:7000,n2=cefas-node-2:7000,n3=cefas-node-3:7000"
-      - "-raft-http-peers"
-      - "n1=http://cefas-node-1:8080,n2=http://cefas-node-2:8080,n3=http://cefas-node-3:8080"
+    environment:
+      <<: *cefas-env
+      CEFAS_CLUSTER_SELF_ID: n1
     ports:
-      - "${CEFAS_NODE1_HTTP_PORT:-18081}:8080"
-      - "${CEFAS_NODE1_GRPC_PORT:-9191}:9090"
+      - "127.0.0.1:${CEFAS_NODE1_HTTP_PORT:-18081}:8080"
+      - "127.0.0.1:${CEFAS_NODE1_GRPC_PORT:-9191}:9090"
     volumes:
       - cefas-node-1-data:/var/lib/cefas
+      - ./cefasdb.rf3.yml:/etc/cefasdb/cefasdb.yml:ro
+    networks:
+      cefasdb-rf3:
+        aliases:
+          - cefasdb
 
   cefas-node-2:
     <<: *cefas-common
-    command:
-      - "-data"
-      - "/var/lib/cefas"
-      - "-http"
-      - ":8080"
-      - "-grpc"
-      - ":9090"
-      - "-grpc-reflection"
-      - "-raft-bootstrap"
-      - "-raft-id"
-      - "n2"
-      - "-raft-bind"
-      - "cefas-node-2:7000"
-      - "-raft-peers"
-      - "n1=cefas-node-1:7000,n2=cefas-node-2:7000,n3=cefas-node-3:7000"
-      - "-raft-http-peers"
-      - "n1=http://cefas-node-1:8080,n2=http://cefas-node-2:8080,n3=http://cefas-node-3:8080"
+    environment:
+      <<: *cefas-env
+      CEFAS_CLUSTER_SELF_ID: n2
     ports:
-      - "${CEFAS_NODE2_HTTP_PORT:-18082}:8080"
-      - "${CEFAS_NODE2_GRPC_PORT:-9192}:9090"
+      - "127.0.0.1:${CEFAS_NODE2_HTTP_PORT:-18082}:8080"
+      - "127.0.0.1:${CEFAS_NODE2_GRPC_PORT:-9192}:9090"
     volumes:
       - cefas-node-2-data:/var/lib/cefas
+      - ./cefasdb.rf3.yml:/etc/cefasdb/cefasdb.yml:ro
 
   cefas-node-3:
     <<: *cefas-common
-    command:
-      - "-data"
-      - "/var/lib/cefas"
-      - "-http"
-      - ":8080"
-      - "-grpc"
-      - ":9090"
-      - "-grpc-reflection"
-      - "-raft-bootstrap"
-      - "-raft-id"
-      - "n3"
-      - "-raft-bind"
-      - "cefas-node-3:7000"
-      - "-raft-peers"
-      - "n1=cefas-node-1:7000,n2=cefas-node-2:7000,n3=cefas-node-3:7000"
-      - "-raft-http-peers"
-      - "n1=http://cefas-node-1:8080,n2=http://cefas-node-2:8080,n3=http://cefas-node-3:8080"
+    environment:
+      <<: *cefas-env
+      CEFAS_CLUSTER_SELF_ID: n3
     ports:
-      - "${CEFAS_NODE3_HTTP_PORT:-18083}:8080"
-      - "${CEFAS_NODE3_GRPC_PORT:-9193}:9090"
+      - "127.0.0.1:${CEFAS_NODE3_HTTP_PORT:-18083}:8080"
+      - "127.0.0.1:${CEFAS_NODE3_GRPC_PORT:-9193}:9090"
     volumes:
       - cefas-node-3-data:/var/lib/cefas
+      - ./cefasdb.rf3.yml:/etc/cefasdb/cefasdb.yml:ro
+
+  prometheus:
+    image: prom/prometheus:latest
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:${PROMETHEUS_RF3_PORT:-9092}:9090"
+    volumes:
+      - ./prometheus/prometheus.rf3.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - cefas-node-1
+      - cefas-node-2
+      - cefas-node-3
+    networks:
+      - cefasdb-rf3
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:${GRAFANA_RF3_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - cefasdb-rf3
+
+networks:
+  cefasdb-rf3:
 
 volumes:
   cefas-node-1-data:

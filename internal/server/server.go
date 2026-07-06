@@ -166,6 +166,9 @@ func (s *Server) allShards() []*pebble.DB {
 	}
 	out := make([]*pebble.DB, 0, len(s.manager.Shards()))
 	for _, sh := range s.manager.Shards() {
+		if sh == nil || sh.Storage == nil {
+			continue
+		}
 		out = append(out, sh.Storage)
 	}
 	return out
@@ -557,6 +560,9 @@ func (s *Server) fanOutCatalog(td types.TableDescriptor) {
 	}
 	for i, sh := range s.manager.Shards() {
 		if i == 0 {
+			continue
+		}
+		if sh == nil || sh.Storage == nil {
 			continue
 		}
 		cat, err := catalog.New(sh.Storage)

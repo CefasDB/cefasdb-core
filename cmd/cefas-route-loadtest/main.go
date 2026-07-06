@@ -401,13 +401,6 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 	if len(shards) == 0 {
 		return errors.New("no shards")
 	}
-	leader := shards[0].LeaderHint
-	cli := cs.byNode[leader]
-	if cli == nil {
-		return fmt.Errorf("metadata shard leader %q has no client", leader)
-	}
-	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	td := types.TableDescriptor{
 		Name:      c.Table,
 		KeySchema: types.KeySchema{PK: "pk", SK: "sk"},
@@ -418,9 +411,18 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 			StreamViewType: types.StreamViewTypeNewAndOldImages,
 		}
 	}
-	err := cli.CreateTable(rpcCtx, td)
-	if err == nil {
-		fmt.Printf("created table: %s via %s\n", c.Table, leader)
+
+	metadataTarget := routeTarget{
+		ShardID: shards[0].ID,
+		Leader:  shards[0].LeaderHint,
+		Voters:  append([]string(nil), shards[0].Voters...),
+	}
+	node, created, err := createTableWithRetry(ctx, c, cs, metadataTarget, td)
+	if err != nil {
+		return err
+	}
+	if created {
+		fmt.Printf("created table: %s via %s\n", c.Table, node)
 		if perr := ensurePluginIndexes(ctx, c, cs); perr != nil {
 			return perr
 		}
@@ -429,18 +431,58 @@ func ensureTable(ctx context.Context, c cfg, cs *clients, shards []shardRoute) e
 		}
 		return warmTable(ctx, c, cs)
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "already") || strings.Contains(msg, "exist") {
-		fmt.Printf("using existing table: %s\n", c.Table)
-		if perr := ensurePluginIndexes(ctx, c, cs); perr != nil {
-			return perr
-		}
-		if perr := ensureMVEager(ctx, c, cs); perr != nil {
-			return perr
-		}
-		return warmTable(ctx, c, cs)
+
+	fmt.Printf("using existing table: %s via %s\n", c.Table, node)
+	if perr := ensurePluginIndexes(ctx, c, cs); perr != nil {
+		return perr
 	}
-	return err
+	if perr := ensureMVEager(ctx, c, cs); perr != nil {
+		return perr
+	}
+	return warmTable(ctx, c, cs)
+}
+
+func createTableWithRetry(ctx context.Context, c cfg, cs *clients, target routeTarget, td types.TableDescriptor) (string, bool, error) {
+	candidates := retryOrder(target, cs.order)
+	if len(candidates) == 0 {
+		return "", false, fmt.Errorf("metadata shard %d has no candidate clients", target.ShardID)
+	}
+
+	timeout := c.RPCTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	createCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var last error
+	for {
+		for _, node := range candidates {
+			cli := cs.byNode[node]
+			if cli == nil {
+				continue
+			}
+			rpcCtx, cancelRPC := context.WithTimeout(createCtx, minDuration(timeout, 10*time.Second))
+			err := cli.CreateTable(rpcCtx, td)
+			cancelRPC()
+			if err == nil {
+				return node, true, nil
+			}
+			if isAlreadyExists(err) {
+				return node, false, nil
+			}
+			last = err
+		}
+
+		select {
+		case <-createCtx.Done():
+			if last != nil {
+				return "", false, fmt.Errorf("metadata shard %d candidates=%v: %w", target.ShardID, candidates, last)
+			}
+			return "", false, createCtx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // ensurePluginIndexes attaches every plugin named in -with-plugin-index
@@ -850,6 +892,21 @@ func isNotLeader(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "not leader")
+}
+
+func isAlreadyExists(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already") || strings.Contains(msg, "exist")
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (r *router) routeForID(id, users int64) (routeTarget, error) {

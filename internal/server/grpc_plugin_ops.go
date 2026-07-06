@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,10 +36,14 @@ import (
 // indexes. Durable descriptor records live in storage under the
 // cefas/internal/plugin-index/ keyspace; reads hydrate this cache.
 var pluginIndexBook = struct {
-	createMu sync.Mutex
-	mu       sync.RWMutex
-	entries  map[string]index.Descriptor // "table/name" → descriptor
-}{entries: map[string]index.Descriptor{}}
+	createMu         sync.Mutex
+	mu               sync.RWMutex
+	entries          map[string]index.Descriptor // "table/name" → descriptor
+	tableRefreshedAt map[string]time.Time
+}{
+	entries:          map[string]index.Descriptor{},
+	tableRefreshedAt: map[string]time.Time{},
+}
 
 func indexKey(table, name string) string { return table + "/" + name }
 
@@ -575,6 +580,7 @@ func (s *GRPCServer) fanOutGeoAudience(ctx context.Context, a *audience.Plugin, 
 		Lat:    req.GetLat(),
 		Lon:    req.GetLon(),
 		Radius: req.GetRadiusMeters(),
+		Limit:  int(req.GetLimit()),
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "select: %v", err)
@@ -585,6 +591,9 @@ func (s *GRPCServer) fanOutGeoAudience(ctx context.Context, a *audience.Plugin, 
 			break
 		}
 		appendCandidate(c)
+		if geoAudienceLimitReached(out, req.GetLimit()) {
+			break
+		}
 	}
 	cs.Close()
 
@@ -598,7 +607,11 @@ func (s *GRPCServer) fanOutGeoAudience(ctx context.Context, a *audience.Plugin, 
 		}}}},
 	}
 	for _, peerID := range s.manager.PeersForTable() {
-		itemCh, errCh := s.manager.PeerQueryIndex(ctx, peerID, d.Table, d.Name, binds, 0)
+		if geoAudienceLimitReached(out, req.GetLimit()) {
+			break
+		}
+		peerCtx, cancel := context.WithCancel(ctx)
+		itemCh, errCh := s.manager.PeerQueryIndex(peerCtx, peerID, d.Table, d.Name, binds, int32(geoAudienceCandidateLimit(int(req.GetLimit()))))
 		for cand := range itemCh {
 			key, err := pbToItem(cand.GetKey())
 			if err != nil {
@@ -612,12 +625,33 @@ func (s *GRPCServer) fanOutGeoAudience(ctx context.Context, a *audience.Plugin, 
 				continue
 			}
 			appendCandidate(plugin.Candidate{Key: key, Score: cand.GetScore()})
+			if geoAudienceLimitReached(out, req.GetLimit()) {
+				cancel()
+				break
+			}
 		}
-		if err := <-errCh; err != nil {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			cancel()
 			return nil, status.Errorf(codes.Unavailable, "peer %s query index: %v", peerID, err)
 		}
+		cancel()
 	}
 	return out, nil
+}
+
+func geoAudienceLimitReached(out []plugin.Candidate, limit int32) bool {
+	return limit > 0 && len(out) >= int(limit)
+}
+
+func geoAudienceCandidateLimit(limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	n := limit * 10
+	if n < 100 {
+		return 100
+	}
+	return n
 }
 
 // audienceWithinRadius applies the same haversine filter the local

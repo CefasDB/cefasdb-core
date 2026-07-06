@@ -80,23 +80,36 @@ func New(db *pebble.DB) (*Catalog, error) {
 }
 
 func (c *Catalog) loadAll() error {
-	lower, upper := storage.PrefixCatalog()
-	it, err := c.db.Iter(lower, upper)
+	tables, err := c.readTablesFromStorage()
 	if err != nil {
 		return err
 	}
+	c.tables = tables
+	return nil
+}
+
+func (c *Catalog) readTablesFromStorage() (map[string]types.TableDescriptor, error) {
+	lower, upper := storage.PrefixCatalog()
+	it, err := c.db.Iter(lower, upper)
+	if err != nil {
+		return nil, err
+	}
 	defer it.Close()
+	tables := make(map[string]types.TableDescriptor)
 	for valid := it.First(); valid; valid = it.Next() {
 		var td types.TableDescriptor
 		v := it.Value()
 		// Pebble reuses value buffers between Next; decode immediately.
 		if err := json.Unmarshal(v, &td); err != nil {
-			return fmt.Errorf("decode descriptor at %s: %w", it.Key(), err)
+			return nil, fmt.Errorf("decode descriptor at %s: %w", it.Key(), err)
 		}
 		_ = domain.NormalizeDescriptor(&td)
-		c.tables[td.Name] = td
+		tables[td.Name] = domain.CloneTableDescriptor(td)
 	}
-	return it.Error()
+	if err := it.Error(); err != nil {
+		return nil, err
+	}
+	return tables, nil
 }
 
 // Reload drops the in-memory cache and re-reads every descriptor from
@@ -237,12 +250,16 @@ func (c *Catalog) KeySchema(name string) (types.KeySchema, error) {
 
 // List returns descriptors of every known table.
 func (c *Catalog) List() []types.TableDescriptor {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if tables, err := c.readTablesFromStorage(); err == nil {
+		c.tables = tables
+	}
 	out := make([]types.TableDescriptor, 0, len(c.tables))
 	for _, td := range c.tables {
 		out = append(out, domain.CloneTableDescriptor(td))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

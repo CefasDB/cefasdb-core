@@ -29,6 +29,39 @@ docker run --rm -p 8080:8080 -p 9090:9090 \
   -http :8080 -grpc :9090 -grpc-reflection
 ```
 
+For a persistent local client-server stack, use Docker Compose:
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+This starts one CefasDB node with a modest single-client profile for
+Electron + Node applications. Host clients can use `127.0.0.1:9090`
+for gRPC or `http://127.0.0.1:8080` for HTTP/SQL. A Node service in
+the same Compose project should use `cefasdb:9090`.
+
+The default Compose profile is intentionally not a cluster and not a
+benchmark setup: it caps CefasDB at 4 CPUs / 4 GiB, uses durable
+single-node writes, and keeps Prometheus/Grafana behind the optional
+`observability` profile.
+
+For a local three-node multi-Raft stack with replication factor 3 and
+automatic rebalancing enabled, use the cluster Compose file:
+
+```sh
+docker compose -p cefas-rf3 \
+  -f deploy/docker-compose.cluster.yml \
+  --profile observability \
+  up -d
+```
+
+The RF=3 stack exposes gRPC on `127.0.0.1:9191`, `:9192`, and `:9193`;
+Grafana is on `http://127.0.0.1:3001`. It uses separate volumes from
+the single-node stack. Do not point it directly at an existing
+single-node volume: multi-Raft stores data under `/var/lib/cefas/shards`,
+so existing single-node tables must be backed up and migrated instead
+of relying on an in-place layout switch.
+
 Images are published per release with the tags `<version>`,
 `v<version>`, and `latest`. Pin to a specific release:
 

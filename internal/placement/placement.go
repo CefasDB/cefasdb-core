@@ -188,9 +188,10 @@ func DefaultPlacement(shards int, selfID string, peers, httpPeers map[string]str
 }
 
 // DefaultPlacementWithReplicationFactor builds the deterministic placement
-// with data shards replicated across a rotating voter subset. Shard 0 remains
-// on every peer because it stores cluster/catalog metadata that every API node
-// needs before routing writes to data shards.
+// with data shards replicated across a rotating voter subset. In token-range
+// multi-shard RF mode, shard 0 remains metadata-only on every peer because it
+// stores cluster/catalog metadata that every API node needs before routing
+// writes to data shards.
 func DefaultPlacementWithReplicationFactor(shards int, selfID string, peers, httpPeers map[string]string, capacity NodeCapacity, strategy string, replicationFactor int) PlacementCatalog {
 	if shards <= 0 {
 		shards = 1
@@ -227,7 +228,15 @@ func DefaultPlacementWithReplicationFactor(shards int, selfID string, peers, htt
 		dataRF = len(voters)
 	}
 
-	ranges := splitTokenRanges(shards)
+	metadataOnlyShard0 := strategy == PlacementStrategyTokenRange && shards > 1 && replicationFactor > 0
+	dataRanges := []TokenRange(nil)
+	if strategy == PlacementStrategyTokenRange {
+		rangeShards := shards
+		if metadataOnlyShard0 {
+			rangeShards = shards - 1
+		}
+		dataRanges = splitTokenRanges(rangeShards)
+	}
 	placements := make([]ShardPlacement, 0, shards)
 	for i := 0; i < shards; i++ {
 		shardVoters := voters
@@ -242,7 +251,14 @@ func DefaultPlacementWithReplicationFactor(shards int, selfID string, peers, htt
 			LeaderHint: leaderHintForShard(shardVoters, uint32(i)),
 		}
 		if strategy == PlacementStrategyTokenRange {
-			sh.Ranges = []TokenRange{ranges[i]}
+			switch {
+			case !metadataOnlyShard0:
+				sh.Ranges = []TokenRange{dataRanges[i]}
+			case i == 0:
+				sh.Ranges = nil
+			default:
+				sh.Ranges = []TokenRange{dataRanges[i-1]}
+			}
 		}
 		placements = append(placements, sh)
 	}
@@ -265,9 +281,27 @@ func rotatingVoters(voters []string, shardIndex, replicationFactor int) []string
 		return append([]string(nil), voters...)
 	}
 	out := make([]string, 0, replicationFactor)
+	seen := make(map[string]struct{}, replicationFactor)
 	start := shardIndex % len(voters)
-	for i := 0; i < replicationFactor; i++ {
-		out = append(out, voters[(start+i)%len(voters)])
+	stride := (len(voters) + replicationFactor - 1) / replicationFactor
+	if stride < 1 {
+		stride = 1
+	}
+	for i := 0; len(out) < replicationFactor && i < len(voters); i++ {
+		voter := voters[(start+i*stride)%len(voters)]
+		if _, ok := seen[voter]; ok {
+			continue
+		}
+		seen[voter] = struct{}{}
+		out = append(out, voter)
+	}
+	for i := 0; len(out) < replicationFactor && i < len(voters); i++ {
+		voter := voters[(start+i)%len(voters)]
+		if _, ok := seen[voter]; ok {
+			continue
+		}
+		seen[voter] = struct{}{}
+		out = append(out, voter)
 	}
 	sort.Strings(out)
 	return out
@@ -376,7 +410,7 @@ func ValidatePlacement(cat PlacementCatalog) error {
 		if !sh.State.Routable() && sh.State != ShardStateDraining && sh.State != ShardStateCreating {
 			return fmt.Errorf("cluster: invalid shard %d state %q", sh.ID, sh.State)
 		}
-		if cat.Strategy == PlacementStrategyTokenRange && sh.State.Routable() && len(sh.Ranges) == 0 {
+		if cat.Strategy == PlacementStrategyTokenRange && sh.State.Routable() && len(sh.Ranges) == 0 && sh.ID != 0 {
 			return fmt.Errorf("cluster: token-range shard %d has no ranges", sh.ID)
 		}
 	}

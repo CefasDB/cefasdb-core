@@ -30,6 +30,7 @@ type pluginIndexLocalState struct {
 
 type pluginIndexLocalSlot struct {
 	done chan struct{}
+	once sync.Once
 	err  error
 }
 
@@ -49,14 +50,10 @@ func (s *GRPCServer) markPluginIndexLocalStateBuilt(desc index.Descriptor) {
 	if !ok {
 		slot = &pluginIndexLocalSlot{done: make(chan struct{})}
 		pluginIndexLocal.entries[key] = slot
-		close(slot.done)
+		slot.once.Do(func() { close(slot.done) })
 		return
 	}
-	select {
-	case <-slot.done:
-	default:
-		close(slot.done)
-	}
+	slot.once.Do(func() { close(slot.done) })
 }
 
 // ensurePluginIndexLocalState guarantees that the local plugin state
@@ -82,8 +79,8 @@ func (s *GRPCServer) ensurePluginIndexLocalState(desc index.Descriptor) error {
 	pluginIndexLocal.entries[key] = slot
 	pluginIndexLocal.mu.Unlock()
 
-	defer close(slot.done)
 	slot.err = s.buildPluginIndexLocalSlice(desc)
+	slot.once.Do(func() { close(slot.done) })
 	return slot.err
 }
 
