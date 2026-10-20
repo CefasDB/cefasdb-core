@@ -2,7 +2,7 @@
 
 # Multi-stage build: pin the Go toolchain that produced our module
 # graph, then copy a static binary into a minimal runtime image.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
 
 ARG TARGETOS
 ARG TARGETARCH

@@ -2,6 +2,7 @@ MODULE := github.com/CefasDb/cefasdb
 COVERAGE_FILE := cover.out
 GOBIN := $(shell go env GOPATH)/bin
 BIN_DIR := ./bin
+GOVULNCHECK_VERSION ?= v1.9.0
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
 
@@ -32,7 +33,7 @@ tools: ## Install developer tools used by other targets.
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/vladopajic/go-test-coverage/v2@latest
-	go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	go install github.com/google/osv-scanner/cmd/osv-scanner@latest
 
@@ -63,10 +64,9 @@ mut: ## Run mutation tests (gremlins).
 	gremlins unleash --tags='!integration'
 
 sec: ## Run govulncheck, gosec, osv-scanner.
-	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
 	@command -v gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@command -v osv-scanner >/dev/null 2>&1 || go install github.com/google/osv-scanner/cmd/osv-scanner@latest
-	govulncheck ./...
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 	gosec -severity=medium -confidence=medium ./...
 	osv-scanner --lockfile go.mod
 

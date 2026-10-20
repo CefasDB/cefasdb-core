@@ -107,3 +107,23 @@ queue/store data. Preserve primary rows and TTL policy. Do not run an old
 writer against a native-indexed table: it cannot maintain the postings.
 Changing an existing index/TTL schema requires an explicit migration, never
 a silent descriptor edit or an invented historical backfill.
+
+## 2026-10-20 compiler and dependency security amendment
+
+Build with Go 1.26.9, selected by the module toolchain directive and a
+digest-pinned Go 1.26.9 Alpine build stage. Keep the minimum language version
+at Go 1.26.0 because the fixed existing `golang.org/x/net` dependency requires
+it. CI and the local security target use the exact govulncheck v1.9.0 release;
+the scanner installation no longer depends on whichever version `latest`
+resolves to. Existing CI check names and legacy warning behavior are unchanged.
+
+The first completed scan with that compiler/scanner found nine reachable
+vulnerabilities in the existing HTTP/2, OpenTelemetry, gRPC and JWT dependency
+families. Update those modules to their minimum fixed releases (`x/net`
+v0.60.0, OTel v1.45.0, gRPC v1.83.2 and jwt/v5 v5.2.2), together with their
+required module-version-selection companions. The final scan must exit
+successfully; a warning-only hosted step is not evidence of a clean scan.
+
+This amendment changes build qualification and existing dependency versions.
+It does not change native table, TTL, authentication scope or installation
+configuration. The native-indexed-table rollback boundary above still applies.
