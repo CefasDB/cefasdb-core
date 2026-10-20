@@ -84,6 +84,11 @@ cross-request snapshot; concurrent expiry/removal can shorten later pages.
 
 ## Exact aggregate
 
+Numeric scalar filters/keys and stored numeric comparisons accept decimal JSON
+numbers of at most 256 bytes and exponent magnitude at most 1024. Fractions,
+hex/binary forms, nonfinite values and larger exponents are rejected before
+arbitrary-precision conversion. Bounded decimals retain exact numeric equality.
+
 `POST /v1/TextAggregate` accepts the same filter without pagination, plus:
 
 ```json

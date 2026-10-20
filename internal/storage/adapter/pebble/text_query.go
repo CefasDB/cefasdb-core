@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,9 +89,16 @@ func prepareTextQuery(td types.TableDescriptor, q types.TextQuery) (textQueryPla
 				return p, textInvalid("scalar filter too long")
 			}
 			if value.T == types.AttrN {
-				if _, ok := new(big.Rat).SetString(value.N); !ok {
+				if _, ok := textNumber(value.N); !ok {
 					return p, textInvalid("invalid numeric filter")
 				}
+			}
+		}
+	}
+	for _, key := range []types.AttributeValue{q.PKValue, q.SKLow, q.SKHigh} {
+		if key.T == types.AttrN {
+			if _, ok := textNumber(key.N); !ok {
+				return p, textInvalid("invalid bounded numeric key")
 			}
 		}
 	}
@@ -179,11 +185,11 @@ func scalarCompare(a, b types.AttributeValue) (int, bool) {
 	case types.AttrS:
 		return strings.Compare(a.S, b.S), true
 	case types.AttrN:
-		x, ok := new(big.Rat).SetString(a.N)
+		x, ok := textNumber(a.N)
 		if !ok {
 			return 0, false
 		}
-		y, ok := new(big.Rat).SetString(b.N)
+		y, ok := textNumber(b.N)
 		if !ok {
 			return 0, false
 		}
