@@ -71,6 +71,9 @@ type Config struct {
 		StreamRetentionInterval     time.Duration `yaml:"streamRetentionInterval"`
 		StreamRetentionCleanupBatch int           `yaml:"streamRetentionCleanupBatchSize"`
 		ChangeLogMode               string        `yaml:"changeLogMode"`
+		TTLReaperEnabled            bool          `yaml:"ttlReaperEnabled"`
+		TTLReaperInterval           time.Duration `yaml:"ttlReaperInterval"`
+		TTLReaperBatchSize          int           `yaml:"ttlReaperBatchSize"`
 	} `yaml:"storage"`
 	Cluster struct {
 		Shards            int               `yaml:"shards"`
@@ -191,6 +194,8 @@ func Defaults() Config {
 	c.Storage.StreamRetention = 24 * time.Hour
 	c.Storage.StreamRetentionInterval = 30 * time.Second
 	c.Storage.StreamRetentionCleanupBatch = 65536
+	c.Storage.TTLReaperInterval = time.Minute
+	c.Storage.TTLReaperBatchSize = 1024
 	c.Raft.HeartbeatTimeout = 2 * time.Second
 	c.Raft.ElectionTimeout = 10 * time.Second
 	c.Raft.LeaderLeaseTimeout = 2 * time.Second
@@ -338,6 +343,9 @@ func ApplyEnv(cfg *Config) error {
 	cfg.Storage.StreamRetentionInterval = dur("STORAGE_STREAM_RETENTION_INTERVAL", cfg.Storage.StreamRetentionInterval)
 	cfg.Storage.StreamRetentionCleanupBatch = integer("STORAGE_STREAM_RETENTION_CLEANUP_BATCH_SIZE", cfg.Storage.StreamRetentionCleanupBatch)
 	cfg.Storage.ChangeLogMode = str("STORAGE_CHANGELOG_MODE", cfg.Storage.ChangeLogMode)
+	cfg.Storage.TTLReaperEnabled = boolean("STORAGE_TTL_REAPER_ENABLED", cfg.Storage.TTLReaperEnabled)
+	cfg.Storage.TTLReaperInterval = dur("STORAGE_TTL_REAPER_INTERVAL", cfg.Storage.TTLReaperInterval)
+	cfg.Storage.TTLReaperBatchSize = integer("STORAGE_TTL_REAPER_BATCH_SIZE", cfg.Storage.TTLReaperBatchSize)
 
 	cfg.Cluster.Shards = integer("CLUSTER_SHARDS", cfg.Cluster.Shards)
 	cfg.Cluster.ReplicationFactor = integer("CLUSTER_REPLICATION_FACTOR", cfg.Cluster.ReplicationFactor)

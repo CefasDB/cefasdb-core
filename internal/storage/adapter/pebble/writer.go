@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
 
@@ -102,6 +103,14 @@ func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts P
 		return err
 	}
 	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	if strings.TrimSpace(opts.Condition) != "" && d.repl != nil {
+		if err := d.ReadBarrier(5 * time.Second); err != nil {
+			return err
+		}
+	}
+	mu := atomicLock(primaryKey)
+	mu.Lock()
+	defer mu.Unlock()
 	encoded, err := storage.EncodeItem(item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
@@ -161,6 +170,11 @@ func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts P
 	if err != nil {
 		return fmt.Errorf("plan ttl: %w", err)
 	}
+	textOps, err := planText(td, priorItem, item)
+	if err != nil {
+		return fmt.Errorf("plan text: %w", err)
+	}
+	ttlOps = append(ttlOps, textOps...)
 
 	b := d.Batch()
 	defer b.Close()
@@ -199,7 +213,7 @@ func (d *DB) putItemCanSkipPrior(td types.TableDescriptor, condition string) boo
 	if strings.TrimSpace(condition) != "" {
 		return false
 	}
-	if len(td.GSIs) > 0 || len(td.LSIs) > 0 || len(td.SpatialIndexes) > 0 || td.TTLAttribute != "" {
+	if len(td.GSIs) > 0 || len(td.LSIs) > 0 || len(td.SpatialIndexes) > 0 || len(td.TextIndexes) > 0 || td.TTLAttribute != "" {
 		return false
 	}
 	if tableHasCounterDefinition(td) {
@@ -252,6 +266,9 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 		return err
 	}
 	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	mu := atomicLock(primaryKey)
+	mu.Lock()
+	defer mu.Unlock()
 	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
@@ -296,6 +313,11 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 	if err != nil {
 		return fmt.Errorf("plan ttl: %w", err)
 	}
+	textOps, err := planText(td, priorItem, nil)
+	if err != nil {
+		return fmt.Errorf("plan text: %w", err)
+	}
+	ttlOps = append(ttlOps, textOps...)
 
 	b := d.Batch()
 	defer b.Close()
@@ -433,6 +455,19 @@ func (d *DB) getEncodedItemByKeyBytesNoLane(table string, pk, sk []byte) ([]byte
 	}
 	if err != nil {
 		return nil, err
+	}
+	td, err := d.visibilityDescriptor(table)
+	if err != nil {
+		return nil, err
+	}
+	if td.TTLAttribute != "" {
+		item, err := storage.DecodeItem(v)
+		if err != nil {
+			return nil, err
+		}
+		if itemExpired(td, item, time.Now()) {
+			return nil, types.ErrItemNotFound
+		}
 	}
 	return v, nil
 }
@@ -577,6 +612,22 @@ func (d *DB) iterateIndexCtx(ctx context.Context, td types.TableDescriptor, lowe
 			pk, sk, projectedBytes, mode, err := storage.DecodeProjectedPointer(ptrCopy)
 			if err != nil {
 				return fmt.Errorf("decode pointer: %w", err)
+			}
+			if len(td.TextIndexes) > 0 && td.TTLAttribute != "" {
+				raw, err := d.getNoLane(storage.KeyPrimary(td.Name, pk, sk))
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				primary, err := storage.DecodeItem(raw)
+				if err != nil {
+					return err
+				}
+				if itemExpired(td, primary, time.Now()) {
+					continue
+				}
 			}
 			switch mode {
 			case "ALL":
@@ -741,6 +792,10 @@ func (d *DB) scanItemsCtx(ctx context.Context, lower, upper []byte, limit int) (
 }
 
 func (d *DB) scanItemsNoLane(lower, upper []byte, limit int) ([]types.Item, error) {
+	td, err := d.visibilityDescriptor(tableFromPrimaryPrefix(lower))
+	if err != nil {
+		return nil, err
+	}
 	it, err := d.iterNoLane(lower, upper)
 	if err != nil {
 		return nil, err
@@ -755,6 +810,9 @@ func (d *DB) scanItemsNoLane(lower, upper []byte, limit int) ([]types.Item, erro
 		item, err := storage.DecodeItem(cp)
 		if err != nil {
 			return nil, fmt.Errorf("decode at key %q: %w", it.Key(), err)
+		}
+		if itemExpired(td, item, time.Now()) {
+			continue
 		}
 		out = append(out, item)
 		if limit > 0 && len(out) >= limit {
@@ -775,6 +833,10 @@ func (d *DB) scanItemsWithCtx(ctx context.Context, lower, upper []byte, visit fu
 }
 
 func (d *DB) scanItemsWithNoLane(lower, upper []byte, visit func(types.Item) bool) error {
+	td, err := d.visibilityDescriptor(tableFromPrimaryPrefix(lower))
+	if err != nil {
+		return err
+	}
 	it, err := d.iterNoLane(lower, upper)
 	if err != nil {
 		return err
@@ -788,6 +850,9 @@ func (d *DB) scanItemsWithNoLane(lower, upper []byte, visit func(types.Item) boo
 		item, err := storage.DecodeItem(cp)
 		if err != nil {
 			return fmt.Errorf("decode at key %q: %w", it.Key(), err)
+		}
+		if itemExpired(td, item, time.Now()) {
+			continue
 		}
 		if !visit(item) {
 			return nil
@@ -836,6 +901,20 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
+	keys := make([][]byte, 0, len(ops))
+	for _, op := range ops {
+		item := op.Item
+		if op.Op == BatchOpDelete {
+			item = op.Key
+		}
+		pk, sk, err := extractKeyBytes(item, td.KeySchema)
+		if err != nil {
+			return err
+		}
+		keys = append(keys, storage.KeyPrimary(td.Name, pk, sk))
+	}
+	unlock := lockPrimaryKeys(keys)
+	defer unlock()
 	if d.batchPutItemsCanSkipPrior(td, ops) {
 		return d.batchPutItemsWithoutPriorImpl(td, ops, bypassRepl)
 	}
@@ -900,6 +979,11 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 			if err != nil {
 				return fmt.Errorf("op %d ttl: %w", i, err)
 			}
+			textOps, err := planText(td, priorItem, op.Item)
+			if err != nil {
+				return fmt.Errorf("op %d text: %w", i, err)
+			}
+			ttlOps = append(ttlOps, textOps...)
 			if err := b.Set(primaryKey, enc, nil); err != nil {
 				return err
 			}
@@ -952,6 +1036,11 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 			if err != nil {
 				return fmt.Errorf("op %d ttl: %w", i, err)
 			}
+			textOps, err := planText(td, priorItem, nil)
+			if err != nil {
+				return fmt.Errorf("op %d text: %w", i, err)
+			}
+			ttlOps = append(ttlOps, textOps...)
 			if err := b.Delete(primaryKey, nil); err != nil {
 				return err
 			}

@@ -3,6 +3,7 @@ package pebble
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
 
@@ -317,6 +318,10 @@ func iterateAndResolve(
 	accept func(types.Item) bool,
 	limit int,
 ) error {
+	td, err := d.visibilityDescriptor(table)
+	if err != nil {
+		return err
+	}
 	for valid := it.First(); valid; valid = it.Next() {
 		v := it.Value()
 		ptrCopy := make([]byte, len(v))
@@ -341,6 +346,9 @@ func iterateAndResolve(
 			return fmt.Errorf("decode item: %w", err)
 		}
 		if !accept(item) {
+			continue
+		}
+		if itemExpired(td, item, time.Now()) {
 			continue
 		}
 		seen[dedupe] = struct{}{}

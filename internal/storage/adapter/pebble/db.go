@@ -161,6 +161,9 @@ type DB struct {
 	// appendChangeRecord whenever rec.StreamRecord is true.
 	streamTablesMu sync.RWMutex
 	streamTables   map[string]struct{}
+	ttlMu          sync.RWMutex
+	ttlStatus      TTLStatus
+	ttlResolver    TTLDescriptorResolver
 
 	// retentionStopCh signals the background retention loop to exit;
 	// retentionStopped is closed by the loop when it has finished.

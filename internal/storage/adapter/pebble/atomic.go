@@ -80,10 +80,36 @@ var (
 )
 
 func atomicLock(key []byte) *sync.Mutex {
+	return &atomicMu[atomicLockIndex(key)]
+}
+
+func atomicLockIndex(key []byte) uint64 {
 	var h maphash.Hash
 	h.SetSeed(atomicSeed)
 	_, _ = h.Write(key)
-	return &atomicMu[h.Sum64()%atomicMutexShards]
+	return h.Sum64() % atomicMutexShards
+}
+
+// lockPrimaryKeys uses a global order for batches, sharing the AtomicUpdate
+// locks so conditions, index deltas and TTL rechecks cannot observe a stale
+// primary row while another caller writes it. FSM apply does not take locks.
+func lockPrimaryKeys(keys [][]byte) func() {
+	var selected [atomicMutexShards]bool
+	for _, key := range keys {
+		selected[atomicLockIndex(key)] = true
+	}
+	for i, yes := range selected {
+		if yes {
+			atomicMu[i].Lock()
+		}
+	}
+	return func() {
+		for i := len(selected) - 1; i >= 0; i-- {
+			if selected[i] {
+				atomicMu[i].Unlock()
+			}
+		}
+	}
 }
 
 // AtomicUpdate performs a single read-modify-write against the row
@@ -235,6 +261,11 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if err != nil {
 		return AtomicResult{}, fmt.Errorf("plan ttl: %w", err)
 	}
+	textOps, err := planText(td, priorItem, newItem)
+	if err != nil {
+		return AtomicResult{}, fmt.Errorf("plan text: %w", err)
+	}
+	ttlOps = append(ttlOps, textOps...)
 
 	b := d.Batch()
 	defer b.Close()

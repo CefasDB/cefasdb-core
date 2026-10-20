@@ -60,6 +60,13 @@ type Handlers struct {
 	spatialAllShards SpatialAllShardsFunc
 	ensureStrongRead EnsureStrongReadFunc
 	observeRange     ObserveRangeMetricFunc
+	textStrongRead   func(http.ResponseWriter, *http.Request, *pebble.DB) bool
+}
+
+// AttachTextStrongRead binds native partition reads to the composition root's
+// cluster authority. A handler without this hook uses the store's replicator.
+func (h *Handlers) AttachTextStrongRead(fn func(http.ResponseWriter, *http.Request, *pebble.DB) bool) {
+	h.textStrongRead = fn
 }
 
 // New constructs the handler set. observeRange may be nil — in that
@@ -385,24 +392,28 @@ func (h *Handlers) executeSQL(w http.ResponseWriter, r *http.Request, stmt cefas
 func sqlEnforceScope(w http.ResponseWriter, r *http.Request, stmt cefassql.Stmt) bool {
 	switch s := stmt.(type) {
 	case *cefassql.SelectStmt:
-		return auth.RequireAnyScope(w, r,
+		return auth.RequireAnyScope(
+			w, r,
 			auth.TableScope(auth.ScopeQuery, s.Table),
 			auth.WildcardScope(auth.ScopeQuery),
 			auth.TableScope(auth.ScopeItemRead, s.Table),
 			auth.WildcardScope(auth.ScopeItemRead),
 		)
 	case *cefassql.InsertStmt:
-		return auth.RequireAnyScope(w, r,
+		return auth.RequireAnyScope(
+			w, r,
 			auth.TableScope(auth.ScopeItemWrite, s.Table),
 			auth.WildcardScope(auth.ScopeItemWrite),
 		)
 	case *cefassql.UpdateStmt:
-		return auth.RequireAnyScope(w, r,
+		return auth.RequireAnyScope(
+			w, r,
 			auth.TableScope(auth.ScopeItemWrite, s.Table),
 			auth.WildcardScope(auth.ScopeItemWrite),
 		)
 	case *cefassql.DeleteStmt:
-		return auth.RequireAnyScope(w, r,
+		return auth.RequireAnyScope(
+			w, r,
 			auth.TableScope(auth.ScopeItemDelete, s.Table),
 			auth.WildcardScope(auth.ScopeItemDelete),
 		)

@@ -7089,6 +7089,8 @@ type TableDescriptor struct {
 	LatestStreamArn      string                    `protobuf:"bytes,9,opt,name=latest_stream_arn,json=latestStreamArn,proto3" json:"latest_stream_arn,omitempty"`
 	LatestStreamLabel    string                    `protobuf:"bytes,10,opt,name=latest_stream_label,json=latestStreamLabel,proto3" json:"latest_stream_label,omitempty"`
 	StreamStatus         string                    `protobuf:"bytes,11,opt,name=stream_status,json=streamStatus,proto3" json:"stream_status,omitempty"`
+	TextIndexes          []*TextIndexDescriptor    `protobuf:"bytes,12,rep,name=text_indexes,json=textIndexes,proto3" json:"text_indexes,omitempty"`
+	TtlAttribute         string                    `protobuf:"bytes,13,opt,name=ttl_attribute,json=ttlAttribute,proto3" json:"ttl_attribute,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -7196,6 +7198,20 @@ func (x *TableDescriptor) GetLatestStreamLabel() string {
 func (x *TableDescriptor) GetStreamStatus() string {
 	if x != nil {
 		return x.StreamStatus
+	}
+	return ""
+}
+
+func (x *TableDescriptor) GetTextIndexes() []*TextIndexDescriptor {
+	if x != nil {
+		return x.TextIndexes
+	}
+	return nil
+}
+
+func (x *TableDescriptor) GetTtlAttribute() string {
+	if x != nil {
+		return x.TtlAttribute
 	}
 	return ""
 }
@@ -14663,6 +14679,58 @@ func (x *AtomicUpdateResponse) GetCreated() bool {
 	return false
 }
 
+type TextIndexDescriptor struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Field         string                 `protobuf:"bytes,2,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TextIndexDescriptor) Reset() {
+	*x = TextIndexDescriptor{}
+	mi := &file_cefas_proto_msgTypes[232]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TextIndexDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TextIndexDescriptor) ProtoMessage() {}
+
+func (x *TextIndexDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_cefas_proto_msgTypes[232]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TextIndexDescriptor.ProtoReflect.Descriptor instead.
+func (*TextIndexDescriptor) Descriptor() ([]byte, []int) {
+	return file_cefas_proto_rawDescGZIP(), []int{232}
+}
+
+func (x *TextIndexDescriptor) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TextIndexDescriptor) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
 type TransactWriteOp_Put struct {
 	state         protoimpl.MessageState     `protogen:"open.v1"`
 	Table         string                     `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
@@ -14673,7 +14741,7 @@ type TransactWriteOp_Put struct {
 
 func (x *TransactWriteOp_Put) Reset() {
 	*x = TransactWriteOp_Put{}
-	mi := &file_cefas_proto_msgTypes[257]
+	mi := &file_cefas_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14685,7 +14753,7 @@ func (x *TransactWriteOp_Put) String() string {
 func (*TransactWriteOp_Put) ProtoMessage() {}
 
 func (x *TransactWriteOp_Put) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[257]
+	mi := &file_cefas_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14725,7 +14793,7 @@ type TransactWriteOp_Delete struct {
 
 func (x *TransactWriteOp_Delete) Reset() {
 	*x = TransactWriteOp_Delete{}
-	mi := &file_cefas_proto_msgTypes[258]
+	mi := &file_cefas_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14737,7 +14805,7 @@ func (x *TransactWriteOp_Delete) String() string {
 func (*TransactWriteOp_Delete) ProtoMessage() {}
 
 func (x *TransactWriteOp_Delete) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[258]
+	mi := &file_cefas_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14777,7 +14845,7 @@ type TransactWriteOp_ConditionCheck struct {
 
 func (x *TransactWriteOp_ConditionCheck) Reset() {
 	*x = TransactWriteOp_ConditionCheck{}
-	mi := &file_cefas_proto_msgTypes[259]
+	mi := &file_cefas_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14789,7 +14857,7 @@ func (x *TransactWriteOp_ConditionCheck) String() string {
 func (*TransactWriteOp_ConditionCheck) ProtoMessage() {}
 
 func (x *TransactWriteOp_ConditionCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_cefas_proto_msgTypes[259]
+	mi := &file_cefas_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15327,7 +15395,7 @@ const file_cefas_proto_rawDesc = "" +
 	"\x13StreamSpecification\x12%\n" +
 	"\x0estream_enabled\x18\x01 \x01(\bR\rstreamEnabled\x12(\n" +
 	"\x10stream_view_type\x18\x02 \x01(\tR\x0estreamViewType\x12+\n" +
-	"\x11retention_seconds\x18\x03 \x01(\x03R\x10retentionSeconds\"\xd3\x04\n" +
+	"\x11retention_seconds\x18\x03 \x01(\x03R\x10retentionSeconds\"\xba\x05\n" +
 	"\x0fTableDescriptor\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\n" +
@@ -15341,7 +15409,9 @@ const file_cefas_proto_rawDesc = "" +
 	"\x11latest_stream_arn\x18\t \x01(\tR\x0flatestStreamArn\x12.\n" +
 	"\x13latest_stream_label\x18\n" +
 	" \x01(\tR\x11latestStreamLabel\x12#\n" +
-	"\rstream_status\x18\v \x01(\tR\fstreamStatus\"O\n" +
+	"\rstream_status\x18\v \x01(\tR\fstreamStatus\x12@\n" +
+	"\ftext_indexes\x18\f \x03(\v2\x1d.cefas.v1.TextIndexDescriptorR\vtextIndexes\x12#\n" +
+	"\rttl_attribute\x18\r \x01(\tR\fttlAttribute\"O\n" +
 	"\x12CreateTableRequest\x129\n" +
 	"\n" +
 	"descriptor\x18\x01 \x01(\v2\x19.cefas.v1.TableDescriptorR\n" +
@@ -16074,7 +16144,10 @@ const file_cefas_proto_rawDesc = "" +
 	"\acreated\x18\x03 \x01(\bR\acreated\x1aQ\n" +
 	"\tItemEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12.\n" +
-	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01*\\\n" +
+	"\x05value\x18\x02 \x01(\v2\x18.cefas.v1.AttributeValueR\x05value:\x028\x01\"?\n" +
+	"\x13TextIndexDescriptor\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05field\x18\x02 \x01(\tR\x05field*\\\n" +
 	"\vConsistency\x12\x1b\n" +
 	"\x17CONSISTENCY_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14CONSISTENCY_EVENTUAL\x10\x01\x12\x16\n" +
@@ -16201,7 +16274,7 @@ func file_cefas_proto_rawDescGZIP() []byte {
 }
 
 var file_cefas_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_cefas_proto_msgTypes = make([]protoimpl.MessageInfo, 275)
+var file_cefas_proto_msgTypes = make([]protoimpl.MessageInfo, 276)
 var file_cefas_proto_goTypes = []any{
 	(Consistency)(0),                          // 0: cefas.v1.Consistency
 	(ReturnValues)(0),                         // 1: cefas.v1.ReturnValues
@@ -16442,49 +16515,50 @@ var file_cefas_proto_goTypes = []any{
 	(*AtomicAction)(nil),                      // 236: cefas.v1.AtomicAction
 	(*AtomicUpdateRequest)(nil),               // 237: cefas.v1.AtomicUpdateRequest
 	(*AtomicUpdateResponse)(nil),              // 238: cefas.v1.AtomicUpdateResponse
-	nil,                                       // 239: cefas.v1.QueryIndexRequest.BindsEntry
-	nil,                                       // 240: cefas.v1.AtomicUpdateMVRequest.KeyEntry
-	nil,                                       // 241: cefas.v1.IndexCandidate.KeyEntry
-	nil,                                       // 242: cefas.v1.CohortCreateRequest.BindsEntry
-	nil,                                       // 243: cefas.v1.CohortEstimateRequest.BindsEntry
-	nil,                                       // 244: cefas.v1.AggregateRow.GroupKeyEntry
-	nil,                                       // 245: cefas.v1.AggregateRow.CountsEntry
-	nil,                                       // 246: cefas.v1.Map.ValuesEntry
-	nil,                                       // 247: cefas.v1.Item.AttributesEntry
-	nil,                                       // 248: cefas.v1.StreamRecordData.KeysEntry
-	nil,                                       // 249: cefas.v1.StreamRecordData.NewImageEntry
-	nil,                                       // 250: cefas.v1.StreamRecordData.OldImageEntry
-	nil,                                       // 251: cefas.v1.PutItemRequest.ItemEntry
-	nil,                                       // 252: cefas.v1.PutItemRequest.BindsEntry
-	nil,                                       // 253: cefas.v1.GetItemRequest.KeyEntry
-	nil,                                       // 254: cefas.v1.GetItemResponse.ItemEntry
-	nil,                                       // 255: cefas.v1.DeleteItemRequest.KeyEntry
-	nil,                                       // 256: cefas.v1.DeleteItemRequest.BindsEntry
-	nil,                                       // 257: cefas.v1.UpdateItemRequest.KeyEntry
-	nil,                                       // 258: cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
-	nil,                                       // 259: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
-	nil,                                       // 260: cefas.v1.UpdateItemResponse.AttributesEntry
-	nil,                                       // 261: cefas.v1.BatchWriteOp.ItemEntry
-	nil,                                       // 262: cefas.v1.BatchWriteOp.KeyEntry
-	nil,                                       // 263: cefas.v1.KeyMap.AttributesEntry
-	(*TransactWriteOp_Put)(nil),               // 264: cefas.v1.TransactWriteOp.Put
-	(*TransactWriteOp_Delete)(nil),            // 265: cefas.v1.TransactWriteOp.Delete
-	(*TransactWriteOp_ConditionCheck)(nil),    // 266: cefas.v1.TransactWriteOp.ConditionCheck
-	nil,                                       // 267: cefas.v1.TransactWriteOp.BindsEntry
-	nil,                                       // 268: cefas.v1.TransactWriteOp.Put.ItemEntry
-	nil,                                       // 269: cefas.v1.TransactWriteOp.Delete.KeyEntry
-	nil,                                       // 270: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
-	nil,                                       // 271: cefas.v1.TransactGet.KeyEntry
-	nil,                                       // 272: cefas.v1.ScanRequest.BindsEntry
-	nil,                                       // 273: cefas.v1.NBAAction.ContextEntry
-	nil,                                       // 274: cefas.v1.NextBestActionRequest.ContextEntry
-	nil,                                       // 275: cefas.v1.RecordRewardRequest.ContextEntry
-	nil,                                       // 276: cefas.v1.DecisionRecord.ContextEntry
-	nil,                                       // 277: cefas.v1.BanditSampleRequest.ContextEntry
-	nil,                                       // 278: cefas.v1.BanditRewardRequest.ContextEntry
-	nil,                                       // 279: cefas.v1.AtomicUpdateRequest.KeyEntry
-	nil,                                       // 280: cefas.v1.AtomicUpdateRequest.BindsEntry
-	nil,                                       // 281: cefas.v1.AtomicUpdateResponse.ItemEntry
+	(*TextIndexDescriptor)(nil),               // 239: cefas.v1.TextIndexDescriptor
+	nil,                                       // 240: cefas.v1.QueryIndexRequest.BindsEntry
+	nil,                                       // 241: cefas.v1.AtomicUpdateMVRequest.KeyEntry
+	nil,                                       // 242: cefas.v1.IndexCandidate.KeyEntry
+	nil,                                       // 243: cefas.v1.CohortCreateRequest.BindsEntry
+	nil,                                       // 244: cefas.v1.CohortEstimateRequest.BindsEntry
+	nil,                                       // 245: cefas.v1.AggregateRow.GroupKeyEntry
+	nil,                                       // 246: cefas.v1.AggregateRow.CountsEntry
+	nil,                                       // 247: cefas.v1.Map.ValuesEntry
+	nil,                                       // 248: cefas.v1.Item.AttributesEntry
+	nil,                                       // 249: cefas.v1.StreamRecordData.KeysEntry
+	nil,                                       // 250: cefas.v1.StreamRecordData.NewImageEntry
+	nil,                                       // 251: cefas.v1.StreamRecordData.OldImageEntry
+	nil,                                       // 252: cefas.v1.PutItemRequest.ItemEntry
+	nil,                                       // 253: cefas.v1.PutItemRequest.BindsEntry
+	nil,                                       // 254: cefas.v1.GetItemRequest.KeyEntry
+	nil,                                       // 255: cefas.v1.GetItemResponse.ItemEntry
+	nil,                                       // 256: cefas.v1.DeleteItemRequest.KeyEntry
+	nil,                                       // 257: cefas.v1.DeleteItemRequest.BindsEntry
+	nil,                                       // 258: cefas.v1.UpdateItemRequest.KeyEntry
+	nil,                                       // 259: cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
+	nil,                                       // 260: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
+	nil,                                       // 261: cefas.v1.UpdateItemResponse.AttributesEntry
+	nil,                                       // 262: cefas.v1.BatchWriteOp.ItemEntry
+	nil,                                       // 263: cefas.v1.BatchWriteOp.KeyEntry
+	nil,                                       // 264: cefas.v1.KeyMap.AttributesEntry
+	(*TransactWriteOp_Put)(nil),               // 265: cefas.v1.TransactWriteOp.Put
+	(*TransactWriteOp_Delete)(nil),            // 266: cefas.v1.TransactWriteOp.Delete
+	(*TransactWriteOp_ConditionCheck)(nil),    // 267: cefas.v1.TransactWriteOp.ConditionCheck
+	nil,                                       // 268: cefas.v1.TransactWriteOp.BindsEntry
+	nil,                                       // 269: cefas.v1.TransactWriteOp.Put.ItemEntry
+	nil,                                       // 270: cefas.v1.TransactWriteOp.Delete.KeyEntry
+	nil,                                       // 271: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
+	nil,                                       // 272: cefas.v1.TransactGet.KeyEntry
+	nil,                                       // 273: cefas.v1.ScanRequest.BindsEntry
+	nil,                                       // 274: cefas.v1.NBAAction.ContextEntry
+	nil,                                       // 275: cefas.v1.NextBestActionRequest.ContextEntry
+	nil,                                       // 276: cefas.v1.RecordRewardRequest.ContextEntry
+	nil,                                       // 277: cefas.v1.DecisionRecord.ContextEntry
+	nil,                                       // 278: cefas.v1.BanditSampleRequest.ContextEntry
+	nil,                                       // 279: cefas.v1.BanditRewardRequest.ContextEntry
+	nil,                                       // 280: cefas.v1.AtomicUpdateRequest.KeyEntry
+	nil,                                       // 281: cefas.v1.AtomicUpdateRequest.BindsEntry
+	nil,                                       // 282: cefas.v1.AtomicUpdateResponse.ItemEntry
 }
 var file_cefas_proto_depIdxs = []int32{
 	7,   // 0: cefas.v1.CreateGlobalIndexRequest.descriptor:type_name -> cefas.v1.GlobalIndexDescriptor
@@ -16500,12 +16574,12 @@ var file_cefas_proto_depIdxs = []int32{
 	22,  // 10: cefas.v1.ListServiceLevelsResponse.service_levels:type_name -> cefas.v1.ServiceLevelDescriptor
 	22,  // 11: cefas.v1.PauseServiceLevelResponse.descriptor:type_name -> cefas.v1.ServiceLevelDescriptor
 	22,  // 12: cefas.v1.ResumeServiceLevelResponse.descriptor:type_name -> cefas.v1.ServiceLevelDescriptor
-	239, // 13: cefas.v1.QueryIndexRequest.binds:type_name -> cefas.v1.QueryIndexRequest.BindsEntry
+	240, // 13: cefas.v1.QueryIndexRequest.binds:type_name -> cefas.v1.QueryIndexRequest.BindsEntry
 	166, // 14: cefas.v1.BatchWriteMVRequest.ops:type_name -> cefas.v1.BatchWriteOp
-	240, // 15: cefas.v1.AtomicUpdateMVRequest.key:type_name -> cefas.v1.AtomicUpdateMVRequest.KeyEntry
+	241, // 15: cefas.v1.AtomicUpdateMVRequest.key:type_name -> cefas.v1.AtomicUpdateMVRequest.KeyEntry
 	236, // 16: cefas.v1.AtomicUpdateMVRequest.actions:type_name -> cefas.v1.AtomicAction
 	166, // 17: cefas.v1.BatchWriteGIRequest.ops:type_name -> cefas.v1.BatchWriteOp
-	241, // 18: cefas.v1.IndexCandidate.key:type_name -> cefas.v1.IndexCandidate.KeyEntry
+	242, // 18: cefas.v1.IndexCandidate.key:type_name -> cefas.v1.IndexCandidate.KeyEntry
 	122, // 19: cefas.v1.MaterializedViewDescriptor.key_schema:type_name -> cefas.v1.KeySchema
 	46,  // 20: cefas.v1.MaterializedViewDescriptor.refresh_policy:type_name -> cefas.v1.RefreshPolicy
 	45,  // 21: cefas.v1.MaterializedViewDescriptor.aggregations:type_name -> cefas.v1.MaterializedViewAggregation
@@ -16537,10 +16611,10 @@ var file_cefas_proto_depIdxs = []int32{
 	115, // 47: cefas.v1.TopKRequest.target:type_name -> cefas.v1.AttributeValue
 	121, // 48: cefas.v1.TopKRow.item:type_name -> cefas.v1.Item
 	99,  // 49: cefas.v1.TopKResponse.rows:type_name -> cefas.v1.TopKRow
-	242, // 50: cefas.v1.CohortCreateRequest.binds:type_name -> cefas.v1.CohortCreateRequest.BindsEntry
-	243, // 51: cefas.v1.CohortEstimateRequest.binds:type_name -> cefas.v1.CohortEstimateRequest.BindsEntry
-	244, // 52: cefas.v1.AggregateRow.group_key:type_name -> cefas.v1.AggregateRow.GroupKeyEntry
-	245, // 53: cefas.v1.AggregateRow.counts:type_name -> cefas.v1.AggregateRow.CountsEntry
+	243, // 50: cefas.v1.CohortCreateRequest.binds:type_name -> cefas.v1.CohortCreateRequest.BindsEntry
+	244, // 51: cefas.v1.CohortEstimateRequest.binds:type_name -> cefas.v1.CohortEstimateRequest.BindsEntry
+	245, // 52: cefas.v1.AggregateRow.group_key:type_name -> cefas.v1.AggregateRow.GroupKeyEntry
+	246, // 53: cefas.v1.AggregateRow.counts:type_name -> cefas.v1.AggregateRow.CountsEntry
 	111, // 54: cefas.v1.AggregateResponse.rows:type_name -> cefas.v1.AggregateRow
 	121, // 55: cefas.v1.SqlResponse.rows:type_name -> cefas.v1.Item
 	116, // 56: cefas.v1.AttributeValue.ss:type_name -> cefas.v1.StringSet
@@ -16550,8 +16624,8 @@ var file_cefas_proto_depIdxs = []int32{
 	119, // 60: cefas.v1.AttributeValue.m:type_name -> cefas.v1.Map
 	120, // 61: cefas.v1.AttributeValue.v:type_name -> cefas.v1.Vector
 	115, // 62: cefas.v1.List.values:type_name -> cefas.v1.AttributeValue
-	246, // 63: cefas.v1.Map.values:type_name -> cefas.v1.Map.ValuesEntry
-	247, // 64: cefas.v1.Item.attributes:type_name -> cefas.v1.Item.AttributesEntry
+	247, // 63: cefas.v1.Map.values:type_name -> cefas.v1.Map.ValuesEntry
+	248, // 64: cefas.v1.Item.attributes:type_name -> cefas.v1.Item.AttributesEntry
 	122, // 65: cefas.v1.GSIDescriptor.key_schema:type_name -> cefas.v1.KeySchema
 	124, // 66: cefas.v1.SpatialIndexDescriptor.ranges:type_name -> cefas.v1.NumRange
 	122, // 67: cefas.v1.TableDescriptor.key_schema:type_name -> cefas.v1.KeySchema
@@ -16559,323 +16633,324 @@ var file_cefas_proto_depIdxs = []int32{
 	125, // 69: cefas.v1.TableDescriptor.spatial_indexes:type_name -> cefas.v1.SpatialIndexDescriptor
 	126, // 70: cefas.v1.TableDescriptor.attribute_definitions:type_name -> cefas.v1.AttributeDefinition
 	127, // 71: cefas.v1.TableDescriptor.stream_specification:type_name -> cefas.v1.StreamSpecification
-	128, // 72: cefas.v1.CreateTableRequest.descriptor:type_name -> cefas.v1.TableDescriptor
-	128, // 73: cefas.v1.CreateTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
-	128, // 74: cefas.v1.DescribeTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
-	128, // 75: cefas.v1.ListTablesResponse.tables:type_name -> cefas.v1.TableDescriptor
-	138, // 76: cefas.v1.ListStreamsResponse.streams:type_name -> cefas.v1.StreamSummary
-	141, // 77: cefas.v1.StreamShard.sequence_number_range:type_name -> cefas.v1.SequenceNumberRange
-	122, // 78: cefas.v1.StreamDescription.key_schema:type_name -> cefas.v1.KeySchema
-	142, // 79: cefas.v1.StreamDescription.shards:type_name -> cefas.v1.StreamShard
-	143, // 80: cefas.v1.DescribeStreamResponse.stream_description:type_name -> cefas.v1.StreamDescription
-	248, // 81: cefas.v1.StreamRecordData.keys:type_name -> cefas.v1.StreamRecordData.KeysEntry
-	249, // 82: cefas.v1.StreamRecordData.new_image:type_name -> cefas.v1.StreamRecordData.NewImageEntry
-	250, // 83: cefas.v1.StreamRecordData.old_image:type_name -> cefas.v1.StreamRecordData.OldImageEntry
-	148, // 84: cefas.v1.StreamRecordEntry.dynamodb:type_name -> cefas.v1.StreamRecordData
-	149, // 85: cefas.v1.GetRecordsResponse.records:type_name -> cefas.v1.StreamRecordEntry
-	127, // 86: cefas.v1.UpdateStreamSpecificationRequest.stream_specification:type_name -> cefas.v1.StreamSpecification
-	127, // 87: cefas.v1.UpdateStreamSpecificationResponse.stream_specification:type_name -> cefas.v1.StreamSpecification
-	153, // 88: cefas.v1.UpdateTimeToLiveRequest.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
-	153, // 89: cefas.v1.UpdateTimeToLiveResponse.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
-	251, // 90: cefas.v1.PutItemRequest.item:type_name -> cefas.v1.PutItemRequest.ItemEntry
-	252, // 91: cefas.v1.PutItemRequest.binds:type_name -> cefas.v1.PutItemRequest.BindsEntry
-	253, // 92: cefas.v1.GetItemRequest.key:type_name -> cefas.v1.GetItemRequest.KeyEntry
-	0,   // 93: cefas.v1.GetItemRequest.consistency:type_name -> cefas.v1.Consistency
-	254, // 94: cefas.v1.GetItemResponse.item:type_name -> cefas.v1.GetItemResponse.ItemEntry
-	255, // 95: cefas.v1.DeleteItemRequest.key:type_name -> cefas.v1.DeleteItemRequest.KeyEntry
-	256, // 96: cefas.v1.DeleteItemRequest.binds:type_name -> cefas.v1.DeleteItemRequest.BindsEntry
-	257, // 97: cefas.v1.UpdateItemRequest.key:type_name -> cefas.v1.UpdateItemRequest.KeyEntry
-	258, // 98: cefas.v1.UpdateItemRequest.expression_attribute_names:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
-	259, // 99: cefas.v1.UpdateItemRequest.expression_attribute_values:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
-	1,   // 100: cefas.v1.UpdateItemRequest.return_values:type_name -> cefas.v1.ReturnValues
-	260, // 101: cefas.v1.UpdateItemResponse.attributes:type_name -> cefas.v1.UpdateItemResponse.AttributesEntry
-	6,   // 102: cefas.v1.BatchWriteOp.kind:type_name -> cefas.v1.BatchWriteOp.Kind
-	261, // 103: cefas.v1.BatchWriteOp.item:type_name -> cefas.v1.BatchWriteOp.ItemEntry
-	262, // 104: cefas.v1.BatchWriteOp.key:type_name -> cefas.v1.BatchWriteOp.KeyEntry
-	166, // 105: cefas.v1.BatchWriteItemRequest.ops:type_name -> cefas.v1.BatchWriteOp
-	170, // 106: cefas.v1.BatchGetItemRequest.keys:type_name -> cefas.v1.KeyMap
-	263, // 107: cefas.v1.KeyMap.attributes:type_name -> cefas.v1.KeyMap.AttributesEntry
-	121, // 108: cefas.v1.BatchGetItemResponse.items:type_name -> cefas.v1.Item
-	264, // 109: cefas.v1.TransactWriteOp.put:type_name -> cefas.v1.TransactWriteOp.Put
-	265, // 110: cefas.v1.TransactWriteOp.delete:type_name -> cefas.v1.TransactWriteOp.Delete
-	266, // 111: cefas.v1.TransactWriteOp.condition_check:type_name -> cefas.v1.TransactWriteOp.ConditionCheck
-	267, // 112: cefas.v1.TransactWriteOp.binds:type_name -> cefas.v1.TransactWriteOp.BindsEntry
-	172, // 113: cefas.v1.TransactWriteItemsRequest.ops:type_name -> cefas.v1.TransactWriteOp
-	271, // 114: cefas.v1.TransactGet.key:type_name -> cefas.v1.TransactGet.KeyEntry
-	175, // 115: cefas.v1.TransactGetItemsRequest.items:type_name -> cefas.v1.TransactGet
-	121, // 116: cefas.v1.TransactGetItemsResponse.items:type_name -> cefas.v1.Item
-	115, // 117: cefas.v1.QueryRequest.pk_value:type_name -> cefas.v1.AttributeValue
-	115, // 118: cefas.v1.QueryRequest.sk_low:type_name -> cefas.v1.AttributeValue
-	115, // 119: cefas.v1.QueryRequest.sk_high:type_name -> cefas.v1.AttributeValue
-	0,   // 120: cefas.v1.QueryRequest.consistency:type_name -> cefas.v1.Consistency
-	272, // 121: cefas.v1.ScanRequest.binds:type_name -> cefas.v1.ScanRequest.BindsEntry
-	0,   // 122: cefas.v1.ScanRequest.consistency:type_name -> cefas.v1.Consistency
-	180, // 123: cefas.v1.SpatialQueryRequest.bbox:type_name -> cefas.v1.BBox
-	181, // 124: cefas.v1.SpatialQueryRequest.radius:type_name -> cefas.v1.Radius
-	182, // 125: cefas.v1.SpatialQueryRequest.z:type_name -> cefas.v1.ZBBox
-	190, // 126: cefas.v1.ClusterStatusResponse.shards:type_name -> cefas.v1.ShardPlacement
-	189, // 127: cefas.v1.ClusterStatusResponse.nodes:type_name -> cefas.v1.NodeDescriptor
-	191, // 128: cefas.v1.ClusterStatusResponse.hot_ranges:type_name -> cefas.v1.RangeHotspotSummary
-	186, // 129: cefas.v1.ClusterStatusResponse.backup_scheduler:type_name -> cefas.v1.ScheduledBackupStatus
-	81,  // 130: cefas.v1.ScheduledBackupStatus.last_retention:type_name -> cefas.v1.ApplyBackupRetentionResponse
-	188, // 131: cefas.v1.NodeDescriptor.capacity:type_name -> cefas.v1.NodeCapacity
-	187, // 132: cefas.v1.ShardPlacement.ranges:type_name -> cefas.v1.TokenRange
-	190, // 133: cefas.v1.PlacementCatalog.shards:type_name -> cefas.v1.ShardPlacement
-	189, // 134: cefas.v1.PlacementCatalog.nodes:type_name -> cefas.v1.NodeDescriptor
-	196, // 135: cefas.v1.PlacementPlan.before:type_name -> cefas.v1.PlacementCatalog
-	196, // 136: cefas.v1.PlacementPlan.after:type_name -> cefas.v1.PlacementCatalog
-	198, // 137: cefas.v1.PlacementPlan.steps:type_name -> cefas.v1.PlacementPlanStep
-	199, // 138: cefas.v1.PlanPlacementResponse.plan:type_name -> cefas.v1.PlacementPlan
-	199, // 139: cefas.v1.ApplyPlacementRequest.plan:type_name -> cefas.v1.PlacementPlan
-	202, // 140: cefas.v1.PlacementApplyResult.steps:type_name -> cefas.v1.PlacementApplyStep
-	196, // 141: cefas.v1.PlacementApplyResult.placement:type_name -> cefas.v1.PlacementCatalog
-	203, // 142: cefas.v1.ApplyPlacementResponse.result:type_name -> cefas.v1.PlacementApplyResult
-	187, // 143: cefas.v1.FinalizeSplitResult.parent_range_before:type_name -> cefas.v1.TokenRange
-	187, // 144: cefas.v1.FinalizeSplitResult.parent_range_after:type_name -> cefas.v1.TokenRange
-	187, // 145: cefas.v1.FinalizeSplitResult.child_range:type_name -> cefas.v1.TokenRange
-	196, // 146: cefas.v1.FinalizeSplitResult.placement:type_name -> cefas.v1.PlacementCatalog
-	206, // 147: cefas.v1.FinalizeSplitResponse.result:type_name -> cefas.v1.FinalizeSplitResult
-	187, // 148: cefas.v1.FinalizeRangeMoveResult.source_ranges_before:type_name -> cefas.v1.TokenRange
-	187, // 149: cefas.v1.FinalizeRangeMoveResult.source_ranges_after:type_name -> cefas.v1.TokenRange
-	187, // 150: cefas.v1.FinalizeRangeMoveResult.moved_range:type_name -> cefas.v1.TokenRange
-	196, // 151: cefas.v1.FinalizeRangeMoveResult.placement:type_name -> cefas.v1.PlacementCatalog
-	209, // 152: cefas.v1.FinalizeRangeMoveResponse.result:type_name -> cefas.v1.FinalizeRangeMoveResult
-	121, // 153: cefas.v1.RerankCandidate.item:type_name -> cefas.v1.Item
-	211, // 154: cefas.v1.RerankRequest.candidates:type_name -> cefas.v1.RerankCandidate
-	211, // 155: cefas.v1.RerankResponse.slate:type_name -> cefas.v1.RerankCandidate
-	115, // 156: cefas.v1.RecommendRequest.target:type_name -> cefas.v1.AttributeValue
-	121, // 157: cefas.v1.RecommendRow.item:type_name -> cefas.v1.Item
-	216, // 158: cefas.v1.RecommendResponse.rows:type_name -> cefas.v1.RecommendRow
-	214, // 159: cefas.v1.RecommendResponse.stages:type_name -> cefas.v1.PipelineStageTiming
-	273, // 160: cefas.v1.NBAAction.context:type_name -> cefas.v1.NBAAction.ContextEntry
-	218, // 161: cefas.v1.NextBestActionRequest.actions:type_name -> cefas.v1.NBAAction
-	274, // 162: cefas.v1.NextBestActionRequest.context:type_name -> cefas.v1.NextBestActionRequest.ContextEntry
-	214, // 163: cefas.v1.NextBestActionResponse.stages:type_name -> cefas.v1.PipelineStageTiming
-	275, // 164: cefas.v1.RecordRewardRequest.context:type_name -> cefas.v1.RecordRewardRequest.ContextEntry
-	276, // 165: cefas.v1.DecisionRecord.context:type_name -> cefas.v1.DecisionRecord.ContextEntry
-	223, // 166: cefas.v1.GetDecisionResponse.decision:type_name -> cefas.v1.DecisionRecord
-	226, // 167: cefas.v1.BanditCreateRequest.arms:type_name -> cefas.v1.BanditArmSpec
-	277, // 168: cefas.v1.BanditSampleRequest.context:type_name -> cefas.v1.BanditSampleRequest.ContextEntry
-	278, // 169: cefas.v1.BanditRewardRequest.context:type_name -> cefas.v1.BanditRewardRequest.ContextEntry
-	234, // 170: cefas.v1.BanditDescribeResponse.arms:type_name -> cefas.v1.BanditArmStats
-	2,   // 171: cefas.v1.AtomicAction.kind:type_name -> cefas.v1.AtomicActionKind
-	115, // 172: cefas.v1.AtomicAction.value:type_name -> cefas.v1.AttributeValue
-	279, // 173: cefas.v1.AtomicUpdateRequest.key:type_name -> cefas.v1.AtomicUpdateRequest.KeyEntry
-	280, // 174: cefas.v1.AtomicUpdateRequest.binds:type_name -> cefas.v1.AtomicUpdateRequest.BindsEntry
-	236, // 175: cefas.v1.AtomicUpdateRequest.actions:type_name -> cefas.v1.AtomicAction
-	281, // 176: cefas.v1.AtomicUpdateResponse.item:type_name -> cefas.v1.AtomicUpdateResponse.ItemEntry
-	115, // 177: cefas.v1.AtomicUpdateResponse.returned_values:type_name -> cefas.v1.AttributeValue
-	115, // 178: cefas.v1.QueryIndexRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 179: cefas.v1.AtomicUpdateMVRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 180: cefas.v1.IndexCandidate.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 181: cefas.v1.CohortCreateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 182: cefas.v1.CohortEstimateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 183: cefas.v1.Map.ValuesEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 184: cefas.v1.Item.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 185: cefas.v1.StreamRecordData.KeysEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 186: cefas.v1.StreamRecordData.NewImageEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 187: cefas.v1.StreamRecordData.OldImageEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 188: cefas.v1.PutItemRequest.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 189: cefas.v1.PutItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 190: cefas.v1.GetItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 191: cefas.v1.GetItemResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 192: cefas.v1.DeleteItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 193: cefas.v1.DeleteItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 194: cefas.v1.UpdateItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 195: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 196: cefas.v1.UpdateItemResponse.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 197: cefas.v1.BatchWriteOp.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 198: cefas.v1.BatchWriteOp.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 199: cefas.v1.KeyMap.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
-	268, // 200: cefas.v1.TransactWriteOp.Put.item:type_name -> cefas.v1.TransactWriteOp.Put.ItemEntry
-	269, // 201: cefas.v1.TransactWriteOp.Delete.key:type_name -> cefas.v1.TransactWriteOp.Delete.KeyEntry
-	270, // 202: cefas.v1.TransactWriteOp.ConditionCheck.key:type_name -> cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
-	115, // 203: cefas.v1.TransactWriteOp.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 204: cefas.v1.TransactWriteOp.Put.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 205: cefas.v1.TransactWriteOp.Delete.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 206: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 207: cefas.v1.TransactGet.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 208: cefas.v1.ScanRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 209: cefas.v1.AtomicUpdateRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 210: cefas.v1.AtomicUpdateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
-	115, // 211: cefas.v1.AtomicUpdateResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
-	129, // 212: cefas.v1.Cefas.CreateTable:input_type -> cefas.v1.CreateTableRequest
-	131, // 213: cefas.v1.Cefas.DescribeTable:input_type -> cefas.v1.DescribeTableRequest
-	133, // 214: cefas.v1.Cefas.ListTables:input_type -> cefas.v1.ListTablesRequest
-	135, // 215: cefas.v1.Cefas.DropTable:input_type -> cefas.v1.DropTableRequest
-	137, // 216: cefas.v1.Cefas.ListStreams:input_type -> cefas.v1.ListStreamsRequest
-	140, // 217: cefas.v1.Cefas.DescribeStream:input_type -> cefas.v1.DescribeStreamRequest
-	145, // 218: cefas.v1.Cefas.GetShardIterator:input_type -> cefas.v1.GetShardIteratorRequest
-	147, // 219: cefas.v1.Cefas.GetRecords:input_type -> cefas.v1.GetRecordsRequest
-	154, // 220: cefas.v1.Cefas.UpdateTimeToLive:input_type -> cefas.v1.UpdateTimeToLiveRequest
-	156, // 221: cefas.v1.Cefas.DescribeTimeToLive:input_type -> cefas.v1.DescribeTimeToLiveRequest
-	158, // 222: cefas.v1.Cefas.PutItem:input_type -> cefas.v1.PutItemRequest
-	160, // 223: cefas.v1.Cefas.GetItem:input_type -> cefas.v1.GetItemRequest
-	164, // 224: cefas.v1.Cefas.UpdateItem:input_type -> cefas.v1.UpdateItemRequest
-	162, // 225: cefas.v1.Cefas.DeleteItem:input_type -> cefas.v1.DeleteItemRequest
-	167, // 226: cefas.v1.Cefas.BatchWriteItem:input_type -> cefas.v1.BatchWriteItemRequest
-	169, // 227: cefas.v1.Cefas.BatchGetItem:input_type -> cefas.v1.BatchGetItemRequest
-	173, // 228: cefas.v1.Cefas.TransactWriteItems:input_type -> cefas.v1.TransactWriteItemsRequest
-	176, // 229: cefas.v1.Cefas.TransactGetItems:input_type -> cefas.v1.TransactGetItemsRequest
-	178, // 230: cefas.v1.Cefas.Query:input_type -> cefas.v1.QueryRequest
-	179, // 231: cefas.v1.Cefas.Scan:input_type -> cefas.v1.ScanRequest
-	183, // 232: cefas.v1.Cefas.SpatialQuery:input_type -> cefas.v1.SpatialQueryRequest
-	113, // 233: cefas.v1.Cefas.Sql:input_type -> cefas.v1.SqlRequest
-	184, // 234: cefas.v1.Cefas.ClusterStatus:input_type -> cefas.v1.ClusterStatusRequest
-	192, // 235: cefas.v1.Cefas.AddVoter:input_type -> cefas.v1.AddVoterRequest
-	194, // 236: cefas.v1.Cefas.RemoveServer:input_type -> cefas.v1.RemoveServerRequest
-	197, // 237: cefas.v1.Cefas.PlanPlacement:input_type -> cefas.v1.PlanPlacementRequest
-	201, // 238: cefas.v1.Cefas.ApplyPlacement:input_type -> cefas.v1.ApplyPlacementRequest
-	205, // 239: cefas.v1.Cefas.FinalizeSplit:input_type -> cefas.v1.FinalizeSplitRequest
-	208, // 240: cefas.v1.Cefas.FinalizeRangeMove:input_type -> cefas.v1.FinalizeRangeMoveRequest
-	61,  // 241: cefas.v1.Cefas.StreamChanges:input_type -> cefas.v1.StreamChangesRequest
-	63,  // 242: cefas.v1.Cefas.ListSnapshots:input_type -> cefas.v1.ListSnapshotsRequest
-	66,  // 243: cefas.v1.Cefas.Compact:input_type -> cefas.v1.CompactRequest
-	72,  // 244: cefas.v1.Cefas.CreateBackup:input_type -> cefas.v1.CreateBackupRequest
-	74,  // 245: cefas.v1.Cefas.ListBackups:input_type -> cefas.v1.ListBackupsRequest
-	76,  // 246: cefas.v1.Cefas.DeleteBackup:input_type -> cefas.v1.DeleteBackupRequest
-	79,  // 247: cefas.v1.Cefas.ApplyBackupRetention:input_type -> cefas.v1.ApplyBackupRetentionRequest
-	82,  // 248: cefas.v1.Cefas.RestoreTableFromBackup:input_type -> cefas.v1.RestoreTableFromBackupRequest
-	85,  // 249: cefas.v1.Cefas.ListPlugins:input_type -> cefas.v1.ListPluginsRequest
-	87,  // 250: cefas.v1.Cefas.DescribePlugin:input_type -> cefas.v1.DescribePluginRequest
-	47,  // 251: cefas.v1.Cefas.CreateMaterializedView:input_type -> cefas.v1.CreateMaterializedViewRequest
-	49,  // 252: cefas.v1.Cefas.DescribeMaterializedView:input_type -> cefas.v1.DescribeMaterializedViewRequest
-	51,  // 253: cefas.v1.Cefas.DropMaterializedView:input_type -> cefas.v1.DropMaterializedViewRequest
-	53,  // 254: cefas.v1.Cefas.ListMaterializedViews:input_type -> cefas.v1.ListMaterializedViewsRequest
-	55,  // 255: cefas.v1.Cefas.RefreshMaterializedView:input_type -> cefas.v1.RefreshMaterializedViewRequest
-	57,  // 256: cefas.v1.Cefas.PauseMaterializedView:input_type -> cefas.v1.PauseMaterializedViewRequest
-	59,  // 257: cefas.v1.Cefas.ResumeMaterializedView:input_type -> cefas.v1.ResumeMaterializedViewRequest
-	90,  // 258: cefas.v1.Cefas.CreateIndex:input_type -> cefas.v1.CreateIndexRequest
-	92,  // 259: cefas.v1.Cefas.DescribeIndex:input_type -> cefas.v1.DescribeIndexRequest
-	94,  // 260: cefas.v1.Cefas.RebuildIndex:input_type -> cefas.v1.RebuildIndexRequest
-	96,  // 261: cefas.v1.Cefas.Explain:input_type -> cefas.v1.ExplainRequest
-	98,  // 262: cefas.v1.Cefas.TopK:input_type -> cefas.v1.TopKRequest
-	101, // 263: cefas.v1.Cefas.CohortCreate:input_type -> cefas.v1.CohortCreateRequest
-	103, // 264: cefas.v1.Cefas.CohortEstimate:input_type -> cefas.v1.CohortEstimateRequest
-	105, // 265: cefas.v1.Cefas.GeoAudience:input_type -> cefas.v1.GeoAudienceRequest
-	106, // 266: cefas.v1.Cefas.Dedup:input_type -> cefas.v1.DedupRequest
-	108, // 267: cefas.v1.Cefas.FreqCap:input_type -> cefas.v1.FreqCapRequest
-	110, // 268: cefas.v1.Cefas.Aggregate:input_type -> cefas.v1.AggregateRequest
-	212, // 269: cefas.v1.Cefas.Rerank:input_type -> cefas.v1.RerankRequest
-	215, // 270: cefas.v1.Cefas.Recommend:input_type -> cefas.v1.RecommendRequest
-	219, // 271: cefas.v1.Cefas.NextBestAction:input_type -> cefas.v1.NextBestActionRequest
-	221, // 272: cefas.v1.Cefas.RecordReward:input_type -> cefas.v1.RecordRewardRequest
-	224, // 273: cefas.v1.Cefas.GetDecision:input_type -> cefas.v1.GetDecisionRequest
-	227, // 274: cefas.v1.Cefas.BanditCreate:input_type -> cefas.v1.BanditCreateRequest
-	229, // 275: cefas.v1.Cefas.BanditSample:input_type -> cefas.v1.BanditSampleRequest
-	231, // 276: cefas.v1.Cefas.BanditReward:input_type -> cefas.v1.BanditRewardRequest
-	233, // 277: cefas.v1.Cefas.BanditDescribe:input_type -> cefas.v1.BanditDescribeRequest
-	151, // 278: cefas.v1.Cefas.UpdateStreamSpecification:input_type -> cefas.v1.UpdateStreamSpecificationRequest
-	23,  // 279: cefas.v1.Cefas.CreateServiceLevel:input_type -> cefas.v1.CreateServiceLevelRequest
-	25,  // 280: cefas.v1.Cefas.AlterServiceLevel:input_type -> cefas.v1.AlterServiceLevelRequest
-	27,  // 281: cefas.v1.Cefas.DropServiceLevel:input_type -> cefas.v1.DropServiceLevelRequest
-	29,  // 282: cefas.v1.Cefas.ListServiceLevels:input_type -> cefas.v1.ListServiceLevelsRequest
-	31,  // 283: cefas.v1.Cefas.PauseServiceLevel:input_type -> cefas.v1.PauseServiceLevelRequest
-	33,  // 284: cefas.v1.Cefas.ResumeServiceLevel:input_type -> cefas.v1.ResumeServiceLevelRequest
-	8,   // 285: cefas.v1.Cefas.CreateGlobalIndex:input_type -> cefas.v1.CreateGlobalIndexRequest
-	10,  // 286: cefas.v1.Cefas.DescribeGlobalIndex:input_type -> cefas.v1.DescribeGlobalIndexRequest
-	12,  // 287: cefas.v1.Cefas.DropGlobalIndex:input_type -> cefas.v1.DropGlobalIndexRequest
-	14,  // 288: cefas.v1.Cefas.ListGlobalIndexes:input_type -> cefas.v1.ListGlobalIndexesRequest
-	16,  // 289: cefas.v1.Cefas.RebuildGlobalIndex:input_type -> cefas.v1.RebuildGlobalIndexRequest
-	18,  // 290: cefas.v1.Cefas.PauseGlobalIndex:input_type -> cefas.v1.PauseGlobalIndexRequest
-	20,  // 291: cefas.v1.Cefas.ResumeGlobalIndex:input_type -> cefas.v1.ResumeGlobalIndexRequest
-	35,  // 292: cefas.v1.Replica.ScanShard:input_type -> cefas.v1.ScanShardRequest
-	36,  // 293: cefas.v1.Replica.QueryIndex:input_type -> cefas.v1.QueryIndexRequest
-	37,  // 294: cefas.v1.Replica.BatchWriteMV:input_type -> cefas.v1.BatchWriteMVRequest
-	39,  // 295: cefas.v1.Replica.AtomicUpdateMV:input_type -> cefas.v1.AtomicUpdateMVRequest
-	41,  // 296: cefas.v1.Replica.BatchWriteGI:input_type -> cefas.v1.BatchWriteGIRequest
-	237, // 297: cefas.v1.CefasAtomic.AtomicUpdate:input_type -> cefas.v1.AtomicUpdateRequest
-	130, // 298: cefas.v1.Cefas.CreateTable:output_type -> cefas.v1.CreateTableResponse
-	132, // 299: cefas.v1.Cefas.DescribeTable:output_type -> cefas.v1.DescribeTableResponse
-	134, // 300: cefas.v1.Cefas.ListTables:output_type -> cefas.v1.ListTablesResponse
-	136, // 301: cefas.v1.Cefas.DropTable:output_type -> cefas.v1.DropTableResponse
-	139, // 302: cefas.v1.Cefas.ListStreams:output_type -> cefas.v1.ListStreamsResponse
-	144, // 303: cefas.v1.Cefas.DescribeStream:output_type -> cefas.v1.DescribeStreamResponse
-	146, // 304: cefas.v1.Cefas.GetShardIterator:output_type -> cefas.v1.GetShardIteratorResponse
-	150, // 305: cefas.v1.Cefas.GetRecords:output_type -> cefas.v1.GetRecordsResponse
-	155, // 306: cefas.v1.Cefas.UpdateTimeToLive:output_type -> cefas.v1.UpdateTimeToLiveResponse
-	157, // 307: cefas.v1.Cefas.DescribeTimeToLive:output_type -> cefas.v1.DescribeTimeToLiveResponse
-	159, // 308: cefas.v1.Cefas.PutItem:output_type -> cefas.v1.PutItemResponse
-	161, // 309: cefas.v1.Cefas.GetItem:output_type -> cefas.v1.GetItemResponse
-	165, // 310: cefas.v1.Cefas.UpdateItem:output_type -> cefas.v1.UpdateItemResponse
-	163, // 311: cefas.v1.Cefas.DeleteItem:output_type -> cefas.v1.DeleteItemResponse
-	168, // 312: cefas.v1.Cefas.BatchWriteItem:output_type -> cefas.v1.BatchWriteItemResponse
-	171, // 313: cefas.v1.Cefas.BatchGetItem:output_type -> cefas.v1.BatchGetItemResponse
-	174, // 314: cefas.v1.Cefas.TransactWriteItems:output_type -> cefas.v1.TransactWriteItemsResponse
-	177, // 315: cefas.v1.Cefas.TransactGetItems:output_type -> cefas.v1.TransactGetItemsResponse
-	121, // 316: cefas.v1.Cefas.Query:output_type -> cefas.v1.Item
-	121, // 317: cefas.v1.Cefas.Scan:output_type -> cefas.v1.Item
-	121, // 318: cefas.v1.Cefas.SpatialQuery:output_type -> cefas.v1.Item
-	114, // 319: cefas.v1.Cefas.Sql:output_type -> cefas.v1.SqlResponse
-	185, // 320: cefas.v1.Cefas.ClusterStatus:output_type -> cefas.v1.ClusterStatusResponse
-	193, // 321: cefas.v1.Cefas.AddVoter:output_type -> cefas.v1.AddVoterResponse
-	195, // 322: cefas.v1.Cefas.RemoveServer:output_type -> cefas.v1.RemoveServerResponse
-	200, // 323: cefas.v1.Cefas.PlanPlacement:output_type -> cefas.v1.PlanPlacementResponse
-	204, // 324: cefas.v1.Cefas.ApplyPlacement:output_type -> cefas.v1.ApplyPlacementResponse
-	207, // 325: cefas.v1.Cefas.FinalizeSplit:output_type -> cefas.v1.FinalizeSplitResponse
-	210, // 326: cefas.v1.Cefas.FinalizeRangeMove:output_type -> cefas.v1.FinalizeRangeMoveResponse
-	62,  // 327: cefas.v1.Cefas.StreamChanges:output_type -> cefas.v1.ChangeEvent
-	64,  // 328: cefas.v1.Cefas.ListSnapshots:output_type -> cefas.v1.ListSnapshotsResponse
-	68,  // 329: cefas.v1.Cefas.Compact:output_type -> cefas.v1.CompactResponse
-	73,  // 330: cefas.v1.Cefas.CreateBackup:output_type -> cefas.v1.CreateBackupResponse
-	75,  // 331: cefas.v1.Cefas.ListBackups:output_type -> cefas.v1.ListBackupsResponse
-	78,  // 332: cefas.v1.Cefas.DeleteBackup:output_type -> cefas.v1.DeleteBackupResponse
-	81,  // 333: cefas.v1.Cefas.ApplyBackupRetention:output_type -> cefas.v1.ApplyBackupRetentionResponse
-	83,  // 334: cefas.v1.Cefas.RestoreTableFromBackup:output_type -> cefas.v1.RestoreTableFromBackupResponse
-	86,  // 335: cefas.v1.Cefas.ListPlugins:output_type -> cefas.v1.ListPluginsResponse
-	88,  // 336: cefas.v1.Cefas.DescribePlugin:output_type -> cefas.v1.DescribePluginResponse
-	48,  // 337: cefas.v1.Cefas.CreateMaterializedView:output_type -> cefas.v1.CreateMaterializedViewResponse
-	50,  // 338: cefas.v1.Cefas.DescribeMaterializedView:output_type -> cefas.v1.DescribeMaterializedViewResponse
-	52,  // 339: cefas.v1.Cefas.DropMaterializedView:output_type -> cefas.v1.DropMaterializedViewResponse
-	54,  // 340: cefas.v1.Cefas.ListMaterializedViews:output_type -> cefas.v1.ListMaterializedViewsResponse
-	56,  // 341: cefas.v1.Cefas.RefreshMaterializedView:output_type -> cefas.v1.RefreshMaterializedViewResponse
-	58,  // 342: cefas.v1.Cefas.PauseMaterializedView:output_type -> cefas.v1.PauseMaterializedViewResponse
-	60,  // 343: cefas.v1.Cefas.ResumeMaterializedView:output_type -> cefas.v1.ResumeMaterializedViewResponse
-	91,  // 344: cefas.v1.Cefas.CreateIndex:output_type -> cefas.v1.CreateIndexResponse
-	93,  // 345: cefas.v1.Cefas.DescribeIndex:output_type -> cefas.v1.DescribeIndexResponse
-	95,  // 346: cefas.v1.Cefas.RebuildIndex:output_type -> cefas.v1.RebuildIndexResponse
-	97,  // 347: cefas.v1.Cefas.Explain:output_type -> cefas.v1.ExplainResponse
-	100, // 348: cefas.v1.Cefas.TopK:output_type -> cefas.v1.TopKResponse
-	102, // 349: cefas.v1.Cefas.CohortCreate:output_type -> cefas.v1.CohortCreateResponse
-	104, // 350: cefas.v1.Cefas.CohortEstimate:output_type -> cefas.v1.CohortEstimateResponse
-	121, // 351: cefas.v1.Cefas.GeoAudience:output_type -> cefas.v1.Item
-	107, // 352: cefas.v1.Cefas.Dedup:output_type -> cefas.v1.DedupResponse
-	109, // 353: cefas.v1.Cefas.FreqCap:output_type -> cefas.v1.FreqCapResponse
-	112, // 354: cefas.v1.Cefas.Aggregate:output_type -> cefas.v1.AggregateResponse
-	213, // 355: cefas.v1.Cefas.Rerank:output_type -> cefas.v1.RerankResponse
-	217, // 356: cefas.v1.Cefas.Recommend:output_type -> cefas.v1.RecommendResponse
-	220, // 357: cefas.v1.Cefas.NextBestAction:output_type -> cefas.v1.NextBestActionResponse
-	222, // 358: cefas.v1.Cefas.RecordReward:output_type -> cefas.v1.RecordRewardResponse
-	225, // 359: cefas.v1.Cefas.GetDecision:output_type -> cefas.v1.GetDecisionResponse
-	228, // 360: cefas.v1.Cefas.BanditCreate:output_type -> cefas.v1.BanditCreateResponse
-	230, // 361: cefas.v1.Cefas.BanditSample:output_type -> cefas.v1.BanditSampleResponse
-	232, // 362: cefas.v1.Cefas.BanditReward:output_type -> cefas.v1.BanditRewardResponse
-	235, // 363: cefas.v1.Cefas.BanditDescribe:output_type -> cefas.v1.BanditDescribeResponse
-	152, // 364: cefas.v1.Cefas.UpdateStreamSpecification:output_type -> cefas.v1.UpdateStreamSpecificationResponse
-	24,  // 365: cefas.v1.Cefas.CreateServiceLevel:output_type -> cefas.v1.CreateServiceLevelResponse
-	26,  // 366: cefas.v1.Cefas.AlterServiceLevel:output_type -> cefas.v1.AlterServiceLevelResponse
-	28,  // 367: cefas.v1.Cefas.DropServiceLevel:output_type -> cefas.v1.DropServiceLevelResponse
-	30,  // 368: cefas.v1.Cefas.ListServiceLevels:output_type -> cefas.v1.ListServiceLevelsResponse
-	32,  // 369: cefas.v1.Cefas.PauseServiceLevel:output_type -> cefas.v1.PauseServiceLevelResponse
-	34,  // 370: cefas.v1.Cefas.ResumeServiceLevel:output_type -> cefas.v1.ResumeServiceLevelResponse
-	9,   // 371: cefas.v1.Cefas.CreateGlobalIndex:output_type -> cefas.v1.CreateGlobalIndexResponse
-	11,  // 372: cefas.v1.Cefas.DescribeGlobalIndex:output_type -> cefas.v1.DescribeGlobalIndexResponse
-	13,  // 373: cefas.v1.Cefas.DropGlobalIndex:output_type -> cefas.v1.DropGlobalIndexResponse
-	15,  // 374: cefas.v1.Cefas.ListGlobalIndexes:output_type -> cefas.v1.ListGlobalIndexesResponse
-	17,  // 375: cefas.v1.Cefas.RebuildGlobalIndex:output_type -> cefas.v1.RebuildGlobalIndexResponse
-	19,  // 376: cefas.v1.Cefas.PauseGlobalIndex:output_type -> cefas.v1.PauseGlobalIndexResponse
-	21,  // 377: cefas.v1.Cefas.ResumeGlobalIndex:output_type -> cefas.v1.ResumeGlobalIndexResponse
-	121, // 378: cefas.v1.Replica.ScanShard:output_type -> cefas.v1.Item
-	43,  // 379: cefas.v1.Replica.QueryIndex:output_type -> cefas.v1.IndexCandidate
-	38,  // 380: cefas.v1.Replica.BatchWriteMV:output_type -> cefas.v1.BatchWriteMVResponse
-	40,  // 381: cefas.v1.Replica.AtomicUpdateMV:output_type -> cefas.v1.AtomicUpdateMVResponse
-	42,  // 382: cefas.v1.Replica.BatchWriteGI:output_type -> cefas.v1.BatchWriteGIResponse
-	238, // 383: cefas.v1.CefasAtomic.AtomicUpdate:output_type -> cefas.v1.AtomicUpdateResponse
-	298, // [298:384] is the sub-list for method output_type
-	212, // [212:298] is the sub-list for method input_type
-	212, // [212:212] is the sub-list for extension type_name
-	212, // [212:212] is the sub-list for extension extendee
-	0,   // [0:212] is the sub-list for field type_name
+	239, // 72: cefas.v1.TableDescriptor.text_indexes:type_name -> cefas.v1.TextIndexDescriptor
+	128, // 73: cefas.v1.CreateTableRequest.descriptor:type_name -> cefas.v1.TableDescriptor
+	128, // 74: cefas.v1.CreateTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
+	128, // 75: cefas.v1.DescribeTableResponse.descriptor:type_name -> cefas.v1.TableDescriptor
+	128, // 76: cefas.v1.ListTablesResponse.tables:type_name -> cefas.v1.TableDescriptor
+	138, // 77: cefas.v1.ListStreamsResponse.streams:type_name -> cefas.v1.StreamSummary
+	141, // 78: cefas.v1.StreamShard.sequence_number_range:type_name -> cefas.v1.SequenceNumberRange
+	122, // 79: cefas.v1.StreamDescription.key_schema:type_name -> cefas.v1.KeySchema
+	142, // 80: cefas.v1.StreamDescription.shards:type_name -> cefas.v1.StreamShard
+	143, // 81: cefas.v1.DescribeStreamResponse.stream_description:type_name -> cefas.v1.StreamDescription
+	249, // 82: cefas.v1.StreamRecordData.keys:type_name -> cefas.v1.StreamRecordData.KeysEntry
+	250, // 83: cefas.v1.StreamRecordData.new_image:type_name -> cefas.v1.StreamRecordData.NewImageEntry
+	251, // 84: cefas.v1.StreamRecordData.old_image:type_name -> cefas.v1.StreamRecordData.OldImageEntry
+	148, // 85: cefas.v1.StreamRecordEntry.dynamodb:type_name -> cefas.v1.StreamRecordData
+	149, // 86: cefas.v1.GetRecordsResponse.records:type_name -> cefas.v1.StreamRecordEntry
+	127, // 87: cefas.v1.UpdateStreamSpecificationRequest.stream_specification:type_name -> cefas.v1.StreamSpecification
+	127, // 88: cefas.v1.UpdateStreamSpecificationResponse.stream_specification:type_name -> cefas.v1.StreamSpecification
+	153, // 89: cefas.v1.UpdateTimeToLiveRequest.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
+	153, // 90: cefas.v1.UpdateTimeToLiveResponse.time_to_live_specification:type_name -> cefas.v1.TimeToLiveSpecification
+	252, // 91: cefas.v1.PutItemRequest.item:type_name -> cefas.v1.PutItemRequest.ItemEntry
+	253, // 92: cefas.v1.PutItemRequest.binds:type_name -> cefas.v1.PutItemRequest.BindsEntry
+	254, // 93: cefas.v1.GetItemRequest.key:type_name -> cefas.v1.GetItemRequest.KeyEntry
+	0,   // 94: cefas.v1.GetItemRequest.consistency:type_name -> cefas.v1.Consistency
+	255, // 95: cefas.v1.GetItemResponse.item:type_name -> cefas.v1.GetItemResponse.ItemEntry
+	256, // 96: cefas.v1.DeleteItemRequest.key:type_name -> cefas.v1.DeleteItemRequest.KeyEntry
+	257, // 97: cefas.v1.DeleteItemRequest.binds:type_name -> cefas.v1.DeleteItemRequest.BindsEntry
+	258, // 98: cefas.v1.UpdateItemRequest.key:type_name -> cefas.v1.UpdateItemRequest.KeyEntry
+	259, // 99: cefas.v1.UpdateItemRequest.expression_attribute_names:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeNamesEntry
+	260, // 100: cefas.v1.UpdateItemRequest.expression_attribute_values:type_name -> cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry
+	1,   // 101: cefas.v1.UpdateItemRequest.return_values:type_name -> cefas.v1.ReturnValues
+	261, // 102: cefas.v1.UpdateItemResponse.attributes:type_name -> cefas.v1.UpdateItemResponse.AttributesEntry
+	6,   // 103: cefas.v1.BatchWriteOp.kind:type_name -> cefas.v1.BatchWriteOp.Kind
+	262, // 104: cefas.v1.BatchWriteOp.item:type_name -> cefas.v1.BatchWriteOp.ItemEntry
+	263, // 105: cefas.v1.BatchWriteOp.key:type_name -> cefas.v1.BatchWriteOp.KeyEntry
+	166, // 106: cefas.v1.BatchWriteItemRequest.ops:type_name -> cefas.v1.BatchWriteOp
+	170, // 107: cefas.v1.BatchGetItemRequest.keys:type_name -> cefas.v1.KeyMap
+	264, // 108: cefas.v1.KeyMap.attributes:type_name -> cefas.v1.KeyMap.AttributesEntry
+	121, // 109: cefas.v1.BatchGetItemResponse.items:type_name -> cefas.v1.Item
+	265, // 110: cefas.v1.TransactWriteOp.put:type_name -> cefas.v1.TransactWriteOp.Put
+	266, // 111: cefas.v1.TransactWriteOp.delete:type_name -> cefas.v1.TransactWriteOp.Delete
+	267, // 112: cefas.v1.TransactWriteOp.condition_check:type_name -> cefas.v1.TransactWriteOp.ConditionCheck
+	268, // 113: cefas.v1.TransactWriteOp.binds:type_name -> cefas.v1.TransactWriteOp.BindsEntry
+	172, // 114: cefas.v1.TransactWriteItemsRequest.ops:type_name -> cefas.v1.TransactWriteOp
+	272, // 115: cefas.v1.TransactGet.key:type_name -> cefas.v1.TransactGet.KeyEntry
+	175, // 116: cefas.v1.TransactGetItemsRequest.items:type_name -> cefas.v1.TransactGet
+	121, // 117: cefas.v1.TransactGetItemsResponse.items:type_name -> cefas.v1.Item
+	115, // 118: cefas.v1.QueryRequest.pk_value:type_name -> cefas.v1.AttributeValue
+	115, // 119: cefas.v1.QueryRequest.sk_low:type_name -> cefas.v1.AttributeValue
+	115, // 120: cefas.v1.QueryRequest.sk_high:type_name -> cefas.v1.AttributeValue
+	0,   // 121: cefas.v1.QueryRequest.consistency:type_name -> cefas.v1.Consistency
+	273, // 122: cefas.v1.ScanRequest.binds:type_name -> cefas.v1.ScanRequest.BindsEntry
+	0,   // 123: cefas.v1.ScanRequest.consistency:type_name -> cefas.v1.Consistency
+	180, // 124: cefas.v1.SpatialQueryRequest.bbox:type_name -> cefas.v1.BBox
+	181, // 125: cefas.v1.SpatialQueryRequest.radius:type_name -> cefas.v1.Radius
+	182, // 126: cefas.v1.SpatialQueryRequest.z:type_name -> cefas.v1.ZBBox
+	190, // 127: cefas.v1.ClusterStatusResponse.shards:type_name -> cefas.v1.ShardPlacement
+	189, // 128: cefas.v1.ClusterStatusResponse.nodes:type_name -> cefas.v1.NodeDescriptor
+	191, // 129: cefas.v1.ClusterStatusResponse.hot_ranges:type_name -> cefas.v1.RangeHotspotSummary
+	186, // 130: cefas.v1.ClusterStatusResponse.backup_scheduler:type_name -> cefas.v1.ScheduledBackupStatus
+	81,  // 131: cefas.v1.ScheduledBackupStatus.last_retention:type_name -> cefas.v1.ApplyBackupRetentionResponse
+	188, // 132: cefas.v1.NodeDescriptor.capacity:type_name -> cefas.v1.NodeCapacity
+	187, // 133: cefas.v1.ShardPlacement.ranges:type_name -> cefas.v1.TokenRange
+	190, // 134: cefas.v1.PlacementCatalog.shards:type_name -> cefas.v1.ShardPlacement
+	189, // 135: cefas.v1.PlacementCatalog.nodes:type_name -> cefas.v1.NodeDescriptor
+	196, // 136: cefas.v1.PlacementPlan.before:type_name -> cefas.v1.PlacementCatalog
+	196, // 137: cefas.v1.PlacementPlan.after:type_name -> cefas.v1.PlacementCatalog
+	198, // 138: cefas.v1.PlacementPlan.steps:type_name -> cefas.v1.PlacementPlanStep
+	199, // 139: cefas.v1.PlanPlacementResponse.plan:type_name -> cefas.v1.PlacementPlan
+	199, // 140: cefas.v1.ApplyPlacementRequest.plan:type_name -> cefas.v1.PlacementPlan
+	202, // 141: cefas.v1.PlacementApplyResult.steps:type_name -> cefas.v1.PlacementApplyStep
+	196, // 142: cefas.v1.PlacementApplyResult.placement:type_name -> cefas.v1.PlacementCatalog
+	203, // 143: cefas.v1.ApplyPlacementResponse.result:type_name -> cefas.v1.PlacementApplyResult
+	187, // 144: cefas.v1.FinalizeSplitResult.parent_range_before:type_name -> cefas.v1.TokenRange
+	187, // 145: cefas.v1.FinalizeSplitResult.parent_range_after:type_name -> cefas.v1.TokenRange
+	187, // 146: cefas.v1.FinalizeSplitResult.child_range:type_name -> cefas.v1.TokenRange
+	196, // 147: cefas.v1.FinalizeSplitResult.placement:type_name -> cefas.v1.PlacementCatalog
+	206, // 148: cefas.v1.FinalizeSplitResponse.result:type_name -> cefas.v1.FinalizeSplitResult
+	187, // 149: cefas.v1.FinalizeRangeMoveResult.source_ranges_before:type_name -> cefas.v1.TokenRange
+	187, // 150: cefas.v1.FinalizeRangeMoveResult.source_ranges_after:type_name -> cefas.v1.TokenRange
+	187, // 151: cefas.v1.FinalizeRangeMoveResult.moved_range:type_name -> cefas.v1.TokenRange
+	196, // 152: cefas.v1.FinalizeRangeMoveResult.placement:type_name -> cefas.v1.PlacementCatalog
+	209, // 153: cefas.v1.FinalizeRangeMoveResponse.result:type_name -> cefas.v1.FinalizeRangeMoveResult
+	121, // 154: cefas.v1.RerankCandidate.item:type_name -> cefas.v1.Item
+	211, // 155: cefas.v1.RerankRequest.candidates:type_name -> cefas.v1.RerankCandidate
+	211, // 156: cefas.v1.RerankResponse.slate:type_name -> cefas.v1.RerankCandidate
+	115, // 157: cefas.v1.RecommendRequest.target:type_name -> cefas.v1.AttributeValue
+	121, // 158: cefas.v1.RecommendRow.item:type_name -> cefas.v1.Item
+	216, // 159: cefas.v1.RecommendResponse.rows:type_name -> cefas.v1.RecommendRow
+	214, // 160: cefas.v1.RecommendResponse.stages:type_name -> cefas.v1.PipelineStageTiming
+	274, // 161: cefas.v1.NBAAction.context:type_name -> cefas.v1.NBAAction.ContextEntry
+	218, // 162: cefas.v1.NextBestActionRequest.actions:type_name -> cefas.v1.NBAAction
+	275, // 163: cefas.v1.NextBestActionRequest.context:type_name -> cefas.v1.NextBestActionRequest.ContextEntry
+	214, // 164: cefas.v1.NextBestActionResponse.stages:type_name -> cefas.v1.PipelineStageTiming
+	276, // 165: cefas.v1.RecordRewardRequest.context:type_name -> cefas.v1.RecordRewardRequest.ContextEntry
+	277, // 166: cefas.v1.DecisionRecord.context:type_name -> cefas.v1.DecisionRecord.ContextEntry
+	223, // 167: cefas.v1.GetDecisionResponse.decision:type_name -> cefas.v1.DecisionRecord
+	226, // 168: cefas.v1.BanditCreateRequest.arms:type_name -> cefas.v1.BanditArmSpec
+	278, // 169: cefas.v1.BanditSampleRequest.context:type_name -> cefas.v1.BanditSampleRequest.ContextEntry
+	279, // 170: cefas.v1.BanditRewardRequest.context:type_name -> cefas.v1.BanditRewardRequest.ContextEntry
+	234, // 171: cefas.v1.BanditDescribeResponse.arms:type_name -> cefas.v1.BanditArmStats
+	2,   // 172: cefas.v1.AtomicAction.kind:type_name -> cefas.v1.AtomicActionKind
+	115, // 173: cefas.v1.AtomicAction.value:type_name -> cefas.v1.AttributeValue
+	280, // 174: cefas.v1.AtomicUpdateRequest.key:type_name -> cefas.v1.AtomicUpdateRequest.KeyEntry
+	281, // 175: cefas.v1.AtomicUpdateRequest.binds:type_name -> cefas.v1.AtomicUpdateRequest.BindsEntry
+	236, // 176: cefas.v1.AtomicUpdateRequest.actions:type_name -> cefas.v1.AtomicAction
+	282, // 177: cefas.v1.AtomicUpdateResponse.item:type_name -> cefas.v1.AtomicUpdateResponse.ItemEntry
+	115, // 178: cefas.v1.AtomicUpdateResponse.returned_values:type_name -> cefas.v1.AttributeValue
+	115, // 179: cefas.v1.QueryIndexRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 180: cefas.v1.AtomicUpdateMVRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 181: cefas.v1.IndexCandidate.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 182: cefas.v1.CohortCreateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 183: cefas.v1.CohortEstimateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 184: cefas.v1.Map.ValuesEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 185: cefas.v1.Item.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 186: cefas.v1.StreamRecordData.KeysEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 187: cefas.v1.StreamRecordData.NewImageEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 188: cefas.v1.StreamRecordData.OldImageEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 189: cefas.v1.PutItemRequest.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 190: cefas.v1.PutItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 191: cefas.v1.GetItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 192: cefas.v1.GetItemResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 193: cefas.v1.DeleteItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 194: cefas.v1.DeleteItemRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 195: cefas.v1.UpdateItemRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 196: cefas.v1.UpdateItemRequest.ExpressionAttributeValuesEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 197: cefas.v1.UpdateItemResponse.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 198: cefas.v1.BatchWriteOp.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 199: cefas.v1.BatchWriteOp.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 200: cefas.v1.KeyMap.AttributesEntry.value:type_name -> cefas.v1.AttributeValue
+	269, // 201: cefas.v1.TransactWriteOp.Put.item:type_name -> cefas.v1.TransactWriteOp.Put.ItemEntry
+	270, // 202: cefas.v1.TransactWriteOp.Delete.key:type_name -> cefas.v1.TransactWriteOp.Delete.KeyEntry
+	271, // 203: cefas.v1.TransactWriteOp.ConditionCheck.key:type_name -> cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry
+	115, // 204: cefas.v1.TransactWriteOp.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 205: cefas.v1.TransactWriteOp.Put.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 206: cefas.v1.TransactWriteOp.Delete.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 207: cefas.v1.TransactWriteOp.ConditionCheck.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 208: cefas.v1.TransactGet.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 209: cefas.v1.ScanRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 210: cefas.v1.AtomicUpdateRequest.KeyEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 211: cefas.v1.AtomicUpdateRequest.BindsEntry.value:type_name -> cefas.v1.AttributeValue
+	115, // 212: cefas.v1.AtomicUpdateResponse.ItemEntry.value:type_name -> cefas.v1.AttributeValue
+	129, // 213: cefas.v1.Cefas.CreateTable:input_type -> cefas.v1.CreateTableRequest
+	131, // 214: cefas.v1.Cefas.DescribeTable:input_type -> cefas.v1.DescribeTableRequest
+	133, // 215: cefas.v1.Cefas.ListTables:input_type -> cefas.v1.ListTablesRequest
+	135, // 216: cefas.v1.Cefas.DropTable:input_type -> cefas.v1.DropTableRequest
+	137, // 217: cefas.v1.Cefas.ListStreams:input_type -> cefas.v1.ListStreamsRequest
+	140, // 218: cefas.v1.Cefas.DescribeStream:input_type -> cefas.v1.DescribeStreamRequest
+	145, // 219: cefas.v1.Cefas.GetShardIterator:input_type -> cefas.v1.GetShardIteratorRequest
+	147, // 220: cefas.v1.Cefas.GetRecords:input_type -> cefas.v1.GetRecordsRequest
+	154, // 221: cefas.v1.Cefas.UpdateTimeToLive:input_type -> cefas.v1.UpdateTimeToLiveRequest
+	156, // 222: cefas.v1.Cefas.DescribeTimeToLive:input_type -> cefas.v1.DescribeTimeToLiveRequest
+	158, // 223: cefas.v1.Cefas.PutItem:input_type -> cefas.v1.PutItemRequest
+	160, // 224: cefas.v1.Cefas.GetItem:input_type -> cefas.v1.GetItemRequest
+	164, // 225: cefas.v1.Cefas.UpdateItem:input_type -> cefas.v1.UpdateItemRequest
+	162, // 226: cefas.v1.Cefas.DeleteItem:input_type -> cefas.v1.DeleteItemRequest
+	167, // 227: cefas.v1.Cefas.BatchWriteItem:input_type -> cefas.v1.BatchWriteItemRequest
+	169, // 228: cefas.v1.Cefas.BatchGetItem:input_type -> cefas.v1.BatchGetItemRequest
+	173, // 229: cefas.v1.Cefas.TransactWriteItems:input_type -> cefas.v1.TransactWriteItemsRequest
+	176, // 230: cefas.v1.Cefas.TransactGetItems:input_type -> cefas.v1.TransactGetItemsRequest
+	178, // 231: cefas.v1.Cefas.Query:input_type -> cefas.v1.QueryRequest
+	179, // 232: cefas.v1.Cefas.Scan:input_type -> cefas.v1.ScanRequest
+	183, // 233: cefas.v1.Cefas.SpatialQuery:input_type -> cefas.v1.SpatialQueryRequest
+	113, // 234: cefas.v1.Cefas.Sql:input_type -> cefas.v1.SqlRequest
+	184, // 235: cefas.v1.Cefas.ClusterStatus:input_type -> cefas.v1.ClusterStatusRequest
+	192, // 236: cefas.v1.Cefas.AddVoter:input_type -> cefas.v1.AddVoterRequest
+	194, // 237: cefas.v1.Cefas.RemoveServer:input_type -> cefas.v1.RemoveServerRequest
+	197, // 238: cefas.v1.Cefas.PlanPlacement:input_type -> cefas.v1.PlanPlacementRequest
+	201, // 239: cefas.v1.Cefas.ApplyPlacement:input_type -> cefas.v1.ApplyPlacementRequest
+	205, // 240: cefas.v1.Cefas.FinalizeSplit:input_type -> cefas.v1.FinalizeSplitRequest
+	208, // 241: cefas.v1.Cefas.FinalizeRangeMove:input_type -> cefas.v1.FinalizeRangeMoveRequest
+	61,  // 242: cefas.v1.Cefas.StreamChanges:input_type -> cefas.v1.StreamChangesRequest
+	63,  // 243: cefas.v1.Cefas.ListSnapshots:input_type -> cefas.v1.ListSnapshotsRequest
+	66,  // 244: cefas.v1.Cefas.Compact:input_type -> cefas.v1.CompactRequest
+	72,  // 245: cefas.v1.Cefas.CreateBackup:input_type -> cefas.v1.CreateBackupRequest
+	74,  // 246: cefas.v1.Cefas.ListBackups:input_type -> cefas.v1.ListBackupsRequest
+	76,  // 247: cefas.v1.Cefas.DeleteBackup:input_type -> cefas.v1.DeleteBackupRequest
+	79,  // 248: cefas.v1.Cefas.ApplyBackupRetention:input_type -> cefas.v1.ApplyBackupRetentionRequest
+	82,  // 249: cefas.v1.Cefas.RestoreTableFromBackup:input_type -> cefas.v1.RestoreTableFromBackupRequest
+	85,  // 250: cefas.v1.Cefas.ListPlugins:input_type -> cefas.v1.ListPluginsRequest
+	87,  // 251: cefas.v1.Cefas.DescribePlugin:input_type -> cefas.v1.DescribePluginRequest
+	47,  // 252: cefas.v1.Cefas.CreateMaterializedView:input_type -> cefas.v1.CreateMaterializedViewRequest
+	49,  // 253: cefas.v1.Cefas.DescribeMaterializedView:input_type -> cefas.v1.DescribeMaterializedViewRequest
+	51,  // 254: cefas.v1.Cefas.DropMaterializedView:input_type -> cefas.v1.DropMaterializedViewRequest
+	53,  // 255: cefas.v1.Cefas.ListMaterializedViews:input_type -> cefas.v1.ListMaterializedViewsRequest
+	55,  // 256: cefas.v1.Cefas.RefreshMaterializedView:input_type -> cefas.v1.RefreshMaterializedViewRequest
+	57,  // 257: cefas.v1.Cefas.PauseMaterializedView:input_type -> cefas.v1.PauseMaterializedViewRequest
+	59,  // 258: cefas.v1.Cefas.ResumeMaterializedView:input_type -> cefas.v1.ResumeMaterializedViewRequest
+	90,  // 259: cefas.v1.Cefas.CreateIndex:input_type -> cefas.v1.CreateIndexRequest
+	92,  // 260: cefas.v1.Cefas.DescribeIndex:input_type -> cefas.v1.DescribeIndexRequest
+	94,  // 261: cefas.v1.Cefas.RebuildIndex:input_type -> cefas.v1.RebuildIndexRequest
+	96,  // 262: cefas.v1.Cefas.Explain:input_type -> cefas.v1.ExplainRequest
+	98,  // 263: cefas.v1.Cefas.TopK:input_type -> cefas.v1.TopKRequest
+	101, // 264: cefas.v1.Cefas.CohortCreate:input_type -> cefas.v1.CohortCreateRequest
+	103, // 265: cefas.v1.Cefas.CohortEstimate:input_type -> cefas.v1.CohortEstimateRequest
+	105, // 266: cefas.v1.Cefas.GeoAudience:input_type -> cefas.v1.GeoAudienceRequest
+	106, // 267: cefas.v1.Cefas.Dedup:input_type -> cefas.v1.DedupRequest
+	108, // 268: cefas.v1.Cefas.FreqCap:input_type -> cefas.v1.FreqCapRequest
+	110, // 269: cefas.v1.Cefas.Aggregate:input_type -> cefas.v1.AggregateRequest
+	212, // 270: cefas.v1.Cefas.Rerank:input_type -> cefas.v1.RerankRequest
+	215, // 271: cefas.v1.Cefas.Recommend:input_type -> cefas.v1.RecommendRequest
+	219, // 272: cefas.v1.Cefas.NextBestAction:input_type -> cefas.v1.NextBestActionRequest
+	221, // 273: cefas.v1.Cefas.RecordReward:input_type -> cefas.v1.RecordRewardRequest
+	224, // 274: cefas.v1.Cefas.GetDecision:input_type -> cefas.v1.GetDecisionRequest
+	227, // 275: cefas.v1.Cefas.BanditCreate:input_type -> cefas.v1.BanditCreateRequest
+	229, // 276: cefas.v1.Cefas.BanditSample:input_type -> cefas.v1.BanditSampleRequest
+	231, // 277: cefas.v1.Cefas.BanditReward:input_type -> cefas.v1.BanditRewardRequest
+	233, // 278: cefas.v1.Cefas.BanditDescribe:input_type -> cefas.v1.BanditDescribeRequest
+	151, // 279: cefas.v1.Cefas.UpdateStreamSpecification:input_type -> cefas.v1.UpdateStreamSpecificationRequest
+	23,  // 280: cefas.v1.Cefas.CreateServiceLevel:input_type -> cefas.v1.CreateServiceLevelRequest
+	25,  // 281: cefas.v1.Cefas.AlterServiceLevel:input_type -> cefas.v1.AlterServiceLevelRequest
+	27,  // 282: cefas.v1.Cefas.DropServiceLevel:input_type -> cefas.v1.DropServiceLevelRequest
+	29,  // 283: cefas.v1.Cefas.ListServiceLevels:input_type -> cefas.v1.ListServiceLevelsRequest
+	31,  // 284: cefas.v1.Cefas.PauseServiceLevel:input_type -> cefas.v1.PauseServiceLevelRequest
+	33,  // 285: cefas.v1.Cefas.ResumeServiceLevel:input_type -> cefas.v1.ResumeServiceLevelRequest
+	8,   // 286: cefas.v1.Cefas.CreateGlobalIndex:input_type -> cefas.v1.CreateGlobalIndexRequest
+	10,  // 287: cefas.v1.Cefas.DescribeGlobalIndex:input_type -> cefas.v1.DescribeGlobalIndexRequest
+	12,  // 288: cefas.v1.Cefas.DropGlobalIndex:input_type -> cefas.v1.DropGlobalIndexRequest
+	14,  // 289: cefas.v1.Cefas.ListGlobalIndexes:input_type -> cefas.v1.ListGlobalIndexesRequest
+	16,  // 290: cefas.v1.Cefas.RebuildGlobalIndex:input_type -> cefas.v1.RebuildGlobalIndexRequest
+	18,  // 291: cefas.v1.Cefas.PauseGlobalIndex:input_type -> cefas.v1.PauseGlobalIndexRequest
+	20,  // 292: cefas.v1.Cefas.ResumeGlobalIndex:input_type -> cefas.v1.ResumeGlobalIndexRequest
+	35,  // 293: cefas.v1.Replica.ScanShard:input_type -> cefas.v1.ScanShardRequest
+	36,  // 294: cefas.v1.Replica.QueryIndex:input_type -> cefas.v1.QueryIndexRequest
+	37,  // 295: cefas.v1.Replica.BatchWriteMV:input_type -> cefas.v1.BatchWriteMVRequest
+	39,  // 296: cefas.v1.Replica.AtomicUpdateMV:input_type -> cefas.v1.AtomicUpdateMVRequest
+	41,  // 297: cefas.v1.Replica.BatchWriteGI:input_type -> cefas.v1.BatchWriteGIRequest
+	237, // 298: cefas.v1.CefasAtomic.AtomicUpdate:input_type -> cefas.v1.AtomicUpdateRequest
+	130, // 299: cefas.v1.Cefas.CreateTable:output_type -> cefas.v1.CreateTableResponse
+	132, // 300: cefas.v1.Cefas.DescribeTable:output_type -> cefas.v1.DescribeTableResponse
+	134, // 301: cefas.v1.Cefas.ListTables:output_type -> cefas.v1.ListTablesResponse
+	136, // 302: cefas.v1.Cefas.DropTable:output_type -> cefas.v1.DropTableResponse
+	139, // 303: cefas.v1.Cefas.ListStreams:output_type -> cefas.v1.ListStreamsResponse
+	144, // 304: cefas.v1.Cefas.DescribeStream:output_type -> cefas.v1.DescribeStreamResponse
+	146, // 305: cefas.v1.Cefas.GetShardIterator:output_type -> cefas.v1.GetShardIteratorResponse
+	150, // 306: cefas.v1.Cefas.GetRecords:output_type -> cefas.v1.GetRecordsResponse
+	155, // 307: cefas.v1.Cefas.UpdateTimeToLive:output_type -> cefas.v1.UpdateTimeToLiveResponse
+	157, // 308: cefas.v1.Cefas.DescribeTimeToLive:output_type -> cefas.v1.DescribeTimeToLiveResponse
+	159, // 309: cefas.v1.Cefas.PutItem:output_type -> cefas.v1.PutItemResponse
+	161, // 310: cefas.v1.Cefas.GetItem:output_type -> cefas.v1.GetItemResponse
+	165, // 311: cefas.v1.Cefas.UpdateItem:output_type -> cefas.v1.UpdateItemResponse
+	163, // 312: cefas.v1.Cefas.DeleteItem:output_type -> cefas.v1.DeleteItemResponse
+	168, // 313: cefas.v1.Cefas.BatchWriteItem:output_type -> cefas.v1.BatchWriteItemResponse
+	171, // 314: cefas.v1.Cefas.BatchGetItem:output_type -> cefas.v1.BatchGetItemResponse
+	174, // 315: cefas.v1.Cefas.TransactWriteItems:output_type -> cefas.v1.TransactWriteItemsResponse
+	177, // 316: cefas.v1.Cefas.TransactGetItems:output_type -> cefas.v1.TransactGetItemsResponse
+	121, // 317: cefas.v1.Cefas.Query:output_type -> cefas.v1.Item
+	121, // 318: cefas.v1.Cefas.Scan:output_type -> cefas.v1.Item
+	121, // 319: cefas.v1.Cefas.SpatialQuery:output_type -> cefas.v1.Item
+	114, // 320: cefas.v1.Cefas.Sql:output_type -> cefas.v1.SqlResponse
+	185, // 321: cefas.v1.Cefas.ClusterStatus:output_type -> cefas.v1.ClusterStatusResponse
+	193, // 322: cefas.v1.Cefas.AddVoter:output_type -> cefas.v1.AddVoterResponse
+	195, // 323: cefas.v1.Cefas.RemoveServer:output_type -> cefas.v1.RemoveServerResponse
+	200, // 324: cefas.v1.Cefas.PlanPlacement:output_type -> cefas.v1.PlanPlacementResponse
+	204, // 325: cefas.v1.Cefas.ApplyPlacement:output_type -> cefas.v1.ApplyPlacementResponse
+	207, // 326: cefas.v1.Cefas.FinalizeSplit:output_type -> cefas.v1.FinalizeSplitResponse
+	210, // 327: cefas.v1.Cefas.FinalizeRangeMove:output_type -> cefas.v1.FinalizeRangeMoveResponse
+	62,  // 328: cefas.v1.Cefas.StreamChanges:output_type -> cefas.v1.ChangeEvent
+	64,  // 329: cefas.v1.Cefas.ListSnapshots:output_type -> cefas.v1.ListSnapshotsResponse
+	68,  // 330: cefas.v1.Cefas.Compact:output_type -> cefas.v1.CompactResponse
+	73,  // 331: cefas.v1.Cefas.CreateBackup:output_type -> cefas.v1.CreateBackupResponse
+	75,  // 332: cefas.v1.Cefas.ListBackups:output_type -> cefas.v1.ListBackupsResponse
+	78,  // 333: cefas.v1.Cefas.DeleteBackup:output_type -> cefas.v1.DeleteBackupResponse
+	81,  // 334: cefas.v1.Cefas.ApplyBackupRetention:output_type -> cefas.v1.ApplyBackupRetentionResponse
+	83,  // 335: cefas.v1.Cefas.RestoreTableFromBackup:output_type -> cefas.v1.RestoreTableFromBackupResponse
+	86,  // 336: cefas.v1.Cefas.ListPlugins:output_type -> cefas.v1.ListPluginsResponse
+	88,  // 337: cefas.v1.Cefas.DescribePlugin:output_type -> cefas.v1.DescribePluginResponse
+	48,  // 338: cefas.v1.Cefas.CreateMaterializedView:output_type -> cefas.v1.CreateMaterializedViewResponse
+	50,  // 339: cefas.v1.Cefas.DescribeMaterializedView:output_type -> cefas.v1.DescribeMaterializedViewResponse
+	52,  // 340: cefas.v1.Cefas.DropMaterializedView:output_type -> cefas.v1.DropMaterializedViewResponse
+	54,  // 341: cefas.v1.Cefas.ListMaterializedViews:output_type -> cefas.v1.ListMaterializedViewsResponse
+	56,  // 342: cefas.v1.Cefas.RefreshMaterializedView:output_type -> cefas.v1.RefreshMaterializedViewResponse
+	58,  // 343: cefas.v1.Cefas.PauseMaterializedView:output_type -> cefas.v1.PauseMaterializedViewResponse
+	60,  // 344: cefas.v1.Cefas.ResumeMaterializedView:output_type -> cefas.v1.ResumeMaterializedViewResponse
+	91,  // 345: cefas.v1.Cefas.CreateIndex:output_type -> cefas.v1.CreateIndexResponse
+	93,  // 346: cefas.v1.Cefas.DescribeIndex:output_type -> cefas.v1.DescribeIndexResponse
+	95,  // 347: cefas.v1.Cefas.RebuildIndex:output_type -> cefas.v1.RebuildIndexResponse
+	97,  // 348: cefas.v1.Cefas.Explain:output_type -> cefas.v1.ExplainResponse
+	100, // 349: cefas.v1.Cefas.TopK:output_type -> cefas.v1.TopKResponse
+	102, // 350: cefas.v1.Cefas.CohortCreate:output_type -> cefas.v1.CohortCreateResponse
+	104, // 351: cefas.v1.Cefas.CohortEstimate:output_type -> cefas.v1.CohortEstimateResponse
+	121, // 352: cefas.v1.Cefas.GeoAudience:output_type -> cefas.v1.Item
+	107, // 353: cefas.v1.Cefas.Dedup:output_type -> cefas.v1.DedupResponse
+	109, // 354: cefas.v1.Cefas.FreqCap:output_type -> cefas.v1.FreqCapResponse
+	112, // 355: cefas.v1.Cefas.Aggregate:output_type -> cefas.v1.AggregateResponse
+	213, // 356: cefas.v1.Cefas.Rerank:output_type -> cefas.v1.RerankResponse
+	217, // 357: cefas.v1.Cefas.Recommend:output_type -> cefas.v1.RecommendResponse
+	220, // 358: cefas.v1.Cefas.NextBestAction:output_type -> cefas.v1.NextBestActionResponse
+	222, // 359: cefas.v1.Cefas.RecordReward:output_type -> cefas.v1.RecordRewardResponse
+	225, // 360: cefas.v1.Cefas.GetDecision:output_type -> cefas.v1.GetDecisionResponse
+	228, // 361: cefas.v1.Cefas.BanditCreate:output_type -> cefas.v1.BanditCreateResponse
+	230, // 362: cefas.v1.Cefas.BanditSample:output_type -> cefas.v1.BanditSampleResponse
+	232, // 363: cefas.v1.Cefas.BanditReward:output_type -> cefas.v1.BanditRewardResponse
+	235, // 364: cefas.v1.Cefas.BanditDescribe:output_type -> cefas.v1.BanditDescribeResponse
+	152, // 365: cefas.v1.Cefas.UpdateStreamSpecification:output_type -> cefas.v1.UpdateStreamSpecificationResponse
+	24,  // 366: cefas.v1.Cefas.CreateServiceLevel:output_type -> cefas.v1.CreateServiceLevelResponse
+	26,  // 367: cefas.v1.Cefas.AlterServiceLevel:output_type -> cefas.v1.AlterServiceLevelResponse
+	28,  // 368: cefas.v1.Cefas.DropServiceLevel:output_type -> cefas.v1.DropServiceLevelResponse
+	30,  // 369: cefas.v1.Cefas.ListServiceLevels:output_type -> cefas.v1.ListServiceLevelsResponse
+	32,  // 370: cefas.v1.Cefas.PauseServiceLevel:output_type -> cefas.v1.PauseServiceLevelResponse
+	34,  // 371: cefas.v1.Cefas.ResumeServiceLevel:output_type -> cefas.v1.ResumeServiceLevelResponse
+	9,   // 372: cefas.v1.Cefas.CreateGlobalIndex:output_type -> cefas.v1.CreateGlobalIndexResponse
+	11,  // 373: cefas.v1.Cefas.DescribeGlobalIndex:output_type -> cefas.v1.DescribeGlobalIndexResponse
+	13,  // 374: cefas.v1.Cefas.DropGlobalIndex:output_type -> cefas.v1.DropGlobalIndexResponse
+	15,  // 375: cefas.v1.Cefas.ListGlobalIndexes:output_type -> cefas.v1.ListGlobalIndexesResponse
+	17,  // 376: cefas.v1.Cefas.RebuildGlobalIndex:output_type -> cefas.v1.RebuildGlobalIndexResponse
+	19,  // 377: cefas.v1.Cefas.PauseGlobalIndex:output_type -> cefas.v1.PauseGlobalIndexResponse
+	21,  // 378: cefas.v1.Cefas.ResumeGlobalIndex:output_type -> cefas.v1.ResumeGlobalIndexResponse
+	121, // 379: cefas.v1.Replica.ScanShard:output_type -> cefas.v1.Item
+	43,  // 380: cefas.v1.Replica.QueryIndex:output_type -> cefas.v1.IndexCandidate
+	38,  // 381: cefas.v1.Replica.BatchWriteMV:output_type -> cefas.v1.BatchWriteMVResponse
+	40,  // 382: cefas.v1.Replica.AtomicUpdateMV:output_type -> cefas.v1.AtomicUpdateMVResponse
+	42,  // 383: cefas.v1.Replica.BatchWriteGI:output_type -> cefas.v1.BatchWriteGIResponse
+	238, // 384: cefas.v1.CefasAtomic.AtomicUpdate:output_type -> cefas.v1.AtomicUpdateResponse
+	299, // [299:385] is the sub-list for method output_type
+	213, // [213:299] is the sub-list for method input_type
+	213, // [213:213] is the sub-list for extension type_name
+	213, // [213:213] is the sub-list for extension extendee
+	0,   // [0:213] is the sub-list for field type_name
 }
 
 func init() { file_cefas_proto_init() }
@@ -16917,7 +16992,7 @@ func file_cefas_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cefas_proto_rawDesc), len(file_cefas_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   275,
+			NumMessages:   276,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

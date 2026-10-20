@@ -185,6 +185,7 @@ func pbToTableDescriptor(td *cefaspb.TableDescriptor) types.TableDescriptor {
 		LatestStreamArn:      td.GetLatestStreamArn(),
 		LatestStreamLabel:    td.GetLatestStreamLabel(),
 		StreamStatus:         td.GetStreamStatus(),
+		TTLAttribute:         td.GetTtlAttribute(),
 	}
 	if ss := td.GetStreamSpecification(); ss != nil {
 		out.StreamSpecification = &types.StreamSpecification{
@@ -214,6 +215,9 @@ func pbToTableDescriptor(td *cefaspb.TableDescriptor) types.TableDescriptor {
 		}
 		out.SpatialIndexes = append(out.SpatialIndexes, sd)
 	}
+	for _, idx := range td.GetTextIndexes() {
+		out.TextIndexes = append(out.TextIndexes, types.TextIndexDescriptor{Name: idx.GetName(), Field: idx.GetField()})
+	}
 	for _, a := range td.GetAttributeDefinitions() {
 		out.AttributeDefinitions = append(out.AttributeDefinitions, types.AttributeDefinition{
 			Name:             a.GetName(),
@@ -233,6 +237,7 @@ func tableDescriptorToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 		LatestStreamArn:      td.LatestStreamArn,
 		LatestStreamLabel:    td.LatestStreamLabel,
 		StreamStatus:         td.StreamStatus,
+		TtlAttribute:         td.TTLAttribute,
 	}
 	if td.StreamSpecification != nil {
 		out.StreamSpecification = &cefaspb.StreamSpecification{
@@ -258,6 +263,9 @@ func tableDescriptorToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 			pb.Ranges = append(pb.Ranges, &cefaspb.NumRange{Lo: r.Lo, Hi: r.Hi})
 		}
 		out.SpatialIndexes = append(out.SpatialIndexes, pb)
+	}
+	for _, idx := range td.TextIndexes {
+		out.TextIndexes = append(out.TextIndexes, &cefaspb.TextIndexDescriptor{Name: idx.Name, Field: idx.Field})
 	}
 	for _, a := range td.AttributeDefinitions {
 		out.AttributeDefinitions = append(out.AttributeDefinitions, &cefaspb.AttributeDefinition{

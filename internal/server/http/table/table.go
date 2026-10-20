@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -39,6 +40,9 @@ type createTableRequest struct {
 	KeySchema           jsonKeySchema                  `json:"keySchema"`
 	GSIs                []types.GSIDescriptor          `json:"gsis,omitempty"`
 	SpatialIndexes      []types.SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	TextIndexes         []types.TextIndexDescriptor    `json:"textIndexes,omitempty"`
+	TTLAttribute        string                         `json:"ttlAttribute,omitempty"`
+	StorageClass        string                         `json:"storageClass,omitempty"`
 	StreamSpecification *types.StreamSpecification     `json:"streamSpecification,omitempty"`
 }
 
@@ -100,12 +104,18 @@ func (h *Handlers) create(w http.ResponseWriter, r *http.Request) {
 		KeySchema:           types.KeySchema{PK: req.KeySchema.PK, SK: req.KeySchema.SK},
 		GSIs:                req.GSIs,
 		SpatialIndexes:      req.SpatialIndexes,
+		TextIndexes:         req.TextIndexes,
+		TTLAttribute:        req.TTLAttribute,
+		StorageClass:        req.StorageClass,
 		StreamSpecification: req.StreamSpecification,
 	}
 	if err := h.cat.Create(td); err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, types.ErrTableAlreadyExists) {
 			status = http.StatusConflict
+		}
+		if errors.Is(err, pebble.ErrNotLeader) || errors.Is(err, pebble.ErrDraining) {
+			status = http.StatusServiceUnavailable
 		}
 		httpx.WriteErr(w, status, err)
 		return
@@ -126,4 +136,55 @@ func (h *Handlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, h.cat.List())
+}
+
+// HandleUpdateTimeToLive exposes the existing TTL configuration operation over
+// HTTP. Native text-table expiration is immutable to prevent resurrection.
+func (h *Handlers) HandleUpdateTimeToLive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !auth.RequireAnyScope(w, r, auth.ScopeTableCreate) {
+		return
+	}
+	var req struct {
+		Table         string `json:"table"`
+		AttributeName string `json:"attributeName"`
+		Enabled       bool   `json:"enabled"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		httpx.WriteErr(w, http.StatusBadRequest, err)
+		return
+	}
+	td, err := h.cat.Describe(req.Table)
+	if err != nil {
+		httpx.WriteErr(w, http.StatusNotFound, err)
+		return
+	}
+	if req.Enabled && req.AttributeName == "" {
+		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("attributeName required"))
+		return
+	}
+	attribute := ""
+	if req.Enabled {
+		attribute = req.AttributeName
+	}
+	if td.TTLAttribute != attribute {
+		if td.TTLAttribute != "" || len(td.TextIndexes) > 0 {
+			httpx.WriteErr(w, http.StatusConflict, fmt.Errorf("existing TTL attribute is immutable through this operation"))
+			return
+		}
+		td.TTLAttribute = attribute
+		if err := h.cat.UpdateTable(td); err != nil {
+			httpx.WriteErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if h.fanOut != nil {
+			h.fanOut(td)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"ttlAttribute": td.TTLAttribute})
 }

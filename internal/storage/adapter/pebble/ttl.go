@@ -1,6 +1,7 @@
 package pebble
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,8 +9,6 @@ import (
 	"time"
 
 	"github.com/CefasDb/cefasdb/internal/storage"
-
-	pebbledb "github.com/cockroachdb/pebble"
 
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
@@ -148,9 +147,6 @@ func (r *Reaper) Run(ctx context.Context) {
 		case <-r.stop:
 			return
 		case <-t.C:
-			if r.leader != nil && !r.leader.IsLeader() {
-				continue
-			}
 			_ = r.Tick(ctx)
 		}
 	}
@@ -167,8 +163,35 @@ func (r *Reaper) Stop() {
 
 // Tick performs one sweep across every table. Exposed so tests can
 // drive the reaper deterministically.
-func (r *Reaper) Tick(ctx context.Context) error {
-	now := uint64(r.cfg.now().Unix())
+func (r *Reaper) Tick(ctx context.Context) (result error) {
+	leader := r.leader == nil || r.leader.IsLeader()
+	r.db.ttlMu.Lock()
+	r.db.ttlStatus.Enabled = true
+	r.db.ttlStatus.Leader = leader
+	r.db.ttlStatus.BacklogPresent = false
+	r.db.ttlMu.Unlock()
+	if !leader {
+		return nil
+	}
+	r.db.ttlMu.Lock()
+	r.db.ttlStatus.LastAttemptAt = r.cfg.now().UTC()
+	r.db.ttlMu.Unlock()
+	defer func() {
+		r.db.ttlMu.Lock()
+		defer r.db.ttlMu.Unlock()
+		if result != nil {
+			r.db.ttlStatus.Failures++
+		} else {
+			r.db.ttlStatus.Sweeps++
+			r.db.ttlStatus.LastSuccessAt = r.cfg.now().UTC()
+		}
+	}()
+	if r.db.repl != nil {
+		if err := r.db.ReadBarrier(5 * time.Second); err != nil {
+			return err
+		}
+	}
+	now := r.cfg.now()
 	for _, td := range r.cat.List() {
 		if td.TTLAttribute == "" {
 			continue
@@ -180,8 +203,12 @@ func (r *Reaper) Tick(ctx context.Context) error {
 	return nil
 }
 
-func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now uint64) error {
-	lower, upper := storage.PrefixTTLBefore(td.Name, now)
+func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now time.Time) error {
+	unix := now.Unix()
+	if unix < 0 {
+		return nil
+	}
+	lower, upper := storage.PrefixTTLBefore(td.Name, uint64(unix))
 	it, err := r.db.Iter(lower, upper)
 	if err != nil {
 		return err
@@ -214,6 +241,11 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 	if err := it.Error(); err != nil {
 		return err
 	}
+	if it.Valid() && len(victims) >= r.cfg.batch() {
+		r.db.ttlMu.Lock()
+		r.db.ttlStatus.BacklogPresent = true
+		r.db.ttlMu.Unlock()
+	}
 
 	if len(victims) == 0 {
 		return nil
@@ -221,12 +253,28 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 	// The primary item key is built from pk_hash8 + sk. We already
 	// stored the hash directly in the TTL key, so we can reconstruct
 	// the primary key with the storage prefix + hash + sk.
+	keys := make([][]byte, 0, len(victims))
+	for _, v := range victims {
+		key := append([]byte(storage.TableBase(td.Name)+storage.SegPrimary), v.pkHash...)
+		keys = append(keys, append(key, v.sk...))
+	}
+	unlock := lockPrimaryKeys(keys)
+	defer unlock()
 	b := r.db.Batch()
 	defer b.Close()
-	for _, v := range victims {
-		primaryKey := append([]byte(nil), []byte(storage.TableBase(td.Name)+storage.SegPrimary)...)
-		primaryKey = append(primaryKey, v.pkHash...)
-		primaryKey = append(primaryKey, v.sk...)
+	var deletedKeys [][]byte
+	var stale uint64
+	for i, v := range victims {
+		if b.Len() >= 8<<20 {
+			r.db.ttlMu.Lock()
+			r.db.ttlStatus.BacklogPresent = true
+			r.db.ttlMu.Unlock()
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		primaryKey := keys[i]
 		var oldItem types.Item
 		raw, err := r.db.Get(primaryKey)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -238,12 +286,44 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 				return fmt.Errorf("decode ttl victim: %w", err)
 			}
 		}
-		if err := b.Delete(primaryKey, nil); err != nil {
-			return err
-		}
 		if err := b.Delete(v.ttlKey, nil); err != nil {
 			return err
 		}
+		currentKey, err := ttlKey(td.Name, td.KeySchema, td.TTLAttribute, oldItem)
+		if err != nil {
+			return err
+		}
+		// A renewed/replaced row can leave an older pointer after recovery.
+		// Clean that pointer, but never delete a different current generation.
+		if oldItem == nil || !bytes.Equal(currentKey, v.ttlKey) || !itemExpired(td, oldItem, now) {
+			stale++
+			continue
+		}
+		gsi, err := storage.PlanGSI(td.Name, td.KeySchema, td.GSIs, oldItem, nil)
+		if err != nil {
+			return err
+		}
+		lsi, err := storage.PlanLSI(td.Name, td.KeySchema, td.LSIs, oldItem, nil)
+		if err != nil {
+			return err
+		}
+		spatial, err := planSpatial(td.Name, td.KeySchema, td.SpatialIndexes, oldItem, nil)
+		if err != nil {
+			return err
+		}
+		text, err := planText(td, oldItem, nil)
+		if err != nil {
+			return err
+		}
+		for _, ops := range [][]storage.IndexOp{gsi, lsi, spatial, text} {
+			if err := applyIndexOps(b, ops); err != nil {
+				return err
+			}
+		}
+		if err := b.Delete(primaryKey, nil); err != nil {
+			return err
+		}
+		deletedKeys = append(deletedKeys, primaryKey)
 		if oldItem != nil && r.db.shouldAppendChangeRecord(td) {
 			rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(oldItem, td.KeySchema), oldItem, nil)
 			rec.BatchID = r.db.nextBatchID()
@@ -252,8 +332,20 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now u
 			}
 		}
 	}
-	return r.db.CommitBatch(b)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := r.db.CommitBatch(b); err != nil {
+		return err
+	}
+	if isMemoryTable(td) {
+		for _, key := range deletedKeys {
+			r.db.memoryDelete(td.Name, key)
+		}
+	}
+	r.db.ttlMu.Lock()
+	r.db.ttlStatus.Deleted += uint64(len(deletedKeys))
+	r.db.ttlStatus.StalePointers += stale
+	r.db.ttlMu.Unlock()
+	return nil
 }
-
-// _ keeps pebbledb referenced for future raw-iterator paths.
-var _ = (*pebbledb.Iterator)(nil)

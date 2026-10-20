@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -42,6 +43,7 @@ type GRPCServer struct {
 	stream    ChangeStream     // nil when no CDC source attached
 	manager   *cluster.Manager // nil in single-shard mode
 	plugins   *plugin.Registry // nil → uses plugin.Default
+	pluginsMu sync.RWMutex
 	metrics   *metrics.Metrics // nil when metrics disabled
 	backups   BackupSchedulerStatusProvider
 	lifecycle *Lifecycle
@@ -54,6 +56,9 @@ type GRPCServer struct {
 func NewGRPCServer(db *pebble.DB, cat *catalog.Catalog, cluster Cluster) *GRPCServer {
 	s := &GRPCServer{db: db, cat: cat, cluster: cluster}
 	if db != nil {
+		if cat != nil {
+			db.AttachTTLResolver(cat.Describe)
+		}
 		s.attachServiceLevelLaneResolver(db)
 		_ = s.hydratePluginIndexCatalog()
 	}
@@ -81,13 +86,24 @@ func (s *GRPCServer) StopMVScheduler() {
 // Without it the handler routes every write to s.db (single-shard).
 func (s *GRPCServer) AttachManager(m *cluster.Manager) {
 	s.manager = m
+	if m != nil && s.cat != nil {
+		for _, sh := range m.Shards() {
+			if sh != nil && sh.Storage != nil {
+				sh.Storage.AttachTTLResolver(s.cat.Describe)
+			}
+		}
+	}
 	s.attachServiceLevelLaneResolvers()
 }
 
 // AttachPluginRegistry overrides the default plugin registry. The
 // server falls back to plugin.Default when no registry is attached —
 // the same registry built-in plugins register against via init().
-func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) { s.plugins = r }
+func (s *GRPCServer) AttachPluginRegistry(r *plugin.Registry) {
+	s.pluginsMu.Lock()
+	defer s.pluginsMu.Unlock()
+	s.plugins = r
+}
 
 // AttachMetrics wires bounded range-hotspot summaries into gRPC
 // cluster status and records PK-bearing gRPC operations.
@@ -129,6 +145,8 @@ func (s *GRPCServer) invalidateServiceLevelLaneShares(name string) {
 }
 
 func (s *GRPCServer) pluginRegistry() *plugin.Registry {
+	s.pluginsMu.RLock()
+	defer s.pluginsMu.RUnlock()
 	if s.plugins != nil {
 		return s.plugins
 	}
@@ -146,6 +164,9 @@ func (s *GRPCServer) readStorageFor(pkBytes []byte) (*pebble.DB, error) {
 	if shard.Storage == nil {
 		return nil, fmt.Errorf("cluster: read shard %d has no storage", shard.ID)
 	}
+	if s.cat != nil {
+		shard.Storage.AttachTTLResolver(s.cat.Describe)
+	}
 	return shard.Storage, nil
 }
 
@@ -157,6 +178,9 @@ func (s *GRPCServer) allShards() []*pebble.DB {
 	for _, sh := range s.manager.Shards() {
 		if sh == nil || sh.Storage == nil {
 			continue
+		}
+		if s.cat != nil {
+			sh.Storage.AttachTTLResolver(s.cat.Describe)
 		}
 		out = append(out, sh.Storage)
 	}
@@ -175,6 +199,9 @@ func (s *GRPCServer) readShardStores() ([]*pebble.DB, error) {
 	for _, sh := range shards {
 		if sh.Storage == nil {
 			return nil, fmt.Errorf("cluster: read shard %d has no storage", sh.ID)
+		}
+		if s.cat != nil {
+			sh.Storage.AttachTTLResolver(s.cat.Describe)
 		}
 		out = append(out, sh.Storage)
 	}

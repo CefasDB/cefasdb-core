@@ -1,4 +1,4 @@
-// Package client is the cefas gRPC SDK.
+// Package client is the cefas gRPC and HTTP/JSON SDK.
 //
 // Dial returns a *Client wired to a cefas server. Every operation is
 // a method on *Client; the resource categories are:
@@ -25,7 +25,7 @@
 //     RecordReward, GetDecision, Rerank, ListStreams, DescribeStream,
 //     GetShardIterator, GetRecords.
 //
-// The package imports pkg/api/proto (generated wire types), pkg/types
-// (domain attributes), and the standard grpc client. It never imports
-// internal/ — that is the server-side boundary.
+// NewHTTPClient provides context-bound table/item/native-text operations over
+// the public JSON protocol. It uses pkg/encoding/ddbjson, the same canonical
+// attribute codec as the server and CLI, without a fork of the wire format.
 package client

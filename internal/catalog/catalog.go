@@ -9,7 +9,9 @@ package catalog
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -134,10 +136,22 @@ func (c *Catalog) Create(td types.TableDescriptor) error {
 	if err := domain.NormalizeDescriptor(&td); err != nil {
 		return err
 	}
+	if len(td.TextIndexes) > 0 {
+		if err := c.db.ReadBarrier(5 * time.Second); err != nil {
+			return err
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.tables[td.Name]; ok {
 		return types.ErrTableAlreadyExists
+	}
+	if len(td.TextIndexes) > 0 {
+		if _, err := c.db.Get(storage.KeyCatalog(td.Name)); err == nil {
+			return types.ErrTableAlreadyExists
+		} else if !errors.Is(err, pebble.ErrNotFound) {
+			return err
+		}
 	}
 	streamDesc, err := c.newStreamDescriptor(td)
 	if err != nil {
@@ -335,6 +349,12 @@ func (c *Catalog) UpdateTable(td types.TableDescriptor) error {
 	}
 	if err := domain.ApplyStreamUpdateSemantics(existing, &td); err != nil {
 		return err
+	}
+	if !reflect.DeepEqual(existing.TextIndexes, td.TextIndexes) {
+		return fmt.Errorf("native text indexes are immutable; an explicit backfill migration is required")
+	}
+	if len(existing.TextIndexes) > 0 && existing.TTLAttribute != td.TTLAttribute {
+		return fmt.Errorf("native text-table expiration is immutable; create it with its TTL attribute")
 	}
 	oldStreamEnabled := domain.StreamEnabled(existing)
 	newStreamEnabled := domain.StreamEnabled(td)

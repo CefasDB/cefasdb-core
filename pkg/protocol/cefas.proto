@@ -775,6 +775,8 @@ message TableDescriptor {
   string                          latest_stream_arn      = 9;
   string                          latest_stream_label    = 10;
   string                          stream_status          = 11;
+  repeated TextIndexDescriptor     text_indexes           = 12;
+  string                          ttl_attribute          = 13;
 }
 
 // ---------- schema rpcs ----------
@@ -1631,4 +1633,9 @@ message AtomicUpdateResponse {
   repeated AttributeValue      returned_values  = 2;
   // True when the item did not exist prior to the call.
   bool                         created          = 3;
+}
+
+message TextIndexDescriptor {
+  string name = 1;
+  string field = 2;
 }

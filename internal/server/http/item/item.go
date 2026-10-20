@@ -54,6 +54,9 @@ type Deps struct {
 	// Required when GetItem accepts "consistency":"strong" requests;
 	// a nil callback treats every read as eventual.
 	EnsureStrongRead func(w http.ResponseWriter, r *http.Request) bool
+	// EnsureStorageStrongRead uses the actual PK-routed store in multi-Raft.
+	// Nil preserves the legacy callback for alternate handler compositions.
+	EnsureStorageStrongRead func(http.ResponseWriter, *http.Request, *pebble.DB) bool
 	// WriteWriteErr maps storage errors (NotLeader → 307, condition
 	// failed → 412, throttled → 429, …) to HTTP responses. Required.
 	WriteWriteErr func(w http.ResponseWriter, r *http.Request, err error)
@@ -184,7 +187,7 @@ func (h *Handlers) HandleGetItem(w http.ResponseWriter, r *http.Request) {
 		auth.WildcardScope(auth.ScopeItemRead)) {
 		return
 	}
-	if req.Consistency == "strong" && h.deps.EnsureStrongRead != nil && !h.deps.EnsureStrongRead(w, r) {
+	if req.Consistency == "strong" && h.deps.EnsureStorageStrongRead == nil && h.deps.EnsureStrongRead != nil && !h.deps.EnsureStrongRead(w, r) {
 		return
 	}
 	td, err := h.deps.Cat.Describe(req.Table)
@@ -205,6 +208,9 @@ func (h *Handlers) HandleGetItem(w http.ResponseWriter, r *http.Request) {
 	db, err := h.deps.StorageFor(pkBytes)
 	if err != nil {
 		httpx.WriteErr(w, mapReadErr(err), err)
+		return
+	}
+	if req.Consistency == "strong" && h.deps.EnsureStorageStrongRead != nil && !h.deps.EnsureStorageStrongRead(w, r, db) {
 		return
 	}
 	item, err := db.GetItem(req.Table, td.KeySchema, keyAttrs)

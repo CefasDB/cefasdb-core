@@ -110,6 +110,9 @@ func main() {
 		streamRetentionCleanupBatch = flag.Int("storage-stream-retention-cleanup-batch-size", 0, "Maximum expired CDC records removed per cleanup tick. 0 inherits config/default.")
 		storageChangeLogMode        = flag.String("storage-changelog-mode", "", "Physical changelog mode: always, streams-only, or off. Empty inherits config/default.")
 		storageAdaptiveMode         = flag.Bool("storage-adaptive-mode", false, "Enable workload-mode adaptive tuner (read/write ratio observer adjusts commitLoop merge cap and retention interval). Off by default.")
+		ttlReaperEnabled            = flag.Bool("storage-ttl-reaper-enabled", false, "Enable leader-owned background row/index expiration cleanup.")
+		ttlReaperInterval           = flag.Duration("storage-ttl-reaper-interval", 0, "TTL sweep interval; zero inherits config/default.")
+		ttlReaperBatchSize          = flag.Int("storage-ttl-reaper-batch-size", 0, "TTL pointer budget per table per sweep; zero inherits config/default.")
 
 		// Identity/auth flags. Empty -identity-jwks-url keeps the
 		// server open (single-node dev mode).
@@ -218,6 +221,19 @@ func main() {
 		*raftIdentityLeaseNamespace, *raftIdentityLeaseAPIURL,
 		*raftIdentityLeaseTTL, *raftIdentityLeaseRenew)
 	bootstrapserver.OverlayLifecycleFlags(&cfg, *shutdownGracePeriod, *shutdownDrainDelay, *shutdownLeadershipTransfer)
+	if *ttlReaperEnabled {
+		cfg.Storage.TTLReaperEnabled = true
+	}
+	if *ttlReaperInterval != 0 {
+		cfg.Storage.TTLReaperInterval = *ttlReaperInterval
+	}
+	if *ttlReaperBatchSize != 0 {
+		cfg.Storage.TTLReaperBatchSize = *ttlReaperBatchSize
+	}
+	if cfg.Storage.TTLReaperEnabled && (cfg.Storage.TTLReaperInterval < time.Second || cfg.Storage.TTLReaperInterval > time.Hour || cfg.Storage.TTLReaperBatchSize < 1 || cfg.Storage.TTLReaperBatchSize > 10000) {
+		logger.Error("TTL reaper requires interval 1s..1h and batch size 1..10000")
+		os.Exit(1)
+	}
 
 	// Initialise tracing first so subsequent setup gets spans on
 	// failure. tracingShutdown is a no-op when no endpoint is set.
@@ -485,6 +501,11 @@ func main() {
 	}
 	if mgr != nil {
 		apiSrv.AttachManager(mgr)
+	}
+	if cfg.Storage.TTLReaperEnabled {
+		stopTTL := apiSrv.StartTTLReapers(runtimeCtx, pebble.ReaperConfig{Interval: cfg.Storage.TTLReaperInterval, BatchSize: cfg.Storage.TTLReaperBatchSize})
+		defer stopTTL()
+		logger.Info("TTL reaper enabled", "interval", cfg.Storage.TTLReaperInterval, "batchSize", cfg.Storage.TTLReaperBatchSize)
 	}
 	if validator != nil {
 		apiSrv.AttachAuth(validator)

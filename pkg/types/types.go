@@ -255,6 +255,13 @@ type NumRange struct {
 	Hi float64 `json:"hi"`
 }
 
+// TextIndexDescriptor is a native, disk-backed substring index. A field is a
+// dotted map path whose string value is indexed; absent values are sparse.
+type TextIndexDescriptor struct {
+	Name  string `json:"name"`
+	Field string `json:"field"`
+}
+
 // TableDescriptor is the persisted schema. Stored under cefas/catalog/<name>.
 type TableDescriptor struct {
 	Name                 string                   `json:"name"`
@@ -263,12 +270,14 @@ type TableDescriptor struct {
 	GSIs                 []GSIDescriptor          `json:"gsis,omitempty"`
 	LSIs                 []LSIDescriptor          `json:"lsis,omitempty"`
 	SpatialIndexes       []SpatialIndexDescriptor `json:"spatialIndexes,omitempty"`
+	TextIndexes          []TextIndexDescriptor    `json:"textIndexes,omitempty"`
 	StorageClass         string                   `json:"storageClass,omitempty"`
 	MemoryFootprintBytes int64                    `json:"memoryFootprintBytes,omitempty"`
 	// TTLAttribute, when non-empty, names a numeric attribute whose
 	// value (Unix epoch seconds) marks the row's expiration. The
-	// background reaper sweeps expired rows lazily; reads of an
-	// expired row are still served until the reaper passes.
+	// background reaper sweeps expired rows lazily. Native text-indexed
+	// tables also hide expired rows immediately on reads. Legacy tables
+	// retain their existing lazy-read semantics.
 	TTLAttribute        string               `json:"ttlAttribute,omitempty"`
 	StreamSpecification *StreamSpecification `json:"streamSpecification,omitempty"`
 	LatestStreamArn     string               `json:"latestStreamArn,omitempty"`

@@ -132,6 +132,9 @@ func (s *Server) AttachBackupScheduler(p BackupSchedulerStatusProvider) { s.back
 func (s *Server) AttachMetrics(m *metrics.Metrics) { s.metrics = m }
 
 func New(db *pebble.DB, cat *catalog.Catalog) *Server {
+	if db != nil && cat != nil {
+		db.AttachTTLResolver(cat.Describe)
+	}
 	return &Server{db: db, cat: cat, lifecycle: NewLifecycle()}
 }
 
@@ -139,7 +142,16 @@ func New(db *pebble.DB, cat *catalog.Catalog) *Server {
 // server single-shard. When attached, every PK-bearing handler
 // resolves the table descriptor on shard 0 (the metadata shard) and
 // routes the actual write/read to the shard that owns the PK.
-func (s *Server) AttachManager(m *cluster.Manager) { s.manager = m }
+func (s *Server) AttachManager(m *cluster.Manager) {
+	s.manager = m
+	if m != nil && s.cat != nil {
+		for _, sh := range m.Shards() {
+			if sh != nil && sh.Storage != nil {
+				sh.Storage.AttachTTLResolver(s.cat.Describe)
+			}
+		}
+	}
+}
 
 // readStorageFor returns the local replica that can authoritatively
 // serve an eventual read for the supplied partition key.
@@ -153,6 +165,9 @@ func (s *Server) readStorageFor(pkBytes []byte) (*pebble.DB, error) {
 	}
 	if shard.Storage == nil {
 		return nil, fmt.Errorf("cluster: read shard %d has no storage", shard.ID)
+	}
+	if s.cat != nil {
+		shard.Storage.AttachTTLResolver(s.cat.Describe)
 	}
 	return shard.Storage, nil
 }
@@ -168,6 +183,9 @@ func (s *Server) allShards() []*pebble.DB {
 	for _, sh := range s.manager.Shards() {
 		if sh == nil || sh.Storage == nil {
 			continue
+		}
+		if s.cat != nil {
+			sh.Storage.AttachTTLResolver(s.cat.Describe)
 		}
 		out = append(out, sh.Storage)
 	}
@@ -186,6 +204,9 @@ func (s *Server) readShardStores() ([]*pebble.DB, error) {
 	for _, sh := range shards {
 		if sh.Storage == nil {
 			return nil, fmt.Errorf("cluster: read shard %d has no storage", sh.ID)
+		}
+		if s.cat != nil {
+			sh.Storage.AttachTTLResolver(s.cat.Describe)
 		}
 		out = append(out, sh.Storage)
 	}
@@ -276,15 +297,16 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	)
 	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
 	itemHandlers := itemhttp.New(itemhttp.Deps{
-		Cat:               s.cat,
-		StorageFor:        s.readStorageFor,
-		WriteTargetsForPK: s.itemWriteTargetsForPK,
-		BatchWriteByShard: s.batchWriteByShard,
-		BatchGetByShard:   s.batchGetByShard,
-		EnsureStrongRead:  s.ensureStrongRead,
-		WriteWriteErr:     writeWriteErr,
-		ObserveWrite:      s.observeItemWrite,
-		ObserveRead:       s.observeItemRead,
+		Cat:                     s.cat,
+		StorageFor:              s.readStorageFor,
+		WriteTargetsForPK:       s.itemWriteTargetsForPK,
+		BatchWriteByShard:       s.batchWriteByShard,
+		BatchGetByShard:         s.batchGetByShard,
+		EnsureStrongRead:        s.ensureStrongRead,
+		EnsureStorageStrongRead: s.ensureStorageStrongRead,
+		WriteWriteErr:           writeWriteErr,
+		ObserveWrite:            s.observeItemWrite,
+		ObserveRead:             s.observeItemRead,
 	})
 	queryHandlers := queryhttp.New(
 		s.cat,
@@ -295,6 +317,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		s.ensureStrongRead,
 		s.observeRangeMetric,
 	)
+	queryHandlers.AttachTextStrongRead(s.ensureStorageStrongRead)
 	register("/v1/ListStreams", streamHandlers.HandleListStreams)
 	register("/v1/DescribeStream", streamHandlers.HandleDescribeStream)
 	register("/v1/GetShardIterator", streamHandlers.HandleGetShardIterator)
@@ -303,6 +326,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	register("/v1/GetItem", itemHandlers.HandleGetItem)
 	register("/v1/DeleteItem", itemHandlers.HandleDeleteItem)
 	register("/v1/Query", queryHandlers.HandleQuery)
+	register("/v1/TextQuery", queryHandlers.HandleTextQuery)
+	register("/v1/TextAggregate", queryHandlers.HandleTextAggregate)
+	register("/v1/UpdateTimeToLive", tableHandlers.HandleUpdateTimeToLive)
 	register("/v1/BatchWriteItem", itemHandlers.HandleBatchWriteItem)
 	register("/v1/BatchGetItem", itemHandlers.HandleBatchGetItem)
 	register("/v1/SpatialQuery", queryHandlers.HandleSpatialQuery)
@@ -348,6 +374,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // internal/storage directly.
 func (s *Server) clusterStatusExtras() map[string]any {
 	out := map[string]any{}
+	if s.manager == nil {
+		out["ttlCleanup"] = s.db.TTLStatus()
+	} else {
+		status := make(map[uint32]pebble.TTLStatus)
+		for _, sh := range s.manager.Shards() {
+			if sh != nil && sh.Storage != nil {
+				status[sh.ID] = sh.Storage.TTLStatus()
+			}
+		}
+		out["ttlCleanup"] = status
+	}
 	if s.metrics != nil {
 		out["hotRanges"] = s.metrics.RangeHotspotSummaries(0)
 	}
@@ -400,6 +437,24 @@ func (s *Server) ensureStrongRead(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) ensureStorageStrongRead(w http.ResponseWriter, r *http.Request, db *pebble.DB) bool {
+	if s.manager == nil && s.cluster != nil {
+		return s.ensureStrongRead(w, r)
+	}
+	err := db.ReadBarrier(barrierTimeout)
+	if err == nil {
+		return true
+	}
+	var leader *pebble.NotLeaderError
+	if errors.As(err, &leader) && leader.LeaderURL != "" {
+		w.Header().Set("Location", leader.LeaderURL+r.URL.RequestURI())
+		writeErr(w, http.StatusTemporaryRedirect, fmt.Errorf("strong read requires partition leader"))
+		return false
+	}
+	writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("partition strong-read barrier unavailable"))
+	return false
 }
 
 // batchWriteByShard groups ops by the shard that owns each op's PK

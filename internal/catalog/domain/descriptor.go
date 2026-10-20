@@ -57,6 +57,33 @@ func NormalizeDescriptor(td *types.TableDescriptor) error {
 	if err := NormalizeStreamDescriptor(td); err != nil {
 		return err
 	}
+	seen := make(map[string]bool)
+	if len(td.TextIndexes) == 0 {
+		td.TextIndexes = nil
+	}
+	if len(td.TextIndexes) > 0 && (len(td.Name) > 128 || strings.ContainsAny(td.Name, "/\\\x00")) {
+		return fmt.Errorf("native text table requires a bounded path-free name")
+	}
+	if len(td.TextIndexes) > 4 {
+		return fmt.Errorf("at most four native text indexes are supported")
+	}
+	for _, idx := range td.TextIndexes {
+		if td.StorageClass != types.StorageClassDisk || td.KeySchema.SK == "" {
+			return fmt.Errorf("native text indexes require disk storage and a sort key")
+		}
+		if idx.Name == "" || len(idx.Name) > 128 || strings.ContainsAny(idx.Name, "/\\\x00") || seen[idx.Name] {
+			return fmt.Errorf("native text index name must be unique and contain no path separator")
+		}
+		if idx.Field == "" || len(idx.Field) > 256 || strings.ContainsAny(idx.Field, "[]\x00") {
+			return fmt.Errorf("native text index requires a bounded dotted map field")
+		}
+		for _, segment := range strings.Split(idx.Field, ".") {
+			if segment == "" {
+				return fmt.Errorf("empty native text field path segment")
+			}
+		}
+		seen[idx.Name] = true
+	}
 	return nil
 }
 
@@ -211,6 +238,9 @@ func StreamARN(table, label string) string {
 // mutate the result without leaking changes back into the
 // catalog's in-memory cache.
 func CloneTableDescriptor(td types.TableDescriptor) types.TableDescriptor {
+	if td.TextIndexes != nil {
+		td.TextIndexes = append([]types.TextIndexDescriptor(nil), td.TextIndexes...)
+	}
 	if td.AttributeDefinitions != nil {
 		td.AttributeDefinitions = append([]types.AttributeDefinition(nil), td.AttributeDefinitions...)
 	}
