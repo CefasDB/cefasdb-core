@@ -121,6 +121,8 @@ func lockPrimaryKeys(keys [][]byte) func() {
 // on a per-key mutex; writers on different keys run in parallel.
 // Multi-shard deployments serialize naturally via the Raft FSM.
 func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts AtomicOptions) (AtomicResult, error) {
+	streamUnlock := d.lockNativeStream(td)
+	defer streamUnlock()
 	if err := d.checkWritePressure(); err != nil {
 		return AtomicResult{}, err
 	}

@@ -1,8 +1,10 @@
 package pebble
 
 import (
+	"bytes"
 	"container/list"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -144,7 +146,8 @@ type DB struct {
 	// atomic.Add. Seeded in Open from max(persisted ChangeCounterKey,
 	// MAX(KeyChangeLog)) so a stale counter from a crash never overlaps
 	// existing keys. Access on the hot path is lock-free.
-	changeIndex atomic.Uint64
+	changeIndex    atomic.Uint64
+	nativeStreamMu sync.Mutex
 
 	// batchSeqCounter is the monotonic per-process source of
 	// idempotency markers (#524). Combined with a nanosecond
@@ -486,8 +489,46 @@ func (d *DB) ApplyCommittedBatch(repr []byte) error {
 		if err := batch.SetRepr(append([]byte(nil), repr...)); err != nil {
 			return fmt.Errorf("fsm apply: SetRepr: %w", err)
 		}
+		var appliedIndex uint64
+		reader := batch.Reader()
+		logPrefix, _ := storage.PrefixChangeLog()
+		for {
+			kind, key, value, ok, err := reader.Next()
+			if err != nil {
+				return fmt.Errorf("fsm apply: batch reader: %w", err)
+			}
+			if !ok {
+				break
+			}
+			if kind != pebbledb.InternalKeyKindSet {
+				continue
+			}
+			var index uint64
+			if bytes.Equal(key, storage.ChangeCounterKey) {
+				if len(value) != 8 {
+					return fmt.Errorf("fsm apply: invalid change counter")
+				}
+				index = binary.BigEndian.Uint64(value)
+			} else if bytes.HasPrefix(key, logPrefix) {
+				var err error
+				index, err = storage.ChangeLogIndexFromKey(key)
+				if err != nil {
+					return fmt.Errorf("fsm apply: invalid change index: %w", err)
+				}
+			}
+			if index > appliedIndex {
+				appliedIndex = index
+			}
+		}
 		if err := batch.Commit(pebbledb.NoSync); err != nil {
 			return fmt.Errorf("fsm apply: commit: %w", err)
+		}
+		// A promoted follower must allocate after every sequence it applied,
+		// even when it has not restarted since receiving those records.
+		for prior := d.changeIndex.Load(); appliedIndex > prior; prior = d.changeIndex.Load() {
+			if d.changeIndex.CompareAndSwap(prior, appliedIndex) {
+				break
+			}
 		}
 		return nil
 	})

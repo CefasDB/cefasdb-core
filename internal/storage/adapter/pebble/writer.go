@@ -89,6 +89,8 @@ func (d *DB) PutItemWithCtx(ctx context.Context, td types.TableDescriptor, item 
 }
 
 func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts PutOptions) error {
+	streamUnlock := d.lockNativeStream(td)
+	defer streamUnlock()
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -258,6 +260,8 @@ func (d *DB) DeleteItemWithCtx(ctx context.Context, td types.TableDescriptor, ke
 }
 
 func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
+	streamUnlock := d.lockNativeStream(td)
+	defer streamUnlock()
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -266,6 +270,11 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 		return err
 	}
 	primaryKey := storage.KeyPrimary(td.Name, pk, sk)
+	if strings.TrimSpace(opts.Condition) != "" && d.repl != nil {
+		if err := d.ReadBarrier(5 * time.Second); err != nil {
+			return err
+		}
+	}
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
@@ -323,6 +332,9 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 	defer b.Close()
 	if err := b.Delete(primaryKey, nil); err != nil {
 		return fmt.Errorf("batch delete primary: %w", err)
+	}
+	if err := deleteNativeCustody(b, td, keyAttrs); err != nil {
+		return err
 	}
 	if err := applyIndexOps(b, gsiOps); err != nil {
 		return err
@@ -895,6 +907,8 @@ func (d *DB) BatchWriteItemLocal(td types.TableDescriptor, ops []BatchOp) error 
 }
 
 func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassRepl bool) error {
+	streamUnlock := d.lockNativeStream(td)
+	defer streamUnlock()
 	if len(ops) == 0 {
 		return nil
 	}
@@ -1042,6 +1056,9 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 			}
 			ttlOps = append(ttlOps, textOps...)
 			if err := b.Delete(primaryKey, nil); err != nil {
+				return err
+			}
+			if err := deleteNativeCustody(b, td, op.Key); err != nil {
 				return err
 			}
 			if isMemoryTable(td) {

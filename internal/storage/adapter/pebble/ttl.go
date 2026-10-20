@@ -192,6 +192,9 @@ func (r *Reaper) Tick(ctx context.Context) (result error) {
 		}
 	}
 	now := r.cfg.now()
+	if _, err := r.db.expireNativeImages(now); err != nil {
+		return err
+	}
 	for _, td := range r.cat.List() {
 		if td.TTLAttribute == "" {
 			continue
@@ -204,6 +207,8 @@ func (r *Reaper) Tick(ctx context.Context) (result error) {
 }
 
 func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now time.Time) error {
+	streamUnlock := r.db.lockNativeStream(td)
+	defer streamUnlock()
 	unix := now.Unix()
 	if unix < 0 {
 		return nil
@@ -321,6 +326,9 @@ func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now t
 			}
 		}
 		if err := b.Delete(primaryKey, nil); err != nil {
+			return err
+		}
+		if err := deleteNativeCustody(b, td, oldItem); err != nil {
 			return err
 		}
 		deletedKeys = append(deletedKeys, primaryKey)

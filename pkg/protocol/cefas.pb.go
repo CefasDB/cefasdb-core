@@ -7837,11 +7837,12 @@ func (x *SequenceNumberRange) GetEndingSequenceNumber() string {
 }
 
 type StreamShard struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	ShardId             string                 `protobuf:"bytes,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	SequenceNumberRange *SequenceNumberRange   `protobuf:"bytes,2,opt,name=sequence_number_range,json=sequenceNumberRange,proto3" json:"sequence_number_range,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	ShardId              string                 `protobuf:"bytes,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	SequenceNumberRange  *SequenceNumberRange   `protobuf:"bytes,2,opt,name=sequence_number_range,json=sequenceNumberRange,proto3" json:"sequence_number_range,omitempty"`
+	LatestSequenceNumber string                 `protobuf:"bytes,3,opt,name=latest_sequence_number,json=latestSequenceNumber,proto3" json:"latest_sequence_number,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *StreamShard) Reset() {
@@ -7886,6 +7887,13 @@ func (x *StreamShard) GetSequenceNumberRange() *SequenceNumberRange {
 		return x.SequenceNumberRange
 	}
 	return nil
+}
+
+func (x *StreamShard) GetLatestSequenceNumber() string {
+	if x != nil {
+		return x.LatestSequenceNumber
+	}
+	return ""
 }
 
 type StreamDescription struct {
@@ -8389,11 +8397,12 @@ func (x *StreamRecordEntry) GetDynamodb() *StreamRecordData {
 }
 
 type GetRecordsResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Records           []*StreamRecordEntry   `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	NextShardIterator string                 `protobuf:"bytes,2,opt,name=next_shard_iterator,json=nextShardIterator,proto3" json:"next_shard_iterator,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	Records                   []*StreamRecordEntry   `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	NextShardIterator         string                 `protobuf:"bytes,2,opt,name=next_shard_iterator,json=nextShardIterator,proto3" json:"next_shard_iterator,omitempty"`
+	LastScannedSequenceNumber string                 `protobuf:"bytes,3,opt,name=last_scanned_sequence_number,json=lastScannedSequenceNumber,proto3" json:"last_scanned_sequence_number,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *GetRecordsResponse) Reset() {
@@ -8436,6 +8445,13 @@ func (x *GetRecordsResponse) GetRecords() []*StreamRecordEntry {
 func (x *GetRecordsResponse) GetNextShardIterator() string {
 	if x != nil {
 		return x.NextShardIterator
+	}
+	return ""
+}
+
+func (x *GetRecordsResponse) GetLastScannedSequenceNumber() string {
+	if x != nil {
+		return x.LastScannedSequenceNumber
 	}
 	return ""
 }
@@ -15453,10 +15469,11 @@ const file_cefas_proto_rawDesc = "" +
 	"\x18exclusive_start_shard_id\x18\x03 \x01(\tR\x15exclusiveStartShardId\"\x85\x01\n" +
 	"\x13SequenceNumberRange\x128\n" +
 	"\x18starting_sequence_number\x18\x01 \x01(\tR\x16startingSequenceNumber\x124\n" +
-	"\x16ending_sequence_number\x18\x02 \x01(\tR\x14endingSequenceNumber\"{\n" +
+	"\x16ending_sequence_number\x18\x02 \x01(\tR\x14endingSequenceNumber\"\xb1\x01\n" +
 	"\vStreamShard\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\tR\ashardId\x12Q\n" +
-	"\x15sequence_number_range\x18\x02 \x01(\v2\x1d.cefas.v1.SequenceNumberRangeR\x13sequenceNumberRange\"\x9a\x03\n" +
+	"\x15sequence_number_range\x18\x02 \x01(\v2\x1d.cefas.v1.SequenceNumberRangeR\x13sequenceNumberRange\x124\n" +
+	"\x16latest_sequence_number\x18\x03 \x01(\tR\x14latestSequenceNumber\"\x9a\x03\n" +
 	"\x11StreamDescription\x12\x1d\n" +
 	"\n" +
 	"stream_arn\x18\x01 \x01(\tR\tstreamArn\x12!\n" +
@@ -15510,10 +15527,11 @@ const file_cefas_proto_rawDesc = "" +
 	"\x10event_source_arn\x18\x05 \x01(\tR\x0eeventSourceArn\x12\x1d\n" +
 	"\n" +
 	"aws_region\x18\x06 \x01(\tR\tawsRegion\x126\n" +
-	"\bdynamodb\x18\a \x01(\v2\x1a.cefas.v1.StreamRecordDataR\bdynamodb\"{\n" +
+	"\bdynamodb\x18\a \x01(\v2\x1a.cefas.v1.StreamRecordDataR\bdynamodb\"\xbc\x01\n" +
 	"\x12GetRecordsResponse\x125\n" +
 	"\arecords\x18\x01 \x03(\v2\x1b.cefas.v1.StreamRecordEntryR\arecords\x12.\n" +
-	"\x13next_shard_iterator\x18\x02 \x01(\tR\x11nextShardIterator\"\x93\x01\n" +
+	"\x13next_shard_iterator\x18\x02 \x01(\tR\x11nextShardIterator\x12?\n" +
+	"\x1clast_scanned_sequence_number\x18\x03 \x01(\tR\x19lastScannedSequenceNumber\"\x93\x01\n" +
 	" UpdateStreamSpecificationRequest\x12\x1d\n" +
 	"\n" +
 	"table_name\x18\x01 \x01(\tR\ttableName\x12P\n" +

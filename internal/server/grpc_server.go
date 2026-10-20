@@ -19,6 +19,7 @@ import (
 	"github.com/CefasDb/cefasdb/internal/metrics"
 	"github.com/CefasDb/cefasdb/internal/placement"
 	craft "github.com/CefasDb/cefasdb/internal/replication"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
 	"github.com/CefasDb/cefasdb/internal/spatial"
 	cefassql "github.com/CefasDb/cefasdb/internal/sql"
 	"github.com/CefasDb/cefasdb/internal/storage"
@@ -2423,6 +2424,8 @@ func (s *GRPCServer) strongReadGate() error {
 // the same error contract.
 func mapStorageErr(err error) error {
 	switch {
+	case errors.Is(err, streamcore.ErrTopologyUnsupported):
+		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, types.ErrTableNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrMVNotFound):

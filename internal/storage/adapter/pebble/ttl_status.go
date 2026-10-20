@@ -13,6 +13,7 @@ type TTLStatus struct {
 	Sweeps         uint64    `json:"sweeps"`
 	Failures       uint64    `json:"failures"`
 	Deleted        uint64    `json:"deleted"`
+	PayloadDeleted uint64    `json:"payloadDeleted"`
 	StalePointers  uint64    `json:"stalePointers"`
 	BacklogPresent bool      `json:"backlogPresent"`
 }

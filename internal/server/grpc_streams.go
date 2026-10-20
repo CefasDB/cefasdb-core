@@ -9,9 +9,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/CefasDb/cefasdb/internal/auth"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
 	"github.com/CefasDb/cefasdb/internal/tracing"
 	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
-	"github.com/CefasDb/cefasdb/internal/core/model"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -20,6 +21,9 @@ func (s *GRPCServer) ListStreams(ctx context.Context, req *cefaspb.ListStreamsRe
 	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
+	}
+	if s.manager != nil && len(s.manager.Shards()) != 1 {
+		return nil, status.Error(codes.Unavailable, streamcore.ErrTopologyUnsupported.Error())
 	}
 	streams, err := s.cat.ListStreams(req.GetTableName())
 	if err != nil {
@@ -48,10 +52,13 @@ func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeSt
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
+	if s.manager != nil && len(s.manager.Shards()) != 1 {
+		return nil, status.Error(codes.Unavailable, streamcore.ErrTopologyUnsupported.Error())
+	}
 	if req.GetStreamArn() == "" {
 		return nil, status.Error(codes.InvalidArgument, "stream_arn required")
 	}
-	desc, err := s.cat.DescribeStream(req.GetStreamArn())
+	desc, err := streamcore.DescribeStream(s.cat, s.db, req.GetStreamArn())
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
@@ -74,6 +81,9 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 	defer span.End()
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
+	}
+	if s.manager != nil && len(s.manager.Shards()) != 1 {
+		return nil, status.Error(codes.Unavailable, streamcore.ErrTopologyUnsupported.Error())
 	}
 	shardID, err := model.NewStreamShardID(req.GetShardId())
 	if err != nil {
@@ -100,6 +110,9 @@ func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequ
 	if err := requireScope(ctx, auth.ScopeTableDescribe); err != nil {
 		return nil, err
 	}
+	if s.manager != nil && len(s.manager.Shards()) != 1 {
+		return nil, status.Error(codes.Unavailable, streamcore.ErrTopologyUnsupported.Error())
+	}
 	result, err := GetStreamRecords(
 		s.cat,
 		s.db,
@@ -112,7 +125,7 @@ func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequ
 		return nil, mapStorageErr(err)
 	}
 	s.observeStreamGetRecords(result, nil)
-	resp := &cefaspb.GetRecordsResponse{NextShardIterator: result.NextShardIterator}
+	resp := &cefaspb.GetRecordsResponse{NextShardIterator: result.NextShardIterator, LastScannedSequenceNumber: result.LastScannedSequenceNumber}
 	for _, record := range result.Records {
 		resp.Records = append(resp.Records, streamRecordToPB(record))
 	}

@@ -34,13 +34,14 @@ import (
 type Metrics struct {
 	Registry  *prometheus.Registry
 	ttlLastMu sync.Mutex
-	ttlLast   map[string][3]uint64
+	ttlLast   map[string][4]uint64
 
-	TTLCleanupRuns        *prometheus.CounterVec
-	TTLCleanupFailures    *prometheus.CounterVec
-	TTLCleanupDeleted     *prometheus.CounterVec
-	TTLCleanupBacklog     *prometheus.GaugeVec
-	TTLCleanupLastSuccess *prometheus.GaugeVec
+	TTLCleanupRuns           *prometheus.CounterVec
+	TTLCleanupFailures       *prometheus.CounterVec
+	TTLCleanupDeleted        *prometheus.CounterVec
+	TTLCleanupPayloadDeleted *prometheus.CounterVec
+	TTLCleanupBacklog        *prometheus.GaugeVec
+	TTLCleanupLastSuccess    *prometheus.GaugeVec
 
 	OpDuration *prometheus.HistogramVec // op{put,get,query,...}, table
 	OpCount    *prometheus.CounterVec   // op, table, outcome{ok,err,notfound,notleader}
@@ -138,12 +139,13 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 	)
 
 	m := &Metrics{
-		Registry:              reg,
-		TTLCleanupRuns:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_runs_total", Help: "Completed TTL cleanup sweeps in this process."}, []string{"shard"}),
-		TTLCleanupFailures:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_failures_total", Help: "Failed TTL cleanup sweeps in this process."}, []string{"shard"}),
-		TTLCleanupDeleted:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_deleted_total", Help: "Primary rows physically expired by this process."}, []string{"shard"}),
-		TTLCleanupBacklog:     prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "cefas_ttl_cleanup_backlog_present", Help: "One if the last sweep observed expired pointers beyond its bounded budget."}, []string{"shard"}),
-		TTLCleanupLastSuccess: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "cefas_ttl_cleanup_last_success_timestamp_seconds", Help: "Unix timestamp of the last completed leader TTL sweep; zero if none."}, []string{"shard"}),
+		Registry:                 reg,
+		TTLCleanupRuns:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_runs_total", Help: "Completed TTL cleanup sweeps in this process."}, []string{"shard"}),
+		TTLCleanupFailures:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_failures_total", Help: "Failed TTL cleanup sweeps in this process."}, []string{"shard"}),
+		TTLCleanupDeleted:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_deleted_total", Help: "Primary rows physically expired by this process."}, []string{"shard"}),
+		TTLCleanupPayloadDeleted: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cefas_ttl_cleanup_cdc_payload_deleted_total", Help: "Expired native CDC image pointers processed by this process."}, []string{"shard"}),
+		TTLCleanupBacklog:        prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "cefas_ttl_cleanup_backlog_present", Help: "One if the last sweep observed expired pointers beyond its bounded budget."}, []string{"shard"}),
+		TTLCleanupLastSuccess:    prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "cefas_ttl_cleanup_last_success_timestamp_seconds", Help: "Unix timestamp of the last completed leader TTL sweep; zero if none."}, []string{"shard"}),
 		OpDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "cefas_op_duration_seconds",
 			Help:    "Latency of a single public operation.",
@@ -362,7 +364,7 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		}, []string{"table", "op"}),
 	}
 	reg.MustRegister(
-		m.TTLCleanupRuns, m.TTLCleanupFailures, m.TTLCleanupDeleted, m.TTLCleanupBacklog, m.TTLCleanupLastSuccess,
+		m.TTLCleanupRuns, m.TTLCleanupFailures, m.TTLCleanupDeleted, m.TTLCleanupPayloadDeleted, m.TTLCleanupBacklog, m.TTLCleanupLastSuccess,
 		m.OpDuration,
 		m.OpCount,
 		m.BatchSize,
@@ -629,11 +631,11 @@ func (m *Metrics) RangeHotspotSummaries(max int) []RangeHotspotSummary {
 func (m *Metrics) ObserveTTL(label string, status pebble.TTLStatus) {
 	m.ttlLastMu.Lock()
 	if m.ttlLast == nil {
-		m.ttlLast = make(map[string][3]uint64)
+		m.ttlLast = make(map[string][4]uint64)
 	}
 	previous := m.ttlLast[label]
-	next := [3]uint64{status.Sweeps, status.Failures, status.Deleted}
-	counters := []prometheus.Counter{m.TTLCleanupRuns.WithLabelValues(label), m.TTLCleanupFailures.WithLabelValues(label), m.TTLCleanupDeleted.WithLabelValues(label)}
+	next := [4]uint64{status.Sweeps, status.Failures, status.Deleted, status.PayloadDeleted}
+	counters := []prometheus.Counter{m.TTLCleanupRuns.WithLabelValues(label), m.TTLCleanupFailures.WithLabelValues(label), m.TTLCleanupDeleted.WithLabelValues(label), m.TTLCleanupPayloadDeleted.WithLabelValues(label)}
 	for i, value := range next {
 		delta := value
 		if value >= previous[i] {

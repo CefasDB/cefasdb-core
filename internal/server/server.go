@@ -295,6 +295,12 @@ func (s *Server) Routes(mux *http.ServeMux) {
 		s.observeStreamIteratorFailure,
 		s.observeStreamGetRecords,
 	)
+	streamHandlers.AttachTopologyGuard(func() error {
+		if s.manager != nil && len(s.manager.Shards()) != 1 {
+			return streamcore.ErrTopologyUnsupported
+		}
+		return nil
+	})
 	backupHandlers := backuphttp.New(s.db, s.cat, s.backupChangeStream(), s.allShards, s.compact)
 	itemHandlers := itemhttp.New(itemhttp.Deps{
 		Cat:                     s.cat,

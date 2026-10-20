@@ -41,9 +41,13 @@ const (
 	flagKey            uint16 = 1 << 7
 	// #524 idempotency markers — additive, off-default for legacy
 	// records that pre-date the field set.
-	flagBatchID    uint16 = 1 << 8
-	flagSeqInBatch uint16 = 1 << 9
-	flagOpKind     uint16 = 1 << 10
+	flagBatchID          uint16 = 1 << 8
+	flagSeqInBatch       uint16 = 1 << 9
+	flagOpKind           uint16 = 1 << 10
+	flagPayloadKey       uint16 = 1 << 11
+	flagPayloadExpiry    uint16 = 1 << 12
+	flagOldPayloadExpiry uint16 = 1 << 13
+	flagPayloadImages    uint16 = 1 << 14
 )
 
 // encodeChangeRecord serializes rec to the on-disk binary format. Always
@@ -96,6 +100,18 @@ func encodeChangeRecord(dst []byte, rec ChangeRecord) ([]byte, error) {
 	}
 	if rec.OpKind != "" {
 		flags |= flagOpKind
+	}
+	if rec.PayloadKey != "" {
+		flags |= flagPayloadKey
+	}
+	if rec.PayloadExpiresAt != 0 {
+		flags |= flagPayloadExpiry
+	}
+	if rec.OldPayloadExpiresAt != 0 {
+		flags |= flagOldPayloadExpiry
+	}
+	if rec.PayloadImages != 0 {
+		flags |= flagPayloadImages
 	}
 	dst = binary.BigEndian.AppendUint16(dst, flags)
 
@@ -158,6 +174,18 @@ func encodeChangeRecord(dst []byte, rec ChangeRecord) ([]byte, error) {
 	}
 	if flags&flagOpKind != 0 {
 		dst = appendLenString(dst, rec.OpKind)
+	}
+	if flags&flagPayloadKey != 0 {
+		dst = appendLenString(dst, rec.PayloadKey)
+	}
+	if flags&flagPayloadExpiry != 0 {
+		dst = binary.BigEndian.AppendUint64(dst, uint64(rec.PayloadExpiresAt))
+	}
+	if flags&flagOldPayloadExpiry != 0 {
+		dst = binary.BigEndian.AppendUint64(dst, uint64(rec.OldPayloadExpiresAt))
+	}
+	if flags&flagPayloadImages != 0 {
+		dst = append(dst, rec.PayloadImages)
 	}
 	return dst, nil
 }
@@ -292,10 +320,44 @@ func decodeChangeRecordBinaryV1(p []byte) (ChangeRecord, error) {
 		p = p[4:]
 	}
 	if flags&flagOpKind != 0 {
-		if s, _, err = readLenString(p); err != nil {
+		if s, p, err = readLenString(p); err != nil {
 			return rec, fmt.Errorf("decode change record v1 op kind: %w", err)
 		}
 		rec.OpKind = s
+	}
+	if flags&flagPayloadKey != 0 {
+		if s, p, err = readLenString(p); err != nil {
+			return rec, fmt.Errorf("decode custody key: %w", err)
+		}
+		rec.PayloadKey = s
+	}
+	if flags&flagPayloadExpiry != 0 {
+		if len(p) < 8 {
+			return rec, fmt.Errorf("decode custody expiry: short")
+		}
+		expiry := binary.BigEndian.Uint64(p[:8])
+		if expiry > uint64(1<<63-1) {
+			return rec, fmt.Errorf("decode custody expiry: overflow")
+		}
+		rec.PayloadExpiresAt = int64(expiry)
+		p = p[8:]
+	}
+	if flags&flagOldPayloadExpiry != 0 {
+		if len(p) < 8 {
+			return rec, fmt.Errorf("decode old custody expiry: short")
+		}
+		expiry := binary.BigEndian.Uint64(p[:8])
+		if expiry > uint64(1<<63-1) {
+			return rec, fmt.Errorf("decode old custody expiry: overflow")
+		}
+		rec.OldPayloadExpiresAt = int64(expiry)
+		p = p[8:]
+	}
+	if flags&flagPayloadImages != 0 {
+		if len(p) < 1 {
+			return rec, fmt.Errorf("decode custody images: short")
+		}
+		rec.PayloadImages = p[0]
 	}
 	return rec, nil
 }

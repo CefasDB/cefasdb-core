@@ -303,7 +303,8 @@ func streamDescriptionToPB(desc types.StreamDescriptor) *cefaspb.StreamDescripti
 
 func streamShardToPB(shard types.StreamShardDescriptor) *cefaspb.StreamShard {
 	return &cefaspb.StreamShard{
-		ShardId: shard.ShardID,
+		ShardId:              shard.ShardID,
+		LatestSequenceNumber: shard.LatestSequenceNumber,
 		SequenceNumberRange: &cefaspb.SequenceNumberRange{
 			StartingSequenceNumber: shard.SequenceNumberRange.StartingSequenceNumber,
 			EndingSequenceNumber:   shard.SequenceNumberRange.EndingSequenceNumber,

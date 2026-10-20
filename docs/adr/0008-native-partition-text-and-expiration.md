@@ -21,6 +21,39 @@ that publication/read without changing the legacy plugin algorithm.
 
 ## Decision
 
+### Native stream continuity and payload custody
+
+Managed-log tables use the existing `NEW_IMAGE` stream with a 24-hour
+checkpoint window, independently of row retention. Native text stream writes
+serialize sequence allocation through their commit on each store, before
+primary-key locks. Stream reads take that same fence while opening/reading a
+committed snapshot, so a concurrent legacy-table write cannot advance a
+checkpoint past an in-flight native write. The throughput cost is measured
+before activation, not hidden behind a lossless claim.
+
+The initial logs backing-store topology is dedicated single-Raft (which may
+have multiple voters), or standalone fsync in tests. CDC refuses Managers with
+more than one logical data store rather than claiming a complete shard-zero
+stream. Native text query/aggregate already route by the exact tenant PK and
+use the actual store's barrier. DescribeStream exposes additive
+`latestSequenceNumber` (including `"0"`) from committed storage after a leader
+barrier; `endingSequenceNumber` continues to mean closed. Iterator/records
+requests bind the requested shard to the real local descriptor; missing
+leader or incarnation proof fails rather than returning a successful subset.
+GetRecords additionally exposes `lastScannedSequenceNumber`, including skipped
+or redacted records, so a compact stream/shard/sequence cursor can resume via
+AFTER_SEQUENCE_NUMBER without interpreting opaque iterators.
+
+Native stream images live in separate payload keys under a full SHA-256
+primary-key custody prefix plus sequence; changelog metadata contains no image.
+The primary/index/change/payload write is one durable batch. DeleteItem and TTL
+cleanup delete that row's entire custody prefix with DeleteRange in the same
+batch, without scanning versions. Stream retention deletes individual payloads.
+Reads resolve payloads under the same snapshot and suppress expired/withdrawn
+images while advancing the scanned checkpoint. This is logical physical
+deletion from the operational keyspace: SST compaction and separately governed
+backups can retain older bytes until their own lifecycle completes.
+
 Declare native immutable `textIndexes` on new disk tables with a sort key.
 Maintain trigram candidate references beside primary data in the same
 Pebble/Raft batch, including Put, Delete, BatchWrite and AtomicUpdate. Store

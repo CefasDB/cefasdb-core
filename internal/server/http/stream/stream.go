@@ -8,14 +8,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
-	"github.com/CefasDb/cefasdb/internal/server/streamcore"
 	"github.com/CefasDb/cefasdb/internal/auth"
 	"github.com/CefasDb/cefasdb/internal/catalog"
+	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
+	"github.com/CefasDb/cefasdb/internal/core/model"
+	"github.com/CefasDb/cefasdb/internal/server/http/httpx"
+	"github.com/CefasDb/cefasdb/internal/server/streamcore"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/tracing"
-	"github.com/CefasDb/cefasdb/internal/core/model"
-	"github.com/CefasDb/cefasdb/internal/compat/ddbjson"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -45,6 +45,29 @@ type Handlers struct {
 	stream             ChangeStream
 	observeIterFailure IteratorFailureObserver
 	observeGetRecords  GetRecordsObserver
+	checkTopology      func() error
+}
+
+func (h *Handlers) AttachTopologyGuard(check func() error) { h.checkTopology = check }
+
+func (h *Handlers) readable(w http.ResponseWriter, r *http.Request) bool {
+	if h.checkTopology != nil {
+		if err := h.checkTopology(); err != nil {
+			writeStreamErr(w, r, err)
+			return false
+		}
+	}
+	return true
+}
+
+func writeStreamErr(w http.ResponseWriter, r *http.Request, err error) {
+	var leader *pebble.NotLeaderError
+	if errors.As(err, &leader) && leader.LeaderURL != "" {
+		w.Header().Set("Location", leader.LeaderURL+r.URL.RequestURI())
+		httpx.WriteErr(w, http.StatusTemporaryRedirect, errors.New("stream read must use the store leader"))
+		return
+	}
+	httpx.WriteErr(w, mapStreamErr(err), err)
 }
 
 // New constructs the handler set. stream may be nil (HandleStream
@@ -124,8 +147,9 @@ type getRecordsRequest struct {
 }
 
 type getRecordsResponse struct {
-	Records           []streamRecordHTTP `json:"records"`
-	NextShardIterator string             `json:"nextShardIterator,omitempty"`
+	Records                   []streamRecordHTTP `json:"records"`
+	NextShardIterator         string             `json:"nextShardIterator,omitempty"`
+	LastScannedSequenceNumber string             `json:"lastScannedSequenceNumber"`
 }
 
 type streamRecordHTTP struct {
@@ -159,6 +183,9 @@ func (h *Handlers) HandleListStreams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !auth.RequireAnyScope(w, r, auth.ScopeTableDescribe) {
+		return
+	}
+	if !h.readable(w, r) {
 		return
 	}
 	var req listStreamsRequest
@@ -211,9 +238,12 @@ func (h *Handlers) HandleDescribeStream(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteErr(w, http.StatusBadRequest, fmt.Errorf("streamArn required"))
 		return
 	}
-	desc, err := h.cat.DescribeStream(req.StreamArn)
+	if !h.readable(w, r) {
+		return
+	}
+	desc, err := streamcore.DescribeStream(h.cat, h.db, req.StreamArn)
 	if err != nil {
-		httpx.WriteErr(w, mapStreamErr(err), err)
+		writeStreamErr(w, r, err)
 		return
 	}
 	shards, lastEvaluated, err := streamcore.PaginateStreamShards(
@@ -263,6 +293,9 @@ func (h *Handlers) HandleGetShardIterator(w http.ResponseWriter, r *http.Request
 		httpx.WriteErr(w, mapStreamErr(err), err)
 		return
 	}
+	if !h.readable(w, r) {
+		return
+	}
 	token, err := streamcore.CreateStreamShardIterator(h.cat, h.db, streamcore.CreateIteratorRequest{
 		StreamArn:      req.StreamArn,
 		ShardID:        shardID,
@@ -271,7 +304,7 @@ func (h *Handlers) HandleGetShardIterator(w http.ResponseWriter, r *http.Request
 	}, time.Now())
 	if err != nil {
 		h.recordIteratorFailure(req.StreamArn, err)
-		httpx.WriteErr(w, mapStreamErr(err), err)
+		writeStreamErr(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, getShardIteratorResponse{ShardIterator: token})
@@ -293,14 +326,17 @@ func (h *Handlers) HandleGetRecords(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !h.readable(w, r) {
+		return
+	}
 	result, err := streamcore.GetStreamRecords(h.cat, h.db, req.ShardIterator, req.Limit, time.Now())
 	if err != nil {
 		h.recordGetRecords(result, err)
-		httpx.WriteErr(w, mapStreamErr(err), err)
+		writeStreamErr(w, r, err)
 		return
 	}
 	h.recordGetRecords(result, nil)
-	resp := getRecordsResponse{NextShardIterator: result.NextShardIterator}
+	resp := getRecordsResponse{NextShardIterator: result.NextShardIterator, LastScannedSequenceNumber: result.LastScannedSequenceNumber}
 	for _, record := range result.Records {
 		resp.Records = append(resp.Records, streamRecordToHTTP(record))
 	}
@@ -391,6 +427,8 @@ func streamRecordToHTTP(record streamcore.StreamRecordEntry) streamRecordHTTP {
 // mapping (which knows about cluster, raft, storage write errors).
 func mapStreamErr(err error) int {
 	switch {
+	case errors.Is(err, streamcore.ErrTopologyUnsupported), errors.Is(err, pebble.ErrNotLeader):
+		return http.StatusServiceUnavailable
 	case errors.Is(err, types.ErrStreamNotFound),
 		errors.Is(err, types.ErrStreamShardNotFound):
 		return http.StatusNotFound

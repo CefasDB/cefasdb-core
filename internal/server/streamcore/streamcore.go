@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/CefasDb/cefasdb/internal/catalog"
-	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/internal/core/model"
+	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -75,6 +75,8 @@ const (
 
 var signingKey = []byte("cefas-stream-iterator-signing-key-v1")
 
+var ErrTopologyUnsupported = errors.New("cefas CDC requires a single logical data store")
+
 // StreamShardIteratorPayload is the decoded body of a shard-iterator
 // token. Exported for the internal gRPC test suite, which constructs
 // expired/trimmed payloads to assert error mapping.
@@ -117,9 +119,37 @@ type StreamRecordData struct {
 // and exhausted). TableName lets metric observers tag failures by
 // table without re-resolving from the iterator.
 type StreamRecordsResult struct {
-	TableName         string
-	Records           []StreamRecordEntry
-	NextShardIterator string
+	TableName                 string
+	Records                   []StreamRecordEntry
+	NextShardIterator         string
+	LastScannedSequenceNumber string
+}
+
+// DescribeStream observes a real committed high-water after the store's
+// leader barrier. EndingSequenceNumber remains the closed-stream fence.
+func DescribeStream(cat *catalog.Catalog, db *pebble.DB, arn string) (types.StreamDescriptor, error) {
+	current, err := db.CommittedChangeIndex()
+	if err != nil {
+		return types.StreamDescriptor{}, err
+	}
+	desc, err := cat.DescribeStream(arn)
+	if err != nil {
+		return desc, err
+	}
+	if len(desc.Shards) != 1 || desc.Shards[0].ShardID != model.StreamShardIDSingle.String() {
+		return desc, ErrTopologyUnsupported
+	}
+	if end := desc.Shards[0].SequenceNumberRange.EndingSequenceNumber; end != "" {
+		ending, err := parseStreamSequenceNumber(end)
+		if err != nil {
+			return desc, err
+		}
+		if current > ending {
+			current = ending
+		}
+	}
+	desc.Shards[0].LatestSequenceNumber = strconv.FormatUint(current, 10)
+	return desc, nil
 }
 
 // NormalizeStreamAPILimit clamps a wire limit to [1, maxStreamAPILimit].
@@ -217,9 +247,15 @@ func CreateStreamShardIterator(cat *catalog.Catalog, db *pebble.DB, req CreateIt
 			IteratorTypeAtSequenceNumber,
 			IteratorTypeAfterSequenceNumber)
 	}
+	if err := db.ReadBarrier(5 * time.Second); err != nil {
+		return "", err
+	}
 	desc, err := cat.DescribeStream(req.StreamArn)
 	if err != nil {
 		return "", err
+	}
+	if len(desc.Shards) != 1 || desc.Shards[0].ShardID != model.StreamShardIDSingle.String() {
+		return "", ErrTopologyUnsupported
 	}
 	shard, ok := findStreamShard(desc, req.ShardID)
 	if !ok {
@@ -255,9 +291,15 @@ func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string,
 	if err != nil {
 		return StreamRecordsResult{}, err
 	}
+	if err := db.ReadBarrier(5 * time.Second); err != nil {
+		return StreamRecordsResult{}, err
+	}
 	desc, err := cat.DescribeStream(payload.StreamArn)
 	if err != nil {
 		return StreamRecordsResult{}, err
+	}
+	if len(desc.Shards) != 1 || desc.Shards[0].ShardID != model.StreamShardIDSingle.String() {
+		return StreamRecordsResult{}, ErrTopologyUnsupported
 	}
 	result := StreamRecordsResult{TableName: desc.TableName}
 	shard, ok := findStreamShard(desc, payload.ShardID)
@@ -271,6 +313,10 @@ func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string,
 	nextSequence, err := parseStreamSequenceNumber(payload.NextSequenceNumber)
 	if err != nil {
 		return result, fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
+	}
+	result.LastScannedSequenceNumber = "0"
+	if nextSequence > 0 {
+		result.LastScannedSequenceNumber = strconv.FormatUint(nextSequence-1, 10)
 	}
 	startSequence, err := parseStreamSequenceNumber(shard.SequenceNumberRange.StartingSequenceNumber)
 	if err != nil {
@@ -299,6 +345,7 @@ func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string,
 		out = append(out, streamRecordFromChange(payload.StreamArn, rec))
 	}
 	result.Records = out
+	result.LastScannedSequenceNumber = strconv.FormatUint(nextSequence-1, 10)
 	if endingSequence > 0 && nextSequence > endingSequence {
 		return result, nil
 	}
@@ -413,11 +460,17 @@ func resolveShardIteratorNextSequence(db *pebble.DB, shard types.StreamShardDesc
 		if err != nil {
 			return 0, fmt.Errorf("%w: %v", types.ErrStreamIteratorInvalid, err)
 		}
+		if iteratorType == IteratorTypeAfterSequenceNumber {
+			if seq == ^uint64(0) {
+				return 0, fmt.Errorf("%w: sequence overflow", types.ErrStreamIteratorInvalid)
+			}
+			if seq+1 < trimFloor {
+				return 0, types.ErrStreamTrimmed
+			}
+			return seq + 1, nil
+		}
 		if seq < trimFloor {
 			return 0, types.ErrStreamTrimmed
-		}
-		if iteratorType == IteratorTypeAfterSequenceNumber {
-			return seq + 1, nil
 		}
 		return seq, nil
 	default:
@@ -440,7 +493,7 @@ func latestStreamSequence(db *pebble.DB, shard types.StreamShardDescriptor) (uin
 		}
 		return ending + 1, nil
 	}
-	current, err := db.CurrentChangeIndex()
+	current, err := db.CommittedChangeIndex()
 	if err != nil {
 		return 0, err
 	}

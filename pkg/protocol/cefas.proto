@@ -824,6 +824,7 @@ message SequenceNumberRange {
 message StreamShard {
   string              shard_id              = 1;
   SequenceNumberRange sequence_number_range = 2;
+  string latest_sequence_number = 3;
 }
 
 message StreamDescription {
@@ -881,6 +882,7 @@ message StreamRecordEntry {
 message GetRecordsResponse {
   repeated StreamRecordEntry records             = 1;
   string                     next_shard_iterator = 2;
+  string                     last_scanned_sequence_number = 3;
 }
 
 // TTL specification mirrors aws dynamodb update-time-to-live.

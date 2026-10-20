@@ -11,7 +11,7 @@ checks the actual primary-key value again when materializing candidates.
 `POST /v1/tables` (existing operation):
 
 ```json
-{"name":"logs-events","keySchema":{"pk":"tenantId","sk":"orderKey"},"ttlAttribute":"expiresAt","textIndexes":[{"name":"message","field":"message"}]}
+{"name":"logs-events","keySchema":{"pk":"tenantId","sk":"orderKey"},"ttlAttribute":"expiresAt","textIndexes":[{"name":"message","field":"message"}],"gsis":[{"name":"accepted-time","keySchema":{"pk":"tenantId","sk":"acceptedKey"},"projection":{"mode":"KEYS_ONLY"}}],"streamSpecification":{"streamEnabled":true,"streamViewType":"NEW_IMAGE","retentionSeconds":86400}}
 ```
 
 Success is HTTP 201 with the normalized descriptor. If the table already
@@ -159,3 +159,80 @@ exclusive `skHigh` equal to the acceptance cutoff (without the ID suffix),
 and `limit`. Repeated bounded read/conditional-delete batches drain the older
 range. Because the legacy GSI uses hashed partitions, the cleanup worker
 must recheck actual tenant identity before deleting any materialized row.
+
+## Commit cursor and live tail
+
+V1 requires a dedicated single logical data store: a single Raft group may
+have three voters; tests may use standalone fsync. CDC APIs reject Managers
+with multiple stores with HTTP 503 / gRPC Unavailable, never a successful
+shard-zero subset. Every CDC read checks the actual store's leader barrier.
+A known leader uses HTTP 307 + Location; retry only explicitly trusted
+installation endpoints. The SDK never follows redirects automatically.
+
+All four operations are POST and require `cefas:table:describe`. Only the
+gateway receives that internal scope and filters images by exact tenant,
+immutable expiry and policy visibility floor. Iterators are positions, not
+tenant authorization, and must not reach browsers.
+
+`/v1/ListStreams` accepts `{tableName?,limit?,exclusiveStartStreamArn?}` and
+returns `{streams:[{streamArn,streamLabel,tableName}],lastEvaluatedStreamArn?}`.
+`/v1/DescribeStream` accepts `{streamArn,limit?,exclusiveStartShardId?}`:
+
+```json
+{"streamDescription":{"streamArn":"descriptor-latestStreamArn","shards":[{"shardId":"shardId-000000000000","sequenceNumberRange":{"startingSequenceNumber":"1"},"latestSequenceNumber":"0"}]}}
+```
+
+The full existing descriptor additionally contains streamLabel/status/view,
+tableName, creationRequestDateTime, keySchema and optional lastEvaluatedShardId.
+The additive `latestSequenceNumber` string includes `"0"` for an empty store
+and observes committed storage, never an allocated in-flight sequence.
+`endingSequenceNumber` still means closed and is absent on open streams.
+Bootstrap this checkpoint **before** the history query, then consume later
+commits. Deduplicate history/live overlap by immutable event identity. Late
+event timestamps and delayed queue persistence cannot fall behind this
+commit cursor. Ordering is per-store commit order, not event/acceptance time.
+
+`/v1/GetShardIterator` request:
+
+```json
+{"streamArn":"descriptor-latestStreamArn","shardId":"shardId-000000000000","shardIteratorType":"AFTER_SEQUENCE_NUMBER","sequenceNumber":"0"}
+```
+
+It returns `{"shardIterator":"opaque-token"}`. Types are TRIM_HORIZON,
+LATEST, AT_SEQUENCE_NUMBER and AFTER_SEQUENCE_NUMBER. AFTER 0 is valid if
+the readable floor is 1; AT retains its stricter floor check. Tokens expire
+after 15 minutes. The runtime stores stream/shard/sequence inside its own
+signed tenant/filter/floor cursor and obtains AFTER on each poll; it never
+interprets the database token.
+
+`/v1/GetRecords` accepts `{"shardIterator":"opaque-token","limit":1000}`:
+
+```json
+{"records":[{"eventID":"streamArn:1","eventName":"INSERT","dynamodb":{"keys":{"tenantId":{"S":"tenant-a"},"orderKey":{"S":"event-time#id"}},"newImage":{"id":{"S":"evt-1"}},"sequenceNumber":"1","streamViewType":"NEW_IMAGE"}}],"nextShardIterator":"opaque-next-token","lastScannedSequenceNumber":"1"}
+```
+
+The existing full envelope also contains eventVersion/source/sourceARN,
+awsRegion, approximateCreationDateTime and sizeBytes. The additive
+`lastScannedSequenceNumber` string is next position minus one, including zero,
+even after skipped other-table or withdrawn-image entries. Advance on empty
+and metadata-only pages. Limits are 1,000 records / 1 MiB per response (one
+oversized record is not split), and 10,000 scanned metadata entries / 8 MiB
+per call. A trimmed sequence returns HTTP 412: show a gap/history recovery,
+never silently reset to LATEST. An expired token can be recreated from the
+compact sequence. Stream retention is 86,400 seconds independently of rows.
+Raw `/v1/Stream` SSE has no resume contract and is not used.
+
+Native images live outside the changelog under a full SHA-256 PK/SK custody
+prefix plus sequence. Primary/index/metadata/image writes are one durable
+batch. Reads validate exact identity and expiry in the same snapshot and
+remove expired images again before returning. DeleteItem (including policy
+cleanup) and TTL delete the whole row custody prefix in the same batch,
+using DeleteRange without scanning versions. Separate per-image expiry
+pointers and CDC trimming remove image keys in bounded cleanup passes;
+sequence/key metadata may remain to preserve cursor continuity.
+`ttlCleanup.payloadDeleted` and
+`cefas_ttl_cleanup_cdc_payload_deleted_total` count processed expiry pointers.
+This deletes the operational keyspace; immediate byte erasure from old
+SST/WAL/Raft segments is not promised. Compaction/snapshot truncation and
+backup retention have separate measured cleanup requirements before
+production acceptance. Old binaries must not write these native tables.

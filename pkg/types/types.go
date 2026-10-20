@@ -213,10 +213,11 @@ type StreamSequenceNumberRange struct {
 }
 
 // StreamShardDescriptor is the public shard model for table streams.
-// CefasDB V1 uses one open shard per active table stream.
+// CDC V1 serves one logical store; multi-store Managers are refused explicitly.
 type StreamShardDescriptor struct {
-	ShardID             string                    `json:"shardId"`
-	SequenceNumberRange StreamSequenceNumberRange `json:"sequenceNumberRange"`
+	ShardID              string                    `json:"shardId"`
+	SequenceNumberRange  StreamSequenceNumberRange `json:"sequenceNumberRange"`
+	LatestSequenceNumber string                    `json:"latestSequenceNumber,omitempty"`
 }
 
 // StreamDescriptor is the persisted metadata returned by future

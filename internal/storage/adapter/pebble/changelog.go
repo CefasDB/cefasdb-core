@@ -52,9 +52,14 @@ type ChangeRecord struct {
 	// the EventName field (which only fires when stream view
 	// is set on the table). Zero values on legacy records mean
 	// "unknown batch" / "unknown kind" for forward-compat reads.
-	BatchID    string `json:"batchId,omitempty"`
-	SeqInBatch int32  `json:"seqInBatch,omitempty"`
-	OpKind     string `json:"opKind,omitempty"`
+	BatchID             string `json:"batchId,omitempty"`
+	SeqInBatch          int32  `json:"seqInBatch,omitempty"`
+	OpKind              string `json:"opKind,omitempty"`
+	PayloadKey          string `json:"payloadKey,omitempty"`
+	PayloadExpiresAt    int64  `json:"payloadExpiresAt,omitempty"`
+	OldPayloadExpiresAt int64  `json:"oldPayloadExpiresAt,omitempty"`
+	PayloadImages       uint8  `json:"payloadImages,omitempty"`
+	nativeDescriptor    *types.TableDescriptor
 }
 
 // StreamRetentionStats is the persisted retention state for one table stream.
@@ -96,6 +101,9 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	}
 	if rec.StreamRecord && rec.SizeBytes == 0 {
 		rec.SizeBytes = estimateChangeRecordSize(rec)
+	}
+	if err := persistNativeImages(b, &rec); err != nil {
+		return rec, fmt.Errorf("native image custody: %w", err)
 	}
 	raw, err := encodeChangeRecord(nil, rec)
 	if err != nil {
@@ -152,6 +160,9 @@ func newChangeRecord(td types.TableDescriptor, op ChangeOp, key, oldItem, newIte
 		Table:  td.Name,
 		Key:    cloneChangeItem(key),
 		OpKind: deriveOpKind(op, oldItem),
+	}
+	if len(td.TextIndexes) > 0 {
+		rec.nativeDescriptor = &td
 	}
 	if op == ChangePut {
 		rec.Item = cloneChangeItem(newItem)
@@ -661,6 +672,9 @@ func (d *DB) applyExpiredChangeLogRetention(now time.Time) (int, error) {
 	if d.repl != nil && !d.repl.IsLeader() {
 		return 0, nil
 	}
+	if _, err := d.expireNativeImages(now); err != nil {
+		return 0, err
+	}
 	before := now.UnixNano()
 	if before < maxUnixNano {
 		before++
@@ -720,6 +734,9 @@ func (d *DB) applyExpiredChangeLogRetention(now time.Time) (int, error) {
 			continue
 		}
 		if err := b.Delete(storage.KeyChangeLog(entry.index), nil); err != nil {
+			return 0, err
+		}
+		if err := deleteNativeRecordPayload(b, entry.record); err != nil {
 			return 0, err
 		}
 		if entry.record.StreamRecord && entry.record.Table != "" {
@@ -819,13 +836,20 @@ func (d *DB) ScanCDC(table string, fromIndex, toIndex uint64, limit int) ([]Chan
 }
 
 func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
+	unlock, err := d.lockNativeStreamRead(table)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	snap := d.db.NewSnapshot()
+	defer snap.Close()
 	lower := storage.KeyChangeLog(fromExclusive + 1)
 	_, upperAll := storage.PrefixChangeLog()
 	upper := upperAll
 	if toInclusive > 0 {
 		upper = storage.KeyChangeLog(toInclusive + 1)
 	}
-	it, err := d.Iter(lower, upper)
+	it, err := snap.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
 		return nil, err
 	}
@@ -843,10 +867,16 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 		if untilUnixNano > 0 && rec.UnixNano > untilUnixNano {
 			break
 		}
+		if err := d.resolveNativeImages(snap, &rec, time.Now()); err != nil {
+			return nil, err
+		}
 		out = append(out, rec)
 	}
 	if err := it.Error(); err != nil {
 		return nil, err
+	}
+	for i := range out {
+		hideExpiredNativeImages(&out[i], time.Now())
 	}
 	return out, nil
 }
@@ -855,6 +885,13 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 // fromSequence. nextSequence is the next changelog sequence a caller should use
 // even when records from other tables or non-stream writes are skipped.
 func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit int, maxBytes int64) ([]ChangeRecord, uint64, error) {
+	unlock, err := d.lockNativeStreamRead(table)
+	if err != nil {
+		return nil, fromSequence, err
+	}
+	defer unlock()
+	snap := d.db.NewSnapshot()
+	defer snap.Close()
 	if fromSequence == 0 {
 		fromSequence = 1
 	}
@@ -872,7 +909,7 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 	if toSequence > 0 {
 		upper = storage.KeyChangeLog(toSequence + 1)
 	}
-	it, err := d.Iter(lower, upper)
+	it, err := snap.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
 		return nil, fromSequence, err
 	}
@@ -881,8 +918,15 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 	nextSequence := fromSequence
 	var out []ChangeRecord
 	var bytes int64
+	var scanned int
+	var scannedBytes int64
 	for valid := it.First(); valid; valid = it.Next() {
 		raw := it.Value()
+		scanned++
+		scannedBytes += int64(len(raw))
+		if scanned > 10000 || (scannedBytes > 8<<20 && scanned > 1) {
+			break
+		}
 		rec, err := decodeChangeRecord(raw)
 		if err != nil {
 			return nil, nextSequence, fmt.Errorf("decode change record at %x: %w", it.Key(), err)
@@ -893,7 +937,13 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 			}
 			continue
 		}
+		if err := d.resolveNativeImages(snap, &rec, time.Now()); err != nil {
+			return nil, nextSequence, err
+		}
 		recBytes := int64(len(raw))
+		if rec.PayloadKey != "" {
+			recBytes = estimateChangeRecordSize(rec)
+		}
 		if maxBytes > 0 && len(out) > 0 && bytes+recBytes > maxBytes {
 			break
 		}
@@ -908,6 +958,9 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 	}
 	if err := it.Error(); err != nil {
 		return nil, nextSequence, err
+	}
+	for i := range out {
+		hideExpiredNativeImages(&out[i], time.Now())
 	}
 	return out, nextSequence, nil
 }

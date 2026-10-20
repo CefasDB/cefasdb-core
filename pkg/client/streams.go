@@ -83,8 +83,9 @@ type StreamRecord struct {
 
 // GetRecordsResult is the typed SDK envelope for GetRecords.
 type GetRecordsResult struct {
-	Records           []StreamRecord
-	NextShardIterator string
+	Records                   []StreamRecord
+	NextShardIterator         string
+	LastScannedSequenceNumber string
 }
 
 // ListStreams returns stream summaries, optionally filtered by table.
@@ -144,8 +145,9 @@ func (c *Client) GetRecords(ctx context.Context, shardIterator string, opts GetR
 		return GetRecordsResult{}, err
 	}
 	out := GetRecordsResult{
-		Records:           make([]StreamRecord, 0, len(resp.GetRecords())),
-		NextShardIterator: resp.GetNextShardIterator(),
+		Records:                   make([]StreamRecord, 0, len(resp.GetRecords())),
+		NextShardIterator:         resp.GetNextShardIterator(),
+		LastScannedSequenceNumber: resp.GetLastScannedSequenceNumber(),
 	}
 	for _, record := range resp.GetRecords() {
 		out.Records = append(out.Records, streamRecordFromPB(record))
@@ -190,7 +192,7 @@ func streamShardFromPB(pb *cefaspb.StreamShard) types.StreamShardDescriptor {
 	if pb == nil {
 		return types.StreamShardDescriptor{}
 	}
-	out := types.StreamShardDescriptor{ShardID: pb.GetShardId()}
+	out := types.StreamShardDescriptor{ShardID: pb.GetShardId(), LatestSequenceNumber: pb.GetLatestSequenceNumber()}
 	if r := pb.GetSequenceNumberRange(); r != nil {
 		out.SequenceNumberRange = types.StreamSequenceNumberRange{
 			StartingSequenceNumber: r.GetStartingSequenceNumber(),
