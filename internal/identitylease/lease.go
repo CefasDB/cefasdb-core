@@ -665,7 +665,8 @@ type k8sTime struct {
 }
 
 func (t k8sTime) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.UTC().Format(time.RFC3339Nano))
+	// Lease acquireTime and renewTime are Kubernetes MicroTime values.
+	return json.Marshal(t.UTC().Format("2006-01-02T15:04:05.000000Z07:00"))
 }
 
 func (t *k8sTime) UnmarshalJSON(raw []byte) error {

@@ -12,6 +12,44 @@ import (
 	"time"
 )
 
+func TestKubernetesLeaseTimestampsUseAPIMicroTime(t *testing.T) {
+	// coordination.k8s.io/v1 Lease uses metav1.MicroTime, not RFC3339Nano.
+	const microTimeLayout = "2006-01-02T15:04:05.000000Z07:00"
+	for _, nanos := range []int{28522935, 0, 1000, 123456000} {
+		now := time.Date(2026, 10, 21, 8, 58, 45, nanos, time.UTC)
+		lease := newLease("code-admin", "cefas-0", "cefas-0", "holder", now, time.Minute, 1)
+		for _, operation := range []string{"create", "renew"} {
+			if operation == "renew" {
+				now = now.Add(time.Second)
+				applyLeaseUpdate(lease, "cefas-0", "holder", now, time.Minute, 1)
+			}
+			raw, err := json.Marshal(lease)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire struct {
+				Spec map[string]json.RawMessage `json:"spec"`
+			}
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"acquireTime", "renewTime"} {
+				var value string
+				if err := json.Unmarshal(wire.Spec[field], &value); err != nil {
+					t.Fatal(err)
+				}
+				parsed, err := time.Parse(microTimeLayout, value)
+				if err != nil {
+					t.Fatalf("%s %s rejected by Kubernetes MicroTime: %s: %v", operation, field, value, err)
+				}
+				if field == "renewTime" && !parsed.Equal(now.Truncate(time.Microsecond)) {
+					t.Fatalf("renewed at %s, want %s", parsed, now.Truncate(time.Microsecond))
+				}
+			}
+		}
+	}
+}
+
 func TestFileLeaseExcludesDuplicateAndIncrementsEpoch(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
