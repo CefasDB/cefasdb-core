@@ -1,0 +1,697 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cefasdb.com/contracts/compatibility/schema-v1.json",
+  "title": "CefasDB compatibility authoring schema version 1",
+  "description": "Non-authoritative tooling feedback mirror for compatibility registry and policy authoring. compatibility.DecodeRegistry and Go domain validation remain authoritative.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/registryDocument"
+    },
+    {
+      "$ref": "#/$defs/policyDocument"
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?:\\S|\\S(?:.*\\S)?)$"
+    },
+    "entryId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "bindingId": {
+      "type": "string",
+      "oneOf": [
+        {
+          "pattern": "^grpc:[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*/[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        {
+          "pattern": "^http:[A-Z]+:/[^\\t\\r\\n ]*$"
+        },
+        {
+          "pattern": "^cli:[^\\s]+(?: [^\\s]+)*$"
+        },
+        {
+          "pattern": "^sdk:[A-Za-z0-9](?:[A-Za-z0-9._~-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._~-]*[A-Za-z0-9])?)*\\.\\(\\*?[A-Za-z_][A-Za-z0-9_]*\\)\\.[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        {
+          "pattern": "^sql:[A-Z][A-Z0-9_-]*( [A-Z][A-Z0-9_-]*)*$"
+        }
+      ]
+    },
+    "glossary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initiativeId",
+        "revision",
+        "terms"
+      ],
+      "properties": {
+        "initiativeId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "revision": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "terms": {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^(?:\\S|\\S(?:.*\\S)?)$": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "comparisonTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "product",
+        "exactVersion",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "product": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "exactVersion": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "not": {
+                "pattern": "^(?:[Ll][Aa][Tt][Ee][Ss][Tt]|[Cc][Uu][Rr][Rr][Ee][Nn][Tt]|[Ss][Tt][Aa][Bb][Ll][Ee]|[Hh][Ee][Aa][Dd]|[Mm][Aa][Ii][Nn]|[Mm][Aa][Ss][Tt][Ee][Rr]|[Nn][Ii][Gg][Hh][Tt][Ll][Yy]|[Ss][Nn][Aa][Pp][Ss][Hh][Oo][Tt]|[Ee][Dd][Gg][Ee])$"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[._+\\-])[Xx](?:$|[._+\\-])|[<>=~^*|,]|\\s"
+              }
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "behaviorError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "condition": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "condition"
+          ]
+        },
+        {
+          "required": [
+            "description"
+          ]
+        }
+      ]
+    },
+    "pagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "requestToken": {
+          "type": "string"
+        },
+        "responseToken": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestToken": {
+                "maxLength": 0
+              },
+              "responseToken": {
+                "maxLength": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "streaming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "none",
+            "client",
+            "server",
+            "bidi"
+          ]
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "behavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result",
+        "errors",
+        "pagination",
+        "streaming",
+        "consistency",
+        "limits"
+      ],
+      "properties": {
+        "result": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "errors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/behaviorError"
+          }
+        },
+        "pagination": {
+          "$ref": "#/$defs/pagination"
+        },
+        "streaming": {
+          "$ref": "#/$defs/streaming"
+        },
+        "consistency": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "limits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/limit"
+          }
+        }
+      }
+    },
+    "deviation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "summary"
+          ]
+        },
+        {
+          "required": [
+            "description"
+          ]
+        }
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindingId",
+        "surface"
+      ],
+      "properties": {
+        "bindingId": {
+          "$ref": "#/$defs/bindingId"
+        },
+        "surface": {
+          "enum": [
+            "grpc",
+            "http",
+            "cli",
+            "sdk",
+            "sql"
+          ]
+        },
+        "behaviorOverride": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/behavior"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deviations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deviation"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "grpc"
+              }
+            },
+            "required": [
+              "surface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingId": {
+                "pattern": "^grpc:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "surface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingId": {
+                "pattern": "^http:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "cli"
+              }
+            },
+            "required": [
+              "surface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingId": {
+                "pattern": "^cli:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "sdk"
+              }
+            },
+            "required": [
+              "surface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingId": {
+                "pattern": "^sdk:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "surface": {
+                "const": "sql"
+              }
+            },
+            "required": [
+              "surface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingId": {
+                "pattern": "^sql:"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "deprecation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replacementEntryId",
+        "noticeRelease",
+        "removalEarliestRelease",
+        "migration"
+      ],
+      "properties": {
+        "replacementEntryId": {
+          "$ref": "#/$defs/entryId"
+        },
+        "noticeRelease": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "removalEarliestRelease": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "migration": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "operation",
+        "owner",
+        "state",
+        "bindings",
+        "behavior"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/entryId"
+        },
+        "operation": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "owner": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "state": {
+          "enum": [
+            "unassessed",
+            "experimental",
+            "unsupported",
+            "supported",
+            "deprecated",
+            "removed"
+          ]
+        },
+        "firstSupportedRelease": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/binding"
+          }
+        },
+        "behavior": {
+          "$ref": "#/$defs/behavior"
+        },
+        "comparisonTargetId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceCaseIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "deprecation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/deprecation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "supported",
+                  "deprecated",
+                  "removed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "firstSupportedRelease"
+            ],
+            "properties": {
+              "firstSupportedRelease": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "supported"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "evidenceCaseIds"
+            ],
+            "properties": {
+              "evidenceCaseIds": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "deprecated",
+                  "removed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "deprecation"
+            ],
+            "properties": {
+              "deprecation": {
+                "$ref": "#/$defs/deprecation"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "deprecation": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "inventoryExclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindingId",
+        "reasonCode",
+        "rationale",
+        "owner"
+      ],
+      "properties": {
+        "bindingId": {
+          "$ref": "#/$defs/bindingId"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "owner": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "registryDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "glossary",
+        "entries",
+        "inventoryExclusions"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "glossary": {
+          "$ref": "#/$defs/glossary"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/entry"
+          }
+        },
+        "inventoryExclusions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inventoryExclusion"
+          }
+        }
+      }
+    },
+    "policyDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "comparisonTargets",
+        "minimumNoticeReleases",
+        "emergencyRemovalAllowed"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "comparisonTargets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/comparisonTarget"
+          }
+        },
+        "minimumNoticeReleases": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "emergencyRemovalAllowed": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

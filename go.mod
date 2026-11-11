@@ -16,6 +16,7 @@ require (
 	github.com/hashicorp/raft v1.7.3
 	github.com/mattn/go-isatty v0.0.20
 	github.com/prometheus/client_golang v1.15.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.8.1
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0
