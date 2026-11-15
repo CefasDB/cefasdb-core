@@ -1,0 +1,1595 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cefasdb.com/contracts/rf3-acceptance/schema-v1.json",
+  "title": "CefasDB RF3 acceptance contract schema version 1",
+  "description": "Closed authoring mirror for schema-1.0 acceptance roots, workload profiles, and topology profiles. rf3acceptance.DecodeBundle remains authoritative.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/acceptanceRoot"
+    },
+    {
+      "$ref": "#/$defs/workloadDocument"
+    },
+    {
+      "$ref": "#/$defs/topologyDocument"
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^(?:\\S|\\S(?:.*\\S)?)$"
+    },
+    "identity": {
+      "type": "string",
+      "maxLength": 192,
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+      "not": {
+        "pattern": "(?i)(?:^|\\.)(?:latest|current|stable|head|main|master|nightly|snapshot|edge)(?:\\.|$)"
+      }
+    },
+    "relativeJSONPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*(?:/[A-Za-z0-9][A-Za-z0-9._+-]*)*\\.json$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?i)(?:^|/)(?:latest|current|stable|head|main|master|nightly|snapshot|edge)(?:\\.json)?(?:/|$)"
+          }
+        }
+      ]
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "owner"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "measured",
+            "proposed-target"
+          ]
+        },
+        "owner": {
+          "enum": [
+            "product-owner",
+            "database-operator",
+            "platform-owner"
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "evidence"
+          ],
+          "properties": {
+            "kind": {
+              "const": "measured"
+            },
+            "rationale": false
+          }
+        },
+        {
+          "required": [
+            "rationale"
+          ],
+          "properties": {
+            "kind": {
+              "const": "proposed-target"
+            },
+            "evidence": false
+          }
+        }
+      ]
+    },
+    "positiveQuantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "provenance"
+      ],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    },
+    "nonNegativeQuantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "provenance"
+      ],
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    },
+    "milliseconds": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "value": {
+              "maximum": 604800000
+            },
+            "unit": {
+              "const": "milliseconds"
+            }
+          }
+        }
+      ]
+    },
+    "ppm": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/nonNegativeQuantity"
+        },
+        {
+          "properties": {
+            "value": {
+              "maximum": 1000000
+            },
+            "unit": {
+              "const": "parts-per-million"
+            }
+          }
+        }
+      ]
+    },
+    "requests": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "requests"
+            }
+          }
+        }
+      ]
+    },
+    "operationsPerSecond": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "operations-per-second"
+            }
+          }
+        }
+      ]
+    },
+    "writes": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/nonNegativeQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "writes"
+            }
+          }
+        }
+      ]
+    },
+    "zeroWrites": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/writes"
+        },
+        {
+          "properties": {
+            "value": {
+              "const": 0
+            }
+          }
+        }
+      ]
+    },
+    "positiveWrites": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/writes"
+        },
+        {
+          "properties": {
+            "value": {
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "runs": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "value": {
+              "minimum": 3
+            },
+            "unit": {
+              "const": "runs"
+            }
+          }
+        }
+      ]
+    },
+    "items": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "items"
+            }
+          }
+        }
+      ]
+    },
+    "keys": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "keys"
+            }
+          }
+        }
+      ]
+    },
+    "users": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "users"
+            }
+          }
+        }
+      ]
+    },
+    "bytes": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "bytes"
+            }
+          }
+        }
+      ]
+    },
+    "ordinal": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "ordinal"
+            }
+          }
+        }
+      ]
+    },
+    "operations": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "operations"
+            }
+          }
+        }
+      ]
+    },
+    "workers": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "workers"
+            }
+          }
+        }
+      ]
+    },
+    "nodes": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "value": {
+              "minimum": 3
+            },
+            "unit": {
+              "const": "nodes"
+            }
+          }
+        }
+      ]
+    },
+    "replicas": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "replicas"
+            }
+          }
+        }
+      ]
+    },
+    "threeReplicas": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/replicas"
+        },
+        {
+          "properties": {
+            "value": {
+              "const": 3
+            }
+          }
+        }
+      ]
+    },
+    "shards": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "shards"
+            }
+          }
+        }
+      ]
+    },
+    "gibibytes": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "gibibytes"
+            }
+          }
+        }
+      ]
+    },
+    "cores": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "cores"
+            }
+          }
+        }
+      ]
+    },
+    "networkRate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "megabits-per-second"
+            }
+          }
+        }
+      ]
+    },
+    "requestsPerSample": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        {
+          "properties": {
+            "unit": {
+              "const": "requests-per-sample"
+            }
+          }
+        }
+      ]
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "profileId",
+        "digest"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativeJSONPath"
+        },
+        "profileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "references": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload",
+        "topology"
+      ],
+      "properties": {
+        "workload": {
+          "$ref": "#/$defs/reference"
+        },
+        "topology": {
+          "$ref": "#/$defs/reference"
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "approver",
+        "approvedAt",
+        "contractId",
+        "workloadProfileId",
+        "workloadDigest",
+        "topologyProfileId",
+        "topologyDigest"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "product-owner",
+            "database-operator",
+            "platform-owner"
+          ]
+        },
+        "approver": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "approvedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "contractId": {
+          "$ref": "#/$defs/identity"
+        },
+        "workloadProfileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "workloadDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "topologyProfileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "topologyDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "acceptanceRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observationWindow",
+        "minimumAttempts",
+        "maxErrorRate",
+        "maxP99Latency",
+        "minimumThroughput",
+        "maxRecovery"
+      ],
+      "properties": {
+        "observationWindow": {
+          "$ref": "#/$defs/milliseconds"
+        },
+        "minimumAttempts": {
+          "$ref": "#/$defs/requests"
+        },
+        "maxErrorRate": {
+          "$ref": "#/$defs/ppm"
+        },
+        "maxP99Latency": {
+          "$ref": "#/$defs/milliseconds"
+        },
+        "minimumThroughput": {
+          "$ref": "#/$defs/operationsPerSecond"
+        },
+        "maxRecovery": {
+          "$ref": "#/$defs/milliseconds"
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "allowedGrpcCodes",
+        "requiredDoctorClasses",
+        "requireBaselineAfterRecovery",
+        "requireSafeRejection"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "healthy-baseline",
+            "pod-kill",
+            "node-drain",
+            "node-shutdown",
+            "orphan-process",
+            "disk-pressure",
+            "network-partition",
+            "two-node-failure"
+          ]
+        },
+        "allowedGrpcCodes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "OK",
+              "Unavailable",
+              "FailedPrecondition"
+            ]
+          }
+        },
+        "requiredDoctorClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "healthy",
+              "degraded",
+              "repairable",
+              "unsafe"
+            ]
+          }
+        },
+        "requireBaselineAfterRecovery": {
+          "type": "boolean"
+        },
+        "requireSafeRejection": {
+          "type": "boolean"
+        },
+        "maxAcknowledgedWritesDuringNoQuorum": {
+          "$ref": "#/$defs/zeroWrites"
+        },
+        "minimumRejectedWritesDuringNoQuorum": {
+          "$ref": "#/$defs/positiveWrites"
+        }
+      }
+    },
+    "healthyScenario": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scenario"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "healthy-baseline"
+            },
+            "allowedGrpcCodes": {
+              "const": [
+                "OK"
+              ]
+            },
+            "requiredDoctorClasses": {
+              "const": [
+                "healthy"
+              ]
+            },
+            "requireBaselineAfterRecovery": {
+              "const": false
+            },
+            "requireSafeRejection": {
+              "const": false
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "maxAcknowledgedWritesDuringNoQuorum"
+                ]
+              },
+              {
+                "required": [
+                  "minimumRejectedWritesDuringNoQuorum"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "servingScenario": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scenario"
+        },
+        {
+          "properties": {
+            "requireBaselineAfterRecovery": {
+              "const": true
+            },
+            "requireSafeRejection": {
+              "const": false
+            },
+            "allowedGrpcCodes": {
+              "contains": {
+                "const": "OK"
+              },
+              "not": {
+                "contains": {
+                  "const": "FailedPrecondition"
+                }
+              }
+            },
+            "requiredDoctorClasses": {
+              "contains": {
+                "enum": [
+                  "healthy",
+                  "degraded"
+                ]
+              },
+              "not": {
+                "contains": {
+                  "const": "unsafe"
+                }
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "maxAcknowledgedWritesDuringNoQuorum"
+                ]
+              },
+              {
+                "required": [
+                  "minimumRejectedWritesDuringNoQuorum"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "twoNodeScenario": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scenario"
+        },
+        {
+          "required": [
+            "maxAcknowledgedWritesDuringNoQuorum",
+            "minimumRejectedWritesDuringNoQuorum"
+          ],
+          "properties": {
+            "name": {
+              "const": "two-node-failure"
+            },
+            "requireBaselineAfterRecovery": {
+              "const": true
+            },
+            "requireSafeRejection": {
+              "const": true
+            },
+            "allowedGrpcCodes": {
+              "not": {
+                "contains": {
+                  "const": "OK"
+                }
+              },
+              "contains": {
+                "enum": [
+                  "Unavailable",
+                  "FailedPrecondition"
+                ]
+              }
+            },
+            "requiredDoctorClasses": {
+              "const": [
+                "unsafe"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "variance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "population",
+        "aggregation",
+        "minimumRuns",
+        "tolerance"
+      ],
+      "properties": {
+        "method": {
+          "const": "relative-range-ppm"
+        },
+        "population": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "aggregation": {
+          "const": "per-profile-and-scenario"
+        },
+        "minimumRuns": {
+          "$ref": "#/$defs/runs"
+        },
+        "tolerance": {
+          "$ref": "#/$defs/ppm"
+        }
+      }
+    },
+    "capacityMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "method",
+        "peakUnit",
+        "saturationSignal",
+        "rounding",
+        "observationWindow",
+        "headroom"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "proposed",
+            "approved"
+          ]
+        },
+        "method": {
+          "const": "bounded-binary-search"
+        },
+        "peakUnit": {
+          "const": "operations-per-second"
+        },
+        "saturationSignal": {
+          "const": "first-approved-limit-breach"
+        },
+        "rounding": {
+          "const": "down-to-whole-unit"
+        },
+        "observationWindow": {
+          "$ref": "#/$defs/milliseconds"
+        },
+        "headroom": {
+          "$ref": "#/$defs/ppm"
+        }
+      }
+    },
+    "acceptanceRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "contractId",
+        "approvedAt",
+        "references",
+        "approvals",
+        "defaultRule",
+        "scenarios",
+        "variance",
+        "capacityMethod"
+      ],
+      "properties": {
+        "documentType": {
+          "const": "rf3-acceptance-root"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "contractId": {
+          "$ref": "#/$defs/identity"
+        },
+        "approvedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "references": {
+          "$ref": "#/$defs/references"
+        },
+        "approvals": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/approval"
+          },
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "role": {
+                    "const": "product-owner"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "role": {
+                    "const": "database-operator"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "role": {
+                    "const": "platform-owner"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        },
+        "defaultRule": {
+          "$ref": "#/$defs/acceptanceRule"
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/healthyScenario"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "pod-kill"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "node-drain"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "node-shutdown"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "orphan-process"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "disk-pressure"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/servingScenario"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "network-partition"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "$ref": "#/$defs/twoNodeScenario"
+            }
+          ],
+          "items": false
+        },
+        "variance": {
+          "$ref": "#/$defs/variance"
+        },
+        "capacityMethod": {
+          "$ref": "#/$defs/capacityMethod"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "bytes"
+      ],
+      "properties": {
+        "mode": {
+          "const": "repeat"
+        },
+        "bytes": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tableNameTemplate",
+        "itemCount",
+        "keyspace",
+        "users",
+        "payload"
+      ],
+      "properties": {
+        "tableNameTemplate": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*%s[a-z0-9_]*$",
+          "maxLength": 128
+        },
+        "itemCount": {
+          "$ref": "#/$defs/items"
+        },
+        "keyspace": {
+          "$ref": "#/$defs/keys"
+        },
+        "users": {
+          "$ref": "#/$defs/users"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload"
+        }
+      }
+    },
+    "workloadPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "phaseOrder",
+        "duration",
+        "consistency",
+        "rpcTimeout",
+        "latencySampleEvery"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "write",
+            "point-read",
+            "scan",
+            "mixed"
+          ]
+        },
+        "phaseOrder": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "operations": {
+          "$ref": "#/$defs/operations"
+        },
+        "duration": {
+          "$ref": "#/$defs/milliseconds"
+        },
+        "rate": {
+          "$ref": "#/$defs/operationsPerSecond"
+        },
+        "workers": {
+          "$ref": "#/$defs/workers"
+        },
+        "batchSize": {
+          "$ref": "#/$defs/items"
+        },
+        "limit": {
+          "$ref": "#/$defs/items"
+        },
+        "writeRate": {
+          "$ref": "#/$defs/operationsPerSecond"
+        },
+        "readRate": {
+          "$ref": "#/$defs/operationsPerSecond"
+        },
+        "writeWorkers": {
+          "$ref": "#/$defs/workers"
+        },
+        "readWorkers": {
+          "$ref": "#/$defs/workers"
+        },
+        "consistency": {
+          "enum": [
+            "strong",
+            "eventual"
+          ]
+        },
+        "rpcTimeout": {
+          "$ref": "#/$defs/milliseconds"
+        },
+        "latencySampleEvery": {
+          "$ref": "#/$defs/requestsPerSample"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "operations",
+            "rate",
+            "workers",
+            "batchSize"
+          ],
+          "properties": {
+            "name": {
+              "const": "write"
+            },
+            "phaseOrder": {
+              "properties": {
+                "value": {
+                  "const": 1
+                }
+              }
+            },
+            "consistency": {
+              "const": "strong"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "limit"
+                ]
+              },
+              {
+                "required": [
+                  "writeRate"
+                ]
+              },
+              {
+                "required": [
+                  "readRate"
+                ]
+              },
+              {
+                "required": [
+                  "writeWorkers"
+                ]
+              },
+              {
+                "required": [
+                  "readWorkers"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "operations",
+            "rate",
+            "workers"
+          ],
+          "properties": {
+            "name": {
+              "const": "point-read"
+            },
+            "phaseOrder": {
+              "properties": {
+                "value": {
+                  "const": 2
+                }
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "batchSize"
+                ]
+              },
+              {
+                "required": [
+                  "limit"
+                ]
+              },
+              {
+                "required": [
+                  "writeRate"
+                ]
+              },
+              {
+                "required": [
+                  "readRate"
+                ]
+              },
+              {
+                "required": [
+                  "writeWorkers"
+                ]
+              },
+              {
+                "required": [
+                  "readWorkers"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "rate",
+            "workers",
+            "limit"
+          ],
+          "properties": {
+            "name": {
+              "const": "scan"
+            },
+            "phaseOrder": {
+              "properties": {
+                "value": {
+                  "const": 3
+                }
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "operations"
+                ]
+              },
+              {
+                "required": [
+                  "batchSize"
+                ]
+              },
+              {
+                "required": [
+                  "writeRate"
+                ]
+              },
+              {
+                "required": [
+                  "readRate"
+                ]
+              },
+              {
+                "required": [
+                  "writeWorkers"
+                ]
+              },
+              {
+                "required": [
+                  "readWorkers"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "writeRate",
+            "readRate",
+            "writeWorkers",
+            "readWorkers",
+            "batchSize"
+          ],
+          "properties": {
+            "name": {
+              "const": "mixed"
+            },
+            "phaseOrder": {
+              "properties": {
+                "value": {
+                  "const": 4
+                }
+              }
+            },
+            "consistency": {
+              "const": "strong"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "operations"
+                ]
+              },
+              {
+                "required": [
+                  "rate"
+                ]
+              },
+              {
+                "required": [
+                  "workers"
+                ]
+              },
+              {
+                "required": [
+                  "limit"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "workloadDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "profileId",
+        "publishedAt",
+        "dataClass",
+        "dataset",
+        "profiles"
+      ],
+      "properties": {
+        "documentType": {
+          "const": "rf3-workload-profile"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "profileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "dataClass": {
+          "const": "synthetic"
+        },
+        "dataset": {
+          "$ref": "#/$defs/dataset"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/workloadPhase"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "write"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/workloadPhase"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "point-read"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/workloadPhase"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "scan"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/workloadPhase"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "mixed"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "durable",
+        "class",
+        "accessMode",
+        "size"
+      ],
+      "properties": {
+        "durable": {
+          "const": true
+        },
+        "class": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "accessMode": {
+          "const": "read-write-once"
+        },
+        "size": {
+          "$ref": "#/$defs/gibibytes"
+        }
+      }
+    },
+    "resourcesPerNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory",
+        "storage",
+        "network"
+      ],
+      "properties": {
+        "cpu": {
+          "$ref": "#/$defs/cores"
+        },
+        "memory": {
+          "$ref": "#/$defs/gibibytes"
+        },
+        "storage": {
+          "$ref": "#/$defs/gibibytes"
+        },
+        "network": {
+          "$ref": "#/$defs/networkRate"
+        }
+      }
+    },
+    "topologyDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "profileId",
+        "publishedAt",
+        "environment",
+        "nodeCount",
+        "replicas",
+        "replicationFactor",
+        "shards",
+        "failureDomains",
+        "antiColocation",
+        "volume",
+        "resourcesPerNode"
+      ],
+      "properties": {
+        "documentType": {
+          "const": "rf3-topology-profile"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "profileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "environment": {
+          "const": "non-production"
+        },
+        "nodeCount": {
+          "$ref": "#/$defs/nodes"
+        },
+        "replicas": {
+          "$ref": "#/$defs/threeReplicas"
+        },
+        "replicationFactor": {
+          "$ref": "#/$defs/threeReplicas"
+        },
+        "shards": {
+          "$ref": "#/$defs/shards"
+        },
+        "failureDomains": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "antiColocation": {
+          "const": true
+        },
+        "volume": {
+          "$ref": "#/$defs/volume"
+        },
+        "resourcesPerNode": {
+          "$ref": "#/$defs/resourcesPerNode"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,891 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cefasdb.com/contracts/rf3-environment/schema-v1.json",
+  "title": "CefasDB RF3 environment contract schema version 1",
+  "description": "Closed authoring mirror for schema-1.0 environment manifests and observed receipts. rf3environment.DecodeManifestV1 and DecodeReceiptV1 remain authoritative.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/manifest"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "maxLength": 192,
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+      "not": {
+        "pattern": "(?i)(?:^|\\.)(?:latest|current|stable|head|main|master|nightly|snapshot|edge)(?:\\.|$)"
+      }
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$"
+    },
+    "kubernetesName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+    },
+    "kubernetesPrefix": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 48,
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?-$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "p1Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptanceContractId",
+        "acceptanceDigest",
+        "workloadProfileId",
+        "workloadDigest",
+        "topologyProfileId",
+        "topologyDigest"
+      ],
+      "properties": {
+        "acceptanceContractId": {
+          "$ref": "#/$defs/identity"
+        },
+        "acceptanceDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "workloadProfileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "workloadDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "topologyProfileId": {
+          "$ref": "#/$defs/identity"
+        },
+        "topologyDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "accountId",
+        "clusterId",
+        "kubernetesContext",
+        "providerVersion",
+        "kubernetesVersion",
+        "nonProduction"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/token"
+        },
+        "accountId": {
+          "$ref": "#/$defs/token"
+        },
+        "clusterId": {
+          "$ref": "#/$defs/token"
+        },
+        "kubernetesContext": {
+          "$ref": "#/$defs/token"
+        },
+        "providerVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "kubernetesVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "nonProduction": {
+          "const": true
+        }
+      }
+    },
+    "nodeContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "providerId",
+        "instanceType",
+        "imageId",
+        "failureDomain"
+      ],
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/token"
+        },
+        "providerId": {
+          "$ref": "#/$defs/token"
+        },
+        "instanceType": {
+          "$ref": "#/$defs/token"
+        },
+        "imageId": {
+          "$ref": "#/$defs/token"
+        },
+        "failureDomain": {
+          "$ref": "#/$defs/token"
+        }
+      }
+    },
+    "resourcesPerNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuCores",
+        "memoryGiB",
+        "storageGiB",
+        "networkMegabits"
+      ],
+      "properties": {
+        "cpuCores": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memoryGiB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "storageGiB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "networkMegabits": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failureDomainLabel",
+        "failureDomains",
+        "nodeCount",
+        "replicas",
+        "replicationFactor",
+        "shards",
+        "antiColocation",
+        "nodes",
+        "resourcesPerNode"
+      ],
+      "properties": {
+        "failureDomainLabel": {
+          "$ref": "#/$defs/token"
+        },
+        "failureDomains": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/token"
+          }
+        },
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "replicas": {
+          "const": 3
+        },
+        "replicationFactor": {
+          "const": 3
+        },
+        "shards": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "antiColocation": {
+          "const": true
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nodeContract"
+          }
+        },
+        "resourcesPerNode": {
+          "$ref": "#/$defs/resourcesPerNode"
+        }
+      }
+    },
+    "deploymentContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespacePrefix",
+        "releasePrefix",
+        "chartName",
+        "chartVersion",
+        "chartDigest",
+        "imageReference",
+        "imageDigest"
+      ],
+      "properties": {
+        "namespacePrefix": {
+          "$ref": "#/$defs/kubernetesPrefix"
+        },
+        "releasePrefix": {
+          "$ref": "#/$defs/kubernetesPrefix"
+        },
+        "chartName": {
+          "$ref": "#/$defs/token"
+        },
+        "chartVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "chartDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "imageReference": {
+          "$ref": "#/$defs/token"
+        },
+        "imageDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class",
+        "provisioner",
+        "bindingMode",
+        "reclaimPolicy",
+        "accessMode",
+        "volumeMode",
+        "capacityGiB",
+        "volumeReusePolicy"
+      ],
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/token"
+        },
+        "provisioner": {
+          "$ref": "#/$defs/token"
+        },
+        "bindingMode": {
+          "const": "wait-for-first-consumer"
+        },
+        "reclaimPolicy": {
+          "enum": [
+            "delete",
+            "retain"
+          ]
+        },
+        "accessMode": {
+          "const": "read-write-once"
+        },
+        "volumeMode": {
+          "const": "filesystem"
+        },
+        "capacityGiB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "volumeReusePolicy": {
+          "const": "forbid-prior-cycle"
+        }
+      }
+    },
+    "admissionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controlNamespace",
+        "leaseName",
+        "serviceAccount",
+        "role",
+        "rbacVerbs",
+        "rbacResources",
+        "credentialIssuer",
+        "credentialAudience",
+        "maxCredentialLifetimeSeconds",
+        "revocationOwner"
+      ],
+      "properties": {
+        "controlNamespace": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "leaseName": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "role": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "rbacVerbs": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "get",
+              "create",
+              "update",
+              "patch"
+            ]
+          },
+          "allOf": [
+            {
+              "contains": {
+                "const": "get"
+              }
+            },
+            {
+              "contains": {
+                "const": "create"
+              }
+            },
+            {
+              "contains": {
+                "const": "update"
+              }
+            },
+            {
+              "contains": {
+                "const": "patch"
+              }
+            }
+          ]
+        },
+        "rbacResources": {
+          "const": [
+            "leases.coordination.k8s.io"
+          ]
+        },
+        "credentialIssuer": {
+          "$ref": "#/$defs/token"
+        },
+        "credentialAudience": {
+          "$ref": "#/$defs/token"
+        },
+        "maxCredentialLifetimeSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "revocationOwner": {
+          "const": "platform-owner"
+        }
+      }
+    },
+    "recoveryContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "iacDigest",
+        "operationId",
+        "owner"
+      ],
+      "properties": {
+        "iacDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "operationId": {
+          "$ref": "#/$defs/identity"
+        },
+        "owner": {
+          "const": "platform-owner"
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "environmentId",
+        "publishedAt",
+        "nonProduction",
+        "p1",
+        "provider",
+        "topology",
+        "deployment",
+        "storage",
+        "admission",
+        "recovery"
+      ],
+      "properties": {
+        "documentType": {
+          "const": "rf3-environment-manifest"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "environmentId": {
+          "$ref": "#/$defs/identity"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "nonProduction": {
+          "const": true
+        },
+        "p1": {
+          "$ref": "#/$defs/p1Binding"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "topology": {
+          "$ref": "#/$defs/topology"
+        },
+        "deployment": {
+          "$ref": "#/$defs/deploymentContract"
+        },
+        "storage": {
+          "$ref": "#/$defs/storage"
+        },
+        "admission": {
+          "$ref": "#/$defs/admissionContract"
+        },
+        "recovery": {
+          "$ref": "#/$defs/recoveryContract"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "digest",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+/-]*$"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "deploymentReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "release",
+        "chartName",
+        "chartVersion",
+        "chartDigest",
+        "imageReference",
+        "imageDigest"
+      ],
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "release": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "chartName": {
+          "$ref": "#/$defs/token"
+        },
+        "chartVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "chartDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "imageReference": {
+          "$ref": "#/$defs/token"
+        },
+        "imageDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "admissionReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controlNamespace",
+        "leaseName",
+        "holderIdentity",
+        "resourceVersion",
+        "serviceAccount",
+        "role",
+        "credentialIssuer",
+        "credentialAudience",
+        "credentialIssuedAt",
+        "credentialExpiresAt"
+      ],
+      "properties": {
+        "controlNamespace": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "leaseName": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "holderIdentity": {
+          "$ref": "#/$defs/identity"
+        },
+        "resourceVersion": {
+          "$ref": "#/$defs/token"
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "role": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "credentialIssuer": {
+          "$ref": "#/$defs/token"
+        },
+        "credentialAudience": {
+          "$ref": "#/$defs/token"
+        },
+        "credentialIssuedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "credentialExpiresAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "nodeObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "nodeUid",
+        "providerId",
+        "instanceType",
+        "imageId",
+        "failureDomain"
+      ],
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/token"
+        },
+        "nodeUid": {
+          "$ref": "#/$defs/token"
+        },
+        "providerId": {
+          "$ref": "#/$defs/token"
+        },
+        "instanceType": {
+          "$ref": "#/$defs/token"
+        },
+        "imageId": {
+          "$ref": "#/$defs/token"
+        },
+        "failureDomain": {
+          "$ref": "#/$defs/token"
+        }
+      }
+    },
+    "replicaObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "podName",
+        "podUid",
+        "nodeId",
+        "failureDomain",
+        "pvcName",
+        "pvcUid",
+        "pvName",
+        "pvUid"
+      ],
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "podName": {
+          "$ref": "#/$defs/token"
+        },
+        "podUid": {
+          "$ref": "#/$defs/token"
+        },
+        "nodeId": {
+          "$ref": "#/$defs/token"
+        },
+        "failureDomain": {
+          "$ref": "#/$defs/token"
+        },
+        "pvcName": {
+          "$ref": "#/$defs/token"
+        },
+        "pvcUid": {
+          "$ref": "#/$defs/token"
+        },
+        "pvName": {
+          "$ref": "#/$defs/token"
+        },
+        "pvUid": {
+          "$ref": "#/$defs/token"
+        }
+      }
+    },
+    "volumeObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pvcName",
+        "pvcUid",
+        "pvName",
+        "pvUid",
+        "storageClass",
+        "provisioner",
+        "bindingMode",
+        "reclaimPolicy",
+        "accessMode",
+        "volumeMode",
+        "capacityGiB",
+        "failureDomain"
+      ],
+      "properties": {
+        "pvcName": {
+          "$ref": "#/$defs/token"
+        },
+        "pvcUid": {
+          "$ref": "#/$defs/token"
+        },
+        "pvName": {
+          "$ref": "#/$defs/token"
+        },
+        "pvUid": {
+          "$ref": "#/$defs/token"
+        },
+        "storageClass": {
+          "$ref": "#/$defs/token"
+        },
+        "provisioner": {
+          "$ref": "#/$defs/token"
+        },
+        "bindingMode": {
+          "const": "wait-for-first-consumer"
+        },
+        "reclaimPolicy": {
+          "enum": [
+            "delete",
+            "retain"
+          ]
+        },
+        "accessMode": {
+          "const": "read-write-once"
+        },
+        "volumeMode": {
+          "const": "filesystem"
+        },
+        "capacityGiB": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureDomain": {
+          "$ref": "#/$defs/token"
+        }
+      }
+    },
+    "doctor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "complete",
+        "artifact"
+      ],
+      "properties": {
+        "classification": {
+          "const": "healthy"
+        },
+        "complete": {
+          "const": true
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "artifact"
+      ],
+      "properties": {
+        "passed": {
+          "const": true
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "credentialsRevoked",
+        "environmentDestroyed",
+        "residualVolumes"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "destroyed",
+            "ready"
+          ]
+        },
+        "credentialsRevoked": {
+          "type": "boolean"
+        },
+        "environmentDestroyed": {
+          "type": "boolean"
+        },
+        "residualVolumes": {
+          "const": 0
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "receiptId",
+        "cycle",
+        "capturedAt",
+        "environmentId",
+        "manifestDigest",
+        "p1",
+        "provider",
+        "deployment",
+        "admission",
+        "nodes",
+        "replicas",
+        "volumes",
+        "doctor",
+        "baseline",
+        "cleanup",
+        "artifacts"
+      ],
+      "properties": {
+        "documentType": {
+          "const": "rf3-environment-receipt"
+        },
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "receiptId": {
+          "$ref": "#/$defs/identity"
+        },
+        "cycle": {
+          "enum": [
+            "create",
+            "recreate"
+          ]
+        },
+        "capturedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "environmentId": {
+          "$ref": "#/$defs/identity"
+        },
+        "manifestDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "p1": {
+          "$ref": "#/$defs/p1Binding"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "deployment": {
+          "$ref": "#/$defs/deploymentReceipt"
+        },
+        "admission": {
+          "$ref": "#/$defs/admissionReceipt"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nodeObservation"
+          }
+        },
+        "replicas": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/replicaObservation"
+          }
+        },
+        "volumes": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/volumeObservation"
+          }
+        },
+        "doctor": {
+          "$ref": "#/$defs/doctor"
+        },
+        "baseline": {
+          "$ref": "#/$defs/baseline"
+        },
+        "cleanup": {
+          "$ref": "#/$defs/cleanup"
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifact"
+          }
+        }
+      }
+    }
+  }
+}

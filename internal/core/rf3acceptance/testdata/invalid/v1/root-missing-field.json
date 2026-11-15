@@ -1,0 +1,220 @@
+{
+  "documentType": "rf3-acceptance-root",
+  "schemaVersion": "1.0",
+  "contractId": "rf3.acceptance.synthetic.v1",
+  "approvedAt": "2026-01-03T00:00:00Z",
+  "references": {
+    "workload": {
+      "path": "workload.json",
+      "profileId": "rf3.workload.synthetic.v1",
+      "digest": "sha256:b24d158445b3af7378edda9b4ca9d612c81e57d70f8de051975cc292379eec0b"
+    },
+    "topology": {
+      "path": "topology.json",
+      "profileId": "rf3.topology.synthetic.v1",
+      "digest": "sha256:9a32cf94654cb489e36f95cae4b8e78c9b32231784ab96fd282bc85502d2567e"
+    }
+  },
+  "approvals": [
+    {
+      "role": "product-owner",
+      "approver": "synthetic-product-owner",
+      "approvedAt": "2026-01-03T00:00:00Z",
+      "contractId": "rf3.acceptance.synthetic.v1",
+      "workloadProfileId": "rf3.workload.synthetic.v1",
+      "workloadDigest": "sha256:b24d158445b3af7378edda9b4ca9d612c81e57d70f8de051975cc292379eec0b",
+      "topologyProfileId": "rf3.topology.synthetic.v1",
+      "topologyDigest": "sha256:9a32cf94654cb489e36f95cae4b8e78c9b32231784ab96fd282bc85502d2567e"
+    },
+    {
+      "role": "database-operator",
+      "approver": "synthetic-database-operator",
+      "approvedAt": "2026-01-03T00:00:00Z",
+      "contractId": "rf3.acceptance.synthetic.v1",
+      "workloadProfileId": "rf3.workload.synthetic.v1",
+      "workloadDigest": "sha256:b24d158445b3af7378edda9b4ca9d612c81e57d70f8de051975cc292379eec0b",
+      "topologyProfileId": "rf3.topology.synthetic.v1",
+      "topologyDigest": "sha256:9a32cf94654cb489e36f95cae4b8e78c9b32231784ab96fd282bc85502d2567e"
+    },
+    {
+      "role": "platform-owner",
+      "approver": "synthetic-platform-owner",
+      "approvedAt": "2026-01-03T00:00:00Z",
+      "contractId": "rf3.acceptance.synthetic.v1",
+      "workloadProfileId": "rf3.workload.synthetic.v1",
+      "workloadDigest": "sha256:b24d158445b3af7378edda9b4ca9d612c81e57d70f8de051975cc292379eec0b",
+      "topologyProfileId": "rf3.topology.synthetic.v1",
+      "topologyDigest": "sha256:9a32cf94654cb489e36f95cae4b8e78c9b32231784ab96fd282bc85502d2567e"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "healthy-baseline",
+      "allowedGrpcCodes": [
+        "OK"
+      ],
+      "requiredDoctorClasses": [
+        "healthy"
+      ],
+      "requireBaselineAfterRecovery": false,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "pod-kill",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "node-drain",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "node-shutdown",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "orphan-process",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "disk-pressure",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded",
+        "repairable"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "network-partition",
+      "allowedGrpcCodes": [
+        "OK",
+        "Unavailable"
+      ],
+      "requiredDoctorClasses": [
+        "healthy",
+        "degraded"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": false
+    },
+    {
+      "name": "two-node-failure",
+      "allowedGrpcCodes": [
+        "Unavailable",
+        "FailedPrecondition"
+      ],
+      "requiredDoctorClasses": [
+        "unsafe"
+      ],
+      "requireBaselineAfterRecovery": true,
+      "requireSafeRejection": true,
+      "maxAcknowledgedWritesDuringNoQuorum": {
+        "value": 0,
+        "unit": "writes",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Require zero acknowledged writes without quorum."
+        }
+      },
+      "minimumRejectedWritesDuringNoQuorum": {
+        "value": 1,
+        "unit": "writes",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Require observable safe rejection without quorum."
+        }
+      }
+    }
+  ],
+  "variance": {
+    "method": "relative-range-ppm",
+    "population": "three-complete-synthetic-runs",
+    "aggregation": "per-profile-and-scenario",
+    "minimumRuns": {
+      "value": 3,
+      "unit": "runs",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "database-operator",
+        "rationale": "Exercise a three-run synthetic comparison."
+      }
+    },
+    "tolerance": {
+      "value": 100000,
+      "unit": "parts-per-million",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise a bounded integer variance tolerance."
+      }
+    }
+  },
+  "capacityMethod": {
+    "status": "proposed",
+    "method": "bounded-binary-search",
+    "peakUnit": "operations-per-second",
+    "saturationSignal": "first-approved-limit-breach",
+    "rounding": "down-to-whole-unit",
+    "observationWindow": {
+      "value": 60000,
+      "unit": "milliseconds",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "database-operator",
+        "rationale": "Observe each synthetic capacity point for one minute."
+      }
+    },
+    "headroom": {
+      "value": 300000,
+      "unit": "parts-per-million",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Keep the 30 percent headroom proposal explicitly non-measured."
+      }
+    }
+  }
+}

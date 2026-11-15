@@ -1,0 +1,101 @@
+{
+  "documentType": "rf3-topology-profile",
+  "schemaVersion": "1.0",
+  "profileId": "rf3.topology.synthetic.v1",
+  "publishedAt": "2026-01-01T00:00:00Z",
+  "environment": "non-production",
+  "nodeCount": {
+    "value": 3,
+    "unit": "nodes",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Use one synthetic node per failure domain."
+    }
+  },
+  "replicas": {
+    "value": 3,
+    "unit": "replicas",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Exercise the RF3 deployment shape."
+    }
+  },
+  "replicationFactor": {
+    "value": 2,
+    "unit": "replicas",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "database-operator",
+      "rationale": "Require RF=3 for the synthetic topology."
+    }
+  },
+  "shards": {
+    "value": 24,
+    "unit": "shards",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "database-operator",
+      "rationale": "Exercise a deterministic synthetic shard count."
+    }
+  },
+  "failureDomains": [
+    "synthetic-fd-a",
+    "synthetic-fd-b",
+    "synthetic-fd-c"
+  ],
+  "antiColocation": true,
+  "volume": {
+    "durable": true,
+    "class": "synthetic-durable",
+    "accessMode": "read-write-once",
+    "size": {
+      "value": 20,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Give every synthetic replica a bounded durable volume."
+      }
+    }
+  },
+  "resourcesPerNode": {
+    "cpu": {
+      "value": 2,
+      "unit": "cores",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Use explicit synthetic CPU units."
+      }
+    },
+    "memory": {
+      "value": 4,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Use explicit synthetic memory units."
+      }
+    },
+    "storage": {
+      "value": 20,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Use explicit synthetic storage units."
+      }
+    },
+    "network": {
+      "value": 1000,
+      "unit": "megabits-per-second",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Use explicit synthetic network units."
+      }
+    }
+  }
+}

@@ -1,0 +1,187 @@
+{
+  "documentType": "rf3-environment-receipt",
+  "schemaVersion": "1.0",
+  "receiptId": "rf3.environment.receipt.create.synthetic.v1",
+  "cycle": "create",
+  "capturedAt": "2026-01-04T00:05:00Z",
+  "environmentId": "rf3.environment.synthetic.v1",
+  "manifestDigest": "sha256:c1ae31abadf67f4eadc13e282fcee417cec153347c85b641e46ddd79a442f017",
+  "p1": {
+    "acceptanceContractId": "rf3.acceptance.synthetic.v1",
+    "acceptanceDigest": "sha256:eca25d60faa1c31c5af575579bbf40b456411754d7e7cfec40061d23cc23b9cf",
+    "workloadProfileId": "rf3.workload.synthetic.v1",
+    "workloadDigest": "sha256:b24d158445b3af7378edda9b4ca9d612c81e57d70f8de051975cc292379eec0b",
+    "topologyProfileId": "rf3.topology.synthetic.v1",
+    "topologyDigest": "sha256:9a32cf94654cb489e36f95cae4b8e78c9b32231784ab96fd282bc85502d2567e"
+  },
+  "provider": {
+    "name": "synthetic-provider",
+    "accountId": "synthetic-account-001",
+    "clusterId": "synthetic-cluster-001",
+    "kubernetesContext": "synthetic-rf3-v1",
+    "providerVersion": "v1.2.3",
+    "kubernetesVersion": "v1.34.1",
+    "nonProduction": true
+  },
+  "deployment": {
+    "namespace": "rf3q-create-001",
+    "release": "cefas-rf3-create-001",
+    "chartName": "cefasdb",
+    "chartVersion": "0.1.0",
+    "chartDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "imageReference": "ghcr.io/cefasdb/cefasdb@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "imageDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "admission": {
+    "controlNamespace": "rf3-qualification-control",
+    "leaseName": "rf3-environment-synthetic-v1",
+    "holderIdentity": "rf3.run.create.synthetic.v1",
+    "resourceVersion": "101",
+    "serviceAccount": "rf3-qualifier",
+    "role": "rf3-environment-operator",
+    "credentialIssuer": "synthetic-oidc-v1",
+    "credentialAudience": "kubernetes.synthetic-v1",
+    "credentialIssuedAt": "2026-01-04T00:00:00Z",
+    "credentialExpiresAt": "2026-01-04T00:15:00Z"
+  },
+  "nodes": [
+    {
+      "nodeId": "synthetic-node-a",
+      "nodeUid": "node-uid-create-a",
+      "providerId": "synthetic-provider-node-a",
+      "instanceType": "synthetic-standard-2",
+      "imageId": "synthetic-node-image-v1",
+      "failureDomain": "synthetic-fd-a"
+    },
+    {
+      "nodeId": "synthetic-node-b",
+      "nodeUid": "node-uid-create-b",
+      "providerId": "synthetic-provider-node-b",
+      "instanceType": "synthetic-standard-2",
+      "imageId": "synthetic-node-image-v1",
+      "failureDomain": "synthetic-fd-b"
+    },
+    {
+      "nodeId": "synthetic-node-c",
+      "nodeUid": "node-uid-create-c",
+      "providerId": "synthetic-provider-node-c",
+      "instanceType": "synthetic-standard-2",
+      "imageId": "synthetic-node-image-v1",
+      "failureDomain": "synthetic-fd-c"
+    }
+  ],
+  "replicas": [
+    {
+      "ordinal": 0,
+      "podName": "cefasdb-0",
+      "podUid": "pod-uid-create-0",
+      "nodeId": "synthetic-node-a",
+      "failureDomain": "synthetic-fd-a",
+      "pvcName": "data-cefasdb-0",
+      "pvcUid": "pvc-uid-create-0",
+      "pvName": "pv-create-0",
+      "pvUid": "pv-uid-create-0"
+    },
+    {
+      "ordinal": 1,
+      "podName": "cefasdb-1",
+      "podUid": "pod-uid-create-1",
+      "nodeId": "synthetic-node-b",
+      "failureDomain": "synthetic-fd-b",
+      "pvcName": "data-cefasdb-1",
+      "pvcUid": "pvc-uid-create-1",
+      "pvName": "pv-create-1",
+      "pvUid": "pv-uid-create-1"
+    },
+    {
+      "ordinal": 2,
+      "podName": "cefasdb-2",
+      "podUid": "pod-uid-create-2",
+      "nodeId": "synthetic-node-c",
+      "failureDomain": "synthetic-fd-c",
+      "pvcName": "data-cefasdb-2",
+      "pvcUid": "pvc-uid-create-2",
+      "pvName": "pv-create-2",
+      "pvUid": "pv-uid-create-2"
+    }
+  ],
+  "volumes": [
+    {
+      "pvcName": "data-cefasdb-0",
+      "pvcUid": "pvc-uid-create-0",
+      "pvName": "pv-create-0",
+      "pvUid": "pv-uid-create-0",
+      "storageClass": "synthetic-durable",
+      "provisioner": "synthetic.csi.cefasdb.io",
+      "bindingMode": "wait-for-first-consumer",
+      "reclaimPolicy": "delete",
+      "accessMode": "read-write-once",
+      "volumeMode": "filesystem",
+      "capacityGiB": 20,
+      "failureDomain": "synthetic-fd-a"
+    },
+    {
+      "pvcName": "data-cefasdb-1",
+      "pvcUid": "pvc-uid-create-1",
+      "pvName": "pv-create-1",
+      "pvUid": "pv-uid-create-1",
+      "storageClass": "synthetic-durable",
+      "provisioner": "synthetic.csi.cefasdb.io",
+      "bindingMode": "wait-for-first-consumer",
+      "reclaimPolicy": "delete",
+      "accessMode": "read-write-once",
+      "volumeMode": "filesystem",
+      "capacityGiB": 20,
+      "failureDomain": "synthetic-fd-b"
+    },
+    {
+      "pvcName": "data-cefasdb-2",
+      "pvcUid": "pvc-uid-create-2",
+      "pvName": "pv-create-2",
+      "pvUid": "pv-uid-create-2",
+      "storageClass": "synthetic-durable",
+      "provisioner": "synthetic.csi.cefasdb.io",
+      "bindingMode": "wait-for-first-consumer",
+      "reclaimPolicy": "delete",
+      "accessMode": "read-write-once",
+      "volumeMode": "filesystem",
+      "capacityGiB": 20,
+      "failureDomain": "synthetic-fd-c"
+    }
+  ],
+  "doctor": {
+    "classification": "healthy",
+    "complete": true,
+    "artifact": {
+      "path": "create/doctor.json",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "bytes": 512
+    }
+  },
+  "baseline": {
+    "passed": true,
+    "artifact": {
+      "path": "create/baseline.json",
+      "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "bytes": 256
+    }
+  },
+  "cleanup": {
+    "state": "destroyed",
+    "credentialsRevoked": true,
+    "environmentDestroyed": true,
+    "residualVolumes": 0
+  },
+  "artifacts": [
+    {
+      "path": "create/doctor.json",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "bytes": 512
+    },
+    {
+      "path": "create/baseline.json",
+      "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "bytes": 256
+    }
+  ]
+}

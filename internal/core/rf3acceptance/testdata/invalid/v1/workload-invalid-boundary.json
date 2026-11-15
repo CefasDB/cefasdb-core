@@ -1,0 +1,346 @@
+{
+  "documentType": "rf3-workload-profile",
+  "schemaVersion": "1.0",
+  "profileId": "rf3.workload.synthetic.v1",
+  "publishedAt": "2026-01-01T00:00:00Z",
+  "dataClass": "synthetic",
+  "dataset": {
+    "tableNameTemplate": "rf3_acceptance_%s",
+    "itemCount": {
+      "value": 0,
+      "unit": "items",
+      "provenance": {
+        "kind": "measured",
+        "owner": "database-operator",
+        "evidence": "synthetic://generator/items-v1"
+      }
+    },
+    "keyspace": {
+      "value": 10000,
+      "unit": "keys",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise a bounded synthetic keyspace."
+      }
+    },
+    "users": {
+      "value": 1000,
+      "unit": "users",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise deterministic synthetic user identifiers."
+      }
+    },
+    "payload": {
+      "mode": "repeat",
+      "bytes": {
+        "value": 256,
+        "unit": "bytes",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Keep fixture payloads bounded and reproducible."
+        }
+      }
+    }
+  },
+  "profiles": [
+    {
+      "name": "write",
+      "phaseOrder": {
+        "value": 1,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset before read phases."
+        }
+      },
+      "operations": {
+        "value": 10000,
+        "unit": "operations",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Write each synthetic item once."
+        }
+      },
+      "duration": {
+        "value": 60000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Use a bounded observation window."
+        }
+      },
+      "rate": {
+        "value": 200,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise sustained writes without production claims."
+        }
+      },
+      "workers": {
+        "value": 8,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use bounded concurrent writers."
+        }
+      },
+      "batchSize": {
+        "value": 100,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use deterministic synthetic batches."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Bound every synthetic write RPC."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Sample every synthetic request."
+        }
+      }
+    },
+    {
+      "name": "point-read",
+      "phaseOrder": {
+        "value": 2,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Verify point reads after seeding."
+        }
+      },
+      "operations": {
+        "value": 5000,
+        "unit": "operations",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Sample half of the bounded synthetic dataset."
+        }
+      },
+      "duration": {
+        "value": 60000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Use a bounded point-read window."
+        }
+      },
+      "rate": {
+        "value": 300,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise sustained synthetic point reads."
+        }
+      },
+      "workers": {
+        "value": 8,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use bounded concurrent readers."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Bound every synthetic point-read RPC."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Sample every synthetic request."
+        }
+      }
+    },
+    {
+      "name": "scan",
+      "phaseOrder": {
+        "value": 3,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Run scans after point-read verification."
+        }
+      },
+      "duration": {
+        "value": 60000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Use a bounded scan window."
+        }
+      },
+      "rate": {
+        "value": 5,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise bounded server-streaming scans."
+        }
+      },
+      "workers": {
+        "value": 2,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Limit concurrent scans."
+        }
+      },
+      "limit": {
+        "value": 1000,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Bound every synthetic scan response."
+        }
+      },
+      "consistency": "eventual",
+      "rpcTimeout": {
+        "value": 10000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Bound every synthetic scan RPC."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Sample every synthetic scan."
+        }
+      }
+    },
+    {
+      "name": "mixed",
+      "phaseOrder": {
+        "value": 4,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Run the mixed phase after isolated profiles."
+        }
+      },
+      "duration": {
+        "value": 120000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Observe mixed traffic for a bounded interval."
+        }
+      },
+      "writeRate": {
+        "value": 100,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise synthetic writes during mixed traffic."
+        }
+      },
+      "readRate": {
+        "value": 200,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise synthetic reads during mixed traffic."
+        }
+      },
+      "writeWorkers": {
+        "value": 4,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use bounded mixed-phase writers."
+        }
+      },
+      "readWorkers": {
+        "value": 8,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use bounded mixed-phase readers."
+        }
+      },
+      "batchSize": {
+        "value": 100,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Use deterministic mixed write batches."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Bound every mixed-phase RPC."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Sample every synthetic mixed request."
+        }
+      }
+    }
+  ]
+}

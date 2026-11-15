@@ -1,0 +1,49 @@
+{
+  "documentType": "rf3-workload-profile",
+  "schemaVersion": "1.0",
+  "profileId": "rf3.workload.synthetic.v1",
+  "publishedAt": "2026-01-01T00:00:00Z",
+  "dataClass": "synthetic",
+  "dataset": {
+    "tableNameTemplate": "rf3_acceptance_%s",
+    "itemCount": {
+      "value": 10000,
+      "unit": "items",
+      "provenance": {
+        "kind": "measured",
+        "owner": "database-operator",
+        "evidence": "synthetic://generator/items-v1"
+      }
+    },
+    "keyspace": {
+      "value": 10000,
+      "unit": "keys",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise a bounded synthetic keyspace."
+      }
+    },
+    "users": {
+      "value": 1000,
+      "unit": "users",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise deterministic synthetic user identifiers."
+      }
+    },
+    "payload": {
+      "mode": "repeat",
+      "bytes": {
+        "value": 256,
+        "unit": "bytes",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Keep fixture payloads bounded and reproducible."
+        }
+      }
+    }
+  }
+}
