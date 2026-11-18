@@ -282,7 +282,7 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		}, []string{"shard"}),
 		StreamFenceHoldSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "cefas_stream_fence_hold_seconds",
-			Help:    "Time a native-stream write held the stream watermark back (sequence reservation through commit).",
+			Help:    "Seconds one native-stream write held the stream watermark back: from its reservation, taken immediately before its first change-sequence allocation, until its commit returned (committed or failed).",
 			Buckets: pebble.FenceHoldBuckets(),
 		}, []string{"shard"}),
 		StorageLaneQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -736,6 +736,16 @@ func (m *Metrics) ObserveEngineEvents(label string, stats pebble.EngineEventStat
 		active = 1
 	}
 	m.PebbleWriteStallActive.WithLabelValues(label).Set(active)
+}
+
+// AttachStreamFence connects a data store's native-stream hold-time
+// observations to the histogram for label. It is idempotent; collectors call
+// it when they start so no write before the first sampling tick is missed.
+func (m *Metrics) AttachStreamFence(label string, st *pebble.DB) {
+	if m == nil || st == nil {
+		return
+	}
+	st.AttachStreamFenceObserver(m.StreamFenceHoldSeconds.WithLabelValues(label))
 }
 
 // ObserveStreamFence publishes the native-stream watermark gauges.

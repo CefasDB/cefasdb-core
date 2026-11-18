@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -55,4 +56,57 @@ func TestStorageCollectorExportsStallAndStreamFenceSeries(t *testing.T) {
 			strings.Contains(body, `cefas_stream_fence_lag_sequences{shard="solo"} 0`) &&
 			strings.Contains(body, `cefas_stream_fence_hold_seconds_count{shard="solo"}`)
 	}, 2*time.Second, 10*time.Millisecond, "collector missing stall/fence series\n--- got ---\n%s", body)
+}
+
+// TestStorageCollectorAttachesHoldHistogramBeforeFirstTick: native-stream
+// writes are observed from collector start, not from its first sample.
+func TestStorageCollectorAttachesHoldHistogramBeforeFirstTick(t *testing.T) {
+	m := New()
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stop := startStorageCollectorForTest(m, "solo", db, nil, time.Hour)
+	defer stop()
+	td := types.TableDescriptor{
+		Name:                "logs",
+		KeySchema:           types.KeySchema{PK: "id"},
+		TextIndexes:         []types.TextIndexDescriptor{{Name: "message", Field: "message"}},
+		StreamSpecification: &types.StreamSpecification{StreamEnabled: true, StreamViewType: types.StreamViewTypeNewImage},
+	}
+	var body string
+	wait.Eventually(t, func() bool {
+		if err := db.PutItemWith(td, types.Item{"id": {T: types.AttrS, S: "1"}, "message": {T: types.AttrS, S: "hello"}}, pebble.PutOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		body = scrapeMetrics(t, m)
+		return strings.Contains(body, `cefas_stream_fence_hold_seconds_count{shard="solo"}`)
+	}, 2*time.Second, 5*time.Millisecond, "hold histogram not attached before the first tick\n--- got ---\n%s", body)
+}
+
+// TestRaftLogStorageCollectorExportsNoStreamFenceSeries: a Raft log store
+// exports stall counters but not the always-zero native-stream series.
+func TestRaftLogStorageCollectorExportsNoStreamFenceSeries(t *testing.T) {
+	m := New()
+	db, err := pebble.Open(pebble.Options{Path: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunRaftLogStorageCollector(ctx, m, "raft", db, time.Millisecond)
+	}()
+	defer func() { cancel(); <-done }()
+	var body string
+	wait.Eventually(t, func() bool {
+		body = scrapeMetrics(t, m)
+		return strings.Contains(body, `cefas_pebble_write_stalls_total{shard="raft"} 0`)
+	}, 2*time.Second, 5*time.Millisecond, "raft log collector missing stall series\n--- got ---\n%s", body)
+	if strings.Contains(body, `cefas_stream_fence_`) {
+		t.Fatalf("raft log store exported stream fence series\n--- got ---\n%s", body)
+	}
 }

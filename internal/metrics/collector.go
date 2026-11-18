@@ -35,6 +35,10 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
+	// Attach the hold-time histogram before the first tick so it observes
+	// every native-stream write from startup; each tick re-attaches
+	// (idempotent) for shards opened later.
+	attachShardStreamFences(m, mgr)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -42,6 +46,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			attachShardStreamFences(m, mgr)
 			for _, sh := range mgr.Shards() {
 				label := fmt.Sprintf("%d", sh.ID)
 				if sh.Raft != nil {
@@ -58,6 +63,7 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 				collectStreamRetention(m, label, sh.Storage)
 				collectTTL(m, label, sh.Storage)
 				collectEngineEvents(m, label, sh.Storage)
+				collectStreamFence(m, label, sh.Storage)
 				if sh.RaftStorage != nil {
 					collectPebble(m, label+":raft", sh.RaftStorage)
 					collectStorageLanes(m, label+":raft", sh.RaftStorage)
@@ -69,9 +75,26 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 	}
 }
 
+func attachShardStreamFences(m *Metrics, mgr *cluster.Manager) {
+	for _, sh := range mgr.Shards() {
+		m.AttachStreamFence(fmt.Sprintf("%d", sh.ID), sh.Storage)
+	}
+}
+
 // RunStorageCollector samples one storage engine. It is used by the
 // single-shard server path where there is no cluster.Manager.
 func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebble.DB, leader LeaderGate, interval time.Duration) {
+	runStorageCollector(ctx, m, label, st, leader, interval, true)
+}
+
+// RunRaftLogStorageCollector samples a Raft log/stable store. It is
+// RunStorageCollector without the native-stream fence series: a log store
+// never holds native-stream tables, so they would be always zero.
+func RunRaftLogStorageCollector(ctx context.Context, m *Metrics, label string, st *pebble.DB, interval time.Duration) {
+	runStorageCollector(ctx, m, label, st, nil, interval, false)
+}
+
+func runStorageCollector(ctx context.Context, m *Metrics, label string, st *pebble.DB, leader LeaderGate, interval time.Duration, dataStore bool) {
 	if m == nil || st == nil {
 		return
 	}
@@ -80,6 +103,9 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 	}
 	if interval <= 0 {
 		interval = 5 * time.Second
+	}
+	if dataStore {
+		m.AttachStreamFence(label, st)
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -104,6 +130,9 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 			collectStreamRetention(m, label, st)
 			collectTTL(m, label, st)
 			collectEngineEvents(m, label, st)
+			if dataStore {
+				collectStreamFence(m, label, st)
+			}
 		}
 	}
 }
@@ -189,14 +218,21 @@ func collectTTL(m *Metrics, label string, st *pebble.DB) {
 	m.ObserveTTL(label, st.TTLStatus())
 }
 
-// collectEngineEvents exports Pebble stall/slow-disk counters and the
-// native-stream watermark, and (idempotently) attaches the hold-time
-// histogram so it observes every native-stream write, not just samples.
+// collectEngineEvents exports Pebble stall/slow-disk counters. Raft log
+// stores export them too.
 func collectEngineEvents(m *Metrics, label string, st *pebble.DB) {
 	if m == nil || st == nil {
 		return
 	}
-	st.AttachStreamFenceObserver(m.StreamFenceHoldSeconds.WithLabelValues(label))
 	m.ObserveEngineEvents(label, st.EngineEvents())
+}
+
+// collectStreamFence exports the native-stream watermark gauges of a data
+// store. The hold-time histogram is attached by AttachStreamFence when the
+// collector starts, not here.
+func collectStreamFence(m *Metrics, label string, st *pebble.DB) {
+	if m == nil || st == nil {
+		return
+	}
 	m.ObserveStreamFence(label, st.StreamFenceStats())
 }

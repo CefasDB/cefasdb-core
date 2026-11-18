@@ -518,7 +518,7 @@ func main() {
 		} else if db != nil {
 			go metrics.RunStorageCollector(runtimeCtx, prom, "0", db, raftDB, 5*time.Second)
 			if raftStore != nil {
-				go metrics.RunStorageCollector(runtimeCtx, prom, "raft", raftStore, nil, 5*time.Second)
+				go metrics.RunRaftLogStorageCollector(runtimeCtx, prom, "raft", raftStore, 5*time.Second)
 			}
 		}
 	}
