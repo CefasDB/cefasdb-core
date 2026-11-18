@@ -123,12 +123,19 @@ func (d *DB) allocateChangeSequence() (uint64, int64) {
 	d.changeAllocMu.Lock()
 	defer d.changeAllocMu.Unlock()
 	index := d.changeIndex.Add(1)
-	now := time.Now().UnixNano()
+	now := d.changeNow()
 	if now < d.lastChangeUnixNano {
 		now = d.lastChangeUnixNano
 	}
 	d.lastChangeUnixNano = now
 	return index, now
+}
+
+func (d *DB) changeNow() int64 {
+	if d.changeClock != nil {
+		return d.changeClock()
+	}
+	return time.Now().UnixNano()
 }
 
 // writeChangeRecord writes rec at its already-assigned Index. It has no

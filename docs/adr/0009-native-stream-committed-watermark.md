@@ -97,6 +97,20 @@ to reach the target (woken by reservation releases, bounded by 30 s and the
 context) and fails with `ErrReadUnavailable` instead of returning a range cut
 short at the watermark. It never stops short silently.
 
+Restore runs on the caller's context: the HTTP and gRPC handlers pass the
+request context (`RestoreTableFromBackupWithOptionsCtx`), so client
+cancellation or server shutdown ends the watermark wait, the copy loop and the
+replay; 30 s stays the upper bound of the wait. A context that has already
+ended before the target is registered creates nothing. Any failure after
+registration (a decode or write error mid-copy, as before, and now a
+cancelled or expired wait) leaves the target registered and partially filled
+and returns `*RestorePartialError`, which matches `ErrRestoreTargetPartial`,
+names the target and the rows copied, and unwraps to the cause. Restore does
+not drop the target itself: the descriptor is mirrored on every shard and no
+existing mid-copy failure cleaned up. The error maps to HTTP 409 and gRPC
+`Aborted` ahead of the cause's own code, because a plain retry collides with
+the partial target; the operator deletes it and restarts the restore.
+
 ### TTL reaper chunks
 
 The reaper takes no stream fence across a sweep. Victims are processed in lock
@@ -136,11 +150,26 @@ must be read from the new metrics after rollout.
 
 Rollback is a plain revert: nothing persisted changes shape.
 
-Review status: GO for a single replica; the multi-voter NO-GO (P2-1) is
-addressed by the watermark-before-barrier order above.
+Review status: GO for a single replica. P2-1 (read order) is closed by the
+watermark-before-barrier order above. Multi-voter remains NO-GO: a new leader
+can reuse a change sequence and overwrite a native change record (see the
+first known hole below) until a leadership barrier lands, or the allocator is
+raised to the applied log before the node accepts writes.
 
 ### Known pre-existing holes (out of scope)
 
+- Multi-voter blocker (NO-GO): a newly elected leader accepts writes as soon
+  as `State()==Leader` (`internal/replication/db.go:355-359`, checked by
+  `Replicate` at `:541`) with no barrier at election, and its sequence
+  allocator rises only as entries are applied
+  (`internal/storage/adapter/pebble/db.go:542`). It can hand out sequence s
+  while an older-term entry carrying the same s is committed but not yet
+  applied; whichever applies last overwrites `KeyChangeLog(s)`
+  (`internal/storage/adapter/pebble/changelog.go:161`), and that native change
+  record is lost. Fix: a Raft barrier on leadership acquisition (or raising
+  the allocator to the applied log) before the leader accepts writes. The
+  timestamp clamp is also per process, so a leader change can step timestamps
+  back by the clock skew between nodes.
 - Non-native stream tables remain unfenced.
 - The persisted change counter can be written out of order by concurrent
   batches (recovery takes the max with a changelog scan).
@@ -148,10 +177,6 @@ addressed by the watermark-before-barrier order above.
   trip, no correctness impact).
 - A writer holding a stale descriptor (text indexes or stream added
   concurrently) writes unfenced until it sees the new descriptor.
-- A newly elected leader can allocate a sequence already used by an entry it
-  has not applied yet (its allocator is raised on apply, not on election);
-  the timestamp clamp is also per process, so a leader change can step
-  timestamps back by the clock skew between nodes.
 - The materialized-view COMPLETE-refresh cursor handling is unchanged here.
 - Store selection for stream reads with `cluster.shards: 1` is unchanged
   here; the watermark is per store and never spans stores.

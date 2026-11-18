@@ -21,3 +21,13 @@ func TestMapStorageErrReadWaitIsUnavailable(t *testing.T) {
 		}
 	}
 }
+
+// A restore that failed after registering its target is Aborted, not the
+// retryable code of its cause: the caller must delete the partial target
+// before restarting (FU-01).
+func TestMapStorageErrPartialRestoreIsAborted(t *testing.T) {
+	err := &pebble.RestorePartialError{Target: "t", RowsCopied: 1, Cause: &pebble.ReadWaitError{Cause: context.Canceled}}
+	if got := status.Code(mapStorageErr(err)); got != codes.Aborted {
+		t.Fatalf("partial restore mapped to %v, want Aborted", got)
+	}
+}

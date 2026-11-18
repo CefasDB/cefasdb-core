@@ -151,6 +151,9 @@ type DB struct {
 	// timestamps never decrease in sequence order (allocateChangeSequence).
 	changeAllocMu      sync.Mutex
 	lastChangeUnixNano int64
+	// changeClock, when set (tests only, before any write), replaces
+	// time.Now for change timestamps taken at sequence allocation.
+	changeClock func() int64
 	// streamFence tracks native-stream sequences that are allocated but
 	// not yet committed; readers bound cursors at its watermark.
 	streamFence streamFence

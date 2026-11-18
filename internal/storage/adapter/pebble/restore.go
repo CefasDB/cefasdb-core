@@ -57,11 +57,53 @@ func (d *DB) RestoreTableFromBackup(
 	return d.RestoreTableFromBackupWithOptions(backupName, sourceTable, targetTable, RestoreOptions{}, register)
 }
 
+// ErrRestoreTargetPartial marks a restore that failed after its target
+// table was registered. The target stays registered and holds only part of
+// the source rows; it is not dropped (a failed write or decode mid-copy has
+// always left it in place, and the descriptor may be mirrored on every
+// shard). Delete the target table before retrying the restore.
+var ErrRestoreTargetPartial = errors.New("cefas/storage: restore target is registered but partially filled")
+
+// RestorePartialError is returned for every failure after the target table
+// was registered. It matches ErrRestoreTargetPartial with errors.Is and
+// unwraps to the failure that stopped the copy (a write error, a cancelled
+// request context, an expired watermark wait).
+type RestorePartialError struct {
+	Target     string
+	RowsCopied int
+	Cause      error
+}
+
+func (e *RestorePartialError) Error() string {
+	return fmt.Sprintf("%s: target table %q holds %d copied rows and must be deleted before retrying: %v",
+		ErrRestoreTargetPartial.Error(), e.Target, e.RowsCopied, e.Cause)
+}
+
+func (e *RestorePartialError) Is(target error) bool { return target == ErrRestoreTargetPartial }
+func (e *RestorePartialError) Unwrap() error        { return e.Cause }
+
 func (d *DB) RestoreTableFromBackupWithOptions(
 	backupName, sourceTable, targetTable string,
 	opts RestoreOptions,
 	register func(types.TableDescriptor) error,
 ) (RestoreResult, error) {
+	return d.RestoreTableFromBackupWithOptionsCtx(context.Background(), backupName, sourceTable, targetTable, opts, register)
+}
+
+// RestoreTableFromBackupWithOptionsCtx is RestoreTableFromBackupWithOptions
+// bound to ctx (the request context): cancellation or shutdown stops the
+// copy and the point-in-time watermark wait, which is still capped at
+// restoreWatermarkWait. A context that ends before the target is registered
+// creates nothing; any failure after registration is a *RestorePartialError.
+func (d *DB) RestoreTableFromBackupWithOptionsCtx(
+	ctx context.Context,
+	backupName, sourceTable, targetTable string,
+	opts RestoreOptions,
+	register func(types.TableDescriptor) error,
+) (RestoreResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if backupName == "" {
 		return RestoreResult{}, fmt.Errorf("backup name required")
 	}
@@ -88,40 +130,49 @@ func (d *DB) RestoreTableFromBackupWithOptions(
 		}, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return RestoreResult{}, fmt.Errorf("restore not started: %w", err)
+	}
 	if err := register(preflight.TargetTable); err != nil {
 		return RestoreResult{}, fmt.Errorf("register target descriptor: %w", err)
 	}
 
+	n := 0
+	partial := func(err error) (RestoreResult, error) {
+		return RestoreResult{}, &RestorePartialError{Target: targetTable, RowsCopied: n, Cause: err}
+	}
 	lower, upper := storage.PrefixPrimaryAll(sourceTable)
 	iter, err := checkpoint.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
 	if err != nil {
-		return RestoreResult{}, fmt.Errorf("checkpoint iter: %w", err)
+		return partial(fmt.Errorf("checkpoint iter: %w", err))
 	}
 	defer iter.Close()
 
-	n := 0
 	for valid := iter.First(); valid; valid = iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return partial(fmt.Errorf("copy interrupted after %d items: %w", n, err))
+		}
 		v := iter.Value()
 		cp := make([]byte, len(v))
 		copy(cp, v)
 		item, err := storage.DecodeItem(cp)
 		if err != nil {
-			return RestoreResult{}, fmt.Errorf("decode item at %s: %w", iter.Key(), err)
+			return partial(fmt.Errorf("decode item at %s: %w", iter.Key(), err))
 		}
 		if err := d.PutItemWith(preflight.TargetTable, item, PutOptions{}); err != nil {
-			return RestoreResult{}, fmt.Errorf("write item %d into target: %w", n, err)
+			return partial(fmt.Errorf("write item %d into target: %w", n, err))
 		}
 		n++
 	}
 	if err := iter.Error(); err != nil {
-		return RestoreResult{}, err
+		return partial(err)
 	}
 	if opts.TargetChangeIndex != 0 || opts.TargetUnixNano != 0 {
-		replayed, err := d.replayChangesToTarget(preflight, opts)
-		if err != nil {
-			return RestoreResult{}, err
-		}
+		replayed, err := d.replayChangesToTarget(ctx, preflight, opts)
 		n += replayed
+		if err != nil {
+			return partial(err)
+		}
 	}
 	return RestoreResult{
 		TargetTable:     preflight.TargetTable,
@@ -247,7 +298,7 @@ func (d *DB) validatePITRTarget(preflight RestorePreflightResult, opts RestoreOp
 // in-flight native-stream writes below its target to commit or abandon.
 const restoreWatermarkWait = 30 * time.Second
 
-func (d *DB) replayChangesToTarget(preflight RestorePreflightResult, opts RestoreOptions) (int, error) {
+func (d *DB) replayChangesToTarget(ctx context.Context, preflight RestorePreflightResult, opts RestoreOptions) (int, error) {
 	if err := d.validatePITRTarget(preflight, opts); err != nil {
 		return 0, err
 	}
@@ -265,15 +316,19 @@ func (d *DB) replayChangesToTarget(preflight RestorePreflightResult, opts Restor
 			return 0, err
 		}
 	}
-	// Every record through toIndex must be replayed: wait (bounded) for
-	// in-flight native writes below it to settle instead of stopping at
-	// the native-stream watermark.
-	records, err := d.changeRecordsThroughCtx(context.Background(), preflight.SourceTableName, meta.ChangeIndex, toIndex, opts.TargetUnixNano, restoreWatermarkWait)
+	// Every record through toIndex must be replayed: wait for in-flight
+	// native writes below it to settle instead of stopping at the
+	// native-stream watermark. The wait ends at ctx (request cancellation,
+	// server shutdown) or restoreWatermarkWait, whichever comes first.
+	records, err := d.changeRecordsThroughCtx(ctx, preflight.SourceTableName, meta.ChangeIndex, toIndex, opts.TargetUnixNano, restoreWatermarkWait)
 	if err != nil {
 		return 0, fmt.Errorf("restore replay through change index %d: %w", toIndex, err)
 	}
 	applied := 0
 	for _, rec := range records {
+		if err := ctx.Err(); err != nil {
+			return applied, fmt.Errorf("replay interrupted before index %d: %w", rec.Index, err)
+		}
 		switch rec.Op {
 		case ChangePut:
 			item := cloneStorageItem(rec.Item)

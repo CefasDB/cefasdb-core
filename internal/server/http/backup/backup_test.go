@@ -2,6 +2,7 @@ package backup_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -263,5 +264,27 @@ func TestHandleCompactMethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
+// The restore handler runs on the request context: a request that has ended
+// before the copy starts creates no target table (FU-01).
+func TestHandleRestoreTableFromBackupHonoursRequestContext(t *testing.T) {
+	t.Parallel()
+	h, db, cat, cleanup := newHandlers(t, nil, nil)
+	defer cleanup()
+	seedBackup(t, db, cat, "snap")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body := bytes.NewBufferString(`{"backupName":"snap","sourceTableName":"Users","targetTableName":"Users_restored"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/RestoreTableFromBackup", body).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.HandleRestoreTableFromBackup(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("cancelled restore returned 200: %s", rec.Body.String())
+	}
+	if _, err := cat.Describe("Users_restored"); !errors.Is(err, types.ErrTableNotFound) {
+		t.Fatalf("cancelled restore created its target: %v", err)
 	}
 }

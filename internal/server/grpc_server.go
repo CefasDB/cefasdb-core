@@ -1666,7 +1666,8 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 	var res pebble.RestoreResult
 	var err error
 	if req.GetDryRun() {
-		res, err = s.db.RestoreTableFromBackupWithOptions(
+		res, err = s.db.RestoreTableFromBackupWithOptionsCtx(
+			ctx,
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
@@ -1678,7 +1679,8 @@ func (s *GRPCServer) RestoreTableFromBackup(ctx context.Context, req *cefaspb.Re
 			register,
 		)
 	} else {
-		res, err = s.db.RestoreTableFromBackupWithOptions(
+		res, err = s.db.RestoreTableFromBackupWithOptionsCtx(
+			ctx,
 			req.GetBackupName(),
 			req.GetSourceTableName(),
 			req.GetTargetTableName(),
@@ -2424,6 +2426,11 @@ func (s *GRPCServer) strongReadGate() error {
 // the same error contract.
 func mapStorageErr(err error) error {
 	switch {
+	case errors.Is(err, pebble.ErrRestoreTargetPartial):
+		// Checked first: the cause may match a retryable sentinel
+		// (Unavailable), but a plain retry collides with the partial target;
+		// the caller must delete it and restart the restore.
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, streamcore.ErrTopologyUnsupported):
 		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, types.ErrTableNotFound):

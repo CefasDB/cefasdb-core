@@ -233,6 +233,167 @@ func TestChangeTimestampsNeverDecreaseInSequenceOrder(t *testing.T) {
 	}
 }
 
+// TestChangeTimestampsMonotoneUnderDelayedAndSteppedClock stresses the
+// allocator itself: the clock (taken between sequence allocation and
+// timestamping) sleeps a random time and sometimes steps back, while many
+// writers on several tables allocate concurrently. Timestamps must never
+// decrease in sequence order. Without changeAllocMu a writer delayed after
+// allocation stamps a later time than a higher sequence; without the clamp a
+// stepped-back reading stamps an earlier one. Either mutation fails here.
+func TestChangeTimestampsMonotoneUnderDelayedAndSteppedClock(t *testing.T) {
+	db, td := nativeStreamDB(t)
+	plain := streamTestTableWithView(types.StreamViewTypeNewImage)
+	keys := streamTestTableWithView(types.StreamViewTypeKeysOnly)
+	keys.Name = "EventKeys"
+	var stepped sync.Mutex
+	steps := 0
+	db.changeClock = func() int64 {
+		time.Sleep(time.Duration(rand.Intn(300)) * time.Microsecond)
+		now := time.Now().UnixNano()
+		if rand.Intn(6) == 0 {
+			stepped.Lock()
+			steps++
+			stepped.Unlock()
+			return now - int64(5*time.Millisecond)
+		}
+		return now
+	}
+	const writers, perWriter = 12, 40
+	expiry := time.Now().Add(time.Hour).Unix()
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				var err error
+				switch (w + i) % 3 {
+				case 0:
+					err = db.PutItemWith(td, textEvent("t", fmt.Sprintf("%d-%d", w, i), "m", expiry), PutOptions{})
+				case 1:
+					err = db.PutItemWith(plain, types.Item{"id": streamS(fmt.Sprintf("%d-%d", w, i))}, PutOptions{})
+				default:
+					err = db.PutItemWith(keys, types.Item{"id": streamS(fmt.Sprintf("%d-%d", w, i))}, PutOptions{})
+				}
+				if err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	if steps == 0 {
+		t.Fatal("fixture: the clock never stepped back")
+	}
+	lower, upper := storage.PrefixChangeLog()
+	it, err := db.db.NewIter(&pebbledb.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+	var prev ChangeRecord
+	n := 0
+	for ok := it.First(); ok; ok = it.Next() {
+		rec, err := decodeChangeRecord(it.Value())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 && rec.UnixNano < prev.UnixNano {
+			t.Fatalf("sequence %d (%s) stamped %d before sequence %d (%s) stamped %d", rec.Index, rec.Table, rec.UnixNano, prev.Index, prev.Table, prev.UnixNano)
+		}
+		prev = rec
+		n++
+	}
+	if n != writers*perWriter {
+		t.Fatalf("changelog holds %d records, want %d", n, writers*perWriter)
+	}
+}
+
+// TestRestoreHonoursRequestContext: restore stops on the request context.
+// A context that has ended before registration creates nothing; one that
+// ends during the point-in-time watermark wait returns at once (not after
+// restoreWatermarkWait) with a RestorePartialError naming the registered,
+// partially filled target, like any other failure after registration.
+func TestRestoreHonoursRequestContext(t *testing.T) {
+	db, td := nativeStreamDB(t)
+	expiry := time.Now().Add(time.Hour).Unix()
+	if err := db.PutItemWith(td, textEvent("a", "base", "base", expiry), PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateBackup("snap", []string{td.Name}); err != nil {
+		t.Fatal(err)
+	}
+	registered := 0
+	register := func(desc types.TableDescriptor) error {
+		registered++
+		raw, err := json.Marshal(desc)
+		if err != nil {
+			return err
+		}
+		return db.Set(storage.KeyCatalog(desc.Name), raw)
+	}
+
+	_, err := db.RestoreTableFromBackupWithOptionsCtx(canceledContext(), "snap", td.Name, "logs_early", RestoreOptions{}, register)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrRestoreTargetPartial) {
+		t.Fatalf("pre-cancelled restore = %v, want context.Canceled without a partial target", err)
+	}
+	if registered != 0 {
+		t.Fatal("pre-cancelled restore registered its target")
+	}
+	if exists, err := db.Has(storage.KeyCatalog("logs_early")); err != nil || exists {
+		t.Fatalf("pre-cancelled restore left target: exists=%v err=%v", exists, err)
+	}
+
+	r := &blockedNativeCommit{db: db, first: make(chan struct{}), release: make(chan struct{})}
+	db.AttachReplicator(r)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(r.release) }) }
+	slowExited := make(chan struct{})
+	go func() {
+		defer close(slowExited)
+		_ = db.PutItemWith(td, textEvent("a", "slow", "slow", expiry), PutOptions{})
+	}()
+	t.Cleanup(func() { release(); <-slowExited })
+	<-r.first
+	target, _ := db.CurrentChangeIndex()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	restoreDone := make(chan error, 1)
+	go func() {
+		_, err := db.RestoreTableFromBackupWithOptionsCtx(ctx, "snap", td.Name, "logs_pitr", RestoreOptions{TargetChangeIndex: target}, register)
+		restoreDone <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for !fenceHasWaiter(db) {
+		select {
+		case err := <-restoreDone:
+			t.Fatalf("restore returned before parking on the watermark: %v", err)
+		case <-time.After(time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("restore never parked on the watermark")
+		}
+	}
+	cancel()
+	select {
+	case err = <-restoreDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("restore ignored request cancellation")
+	}
+	var partial *RestorePartialError
+	if !errors.As(err, &partial) || !errors.Is(err, ErrRestoreTargetPartial) || !errors.Is(err, context.Canceled) || !errors.Is(err, ErrReadUnavailable) {
+		t.Fatalf("cancelled restore = %v, want RestorePartialError wrapping the cancelled watermark wait", err)
+	}
+	if partial.Target != "logs_pitr" || partial.RowsCopied != 1 {
+		t.Fatalf("partial error = %+v, want target logs_pitr with 1 copied row", partial)
+	}
+	if exists, err := db.Has(storage.KeyCatalog("logs_pitr")); err != nil || !exists {
+		t.Fatalf("partial target must stay registered as reported: exists=%v err=%v", exists, err)
+	}
+}
+
 // TestTTLReaperConcurrentWithCursorsNeverSkipsOrDuplicates runs the chunked
 // TTL reaper, native writers and a writer on another stream table while
 // cursors poll: every committed native record (puts and reaper deletes) is

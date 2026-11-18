@@ -101,7 +101,7 @@ type compactRequest struct {
 
 // HandleRestoreTableFromBackup serves POST /v1/RestoreTableFromBackup.
 func (h *Handlers) HandleRestoreTableFromBackup(w http.ResponseWriter, r *http.Request) {
-	_, span := tracing.Tracer().Start(r.Context(), "RestoreTableFromBackup")
+	ctx, span := tracing.Tracer().Start(r.Context(), "RestoreTableFromBackup")
 	defer span.End()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -132,7 +132,8 @@ func (h *Handlers) HandleRestoreTableFromBackup(w http.ResponseWriter, r *http.R
 		}
 		return nil
 	}
-	res, err := h.db.RestoreTableFromBackupWithOptions(
+	res, err := h.db.RestoreTableFromBackupWithOptionsCtx(
+		ctx,
 		req.BackupName,
 		req.SourceTableName,
 		req.TargetTableName,
@@ -303,6 +304,10 @@ func compactionResultsJSON(results []pebble.CompactionResult) []map[string]any {
 // reachable from these handlers are reproduced here.
 func mapBackupErr(err error) int {
 	switch {
+	case errors.Is(err, pebble.ErrRestoreTargetPartial):
+		// Checked first: the cause may itself match a retryable sentinel,
+		// but a plain retry now collides with the partial target.
+		return http.StatusConflict
 	case errors.Is(err, pebble.ErrBackupNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, pebble.ErrBackupInUse):
