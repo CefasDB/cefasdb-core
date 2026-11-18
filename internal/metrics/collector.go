@@ -57,10 +57,12 @@ func RunShardCollector(ctx context.Context, m *Metrics, mgr *cluster.Manager, in
 				collectBackpressure(m, label, sh.Storage)
 				collectStreamRetention(m, label, sh.Storage)
 				collectTTL(m, label, sh.Storage)
+				collectEngineEvents(m, label, sh.Storage)
 				if sh.RaftStorage != nil {
 					collectPebble(m, label+":raft", sh.RaftStorage)
 					collectStorageLanes(m, label+":raft", sh.RaftStorage)
 					collectBackpressure(m, label+":raft", sh.RaftStorage)
+					collectEngineEvents(m, label+":raft", sh.RaftStorage)
 				}
 			}
 		}
@@ -101,6 +103,7 @@ func RunStorageCollector(ctx context.Context, m *Metrics, label string, st *pebb
 			collectBackpressure(m, label, st)
 			collectStreamRetention(m, label, st)
 			collectTTL(m, label, st)
+			collectEngineEvents(m, label, st)
 		}
 	}
 }
@@ -184,4 +187,16 @@ func collectTTL(m *Metrics, label string, st *pebble.DB) {
 		return
 	}
 	m.ObserveTTL(label, st.TTLStatus())
+}
+
+// collectEngineEvents exports Pebble stall/slow-disk counters and the
+// native-stream watermark, and (idempotently) attaches the hold-time
+// histogram so it observes every native-stream write, not just samples.
+func collectEngineEvents(m *Metrics, label string, st *pebble.DB) {
+	if m == nil || st == nil {
+		return
+	}
+	st.AttachStreamFenceObserver(m.StreamFenceHoldSeconds.WithLabelValues(label))
+	m.ObserveEngineEvents(label, st.EngineEvents())
+	m.ObserveStreamFence(label, st.StreamFenceStats())
 }

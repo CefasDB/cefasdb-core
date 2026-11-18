@@ -71,6 +71,16 @@ type Metrics struct {
 	PebbleLevelSublevels        *prometheus.GaugeVec // shard, level
 	PebbleLevelScore            *prometheus.GaugeVec // shard, level
 
+	PebbleWriteStalls       *prometheus.CounterVec   // shard
+	PebbleWriteStallSeconds *prometheus.CounterVec   // shard
+	PebbleWriteStallActive  *prometheus.GaugeVec     // shard
+	PebbleDiskSlow          *prometheus.CounterVec   // shard
+	StreamFenceInFlight     *prometheus.GaugeVec     // shard
+	StreamFenceLag          *prometheus.GaugeVec     // shard
+	StreamFenceHoldSeconds  *prometheus.HistogramVec // shard
+	engineLastMu            sync.Mutex
+	engineLast              map[string]pebble.EngineEventStats
+
 	StorageLaneQueueDepth       *prometheus.GaugeVec // shard, lane
 	StorageLaneActiveWorkers    *prometheus.GaugeVec // shard, lane
 	StorageLaneWorkers          *prometheus.GaugeVec // shard, lane
@@ -246,6 +256,35 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 			Name: "cefas_pebble_level_score",
 			Help: "Pebble compaction score per level.",
 		}, []string{"shard", "level"}),
+		PebbleWriteStalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_pebble_write_stalls_total",
+			Help: "Pebble write stalls (memtable or L0 back-pressure blocking every commit) observed by this process.",
+		}, []string{"shard"}),
+		PebbleWriteStallSeconds: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_pebble_write_stall_seconds_total",
+			Help: "Cumulative seconds Pebble spent in write stalls, including an active stall.",
+		}, []string{"shard"}),
+		PebbleWriteStallActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_pebble_write_stall_active",
+			Help: "One while Pebble is stalling writes.",
+		}, []string{"shard"}),
+		PebbleDiskSlow: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "cefas_pebble_disk_slow_total",
+			Help: "Pebble slow-disk events (a WAL or sstable write exceeded the disk slowness threshold).",
+		}, []string{"shard"}),
+		StreamFenceInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_fence_inflight",
+			Help: "Native-stream writes holding an allocated but uncommitted change sequence.",
+		}, []string{"shard"}),
+		StreamFenceLag: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cefas_stream_fence_lag_sequences",
+			Help: "Allocated change sequences above the committed native-stream watermark.",
+		}, []string{"shard"}),
+		StreamFenceHoldSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "cefas_stream_fence_hold_seconds",
+			Help:    "Time a native-stream write held the stream watermark back (sequence reservation through commit).",
+			Buckets: pebble.FenceHoldBuckets(),
+		}, []string{"shard"}),
 		StorageLaneQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "cefas_storage_lane_queue_depth",
 			Help: "Queued operations waiting for a storage lane worker.",
@@ -389,6 +428,13 @@ func NewWithRangeHotspots(hotspots RangeHotspotConfig) *Metrics {
 		m.PebbleLevelBytes,
 		m.PebbleLevelSublevels,
 		m.PebbleLevelScore,
+		m.PebbleWriteStalls,
+		m.PebbleWriteStallSeconds,
+		m.PebbleWriteStallActive,
+		m.PebbleDiskSlow,
+		m.StreamFenceInFlight,
+		m.StreamFenceLag,
+		m.StreamFenceHoldSeconds,
 		m.StorageLaneQueueDepth,
 		m.StorageLaneActiveWorkers,
 		m.StorageLaneWorkers,
@@ -655,4 +701,52 @@ func (m *Metrics) ObserveTTL(label string, status pebble.TTLStatus) {
 		timestamp = float64(status.LastSuccessAt.Unix())
 	}
 	m.TTLCleanupLastSuccess.WithLabelValues(label).Set(timestamp)
+}
+
+// ObserveEngineEvents publishes cumulative Pebble stall and slow-disk
+// counters as monotonic per-process counters, tolerating a store
+// replacement that resets the source totals.
+func (m *Metrics) ObserveEngineEvents(label string, stats pebble.EngineEventStats) {
+	if m == nil {
+		return
+	}
+	m.engineLastMu.Lock()
+	if m.engineLast == nil {
+		m.engineLast = make(map[string]pebble.EngineEventStats)
+	}
+	prev := m.engineLast[label]
+	m.engineLast[label] = stats
+	m.engineLastMu.Unlock()
+	addUint := func(c prometheus.Counter, now, before uint64) {
+		delta := now
+		if now >= before {
+			delta = now - before
+		}
+		c.Add(float64(delta))
+	}
+	addUint(m.PebbleWriteStalls.WithLabelValues(label), stats.WriteStalls, prev.WriteStalls)
+	addUint(m.PebbleDiskSlow.WithLabelValues(label), stats.DiskSlowEvents, prev.DiskSlowEvents)
+	seconds := stats.WriteStallSeconds
+	if seconds >= prev.WriteStallSeconds {
+		seconds -= prev.WriteStallSeconds
+	}
+	m.PebbleWriteStallSeconds.WithLabelValues(label).Add(seconds)
+	active := 0.0
+	if stats.WriteStallActive {
+		active = 1
+	}
+	m.PebbleWriteStallActive.WithLabelValues(label).Set(active)
+}
+
+// ObserveStreamFence publishes the native-stream watermark gauges.
+func (m *Metrics) ObserveStreamFence(label string, stats pebble.StreamFenceStats) {
+	if m == nil {
+		return
+	}
+	m.StreamFenceInFlight.WithLabelValues(label).Set(float64(stats.InFlight))
+	lag := 0.0
+	if stats.Allocated > stats.Watermark {
+		lag = float64(stats.Allocated - stats.Watermark)
+	}
+	m.StreamFenceLag.WithLabelValues(label).Set(lag)
 }

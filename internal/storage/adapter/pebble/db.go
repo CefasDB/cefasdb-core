@@ -150,6 +150,8 @@ type DB struct {
 	// streamFence tracks native-stream sequences that are allocated but
 	// not yet committed; readers bound cursors at its watermark.
 	streamFence streamFence
+	// events counts Pebble write stalls and slow-disk events.
+	events *engineEvents
 
 	// batchSeqCounter is the monotonic per-process source of
 	// idempotency markers (#524). Combined with a nanosecond
@@ -202,6 +204,8 @@ const (
 // an exclusive file lock on the directory — one process per path.
 func Open(opts Options) (*DB, error) {
 	pOpts := newPebbleOptions(opts)
+	events := &engineEvents{}
+	pOpts.AddEventListener(events.listener())
 	d, err := pebbledb.Open(opts.Path, pOpts)
 	if err != nil {
 		return nil, fmt.Errorf("pebble open %s: %w", opts.Path, err)
@@ -229,6 +233,7 @@ func Open(opts Options) (*DB, error) {
 		atomicDedupLRU:       list.New(),
 		atomicDedup:          make(map[string]*list.Element),
 		streamTables:         make(map[string]struct{}),
+		events:               events,
 	}
 	if opts.AdaptiveMode {
 		wrapper.workload = newWorkloadMode(wrapper.streamRetention.Interval)
