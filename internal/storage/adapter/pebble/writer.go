@@ -89,8 +89,6 @@ func (d *DB) PutItemWithCtx(ctx context.Context, td types.TableDescriptor, item 
 }
 
 func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts PutOptions) error {
-	streamUnlock := d.lockNativeStream(td)
-	defer streamUnlock()
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -113,6 +111,10 @@ func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts P
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
+	// Reserve the native-stream sequence after the primary-key lock and
+	// release it only after the commit below has returned.
+	streamDone := d.beginNativeStreamWrite(td)
+	defer streamDone()
 	encoded, err := storage.EncodeItem(item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
@@ -260,8 +262,6 @@ func (d *DB) DeleteItemWithCtx(ctx context.Context, td types.TableDescriptor, ke
 }
 
 func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item, opts DeleteOptions) error {
-	streamUnlock := d.lockNativeStream(td)
-	defer streamUnlock()
 	if err := d.checkWritePressure(); err != nil {
 		return err
 	}
@@ -278,6 +278,10 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
+	// Reserve the native-stream sequence after the primary-key lock and
+	// release it only after the commit below has returned.
+	streamDone := d.beginNativeStreamWrite(td)
+	defer streamDone()
 	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
@@ -907,8 +911,6 @@ func (d *DB) BatchWriteItemLocal(td types.TableDescriptor, ops []BatchOp) error 
 }
 
 func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassRepl bool) error {
-	streamUnlock := d.lockNativeStream(td)
-	defer streamUnlock()
 	if len(ops) == 0 {
 		return nil
 	}
@@ -929,6 +931,8 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 	}
 	unlock := lockPrimaryKeys(keys)
 	defer unlock()
+	streamDone := d.beginNativeStreamWrite(td)
+	defer streamDone()
 	if d.batchPutItemsCanSkipPrior(td, ops) {
 		return d.batchPutItemsWithoutPriorImpl(td, ops, bypassRepl)
 	}

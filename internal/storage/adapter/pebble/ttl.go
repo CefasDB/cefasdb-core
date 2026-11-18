@@ -207,7 +207,7 @@ func (r *Reaper) Tick(ctx context.Context) (result error) {
 }
 
 func (r *Reaper) sweepTable(ctx context.Context, td types.TableDescriptor, now time.Time) error {
-	streamUnlock := r.db.lockNativeStream(td)
+	streamUnlock := r.db.beginNativeStreamWrite(td)
 	defer streamUnlock()
 	unix := now.Unix()
 	if unix < 0 {

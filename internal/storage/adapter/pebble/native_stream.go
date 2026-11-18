@@ -2,6 +2,7 @@ package pebble
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -16,32 +17,11 @@ import (
 
 const nativeImageExpiryPrefix = storage.Namespace + "cdc-image-expiry/"
 
-// The order is store native-stream fence, then primary-key locks, then commit.
-// Readers share the fence: another table's committed sequence cannot let a
-// cursor skip a native write whose sequence was allocated but not committed.
-func (d *DB) lockNativeStream(td types.TableDescriptor) func() {
-	if len(td.TextIndexes) == 0 || td.StreamSpecification == nil || !td.StreamSpecification.StreamEnabled {
-		return func() {}
-	}
-	d.nativeStreamMu.Lock()
-	return d.nativeStreamMu.Unlock
-}
-
-func (d *DB) lockNativeStreamRead(table string) (func(), error) {
-	td, err := d.visibilityDescriptor(table)
-	if err != nil {
-		return nil, err
-	}
-	if len(td.TextIndexes) == 0 {
-		return func() {}, nil
-	}
-	d.nativeStreamMu.Lock()
-	if err := d.ReadBarrier(5 * time.Second); err != nil {
-		d.nativeStreamMu.Unlock()
-		return nil, err
-	}
-	return d.nativeStreamMu.Unlock, nil
-}
+// Native-stream ordering is enforced by the committed watermark in
+// stream_fence.go: writers register before allocating a sequence (after their
+// primary-key locks) and readers bound their snapshot at the watermark, so
+// another table's committed sequence cannot let a cursor skip a native write
+// whose sequence was allocated but not committed.
 
 func hideExpiredNativeImages(rec *ChangeRecord, now time.Time) {
 	if rec.PayloadExpiresAt > 0 && rec.PayloadExpiresAt <= now.Unix() {
@@ -303,13 +283,22 @@ func (d *DB) expireNativeImages(now time.Time) (int, error) {
 }
 
 // CommittedChangeIndex reads durable state, not allocated producer sequences.
-// Native writers cannot be in flight while this checkpoint is observed.
+// It is CommittedChangeIndexCtx without a caller deadline.
 func (d *DB) CommittedChangeIndex() (uint64, error) {
-	d.nativeStreamMu.Lock()
-	defer d.nativeStreamMu.Unlock()
-	if err := d.ReadBarrier(5 * time.Second); err != nil {
+	return d.CommittedChangeIndexCtx(context.Background())
+}
+
+// CommittedChangeIndexCtx returns the highest committed changelog sequence
+// that no cursor can overtake: max(persisted counter, last changelog key),
+// capped at the native-stream watermark taken before that state is read.
+// Every native sequence at or below the result has committed (or was
+// abandoned), so a LATEST iterator at result+1 cannot skip an in-flight
+// native write. It does not block writers; ctx bounds the read barrier.
+func (d *DB) CommittedChangeIndexCtx(ctx context.Context) (uint64, error) {
+	if err := d.ReadBarrierCtx(ctx, defaultReadBarrierTimeout); err != nil {
 		return 0, err
 	}
+	watermark := d.nativeStreamWatermark()
 	persisted, err := d.loadPersistedChangeIndex()
 	if err != nil {
 		return 0, err
@@ -320,6 +309,9 @@ func (d *DB) CommittedChangeIndex() (uint64, error) {
 	}
 	if last > persisted {
 		persisted = last
+	}
+	if persisted > watermark {
+		persisted = watermark
 	}
 	return persisted, nil
 }

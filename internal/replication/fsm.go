@@ -96,6 +96,14 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	if err := readSnapshot(rc, f.pebble); err != nil {
 		return fmt.Errorf("fsm restore: %w", err)
 	}
+	// The snapshot repopulated the store underneath the applier. Raise its
+	// change-sequence allocator so a promoted node never reuses a sequence
+	// and its committed watermark covers the installed changelog.
+	if r, ok := f.applier.(interface{ ReseedChangeIndex() error }); ok {
+		if err := r.ReseedChangeIndex(); err != nil {
+			return fmt.Errorf("fsm restore: reseed change index: %w", err)
+		}
+	}
 	return nil
 }
 

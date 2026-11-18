@@ -58,7 +58,7 @@ func (s *GRPCServer) DescribeStream(ctx context.Context, req *cefaspb.DescribeSt
 	if req.GetStreamArn() == "" {
 		return nil, status.Error(codes.InvalidArgument, "stream_arn required")
 	}
-	desc, err := streamcore.DescribeStream(s.cat, s.db, req.GetStreamArn())
+	desc, err := streamcore.DescribeStreamCtx(ctx, s.cat, s.db, req.GetStreamArn())
 	if err != nil {
 		return nil, mapStorageErr(err)
 	}
@@ -91,7 +91,7 @@ func (s *GRPCServer) GetShardIterator(ctx context.Context, req *cefaspb.GetShard
 		s.observeStreamIteratorFailure(StreamTableForARN(s.cat, req.GetStreamArn()), err)
 		return nil, mapStorageErr(err)
 	}
-	token, err := CreateStreamShardIterator(s.cat, s.db, CreateIteratorRequest{
+	token, err := streamcore.CreateStreamShardIteratorCtx(ctx, s.cat, s.db, CreateIteratorRequest{
 		StreamArn:      req.GetStreamArn(),
 		ShardID:        shardID,
 		IteratorType:   req.GetShardIteratorType(),
@@ -113,7 +113,8 @@ func (s *GRPCServer) GetRecords(ctx context.Context, req *cefaspb.GetRecordsRequ
 	if s.manager != nil && len(s.manager.Shards()) != 1 {
 		return nil, status.Error(codes.Unavailable, streamcore.ErrTopologyUnsupported.Error())
 	}
-	result, err := GetStreamRecords(
+	result, err := streamcore.GetStreamRecordsCtx(
+		ctx,
 		s.cat,
 		s.db,
 		req.GetShardIterator(),

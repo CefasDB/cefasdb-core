@@ -255,3 +255,48 @@ func TestHandleStreamForwardsEvents(t *testing.T) {
 		t.Fatalf("content-type = %q, want text/event-stream", got)
 	}
 }
+
+// TestHandleGetRecordsCancelledContextReturnsRetryable503 proves a stream
+// read whose request context has ended returns the retryable 503 promptly
+// instead of waiting on the store (FU-01).
+func TestHandleGetRecordsCancelledContextReturnsRetryable503(t *testing.T) {
+	t.Parallel()
+	h, _, cat, cleanup := newHandlers(t)
+	defer cleanup()
+	td := createEventsTable(t, cat)
+
+	iterBody := bytes.NewBufferString(
+		`{"streamArn":"` + td.LatestStreamArn +
+			`","shardId":"` + types.StreamShardIDSingle +
+			`","shardIteratorType":"TRIM_HORIZON"}`)
+	iterRec := httptest.NewRecorder()
+	h.HandleGetShardIterator(iterRec, httptest.NewRequest(http.MethodPost, "/v1/GetShardIterator", iterBody))
+	if iterRec.Code != http.StatusOK {
+		t.Fatalf("iterator status = %d body=%s", iterRec.Code, iterRec.Body.String())
+	}
+	var iterResp struct {
+		ShardIterator string `json:"shardIterator"`
+	}
+	if err := json.NewDecoder(iterRec.Body).Decode(&iterResp); err != nil {
+		t.Fatalf("decode iterator: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		path string
+		body string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{"/v1/GetRecords", `{"shardIterator":"` + iterResp.ShardIterator + `","limit":10}`, h.HandleGetRecords},
+		{"/v1/DescribeStream", `{"streamArn":"` + td.LatestStreamArn + `"}`, h.HandleDescribeStream},
+		{"/v1/GetShardIterator", `{"streamArn":"` + td.LatestStreamArn + `","shardId":"` + types.StreamShardIDSingle + `","shardIteratorType":"LATEST"}`, h.HandleGetShardIterator},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewBufferString(tc.body)).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		tc.call(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s with cancelled context: status = %d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}

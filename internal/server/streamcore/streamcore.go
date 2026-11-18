@@ -10,6 +10,7 @@
 package streamcore
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -128,7 +129,12 @@ type StreamRecordsResult struct {
 // DescribeStream observes a real committed high-water after the store's
 // leader barrier. EndingSequenceNumber remains the closed-stream fence.
 func DescribeStream(cat *catalog.Catalog, db *pebble.DB, arn string) (types.StreamDescriptor, error) {
-	current, err := db.CommittedChangeIndex()
+	return DescribeStreamCtx(context.Background(), cat, db, arn)
+}
+
+// DescribeStreamCtx is DescribeStream bounded by the request context.
+func DescribeStreamCtx(ctx context.Context, cat *catalog.Catalog, db *pebble.DB, arn string) (types.StreamDescriptor, error) {
+	current, err := db.CommittedChangeIndexCtx(ctx)
 	if err != nil {
 		return types.StreamDescriptor{}, err
 	}
@@ -231,6 +237,12 @@ func PaginateStreamShards(shards []types.StreamShardDescriptor, limit int, exclu
 // trimmed/invalid iterator) return typed errors callers can map to
 // the wire status they need.
 func CreateStreamShardIterator(cat *catalog.Catalog, db *pebble.DB, req CreateIteratorRequest, now time.Time) (string, error) {
+	return CreateStreamShardIteratorCtx(context.Background(), cat, db, req, now)
+}
+
+// CreateStreamShardIteratorCtx is CreateStreamShardIterator bounded by the
+// request context.
+func CreateStreamShardIteratorCtx(ctx context.Context, cat *catalog.Catalog, db *pebble.DB, req CreateIteratorRequest, now time.Time) (string, error) {
 	if req.StreamArn == "" {
 		return "", fmt.Errorf("%w: stream_arn required", types.ErrStreamIteratorInvalid)
 	}
@@ -247,7 +259,7 @@ func CreateStreamShardIterator(cat *catalog.Catalog, db *pebble.DB, req CreateIt
 			IteratorTypeAtSequenceNumber,
 			IteratorTypeAfterSequenceNumber)
 	}
-	if err := db.ReadBarrier(5 * time.Second); err != nil {
+	if err := db.ReadBarrierCtx(ctx, 5*time.Second); err != nil {
 		return "", err
 	}
 	desc, err := cat.DescribeStream(req.StreamArn)
@@ -265,7 +277,7 @@ func CreateStreamShardIterator(cat *catalog.Catalog, db *pebble.DB, req CreateIt
 	if err != nil {
 		return "", err
 	}
-	nextSequence, err := resolveShardIteratorNextSequence(db, shard, iteratorType, req.SequenceNumber, retention)
+	nextSequence, err := resolveShardIteratorNextSequence(ctx, db, shard, iteratorType, req.SequenceNumber, retention)
 	if err != nil {
 		return "", err
 	}
@@ -284,6 +296,11 @@ func CreateStreamShardIterator(cat *catalog.Catalog, db *pebble.DB, req CreateIt
 // "" when the shard is closed and exhausted). Stream-specific
 // failures return typed errors.
 func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string, limit int32, now time.Time) (StreamRecordsResult, error) {
+	return GetStreamRecordsCtx(context.Background(), cat, db, shardIterator, limit, now)
+}
+
+// GetStreamRecordsCtx is GetStreamRecords bounded by the request context.
+func GetStreamRecordsCtx(ctx context.Context, cat *catalog.Catalog, db *pebble.DB, shardIterator string, limit int32, now time.Time) (StreamRecordsResult, error) {
 	if shardIterator == "" {
 		return StreamRecordsResult{}, fmt.Errorf("%w: shard_iterator required", types.ErrStreamIteratorInvalid)
 	}
@@ -291,7 +308,7 @@ func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string,
 	if err != nil {
 		return StreamRecordsResult{}, err
 	}
-	if err := db.ReadBarrier(5 * time.Second); err != nil {
+	if err := db.ReadBarrierCtx(ctx, 5*time.Second); err != nil {
 		return StreamRecordsResult{}, err
 	}
 	desc, err := cat.DescribeStream(payload.StreamArn)
@@ -336,7 +353,7 @@ func GetStreamRecords(cat *catalog.Catalog, db *pebble.DB, shardIterator string,
 			return result, nil
 		}
 	}
-	records, nextSequence, err := db.StreamRecords(desc.TableName, nextSequence, endingSequence, normalizeGetRecordsLimit(limit), maxGetRecordsResponseBytes)
+	records, nextSequence, err := db.StreamRecordsCtx(ctx, desc.TableName, nextSequence, endingSequence, normalizeGetRecordsLimit(limit), maxGetRecordsResponseBytes)
 	if err != nil {
 		return result, err
 	}
@@ -441,7 +458,7 @@ func findStreamShard(desc types.StreamDescriptor, shardID model.StreamShardID) (
 	return types.StreamShardDescriptor{}, false
 }
 
-func resolveShardIteratorNextSequence(db *pebble.DB, shard types.StreamShardDescriptor, iteratorType, sequenceNumber string, retention pebble.StreamRetentionStats) (uint64, error) {
+func resolveShardIteratorNextSequence(ctx context.Context, db *pebble.DB, shard types.StreamShardDescriptor, iteratorType, sequenceNumber string, retention pebble.StreamRetentionStats) (uint64, error) {
 	start, err := parseStreamSequenceNumber(shard.SequenceNumberRange.StartingSequenceNumber)
 	if err != nil {
 		return 0, fmt.Errorf("stream shard starting sequence: %w", err)
@@ -451,7 +468,7 @@ func resolveShardIteratorNextSequence(db *pebble.DB, shard types.StreamShardDesc
 	case IteratorTypeTrimHorizon:
 		return trimFloor, nil
 	case IteratorTypeLatest:
-		return latestStreamSequence(db, shard)
+		return latestStreamSequence(ctx, db, shard)
 	case IteratorTypeAtSequenceNumber, IteratorTypeAfterSequenceNumber:
 		if sequenceNumber == "" {
 			return 0, fmt.Errorf("%w: sequence_number required for %s", types.ErrStreamIteratorInvalid, iteratorType)
@@ -485,7 +502,7 @@ func streamTrimFloor(shardStart uint64, retention pebble.StreamRetentionStats) u
 	return shardStart
 }
 
-func latestStreamSequence(db *pebble.DB, shard types.StreamShardDescriptor) (uint64, error) {
+func latestStreamSequence(ctx context.Context, db *pebble.DB, shard types.StreamShardDescriptor) (uint64, error) {
 	if shard.SequenceNumberRange.EndingSequenceNumber != "" {
 		ending, err := parseStreamSequenceNumber(shard.SequenceNumberRange.EndingSequenceNumber)
 		if err != nil {
@@ -493,7 +510,7 @@ func latestStreamSequence(db *pebble.DB, shard types.StreamShardDescriptor) (uin
 		}
 		return ending + 1, nil
 	}
-	current, err := db.CommittedChangeIndex()
+	current, err := db.CommittedChangeIndexCtx(ctx)
 	if err != nil {
 		return 0, err
 	}

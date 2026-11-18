@@ -2476,7 +2476,7 @@ func mapStorageErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, craft.ErrNotLeader):
 		return status.Error(codes.FailedPrecondition, err.Error())
-	case errors.Is(err, pebble.ErrDraining):
+	case errors.Is(err, pebble.ErrDraining), errors.Is(err, pebble.ErrReadUnavailable):
 		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, pebble.ErrThrottled):
 		return status.Error(codes.ResourceExhausted, err.Error())

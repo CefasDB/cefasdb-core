@@ -1,6 +1,7 @@
 package pebble
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -93,6 +94,20 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 		return rec, fmt.Errorf("change record table required")
 	}
 	rec.Index = d.changeIndex.Add(1)
+	rec, err := d.writeChangeRecord(b, rec)
+	if err != nil {
+		return rec, err
+	}
+	if rec.StreamRecord {
+		d.trackStreamTable(rec.Table)
+	}
+	return rec, nil
+}
+
+// writeChangeRecord writes rec at its already-assigned Index. It has no
+// side effects outside b, so the TTL reaper can size a record before it
+// allocates the sequence.
+func (d *DB) writeChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeRecord, error) {
 	if rec.StreamRecord {
 		rec.SequenceNumber = strconv.FormatUint(rec.Index, 10)
 	}
@@ -119,9 +134,6 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 		if err := b.Set(storage.KeyChangeLogExpiration(expireUnixNano, rec.Index), nil, nil); err != nil {
 			return rec, err
 		}
-	}
-	if rec.StreamRecord {
-		d.trackStreamTable(rec.Table)
 	}
 	return rec, nil
 }
@@ -554,6 +566,29 @@ func (d *DB) seedChangeIndex() error {
 	return nil
 }
 
+// ReseedChangeIndex raises the in-memory allocator to the persisted state
+// after the store was repopulated underneath it (Raft snapshot install). It
+// never lowers the allocator.
+func (d *DB) ReseedChangeIndex() error {
+	persisted, err := d.loadPersistedChangeIndex()
+	if err != nil {
+		return err
+	}
+	scanned, err := d.scanMaxChangeIndex()
+	if err != nil {
+		return err
+	}
+	if scanned > persisted {
+		persisted = scanned
+	}
+	for prior := d.changeIndex.Load(); persisted > prior; prior = d.changeIndex.Load() {
+		if d.changeIndex.CompareAndSwap(prior, persisted) {
+			break
+		}
+	}
+	return nil
+}
+
 func (d *DB) CurrentChangeIndex() (uint64, error) {
 	return d.changeIndex.Load(), nil
 }
@@ -836,11 +871,24 @@ func (d *DB) ScanCDC(table string, fromIndex, toIndex uint64, limit int) ([]Chan
 }
 
 func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
-	unlock, err := d.lockNativeStreamRead(table)
+	return d.changeRecordsAfterCtx(context.Background(), table, fromExclusive, toInclusive, untilUnixNano)
+}
+
+func (d *DB) changeRecordsAfterCtx(ctx context.Context, table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
+	bound, fenced, err := d.nativeStreamReadBound(ctx, table)
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
+	if fenced {
+		if bound <= fromExclusive {
+			return nil, nil
+		}
+		if toInclusive == 0 || toInclusive > bound {
+			toInclusive = bound
+		}
+	}
+	// The snapshot is taken after the watermark: every native sequence
+	// <= bound has committed and is therefore visible to it.
 	snap := d.db.NewSnapshot()
 	defer snap.Close()
 	lower := storage.KeyChangeLog(fromExclusive + 1)
@@ -885,20 +933,36 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 // fromSequence. nextSequence is the next changelog sequence a caller should use
 // even when records from other tables or non-stream writes are skipped.
 func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit int, maxBytes int64) ([]ChangeRecord, uint64, error) {
-	unlock, err := d.lockNativeStreamRead(table)
+	return d.StreamRecordsCtx(context.Background(), table, fromSequence, toSequence, limit, maxBytes)
+}
+
+// StreamRecordsCtx is StreamRecords bounded by ctx. For native tables the
+// scan stops at the committed watermark, so nextSequence never passes a
+// native sequence that is allocated but not committed; it never waits for
+// writers, only for the read barrier.
+func (d *DB) StreamRecordsCtx(ctx context.Context, table string, fromSequence, toSequence uint64, limit int, maxBytes int64) ([]ChangeRecord, uint64, error) {
+	bound, fenced, err := d.nativeStreamReadBound(ctx, table)
 	if err != nil {
 		return nil, fromSequence, err
 	}
-	defer unlock()
 	snap := d.db.NewSnapshot()
 	defer snap.Close()
 	if fromSequence == 0 {
 		fromSequence = 1
 	}
-	if stats, ok, err := d.loadStreamRetentionState(table); err != nil {
+	if fenced {
+		if bound < fromSequence {
+			if err := d.checkStreamTrimmed(table, fromSequence); err != nil {
+				return nil, fromSequence, err
+			}
+			return nil, fromSequence, nil
+		}
+		if toSequence == 0 || toSequence > bound {
+			toSequence = bound
+		}
+	}
+	if err := d.checkStreamTrimmed(table, fromSequence); err != nil {
 		return nil, fromSequence, err
-	} else if ok && stats.OldestSequence > 0 && fromSequence < stats.OldestSequence {
-		return nil, fromSequence, types.ErrStreamTrimmed
 	}
 	if limit <= 0 {
 		limit = 1000
@@ -963,4 +1027,15 @@ func (d *DB) StreamRecords(table string, fromSequence, toSequence uint64, limit 
 		hideExpiredNativeImages(&out[i], time.Now())
 	}
 	return out, nextSequence, nil
+}
+
+func (d *DB) checkStreamTrimmed(table string, fromSequence uint64) error {
+	stats, ok, err := d.loadStreamRetentionState(table)
+	if err != nil {
+		return err
+	}
+	if ok && stats.OldestSequence > 0 && fromSequence < stats.OldestSequence {
+		return types.ErrStreamTrimmed
+	}
+	return nil
 }

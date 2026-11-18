@@ -146,8 +146,10 @@ type DB struct {
 	// atomic.Add. Seeded in Open from max(persisted ChangeCounterKey,
 	// MAX(KeyChangeLog)) so a stale counter from a crash never overlaps
 	// existing keys. Access on the hot path is lock-free.
-	changeIndex    atomic.Uint64
-	nativeStreamMu sync.Mutex
+	changeIndex atomic.Uint64
+	// streamFence tracks native-stream sequences that are allocated but
+	// not yet committed; readers bound cursors at its watermark.
+	streamFence streamFence
 
 	// batchSeqCounter is the monotonic per-process source of
 	// idempotency markers (#524). Combined with a nanosecond
