@@ -290,15 +290,16 @@ func (d *DB) CommittedChangeIndex() (uint64, error) {
 
 // CommittedChangeIndexCtx returns the highest committed changelog sequence
 // that no cursor can overtake: max(persisted counter, last changelog key),
-// capped at the native-stream watermark taken before that state is read.
-// Every native sequence at or below the result has committed (or was
-// abandoned), so a LATEST iterator at result+1 cannot skip an in-flight
-// native write. It does not block writers; ctx bounds the read barrier.
+// capped at the native-stream watermark. Every native sequence at or below
+// the result has committed (or was abandoned), so a LATEST iterator at
+// result+1 cannot skip an in-flight native write. The watermark is read
+// before the read barrier for the reason given on nativeStreamReadBound.
+// It does not block writers; ctx bounds the read barrier.
 func (d *DB) CommittedChangeIndexCtx(ctx context.Context) (uint64, error) {
+	watermark := d.nativeStreamWatermark()
 	if err := d.ReadBarrierCtx(ctx, defaultReadBarrierTimeout); err != nil {
 		return 0, err
 	}
-	watermark := d.nativeStreamWatermark()
 	persisted, err := d.loadPersistedChangeIndex()
 	if err != nil {
 		return 0, err

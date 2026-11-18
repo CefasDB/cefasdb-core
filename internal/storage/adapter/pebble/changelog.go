@@ -93,7 +93,14 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 	if rec.Table == "" {
 		return rec, fmt.Errorf("change record table required")
 	}
-	rec.Index = d.changeIndex.Add(1)
+	if rec.UnixNano == 0 {
+		rec.Index, rec.UnixNano = d.allocateChangeSequence()
+	} else {
+		// A caller-supplied timestamp (test fixtures backdating records)
+		// is kept and does not take part in the ordering clamp. Production
+		// writers, the TTL reaper included, leave it zero.
+		rec.Index = d.changeIndex.Add(1)
+	}
 	rec, err := d.writeChangeRecord(b, rec)
 	if err != nil {
 		return rec, err
@@ -102,6 +109,26 @@ func (d *DB) appendChangeRecord(b *pebbledb.Batch, rec ChangeRecord) (ChangeReco
 		d.trackStreamTable(rec.Table)
 	}
 	return rec, nil
+}
+
+// allocateChangeSequence assigns the next change sequence together with its
+// timestamp. Both are taken under changeAllocMu and the timestamp is clamped
+// to be non-decreasing, so within this process timestamps never decrease in
+// sequence order whatever the concurrency. Time-bounded changelog scans
+// (point-in-time restore by timestamp) stop at the first record newer than
+// their target and rely on that order. The stamp is taken at allocation, not
+// when the record was planned, so a slow planner (the TTL reaper) cannot
+// carry an older timestamp past a later-allocated sequence.
+func (d *DB) allocateChangeSequence() (uint64, int64) {
+	d.changeAllocMu.Lock()
+	defer d.changeAllocMu.Unlock()
+	index := d.changeIndex.Add(1)
+	now := time.Now().UnixNano()
+	if now < d.lastChangeUnixNano {
+		now = d.lastChangeUnixNano
+	}
+	d.lastChangeUnixNano = now
+	return index, now
 }
 
 // writeChangeRecord writes rec at its already-assigned Index. It has no
@@ -875,9 +902,42 @@ func (d *DB) changeRecordsAfter(table string, fromExclusive, toInclusive uint64,
 }
 
 func (d *DB) changeRecordsAfterCtx(ctx context.Context, table string, fromExclusive, toInclusive uint64, untilUnixNano int64) ([]ChangeRecord, error) {
+	return d.changeRecordsRange(ctx, table, fromExclusive, toInclusive, untilUnixNano, false)
+}
+
+// changeRecordsThroughCtx returns the records of table in
+// (fromExclusive, toInclusive], stopping at untilUnixNano like
+// changeRecordsAfter. Unlike changeRecordsAfter, which stops a native table
+// at the committed watermark, it first waits (bounded by ctx and wait) for
+// the watermark to reach toInclusive and fails with ErrReadUnavailable
+// rather than return a range cut short. Point-in-time restore uses it so an
+// in-flight native write below its target is never silently dropped.
+func (d *DB) changeRecordsThroughCtx(ctx context.Context, table string, fromExclusive, toInclusive uint64, untilUnixNano int64, wait time.Duration) ([]ChangeRecord, error) {
+	if toInclusive == 0 || toInclusive <= fromExclusive {
+		return nil, nil
+	}
+	td, err := d.visibilityDescriptor(table)
+	if err != nil {
+		return nil, err
+	}
+	if len(td.TextIndexes) > 0 {
+		if err := d.waitNativeStreamWatermark(ctx, toInclusive, wait); err != nil {
+			return nil, err
+		}
+	}
+	return d.changeRecordsRange(ctx, table, fromExclusive, toInclusive, untilUnixNano, true)
+}
+
+// changeRecordsRange scans the changelog of table. For a native table the
+// scan is capped at the committed watermark; with exact set, a watermark
+// below toInclusive is an error instead of a silent cap.
+func (d *DB) changeRecordsRange(ctx context.Context, table string, fromExclusive, toInclusive uint64, untilUnixNano int64, exact bool) ([]ChangeRecord, error) {
 	bound, fenced, err := d.nativeStreamReadBound(ctx, table)
 	if err != nil {
 		return nil, err
+	}
+	if fenced && exact && toInclusive > bound {
+		return nil, &ReadWaitError{Cause: fmt.Errorf("native-stream watermark %d is below the requested change index %d", bound, toInclusive)}
 	}
 	if fenced {
 		if bound <= fromExclusive {
@@ -887,8 +947,8 @@ func (d *DB) changeRecordsAfterCtx(ctx context.Context, table string, fromExclus
 			toInclusive = bound
 		}
 	}
-	// The snapshot is taken after the watermark: every native sequence
-	// <= bound has committed and is therefore visible to it.
+	// The snapshot is taken after the watermark and the barrier: every
+	// native sequence <= bound has committed and is therefore visible to it.
 	snap := d.db.NewSnapshot()
 	defer snap.Close()
 	lower := storage.KeyChangeLog(fromExclusive + 1)

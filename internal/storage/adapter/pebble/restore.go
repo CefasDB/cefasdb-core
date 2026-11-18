@@ -1,6 +1,7 @@
 package pebble
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -242,6 +243,10 @@ func (d *DB) validatePITRTarget(preflight RestorePreflightResult, opts RestoreOp
 	return nil
 }
 
+// restoreWatermarkWait bounds how long point-in-time replay waits for
+// in-flight native-stream writes below its target to commit or abandon.
+const restoreWatermarkWait = 30 * time.Second
+
 func (d *DB) replayChangesToTarget(preflight RestorePreflightResult, opts RestoreOptions) (int, error) {
 	if err := d.validatePITRTarget(preflight, opts); err != nil {
 		return 0, err
@@ -260,9 +265,12 @@ func (d *DB) replayChangesToTarget(preflight RestorePreflightResult, opts Restor
 			return 0, err
 		}
 	}
-	records, err := d.changeRecordsAfter(preflight.SourceTableName, meta.ChangeIndex, toIndex, opts.TargetUnixNano)
+	// Every record through toIndex must be replayed: wait (bounded) for
+	// in-flight native writes below it to settle instead of stopping at
+	// the native-stream watermark.
+	records, err := d.changeRecordsThroughCtx(context.Background(), preflight.SourceTableName, meta.ChangeIndex, toIndex, opts.TargetUnixNano, restoreWatermarkWait)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("restore replay through change index %d: %w", toIndex, err)
 	}
 	applied := 0
 	for _, rec := range records {

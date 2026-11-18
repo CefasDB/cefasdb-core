@@ -147,6 +147,10 @@ type DB struct {
 	// MAX(KeyChangeLog)) so a stale counter from a crash never overlaps
 	// existing keys. Access on the hot path is lock-free.
 	changeIndex atomic.Uint64
+	// changeAllocMu orders sequence allocation with its timestamp so change
+	// timestamps never decrease in sequence order (allocateChangeSequence).
+	changeAllocMu      sync.Mutex
+	lastChangeUnixNano int64
 	// streamFence tracks native-stream sequences that are allocated but
 	// not yet committed; readers bound cursors at its watermark.
 	streamFence streamFence

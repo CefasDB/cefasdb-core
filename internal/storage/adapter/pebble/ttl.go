@@ -439,17 +439,20 @@ func (sw *ttlSweep) planVictim(b *pebbledb.Batch, v ttlVictim, primaryKey []byte
 	}
 	rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(oldItem, td.KeySchema), oldItem, nil)
 	rec.BatchID = db.nextBatchID()
-	// Fix the timestamp now so the sized record and the committed record
-	// share the same expiration key.
-	rec.UnixNano = time.Now().UnixNano()
+	// The timestamp is stamped with the sequence at commit time
+	// (appendChangeRecord), never at planning time: a planned timestamp
+	// could precede that of a sequence another writer allocated earlier.
 	return rec, true, true, nil
 }
 
 // recordBytes is an upper bound of the batch bytes rec adds once it has a
-// sequence: it is written with the widest possible sequence.
+// sequence: it is written with the widest possible sequence. Sequence and
+// timestamp are fixed-width in the record and the expiration key, so a
+// placeholder timestamp (any positive value) sizes the committed record.
 func (sw *ttlSweep) recordBytes(measure *pebbledb.Batch, rec ChangeRecord) (int, error) {
 	measure.Reset()
 	rec.Index = ^uint64(0)
+	rec.UnixNano = time.Now().UnixNano()
 	if _, err := sw.r.db.writeChangeRecord(measure, rec); err != nil {
 		return 0, fmt.Errorf("ttl change log: %w", err)
 	}

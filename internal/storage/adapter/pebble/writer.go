@@ -111,10 +111,10 @@ func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts P
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
-	// Reserve the native-stream sequence after the primary-key lock and
-	// release it only after the commit below has returned.
-	streamDone := d.beginNativeStreamWrite(td)
-	defer streamDone()
+	// The native-stream reservation is taken immediately before the
+	// sequence allocation below and released after the commit returned.
+	var stream nativeStreamReservation
+	defer stream.done()
 	encoded, err := storage.EncodeItem(item)
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
@@ -200,6 +200,7 @@ func (d *DB) putItemWithNoLane(td types.TableDescriptor, item types.Item, opts P
 	if d.shouldAppendChangeRecord(td) {
 		rec := newChangeRecord(td, ChangePut, keyItemFromItem(item, td.KeySchema), priorItem, item)
 		rec.BatchID = d.nextBatchID()
+		stream.reserve(d, td)
 		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
@@ -278,10 +279,10 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
-	// Reserve the native-stream sequence after the primary-key lock and
-	// release it only after the commit below has returned.
-	streamDone := d.beginNativeStreamWrite(td)
-	defer streamDone()
+	// The native-stream reservation is taken immediately before the
+	// sequence allocation below and released after the commit returned.
+	var stream nativeStreamReservation
+	defer stream.done()
 	cond, err := storage.ParseCondition(opts.Condition)
 	if err != nil {
 		return fmt.Errorf("condition: %w", err)
@@ -355,6 +356,7 @@ func (d *DB) deleteItemWithNoLane(td types.TableDescriptor, keyAttrs types.Item,
 	if d.shouldAppendChangeRecord(td) {
 		rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(keyAttrs, td.KeySchema), priorItem, nil)
 		rec.BatchID = d.nextBatchID()
+		stream.reserve(d, td)
 		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return fmt.Errorf("change log: %w", err)
 		}
@@ -931,8 +933,11 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 	}
 	unlock := lockPrimaryKeys(keys)
 	defer unlock()
-	streamDone := d.beginNativeStreamWrite(td)
-	defer streamDone()
+	// Reserved at the first sequence allocation below, released after the
+	// commit returned. Native tables never take the skip-prior path (text
+	// indexes disable it), so it needs no reservation.
+	var stream nativeStreamReservation
+	defer stream.done()
 	if d.batchPutItemsCanSkipPrior(td, ops) {
 		return d.batchPutItemsWithoutPriorImpl(td, ops, bypassRepl)
 	}
@@ -1012,6 +1017,7 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 				rec := newChangeRecord(td, ChangePut, keyItemFromItem(op.Item, td.KeySchema), priorItem, op.Item)
 				rec.BatchID = batchID
 				rec.SeqInBatch = int32(i)
+				stream.reserve(d, td)
 				if _, err := d.appendChangeRecord(b, rec); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}
@@ -1072,6 +1078,7 @@ func (d *DB) batchWriteItemImpl(td types.TableDescriptor, ops []BatchOp, bypassR
 				rec := newChangeRecord(td, ChangeDelete, keyItemFromItem(op.Key, td.KeySchema), priorItem, nil)
 				rec.BatchID = batchID
 				rec.SeqInBatch = int32(i)
+				stream.reserve(d, td)
 				if _, err := d.appendChangeRecord(b, rec); err != nil {
 					return fmt.Errorf("op %d change log: %w", i, err)
 				}

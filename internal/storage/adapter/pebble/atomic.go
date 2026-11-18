@@ -148,8 +148,10 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	mu := atomicLock(primaryKey)
 	mu.Lock()
 	defer mu.Unlock()
-	streamDone := d.beginNativeStreamWrite(td)
-	defer streamDone()
+	// Reserved immediately before the sequence allocation below and
+	// released after the commit returned.
+	var stream nativeStreamReservation
+	defer stream.done()
 	if dedupKey != "" {
 		if cached, ok := d.atomicDedupGet(dedupKey, time.Now()); ok {
 			return cached, nil
@@ -289,6 +291,7 @@ func (d *DB) AtomicUpdate(td types.TableDescriptor, keyAttrs types.Item, opts At
 	if d.shouldAppendChangeRecord(td) {
 		rec := newChangeRecord(td, ChangePut, keyItemFromItem(newItem, td.KeySchema), priorItem, newItem)
 		rec.BatchID = d.nextBatchID()
+		stream.reserve(d, td)
 		if _, err := d.appendChangeRecord(b, rec); err != nil {
 			return AtomicResult{}, fmt.Errorf("change log: %w", err)
 		}
