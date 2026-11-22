@@ -7,11 +7,96 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
+
+func TestLoadPublishedRF3AcceptanceBundle(t *testing.T) {
+	t.Parallel()
+
+	directory := filepath.Join("..", "..", "contracts", "rf3-acceptance")
+	rootPath := filepath.Join(directory, "v1.json")
+	workloadPath := filepath.Join(directory, "workload-v1.json")
+	topologyPath := filepath.Join(directory, "topology-v1.json")
+
+	got, err := LoadRF3AcceptanceFiles(context.Background(), rootPath, workloadPath, topologyPath)
+	if err != nil {
+		t.Fatalf("LoadRF3AcceptanceFiles() unexpected error: %v", err)
+	}
+	assertRF3NonzeroBundle(t, got)
+
+	if value := got.Acceptance().ID().String(); value != "rf3.acceptance.rf3-p1.v1" {
+		t.Fatalf("acceptance ID = %q, want rf3.acceptance.rf3-p1.v1", value)
+	}
+	if value := got.Workload().ID().String(); value != "rf3.workload.synthetic-mixed-one-kops.v1" {
+		t.Fatalf("workload ID = %q, want rf3.workload.synthetic-mixed-one-kops.v1", value)
+	}
+	if value := got.Topology().ID().String(); value != "rf3.topology.three-node-standard.v1" {
+		t.Fatalf("topology ID = %q, want rf3.topology.three-node-standard.v1", value)
+	}
+
+	digests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{
+			name: "acceptance",
+			got:  got.AcceptanceDigest().String(),
+			want: "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853",
+		},
+		{
+			name: "workload",
+			got:  got.WorkloadDigest().String(),
+			want: "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
+		},
+		{
+			name: "topology",
+			got:  got.TopologyDigest().String(),
+			want: "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78",
+		},
+	}
+	for _, digest := range digests {
+		if digest.got != digest.want {
+			t.Errorf("%s digest = %q, want %q", digest.name, digest.got, digest.want)
+		}
+	}
+
+	wantWorkloadNames := []string{"write", "point-read", "scan", "mixed"}
+	if names := got.Workload().ProfileNames(); !reflect.DeepEqual(names, wantWorkloadNames) {
+		t.Fatalf("workload names = %v, want %v", names, wantWorkloadNames)
+	}
+
+	scenarios := got.Acceptance().Scenarios()
+	scenarioNames := make([]string, len(scenarios))
+	for index, scenario := range scenarios {
+		scenarioNames[index] = scenario.Name()
+	}
+	wantScenarioNames := []string{
+		"healthy-baseline",
+		"pod-kill",
+		"node-drain",
+		"node-shutdown",
+		"orphan-process",
+		"disk-pressure",
+		"network-partition",
+		"two-node-failure",
+	}
+	if !reflect.DeepEqual(scenarioNames, wantScenarioNames) {
+		t.Fatalf("scenario names = %v, want %v", scenarioNames, wantScenarioNames)
+	}
+
+	wantFailureDomains := []string{"rf3q-zone-a", "rf3q-zone-b", "rf3q-zone-c"}
+	if domains := got.Topology().FailureDomains(); !reflect.DeepEqual(domains, wantFailureDomains) {
+		t.Fatalf("failure domains = %v, want %v", domains, wantFailureDomains)
+	}
+	if storageClass := got.Topology().Volume().Class; storageClass != "cefasdb-rf3-durable-rwo-v1" {
+		t.Fatalf("storage class = %q, want cefasdb-rf3-durable-rwo-v1", storageClass)
+	}
+}
 
 func TestLoadRF3AcceptanceFiles(t *testing.T) {
 	t.Parallel()
@@ -112,7 +197,6 @@ func TestLoadRF3AcceptanceFilesHonorsCancellation(t *testing.T) {
 	topologyPath := writeRF3File(t, directory, rf3TopologyName, corpus.topology)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
 	got, err := LoadRF3AcceptanceFiles(ctx, rootPath, workloadPath, topologyPath)
 	assertRF3RejectedBundle(t, got, err)
 	if !errors.Is(err, context.Canceled) {
@@ -323,6 +407,39 @@ func TestRF3AcceptanceSchemaAndSemanticValidationAgree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile draft 2020-12 schema: %v", err)
 	}
+
+	publishedDirectory := filepath.Join("..", "..", "contracts", "rf3-acceptance")
+	publishedRootPath := filepath.Join(publishedDirectory, "v1.json")
+	publishedWorkloadPath := filepath.Join(publishedDirectory, "workload-v1.json")
+	publishedTopologyPath := filepath.Join(publishedDirectory, "topology-v1.json")
+	publishedDocuments := []struct {
+		name string
+		path string
+	}{
+		{name: "v1.json", path: publishedRootPath},
+		{name: "workload-v1.json", path: publishedWorkloadPath},
+		{name: "topology-v1.json", path: publishedTopologyPath},
+	}
+	for _, document := range publishedDocuments {
+		data, err := os.ReadFile(document.path)
+		if err != nil {
+			t.Fatalf("read published %s: %v", document.name, err)
+		}
+		value, err := decodeStrictRF3JSON(data)
+		if err != nil {
+			t.Fatalf("strictly decode published %s: %v", document.name, err)
+		}
+		if err := compiled.Validate(value); err != nil {
+			t.Fatalf("schema rejected published %s: %v", document.name, err)
+		}
+	}
+	publishedBundle, err := LoadRF3AcceptanceFiles(
+		context.Background(), publishedRootPath, publishedWorkloadPath, publishedTopologyPath,
+	)
+	if err != nil {
+		t.Fatalf("semantic loader rejected published bundle: %v", err)
+	}
+	assertRF3NonzeroBundle(t, publishedBundle)
 
 	valid := readRF3Corpus(t)
 	for name, data := range valid.documents() {

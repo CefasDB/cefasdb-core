@@ -24,7 +24,6 @@ const (
 	SchemaVersion     uint32 = 1
 	MaxCanonicalBytes        = 1 << 20
 	MaxFindings              = 1000
-	MaxFreeTextBytes         = 4 << 10
 )
 
 type QualificationStatus string
@@ -34,11 +33,23 @@ const (
 	StatusNoGo QualificationStatus = "NO_GO"
 )
 
+// FindingReason identifies a reviewed summary that cannot carry row or credential text.
+type FindingReason string
+
+const (
+	FindingReasonCheckFailed     FindingReason = "CHECK_FAILED"
+	FindingReasonCheckMissing    FindingReason = "CHECK_MISSING"
+	FindingReasonEvidenceMissing FindingReason = "EVIDENCE_MISSING"
+	FindingReasonObjectiveMiss   FindingReason = "OBJECTIVE_EXCEEDED"
+	FindingReasonMutationUnknown FindingReason = "MUTATION_OUTCOME_UNKNOWN"
+	FindingReasonOperatorBlocked FindingReason = "OPERATOR_BLOCKED"
+)
+
 type Finding struct {
-	CheckID     string `json:"checkId"`
-	Owner       string `json:"owner"`
-	Reason      string `json:"reason"`
-	EvidenceRef string `json:"evidenceRef"`
+	CheckID     string        `json:"checkId"`
+	Owner       string        `json:"owner"`
+	Reason      FindingReason `json:"reason"`
+	EvidenceRef string        `json:"evidenceRef"`
 }
 
 type QualificationRecord struct {
@@ -155,14 +166,31 @@ type EvidenceStore interface {
 }
 
 var (
-	idPattern     = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._@/-]{0,191})$`)
-	digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	refPattern    = regexp.MustCompile(`^[^\x00-\x20\x7f]+$`)
+	idPattern      = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._@/-]{0,191})$`)
+	scopeIDPattern = regexp.MustCompile(`^[a-z](?:[a-z0-9]|[-./@_][a-z0-9])*$`)
+	digestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	refPattern     = regexp.MustCompile(`^[^\x00-\x20\x7f]+$`)
 )
 
 func index(i int) string { return strconv.Itoa(i) }
 func validID(v string) bool {
 	return idPattern.MatchString(v) && v != "." && v != ".." && !strings.Contains(v, "..")
+}
+
+func validScopeID(v string) bool { return len(v) <= 192 && scopeIDPattern.MatchString(v) }
+
+func validFindingReason(reason FindingReason) bool {
+	switch reason {
+	case FindingReasonCheckFailed,
+		FindingReasonCheckMissing,
+		FindingReasonEvidenceMissing,
+		FindingReasonObjectiveMiss,
+		FindingReasonMutationUnknown,
+		FindingReasonOperatorBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 func validRef(v string) bool {
@@ -180,7 +208,9 @@ func validTime(v time.Time) bool {
 func clone(record QualificationRecord) QualificationRecord {
 	out := record
 	out.StartedAt, out.CompletedAt = record.StartedAt.Round(0), record.CompletedAt.Round(0)
-	out.Findings = append([]Finding(nil), record.Findings...)
+	if record.Findings != nil {
+		out.Findings = append([]Finding{}, record.Findings...)
+	}
 	return out
 }
 
@@ -189,7 +219,7 @@ func validateShape(r QualificationRecord) error {
 	switch {
 	case r.SchemaVersion != SchemaVersion:
 		return bad("schemaVersion")
-	case !validID(r.ScopeID):
+	case !validScopeID(r.ScopeID):
 		return bad("scopeId")
 	case !validID(r.RunID):
 		return bad("runId")
@@ -211,6 +241,10 @@ func validateShape(r QualificationRecord) error {
 		return bad("upgradeRunRef")
 	case r.Status != StatusPass && r.Status != StatusNoGo:
 		return bad("status")
+	case r.Status == StatusPass && len(r.Findings) != 0:
+		return bad("findings")
+	case r.Status == StatusNoGo && len(r.Findings) == 0:
+		return bad("findings")
 	case !validID(r.OperatorID):
 		return bad("operatorId")
 	case !validID(r.RunbookRevision):
@@ -234,7 +268,7 @@ func validateShape(r QualificationRecord) error {
 		if !validID(finding.Owner) {
 			return bad(field + ".owner")
 		}
-		if finding.Reason == "" || len(finding.Reason) > MaxFreeTextBytes || !utf8.ValidString(finding.Reason) {
+		if finding.Reason == "" || !utf8.ValidString(string(finding.Reason)) {
 			return bad(field + ".reason")
 		}
 		if !validRef(finding.EvidenceRef) {
@@ -277,10 +311,10 @@ func allStringsUTF8(r QualificationRecord) bool {
 		r.SourceRelease.Version, r.SourceRelease.ImageDigest, r.SourceRelease.SourceCommit, r.SourceRelease.ProvenanceURI,
 		r.CandidateRelease.Version, r.CandidateRelease.ImageDigest, r.CandidateRelease.SourceCommit, r.CandidateRelease.ProvenanceURI,
 		r.TargetEnvironmentID, r.TargetProofRef, r.RestoreRunRef, r.ReconciliationReportRef, r.UpgradeRunRef,
-		string(r.Status), r.OperatorID, r.RunbookRevision, r.RunbookSHA256, r.DiagnosticsRef, r.SHA256,
+		string(r.Status), r.OperatorID, r.RunbookRevision, r.RunbookSHA256, r.DiagnosticsRef,
 	}
 	for _, finding := range r.Findings {
-		values = append(values, finding.CheckID, finding.Owner, finding.Reason, finding.EvidenceRef)
+		values = append(values, finding.CheckID, finding.Owner, string(finding.Reason), finding.EvidenceRef)
 	}
 	for _, value := range values {
 		if !utf8.ValidString(value) {
@@ -387,8 +421,8 @@ func Paginate(records map[string]QualificationRecord, scope string, size int, to
 		return EvidencePage{}, err
 	}
 	ids := make([]string, 0, len(records))
-	for id := range records {
-		if id > after {
+	for id, record := range records {
+		if record.ScopeID == scope && record.RunID == id && id > after {
 			ids = append(ids, id)
 		}
 	}

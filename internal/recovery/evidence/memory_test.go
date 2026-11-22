@@ -15,6 +15,7 @@ type memoryValue struct {
 	ref       evidence.EvidenceRef
 }
 type memoryBacking struct {
+	// mu protects records and failNext for every handle sharing this backing.
 	mu       sync.Mutex
 	records  map[string]memoryValue
 	key      []byte
@@ -26,12 +27,26 @@ type memoryStore struct {
 	data  *memoryBacking
 }
 
-func newMemory(scope string) (*memoryStore, func() evidence.EvidenceStore) {
+func newMemoryBacking() *memoryBacking {
 	at := time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)
-	data := &memoryBacking{records: map[string]memoryValue{}, key: []byte("evidence-test-cursor-key"), now: func() time.Time { return at }}
+	return &memoryBacking{
+		records: map[string]memoryValue{},
+		key:     []byte("evidence-test-cursor-key"),
+		now:     func() time.Time { return at },
+	}
+}
+
+func openMemory(data *memoryBacking, scope string) (*memoryStore, func() evidence.EvidenceStore) {
 	open := func() evidence.EvidenceStore { return &memoryStore{scope: scope, data: data} }
 	return open().(*memoryStore), open
 }
+
+func newMemory(scope string) (*memoryStore, func() evidence.EvidenceStore) {
+	return openMemory(newMemoryBacking(), scope)
+}
+
+func memoryKey(scope, runID string) string { return scope + "\x00" + runID }
+
 func (s *memoryStore) Durable() bool { return false }
 func (s *memoryStore) allowed(scope, op string) error {
 	if scope != s.scope {
@@ -56,7 +71,8 @@ func (s *memoryStore) PutTerminal(ctx context.Context, input evidence.Qualificat
 	if err := ctx.Err(); err != nil {
 		return evidence.EvidenceRef{}, err
 	}
-	if old, ok := s.data.records[record.RunID]; ok {
+	key := memoryKey(record.ScopeID, record.RunID)
+	if old, ok := s.data.records[key]; ok {
 		if bytes.Equal(old.canonical, canonical) {
 			return old.ref, nil
 		}
@@ -67,7 +83,7 @@ func (s *memoryStore) PutTerminal(ctx context.Context, input evidence.Qualificat
 		return evidence.EvidenceRef{}, &evidence.Error{Code: evidence.CodeEvidenceNotDurable, Operation: "PutTerminal"}
 	}
 	ref := evidence.EvidenceRef{Key: "scopes/" + record.ScopeID + "/runs/" + record.RunID + "/qualification.v1.json", SHA256: digest, CreatedAt: s.data.now()}
-	s.data.records[record.RunID] = memoryValue{record: evidence.CopyRecord(record), canonical: append([]byte(nil), canonical...), ref: ref}
+	s.data.records[key] = memoryValue{record: evidence.CopyRecord(record), canonical: append([]byte(nil), canonical...), ref: ref}
 	return ref, nil
 }
 
@@ -80,7 +96,10 @@ func (s *memoryStore) Get(ctx context.Context, scope, runID string) (evidence.Qu
 	}
 	s.data.mu.Lock()
 	defer s.data.mu.Unlock()
-	value, ok := s.data.records[runID]
+	if err := ctx.Err(); err != nil {
+		return evidence.QualificationRecord{}, err
+	}
+	value, ok := s.data.records[memoryKey(scope, runID)]
 	if !ok {
 		return evidence.QualificationRecord{}, &evidence.Error{Code: evidence.CodeEvidenceNotFound, Operation: "Get", Field: "runId"}
 	}
@@ -100,10 +119,16 @@ func (s *memoryStore) List(ctx context.Context, scope string, size int, token st
 		return evidence.EvidencePage{}, err
 	}
 	records := make(map[string]evidence.QualificationRecord, len(s.data.records))
-	for id, value := range s.data.records {
-		records[id] = evidence.CopyRecord(value.record)
+	for _, value := range s.data.records {
+		if value.record.ScopeID == scope {
+			records[value.record.RunID] = evidence.CopyRecord(value.record)
+		}
 	}
 	return evidence.Paginate(records, scope, size, token, s.data.key)
 }
 
-func (s *memoryStore) failPersistence() { s.data.mu.Lock(); s.data.failNext = true; s.data.mu.Unlock() }
+func (s *memoryStore) failPersistence() {
+	s.data.mu.Lock()
+	defer s.data.mu.Unlock()
+	s.data.failNext = true
+}

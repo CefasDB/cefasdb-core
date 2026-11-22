@@ -1,213 +1,189 @@
 # ADR 0009: RF3 qualification acceptance contract
 
-Status: proposed
-
-## Decision request
-
-The product owner, database operator, and platform owner must approve their
-fields before this ADR can become accepted or an RF3 acceptance bundle can
-qualify a run. No approval deadline or approved numeric target is recorded.
-The decision fixes a schema 1.0, exact-byte contract boundary now, at the cost
-of rejecting incomplete or unsupported inputs instead of inheriting tool
-defaults. Team CefasDB owns implementation after those approvals.
-
-## Context
-
-Later RF3 qualification work needs one immutable identity for the workload,
-dataset, topology, observation windows, service limits, recovery rules,
-variance rule, capacity-method status, and all eight resilience scenarios.
-The repository matrix names those scenarios and distinguishes one-domain
-serving from two-domain safe rejection, but it does not define numeric
-acceptance limits. [SRC-07a4546899ec536a]
-
-The current load runner exposes write, point-read, and mixed controls and
-reports request counts, errors, throughput, and latency percentiles; it does
-not supply an approved scan profile, topology, recovery limit, variance rule,
-or acceptance decision. [SRC-1be63d7f43fcea03] [SRC-2b616f55cdac4c46]
-[SRC-edae006394a40450] Those executable fields constrain future mappings but
-do not become approved defaults.
-
-The repository already separates semantic decoding from filesystem access.
-`compatibility.DecodeRegistry` returns a zero aggregate on every error,
-strictly rejects unknown fields and trailing documents, and delegates file
-opening and closing to `internal/contractbuild`.
-[SRC-de2b78731714dde2] [SRC-6ac1702831b79eb7]
-[SRC-93538d64f389a8f3] The RF3 contract follows that boundary.
+Status: accepted (2026-11-22 UTC)
 
 ## Decision
 
-### Schema 1.0 and exact-byte identity
+Team CefasDB accepts the schema 1.0 RF3 qualification contract for contract
+`rf3.acceptance.rf3-p1.v1`. The product owner, database operator, and
+platform owner approved the profile IDs and exact profile digests at
+2026-11-22T16:09:32.817Z through the protected decision records listed below.
+This decision authorizes the checked-in targets; it does not claim that an RF3
+environment has passed qualification. Publication remains gated on a host
+`make test` receipt for the final source bytes.
 
-The initial bundle uses schema 1.0 and contains three explicitly supplied
-file-backed plug-ins:
+## Context
 
-1. `contracts/rf3-acceptance/v1.json`, the acceptance-root plug-in.
-2. `contracts/rf3-acceptance/workload-v1.json`, the workload-profile plug-in.
-3. `contracts/rf3-acceptance/topology-v1.json`, the topology-profile plug-in.
+RF3-P2 and RF3-P4 need one immutable identity for the workload, dataset,
+topology, observation windows, service limits, recovery rules, variance rule,
+capacity method, and eight resilience scenarios. The repository matrix defines
+the scenario names and the one-domain versus two-domain safety boundary, but it
+does not supply approved numeric limits.
 
-`contracts/rf3-acceptance/schema-v1.json` is a closed JSON Schema draft
-2020-12 mirror for editor and CI feedback. It is not a fourth plug-in and is
-not the semantic authority. The repository uses the same mirror-versus-Go
-authority split for compatibility contracts and already includes the schema
-compiler dependency. [SRC-3cf0b81f580ab8c2] [SRC-8ea0a15e87dd8d3e]
+The core decoder accepts exactly three caller-supplied JSON sources. It
+strictly decodes the acceptance root, workload profile, and topology profile;
+checks the root-to-profile IDs and SHA-256 digests; validates the aggregate;
+and returns `Bundle{}` on any error. [SRC-36566995ee042ac5]
+[SRC-d96069f0ad8ff1c6] The filesystem adapter opens those three named paths,
+closes every opened input, preserves path failures, and delegates semantics to
+the core. [SRC-3b1d1359eddeca9b]
 
-A digest is lowercase `sha256:<64-hex>` over the exact file bytes. JSON
-canonicalization, whitespace normalization, field reordering, or value
-normalization does not occur before hashing. The acceptance root binds the
-relative identity, profile ID, and digest of the workload and topology files.
-A downstream run also records the exact acceptance-root digest. A path,
-contract ID, or profile ID alone never establishes identity; mutable aliases
-such as `latest` are invalid.
+## Exact-byte contract
 
-### Ownership and provenance
+The accepted bundle contains these semantic inputs:
 
-The product owner and database operator jointly approve the dataset, four
-workload profiles, latency and error limits, throughput, recovery, variance,
-and any capacity gate. The platform owner approves the non-production RF=3
-topology, three distinct failure domains, durable-volume and anti-colocation
-rules, and resource units. The acceptance root records all three roles and
-binds only the profile digests they reviewed.
+| Role | Repository path | Identity | SHA-256 |
+| --- | --- | --- | --- |
+| Acceptance root | `contracts/rf3-acceptance/v1.json` | `rf3.acceptance.rf3-p1.v1` | `10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853` |
+| Workload profile | `contracts/rf3-acceptance/workload-v1.json` | `rf3.workload.synthetic-mixed-one-kops.v1` | `d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66` |
+| Topology profile | `contracts/rf3-acceptance/topology-v1.json` | `rf3.topology.three-node-standard.v1` | `33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78` |
 
-Every decision-driving number records its value, unit, provenance kind,
-accountable owner, and evidence locator or proposal rationale.
-`measured` requires reproducible evidence. `proposed-target` requires an
-owner and rationale; approval makes it an authorized target, not a measured
-baseline. Missing, unresolved, ownerless, unitless, or unlabelled values are
-invalid. Each approval timestamp must follow the point at which the exact
-referenced bytes were fixed. Changing any referenced bytes invalidates the old
-approval set and requires a new root version and approval timestamp.
+A digest is lowercase `sha256:<64-hex>` over exact file bytes. The loader
+does not canonicalize JSON, normalize whitespace, reorder fields, or normalize
+values before hashing. The root binds both profile paths, IDs, and digests.
+[SRC-b7e8b815921c6624]
 
-This ADR remains proposed until the product owner, database operator, and
-platform owner approve their fields. The proposed 30 percent headroom and any
-three-run capacity method remain non-binding until the product owner and
-database operator approve their unit, population, window, formula, rounding,
-and variance rule.
+`contracts/rf3-acceptance/publication-v1.json` is the audit binding for the
+published root. Its SHA-256 is
+`e2b1c429f2cd2031de2bed134cf962c3e3d2b3d3502c281fa1b623cc6fde2fea`.
+It binds the root digest, both profile digests, the protected review manifest,
+the platform-input receipt, the decision policy, each role decision, and the
+approved attempt semantics. It is not a fourth input to `DecodeBundle`.
+[SRC-08db62aad3d95d42]
 
-### Profile separation
+## Protected owner decisions
 
-The acceptance root owns approvals, profile references, the default rule,
-exactly eight scenario overrides, the variance rule, and capacity-method
-status. The workload profile owns the synthetic dataset plus separate write,
-point-read, scan, and mixed profiles. The topology profile owns the
-non-production RF=3 requirements. Separate digests preserve each owner's
-boundary while the root provides one bundle identity.
+The Code Forge records below are the authorization evidence. The checked-in
+publication record indexes them; it does not replace their protected storage.
 
-Profiles contain no credentials, bearer tokens, kubeconfigs, provider tokens,
-raw environments, or customer data. Provider inventory, fault hooks, live
-results, recurring cadence, and evidence retention remain outside schema 1.0.
+| Decision | Protected record |
+| --- | --- |
+| Review manifest | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/drafts/approval-review-plan-implementation--1--publish-material/4775c160088eb62e695f3da2dbe1cdc28855aeecb058427b59297f795ded07f6/manifest.json`, SHA-256 `706b59e4729641c03de05ac8b1d4db96e78630cccb560ecb123d2eced87c6740` |
+| Decision policy | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-decision-policy-v1.json` |
+| Product owner | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-product-owner-approval-v1.json` |
+| Database operator | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-database-operator-approval-v1.json` |
+| Platform owner | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-platform-owner-approval-v1.json` |
+| Platform literals | `codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/input-approval-plan-implementation--1--platform-d69b6f54ee47816284499670211f92456ef5e58c0a118cdf10a89313f89ccc14.json` |
 
-### RF3 microkernel mapping
+Each role decision names the contract ID, both profile IDs, both profile
+digests, the approver `github:432802 (@osvaldoandrade)`, and the approval
+timestamp. The publication record additionally binds every role decision to
+the final acceptance-root digest. Changing the root or either profile requires
+a new publication record and a new verification receipt.
 
-The core owns one `Bundle` aggregate containing `AcceptanceContractV1`,
-`WorkloadProfileV1`, and `TopologyProfileV1`. It constructs validated
-`ContractID`, `ProfileID`, `Digest`, `DurationMillis`, `RatePPM`, and
-`Provenance` values before the aggregate becomes observable.
+The platform-input record authorizes exactly
+`rf3q-zone-a`, `rf3q-zone-b`, and `rf3q-zone-c`, plus storage class
+`cefasdb-rf3-durable-rwo-v1`.
 
-| Microkernel role | Proposed RF3 element | Contract |
-| --- | --- | --- |
-| Core | `internal/core/rf3acceptance` | Filesystem-free typed values, schema 1.0 semantics, aggregate invariants, and zero partial output. |
-| Plug-in contract | `rf3acceptance.DecodeBundle(root, workload, topology Source) (Bundle, error)` | Consumes the three explicit sources and returns one complete immutable bundle or `Bundle{}` plus an error. |
-| Registry | `internal/contractbuild` RF3 acceptance registry | Opens only the explicitly supplied root, workload, and topology paths, preserves source identities and path errors, closes inputs, and delegates all semantics to `DecodeBundle`. |
-| Plug-ins | Acceptance root, workload profile, topology profile | Versioned checked-in data files; each implements the contract by conforming to schema 1.0 and the core invariants. |
-| Contract tests | RF3 schema, semantic, loader, property, and fuzz suite | Runs against every plug-in and proves version rejection, digest binding, failure isolation, and zero partial output. |
+## Attempt and error semantics
 
-These are data plug-ins in a bounded acceptance microkernel. They do not
-implement or extend `pkg/plugin.Plugin`. The existing runtime registry
-stores executable `Plugin` implementations registered by name and serves
-index, distance, estimator, and audience behavior.
-[SRC-be60138e3310e9d0] [SRC-63437f3b77f625c6]
-RF3 acceptance files need neither runtime registration nor executable
-dispatch.
+Schema 1.0 retains the encoded unit `requests` for
+`defaultRule.minimumAttempts`. For this accepted contract, the publication
+record defines that denominator as logical item operations:
 
-### Operation inventory
+- one attempted write item counts as one attempt, even when the runner sends
+  several items in one batch RPC;
+- one point read counts as one attempt;
+- a failed batch write charges every item in the batch as failed unless
+  per-item evidence proves a narrower failure set;
+- error ppm equals failed logical item operations divided by attempted logical
+  item operations, multiplied by 1,000,000.
 
-| Operation | Owner and sequence | Result and failure contract |
-| --- | --- | --- |
-| `DecodeBundle(root, workload, topology Source)` | The core reads each exact byte stream once; strictly decodes one document per source; verifies schema 1.0, IDs, root-to-profile paths and SHA-256 digests; constructs typed values; validates approvals, provenance, profiles, topology, and the exact eight scenarios. | Returns a complete `Bundle` only after every check passes. Nil input, read failure, malformed or trailing JSON, unknown field, unsupported version, digest mismatch, missing approval, invalid provenance, or invariant failure returns `Bundle{}` and an error. It performs no filesystem or network I/O beyond reading the supplied sources. |
-| Registry load | `internal/contractbuild` opens the three caller-selected files, attaches their stable identities, invokes `DecodeBundle`, and closes every opened file. It adds no semantic defaults and performs no directory discovery. | Preserves the failing path and underlying open or close error. It returns no partial bundle and performs no mutation. |
-| Schema feedback | Tooling compiles `schema-v1.json` and validates each authoring document before semantic decoding. | Schema success never overrides a core rejection; a schema/core disagreement fails verification. |
+The root requires 300,000 logical attempts in the 300,000 ms serving window.
+A consumer that only reports RPC attempts cannot evaluate this gate and must
+return an incomplete result. The source rationale and the publication record
+carry the same mapping, so the pre-approval review note no longer remains in
+the accepted root. [SRC-b7e8b815921c6624] [SRC-08db62aad3d95d42]
 
-### Compatibility policy
+## Fixed bundle boundary
 
-Readers initially accept schema 1.0 only and fail closed on unsupported
-versions, unknown fields, unknown enums, and missing required fields. They do
-not merge documents, select `latest`, or ignore data they do not understand.
+This design is a fixed three-source aggregate, not a dynamic microkernel. The
+core constructs concrete `AcceptanceContractV1`, `WorkloadProfileV1`, and
+`TopologyProfileV1` values. The caller supplies all three sources in one
+`DecodeBundle` call. Any missing, unreadable, malformed, unsupported, or
+inconsistent source rejects the entire aggregate; the design provides no
+independent source lifecycle or failure isolation. Adding a fourth role
+requires a contract version, decoder change, loader change, and tests.
 
-A future minor schema may add optional fields without changing existing
-meaning, but a reader accepts that minor version only after its code and
-contract tests declare support. Removing or renaming a field, making an
-optional field required, changing a type, unit, enum, digest rule, owner rule,
-or invariant requires a new major schema version. Any workload, topology,
-target, method, or approval change produces new profile bytes and a new
-acceptance-root version even when the schema version remains supported.
+The checked-in JSON documents are data inputs. They do not implement
+`pkg/plugin.Plugin`, register executable behavior, support directory
+discovery, or load shared objects.
 
-Published bytes are immutable. Errata use a new version; consumers never
-reinterpret an old result under a corrected file.
+## Component evidence
 
-### Explicit non-decision: no dynamic registry
+| Component | Accountable owner | Business responsibility | Source roots | Provides | Consumes | Owned data and reason to change |
+| --- | --- | --- | --- | --- | --- | --- |
+| RF3 acceptance contract data | Team CefasDB, from task `TASK-RF3-P1-APPROVAL` | Publish exact workload, topology, acceptance, and authorization bindings for downstream qualification | `contracts/rf3-acceptance` | Versioned JSON inputs and publication evidence | Protected Code Forge decision locators | Owns the checked-in contract bytes; this change removes the unresolved attempt mapping and binds the final root to approvals |
+| RF3 acceptance core | Team CefasDB, from the task owner; repository CODEOWNERS evidence was not inspected | Strictly decode and validate the three-source aggregate | `internal/core/rf3acceptance` | `DecodeBundle`, `Bundle`, typed contract values | Three immutable `Source` values | Owns semantic validation and exact-byte digest checks; this resolution does not change its fixed schema 1.0 API |
+| RF3 contractbuild adapter | Team CefasDB, from the task owner; repository CODEOWNERS evidence was not inspected | Load caller-selected files and verify published artifacts | `internal/contractbuild` | `LoadRF3AcceptanceFiles` and end-to-end contract tests | RF3 acceptance core and checked-in JSON | Owns filesystem error handling and publication verification; this change adds exact publication and decision-binding assertions |
+| RF3 contract ADR | Team CefasDB, from the task owner | Record the accepted boundary, authorization, semantics, verification gate, and rollback | `docs/adr/0009-rf3-qualification-acceptance-contract.md` | Decision record | Inspected source and protected record locators | Owns the decision narrative; this change removes contradictory proposed-state and microkernel claims |
 
-This change does not extend `pkg/plugin`, add `init` registration, scan a
-directory, load shared objects, select a plug-in by mutable name, or introduce
-a general dynamic registry. The contractbuild registry has exactly three
-caller-supplied file roles. A new role requires a new contract version and a
-recorded need, not a generic discovery mechanism.
+The captured architecture assessment is incomplete and reports no passed
+fitness result. This ADR does not convert its incomplete metrics into a quality
+claim.
+
+## Verification gate
+
+`TestLoadPublishedRF3AcceptanceBundle` loads the exact three semantic files
+and pins their digests. [SRC-39537e4be70c23c9]
+`TestRF3PublicationBindsProtectedDecisionsAndFinalBundle` strictly decodes
+the publication record, pins its digest, compares all bundle digests, checks
+the protected evidence locators, and enforces the logical-attempt mapping.
+[SRC-785addbca2c07085]
+
+The source definitions are not an execution receipt. The host must run
+`make test` against the final recorded source version and retain an exit-code
+0 receipt. A failed or missing host receipt blocks publication even when the
+test files exist. The repository's warn-only CI job does not replace this
+task-specific host gate.
+
+## Compatibility
+
+Readers accept schema 1.0 only and fail closed on unsupported versions,
+unknown fields, unknown enums, missing required fields, path mismatches, and
+digest mismatches. The publication record resolves the schema 1.0 attempt-unit
+label for this contract without changing the three-input decoder API.
+
+A future change to a field name, type, unit, enum, digest rule, owner rule, or
+invariant requires a new major schema version. Any workload, topology, target,
+method, approval, or publication binding change produces new bytes and a new
+root or publication version.
 
 ## Consequences
 
-- Later runs can bind every decision to exact root, workload, and topology
-  bytes and reject drift before mutation.
-- Owners can revise one profile without copying unrelated fields, but every
-  revision requires a new digest, root version, and approvals.
-- Formatting-only edits change identity. Authors must treat checked-in
-  contract bytes as published artifacts.
-- Strict readers reject unimplemented minor versions; this trades automatic
-  forward compatibility for explicit qualification semantics.
-- This ADR approves the boundary only. It does not approve numeric targets,
-  profile values, topology resources, a capacity gate, or RF3-P1 acceptance.
+- RF3-P2 and RF3-P4 can identify the exact authorized contract and protected
+  decisions without treating embedded approver strings as authorization.
+- Evaluators use one logical-operation denominator for batched writes and
+  point reads.
+- One invalid semantic input rejects the whole bundle; callers receive no
+  partial aggregate or isolated source recovery.
+- The accepted contract does not prove live availability, latency,
+  throughput, recovery, variance, capacity, or fault behavior.
+- Formatting-only edits change identity and require a new publication
+  binding.
 
 ## Alternatives considered
 
-1. One monolithic JSON file. Rejected because it merges product, database,
-   and platform ownership and prevents independent profile identity.
-2. JSON Schema as the only validator. Rejected because digest relationships,
-   approval timing, provenance, exact scenario membership, and zero partial
-   output require semantic validation.
-3. Current load-tool defaults as the approved workload. Rejected because
-   executable defaults are not owner decisions and omit scan, topology,
-   recovery, variance, and capacity contracts.
-4. `pkg/plugin` or a dynamic plug-in host. Rejected because the existing
-   registry dispatches executable runtime behavior, while RF3 inputs are
-   immutable data with exactly three known roles.
-5. A service or planning database. Rejected because checked-in files, code
-   review, strict validation, and content digests satisfy this single-writer
-   authoring boundary without a network or persistence dependency.
+1. Treat the three JSON files as independent plug-ins. Rejected because the
+   implementation has one fixed call, one aggregate, and no independent
+   lifecycle or failure boundary.
+2. Treat the embedded approver strings as authorization. Rejected because
+   canonical text and profile digest validation do not prove role authority.
+3. Count batch RPCs as attempts. Rejected because the approved denominator is
+   logical item operations and batching would change both the attempt floor and
+   error ppm.
+4. Change schema 1.0 and the core decoder in this resolution. Rejected because
+   this review step can edit only its recorded source files; the publication
+   record resolves the approved mapping without claiming a decoder API change.
+5. Use the warn-only CI test as the publication receipt. Rejected because a
+   continued test failure leaves the workflow green.
 
 ## Rollback
 
-Before any downstream run consumes an acceptance-root digest, rollback may
-revert the additive ADR, schema, profiles, core, registry, and tests.
+Before a downstream manifest consumes the acceptance-root digest, Team
+CefasDB may revert the root, publication record, tests, and this ADR.
 
-After any run, manifest, result, or release record consumes a digest, that
-version is immutable. Rollback may restore the last supported reader and stop
-new qualification runs, but it must retain the consumed bytes and their
-evidence. A correction or new target publishes a new schema/profile/root
-version for new runs; it never edits or re-labels the consumed version.
-
-## Source evidence
-
-- The existing semantic decoder returns no partial aggregate and separates
-  strict document decoding from aggregate validation.
-  [SRC-de2b78731714dde2] [SRC-6ac1702831b79eb7]
-- The existing filesystem adapter opens named inputs, delegates semantics,  closes inputs, and preserves path failures. [SRC-93538d64f389a8f3]
-- The compatibility schema is a closed draft-2020-12 feedback mirror, while
-  Go validation remains authoritative. [SRC-3cf0b81f580ab8c2]
-- The runtime plug-in registry stores executable implementations by manifest
-  name; its interfaces cover runtime behaviors rather than contract files.
-  [SRC-be60138e3310e9d0] [SRC-63437f3b77f625c6]
-- The resilience matrix defines eight scenarios and the one-domain versus
-  two-domain safety boundary without numeric service limits.
-  [SRC-07a4546899ec536a]
-- The load runner and report expose executable workload inputs and measured
-  request fields, not approved acceptance values.
-  [SRC-1be63d7f43fcea03] [SRC-2b616f55cdac4c46]
-  [SRC-edae006394a40450]
+After a run, result, or release record consumes a digest, Team CefasDB must
+retain those exact bytes. A correction publishes a new root and publication
+version for new runs; rollback may stop new qualification runs and restore the
+last supported reader, but it must not edit or relabel consumed artifacts.

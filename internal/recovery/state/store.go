@@ -2,17 +2,26 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+)
+
+const (
+	maxCanonicalJSONBytes = 1 << 20
+	maxCanonicalJSONDepth = 64
 )
 
 type StepStatus string
@@ -127,13 +136,16 @@ type RunStore interface {
 }
 
 var (
-	idPattern     = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._@/-]{0,191})$`)
-	digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	idPattern      = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._@/-]{0,191})$`)
+	scopeIDPattern = regexp.MustCompile(`^[a-z](?:[a-z0-9]|[-./@_][a-z0-9])*$`)
+	digestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 func validID(v string) bool {
 	return idPattern.MatchString(v) && v != "." && v != ".." && !strings.Contains(v, "..")
 }
+
+func validScopeID(v string) bool { return len(v) <= 192 && scopeIDPattern.MatchString(v) }
 
 func validTime(v time.Time) bool {
 	if v.IsZero() {
@@ -145,10 +157,12 @@ func validTime(v time.Time) bool {
 
 func clone(run RecoveryRun) RecoveryRun {
 	out := run
-	out.CreatedAt, out.UpdatedAt = run.CreatedAt.Round(0), run.UpdatedAt.Round(0)
-	out.StepStates = make(map[string]StepState, len(run.StepStates))
-	for k, v := range run.StepStates {
-		out.StepStates[k] = v
+	out.CreatedAt, out.UpdatedAt = run.CreatedAt.Round(0).UTC(), run.UpdatedAt.Round(0).UTC()
+	if run.StepStates != nil {
+		out.StepStates = make(map[string]StepState, len(run.StepStates))
+		for k, v := range run.StepStates {
+			out.StepStates[k] = v
+		}
 	}
 	return out
 }
@@ -157,7 +171,7 @@ func equal(a, b RecoveryRun) bool { return reflect.DeepEqual(clone(a), clone(b))
 func validate(run RecoveryRun) error {
 	bad := func(field string) error { return fail(CodeInvalidRun, "validate", field) }
 	switch {
-	case !validID(run.ScopeID):
+	case !validScopeID(run.ScopeID):
 		return bad("scopeId")
 	case !validID(run.RunID):
 		return bad("runId")
@@ -198,8 +212,100 @@ func validate(run RecoveryRun) error {
 	return nil
 }
 
+func scanJSONObject(decoder *json.Decoder, depth int) error {
+	keys := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return ErrInvalidRun
+		}
+		if _, duplicate := keys[key]; duplicate {
+			return ErrInvalidRun
+		}
+		keys[key] = struct{}{}
+		if err := scanJSONValue(decoder, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err := decoder.Token()
+	return err
+}
+
+func scanJSONArray(decoder *json.Decoder, depth int) error {
+	for decoder.More() {
+		if err := scanJSONValue(decoder, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err := decoder.Token()
+	return err
+}
+
+func scanJSONValue(decoder *json.Decoder, depth int) error {
+	if depth > maxCanonicalJSONDepth {
+		return ErrInvalidRun
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		return scanJSONObject(decoder, depth)
+	case '[':
+		return scanJSONArray(decoder, depth)
+	default:
+		return ErrInvalidRun
+	}
+}
+
+func canonicalJSON(raw []byte, operation string) ([]byte, string, error) {
+	if len(raw) == 0 || len(raw) > maxCanonicalJSONBytes || !utf8.Valid(raw) {
+		return nil, "", fail(CodeInvalidRun, operation, "$")
+	}
+	scanner := json.NewDecoder(bytes.NewReader(raw))
+	scanner.UseNumber()
+	if err := scanJSONValue(scanner, 0); err != nil {
+		return nil, "", &Error{Code: CodeInvalidRun, Operation: operation, Field: "$", Cause: err}
+	}
+	if _, err := scanner.Token(); !errors.Is(err, io.EOF) {
+		return nil, "", &Error{Code: CodeInvalidRun, Operation: operation, Field: "$", Cause: err}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, "", &Error{Code: CodeInvalidRun, Operation: operation, Field: "$", Cause: err}
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return nil, "", &Error{Code: CodeInvalidRun, Operation: operation, Field: "$", Cause: err}
+	}
+	canonical = append(canonical, '\n')
+	if len(canonical) > maxCanonicalJSONBytes {
+		return nil, "", fail(CodeInvalidRun, operation, "$")
+	}
+	sum := sha256.Sum256(canonical)
+	return canonical, "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// CanonicalPayload canonicalizes one JSON run payload and returns its SHA-256 identity.
+func CanonicalPayload(raw []byte) ([]byte, string, error) {
+	return canonicalJSON(raw, "CanonicalPayload")
+}
+
+// CanonicalRequest canonicalizes one JSON step request and returns its SHA-256 identity.
+func CanonicalRequest(raw []byte) ([]byte, string, error) {
+	return canonicalJSON(raw, "CanonicalRequest")
+}
+
 func validateAdvance(current, next RecoveryRun, expected uint64) error {
-	if next.Revision != expected+1 {
+	if current.Revision != expected || expected == ^uint64(0) || next.Revision != expected+1 {
 		return conflict(CodeRevisionConflict, "CompareAndSwap", current.Revision)
 	}
 	if next.ScopeID != current.ScopeID || next.RunID != current.RunID ||
@@ -297,8 +403,8 @@ func page(runs map[string]RecoveryRun, scope string, size int, token string, key
 		return RunPage{}, err
 	}
 	ids := make([]string, 0, len(runs))
-	for id := range runs {
-		if id > after {
+	for id, run := range runs {
+		if run.ScopeID == scope && run.RunID == id && id > after {
 			ids = append(ids, id)
 		}
 	}

@@ -26,9 +26,11 @@ func seal(tb testing.TB, record evidence.QualificationRecord) evidence.Qualifica
 func driver() storetest.Driver {
 	key := []byte("evidence-test-cursor-key")
 	return storetest.Driver{
-		Open: func(_ testing.TB, scope string) (evidence.EvidenceStore, func() evidence.EvidenceStore) {
-			store, reopen := newMemory(scope)
-			return store, reopen
+		New: func(_ testing.TB) storetest.ScopeOpener {
+			data := newMemoryBacking()
+			return func(scope string) (evidence.EvidenceStore, func() evidence.EvidenceStore) {
+				return openMemory(data, scope)
+			}
 		},
 		Seal:     seal,
 		FailNext: func(store evidence.EvidenceStore) { store.(*memoryStore).failPersistence() },
@@ -62,7 +64,10 @@ func TestCanonicalAndLimits(t *testing.T) {
 	record = storetest.SampleRecord("oversized", at)
 	record.Findings = make([]evidence.Finding, evidence.MaxFindings)
 	for i := range record.Findings {
-		record.Findings[i] = evidence.Finding{CheckID: "REC-01", Owner: "team-cefasdb", Reason: strings.Repeat("x", evidence.MaxFreeTextBytes), EvidenceRef: "finding"}
+		record.Findings[i] = evidence.Finding{
+			CheckID: "REC-01", Owner: "team-cefasdb", Reason: evidence.FindingReasonCheckFailed,
+			EvidenceRef: strings.Repeat("e", 4096),
+		}
 	}
 	record.SHA256 = firstDigest
 	store, _ := newMemory("scope-a")
@@ -71,8 +76,33 @@ func TestCanonicalAndLimits(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Code != evidence.CodeInvalidEvidence {
 		t.Fatalf("oversized error = %#v", err)
 	}
-	if strings.Contains(failure.Error(), strings.Repeat("x", 32)) {
+	if strings.Contains(failure.Error(), strings.Repeat("e", 32)) {
 		t.Fatal("error exposed rejected value")
+	}
+
+	unstructured := storetest.SampleRecord("unstructured-reason", at)
+	unstructured.Findings[0].Reason = "token: eyJhbGciOiJIUzI1NiJ9.abc.sig"
+	unstructured = seal(t, unstructured)
+	if _, err = store.PutTerminal(t.Context(), unstructured); !errors.Is(err, evidence.ErrEvidenceRedactionFailed) {
+		t.Fatalf("unstructured reason error = %v", err)
+	}
+
+	maxFindings := storetest.SampleRecord("max-findings", at)
+	maxFindings.Findings = make([]evidence.Finding, evidence.MaxFindings)
+	for i := range maxFindings.Findings {
+		maxFindings.Findings[i] = evidence.Finding{
+			CheckID: "REC-01", Owner: "team-cefasdb", Reason: evidence.FindingReasonCheckFailed, EvidenceRef: "finding",
+		}
+	}
+	maxFindings = seal(t, maxFindings)
+	if _, err = store.PutTerminal(t.Context(), maxFindings); err != nil {
+		t.Fatalf("1,000 findings were rejected: %v", err)
+	}
+
+	malformedHash := storetest.SampleRecord("malformed-hash", at)
+	malformedHash.SHA256 = string([]byte{0xff})
+	if _, _, _, err = evidence.PrepareRecord(malformedHash); !errors.Is(err, evidence.ErrEvidenceHashMismatch) {
+		t.Fatalf("malformed sha256 error = %v", err)
 	}
 }
 
@@ -82,6 +112,8 @@ func TestValidationAndErrors(t *testing.T) {
 	cases := []func(*evidence.QualificationRecord){
 		func(r *evidence.QualificationRecord) { r.SchemaVersion = 0 },
 		func(r *evidence.QualificationRecord) { r.ScopeID = "" },
+		func(r *evidence.QualificationRecord) { r.ScopeID = "Scope-A" },
+		func(r *evidence.QualificationRecord) { r.ScopeID = "scope//a" },
 		func(r *evidence.QualificationRecord) { r.RunID = "" },
 		func(r *evidence.QualificationRecord) { r.RunRevision = 0 },
 		func(r *evidence.QualificationRecord) { r.ContractRef.ID = "" },
@@ -92,6 +124,8 @@ func TestValidationAndErrors(t *testing.T) {
 		func(r *evidence.QualificationRecord) { r.ReconciliationReportRef = "" },
 		func(r *evidence.QualificationRecord) { r.UpgradeRunRef = "" },
 		func(r *evidence.QualificationRecord) { r.Status = "" },
+		func(r *evidence.QualificationRecord) { r.Status = evidence.StatusPass },
+		func(r *evidence.QualificationRecord) { r.Findings = nil },
 		func(r *evidence.QualificationRecord) { r.OperatorID = "" },
 		func(r *evidence.QualificationRecord) { r.RunbookRevision = "" },
 		func(r *evidence.QualificationRecord) { r.RunbookSHA256 = "" },
@@ -113,6 +147,19 @@ func TestValidationAndErrors(t *testing.T) {
 			t.Fatalf("case %d: %#v", i, err)
 		}
 	}
+	slashScope := storetest.SampleRecord("slash-scope", at)
+	slashScope.ScopeID = "scope/a"
+	slashScope = seal(t, slashScope)
+	if _, _, _, err := evidence.PrepareRecord(slashScope); err != nil {
+		t.Fatalf("canonical slash scope was rejected: %v", err)
+	}
+	passing := storetest.SampleRecord("passing", at)
+	passing.Status = evidence.StatusPass
+	passing.Findings = nil
+	passing = seal(t, passing)
+	if _, _, _, err := evidence.PrepareRecord(passing); err != nil {
+		t.Fatalf("PASS without findings was rejected: %v", err)
+	}
 	for _, candidate := range []bool{false, true} {
 		input := evidence.CopyRecord(base)
 		if candidate {
@@ -127,7 +174,7 @@ func TestValidationAndErrors(t *testing.T) {
 		}
 	}
 	input := evidence.CopyRecord(base)
-	input.Findings[0].Reason = string([]byte{0xff})
+	input.Findings[0].Reason = evidence.FindingReason(string([]byte{0xff}))
 	if _, _, err := evidence.CanonicalRecord(input); !errors.Is(err, evidence.ErrInvalidEvidence) {
 		t.Fatal("invalid UTF-8 was accepted")
 	}
@@ -141,6 +188,32 @@ func TestValidationAndErrors(t *testing.T) {
 	wrapped := &evidence.Error{Code: evidence.CodeInvalidEvidence, Operation: "test", Field: "field", Cause: errors.New("cause")}
 	if !evidence.IsCode(wrapped, evidence.CodeInvalidEvidence) || errors.Unwrap(wrapped) == nil || wrapped.Error() == "" {
 		t.Fatal("typed error contract failed")
+	}
+}
+
+func TestCopyAndPaginationScopeIsolation(t *testing.T) {
+	at := time.Date(2026, 11, 22, 3, 0, 0, 0, time.UTC)
+	withNilFindings := storetest.SampleRecord("nil-findings", at)
+	withNilFindings.Findings = nil
+	if copied := evidence.CopyRecord(withNilFindings); copied.Findings != nil {
+		t.Fatal("CopyRecord changed a nil findings slice")
+	}
+
+	allowed := seal(t, storetest.SampleRecord("allowed", at))
+	denied := seal(t, storetest.SampleRecord("denied", at))
+	denied.ScopeID = "scope-b"
+	page, err := evidence.Paginate(
+		map[string]evidence.QualificationRecord{allowed.RunID: allowed, denied.RunID: denied},
+		"scope-a",
+		100,
+		"",
+		[]byte("evidence-test-cursor-key"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].RunID != allowed.RunID {
+		t.Fatalf("scope-filtered page = %#v", page)
 	}
 }
 
@@ -163,7 +236,7 @@ func FuzzRedaction(f *testing.F) {
 	f.Add([]byte(`{"payload":{"id":1}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		record := storetest.SampleRecord("fuzz", time.Date(2026, 11, 22, 3, 0, 0, 0, time.UTC))
-		record.Findings[0].Reason = string(raw)
+		record.Findings[0].Reason = evidence.FindingReason(string(raw))
 		if _, digest, err := evidence.CanonicalRecord(record); err == nil {
 			record.SHA256 = digest
 		}

@@ -1,0 +1,101 @@
+{
+  "documentType": "rf3-topology-profile",
+  "schemaVersion": "1.0",
+  "profileId": "rf3.topology.three-node-standard.v1",
+  "publishedAt": "2026-11-22T08:21:40Z",
+  "environment": "non-production",
+  "nodeCount": {
+    "value": 3,
+    "unit": "nodes",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Proposed three-node RF3 baseline with anti-colocation and 24 shards."
+    }
+  },
+  "replicas": {
+    "value": 3,
+    "unit": "replicas",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Proposed three-node RF3 baseline with anti-colocation and 24 shards."
+    }
+  },
+  "replicationFactor": {
+    "value": 3,
+    "unit": "replicas",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Proposed three-node RF3 baseline with anti-colocation and 24 shards."
+    }
+  },
+  "shards": {
+    "value": 24,
+    "unit": "shards",
+    "provenance": {
+      "kind": "proposed-target",
+      "owner": "platform-owner",
+      "rationale": "Proposed three-node RF3 baseline with anti-colocation and 24 shards."
+    }
+  },
+  "failureDomains": [
+    "rf3q-zone-a",
+    "rf3q-zone-b",
+    "rf3q-zone-c"
+  ],
+  "antiColocation": true,
+  "volume": {
+    "durable": true,
+    "class": "cefasdb-rf3-durable-rwo-v1",
+    "accessMode": "read-write-once",
+    "size": {
+      "value": 80,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Reserve 80 GiB on a durable RWO volume and budget 20 GiB outside it."
+      }
+    }
+  },
+  "resourcesPerNode": {
+    "cpu": {
+      "value": 4,
+      "unit": "cores",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Proposed per-node baseline. Platform owner validates capacity and placement."
+      }
+    },
+    "memory": {
+      "value": 16,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Proposed per-node baseline. Platform owner validates capacity and placement."
+      }
+    },
+    "storage": {
+      "value": 100,
+      "unit": "gibibytes",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Proposed per-node baseline. Platform owner validates capacity and placement."
+      }
+    },
+    "network": {
+      "value": 1000,
+      "unit": "megabits-per-second",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "platform-owner",
+        "rationale": "Proposed per-node baseline. Platform owner validates capacity and placement."
+      }
+    }
+  }
+}

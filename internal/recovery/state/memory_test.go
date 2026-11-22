@@ -8,6 +8,7 @@ import (
 )
 
 type memoryBacking struct {
+	// mu protects runs for every handle sharing this backing.
 	mu   sync.Mutex
 	runs map[string]state.RecoveryRun
 	key  []byte
@@ -17,11 +18,21 @@ type memoryStore struct {
 	data  *memoryBacking
 }
 
-func newMemory(scope string) (*memoryStore, func() state.RunStore) {
-	data := &memoryBacking{runs: map[string]state.RecoveryRun{}, key: []byte("state-test-cursor-key")}
+func newMemoryBacking() *memoryBacking {
+	return &memoryBacking{runs: map[string]state.RecoveryRun{}, key: []byte("state-test-cursor-key")}
+}
+
+func openMemory(data *memoryBacking, scope string) (*memoryStore, func() state.RunStore) {
 	open := func() state.RunStore { return &memoryStore{scope: scope, data: data} }
 	return open().(*memoryStore), open
 }
+
+func newMemory(scope string) (*memoryStore, func() state.RunStore) {
+	return openMemory(newMemoryBacking(), scope)
+}
+
+func memoryKey(scope, runID string) string { return scope + "\x00" + runID }
+
 func (s *memoryStore) Durable() bool { return false }
 func (s *memoryStore) allowed(scope, op string) error {
 	if scope != s.scope {
@@ -49,13 +60,14 @@ func (s *memoryStore) Create(ctx context.Context, run state.RecoveryRun) (state.
 	if err := ctx.Err(); err != nil {
 		return state.RecoveryRun{}, err
 	}
-	if old, ok := s.data.runs[run.RunID]; ok {
+	key := memoryKey(run.ScopeID, run.RunID)
+	if old, ok := s.data.runs[key]; ok {
 		if old.PayloadSHA256 != run.PayloadSHA256 {
 			return state.RecoveryRun{}, &state.Error{Code: state.CodeRunPayloadConflict, Operation: "Create", Revision: old.Revision}
 		}
 		return state.CopyRun(old), nil
 	}
-	s.data.runs[run.RunID] = run
+	s.data.runs[key] = run
 	return state.CopyRun(run), nil
 }
 
@@ -68,7 +80,10 @@ func (s *memoryStore) Get(ctx context.Context, scope, runID string) (state.Recov
 	}
 	s.data.mu.Lock()
 	defer s.data.mu.Unlock()
-	run, ok := s.data.runs[runID]
+	if err := ctx.Err(); err != nil {
+		return state.RecoveryRun{}, err
+	}
+	run, ok := s.data.runs[memoryKey(scope, runID)]
 	if !ok {
 		return state.RecoveryRun{}, &state.Error{Code: state.CodeRunNotFound, Operation: "Get", Field: "runId"}
 	}
@@ -79,6 +94,11 @@ func (s *memoryStore) CompareAndSwap(ctx context.Context, scope, runID string, e
 	if err := s.allowed(scope, "CompareAndSwap"); err != nil {
 		return state.RecoveryRun{}, err
 	}
+	if next.ScopeID != "" {
+		if err := s.allowed(next.ScopeID, "CompareAndSwap"); err != nil {
+			return state.RecoveryRun{}, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return state.RecoveryRun{}, err
 	}
@@ -87,7 +107,8 @@ func (s *memoryStore) CompareAndSwap(ctx context.Context, scope, runID string, e
 	if err := ctx.Err(); err != nil {
 		return state.RecoveryRun{}, err
 	}
-	current, ok := s.data.runs[runID]
+	key := memoryKey(scope, runID)
+	current, ok := s.data.runs[key]
 	if !ok {
 		return state.RecoveryRun{}, &state.Error{Code: state.CodeRunNotFound, Operation: "CompareAndSwap", Field: "runId"}
 	}
@@ -100,7 +121,7 @@ func (s *memoryStore) CompareAndSwap(ctx context.Context, scope, runID string, e
 	if err := state.ValidateAdvance(current, next, expected); err != nil {
 		return state.RecoveryRun{}, err
 	}
-	s.data.runs[runID] = state.CopyRun(next)
+	s.data.runs[key] = state.CopyRun(next)
 	return state.CopyRun(next), nil
 }
 
@@ -116,5 +137,11 @@ func (s *memoryStore) List(ctx context.Context, scope string, size int, token st
 	if err := ctx.Err(); err != nil {
 		return state.RunPage{}, err
 	}
-	return state.Paginate(s.data.runs, scope, size, token, s.data.key)
+	runs := make(map[string]state.RecoveryRun, len(s.data.runs))
+	for _, run := range s.data.runs {
+		if run.ScopeID == scope {
+			runs[run.RunID] = state.CopyRun(run)
+		}
+	}
+	return state.Paginate(runs, scope, size, token, s.data.key)
 }

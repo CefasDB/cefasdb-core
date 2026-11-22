@@ -1,0 +1,346 @@
+{
+  "documentType": "rf3-workload-profile",
+  "schemaVersion": "1.0",
+  "profileId": "rf3.workload.synthetic-mixed-one-kops.v1",
+  "publishedAt": "2026-11-22T08:21:40Z",
+  "dataClass": "synthetic",
+  "dataset": {
+    "tableNameTemplate": "rf3_acceptance_%s",
+    "itemCount": {
+      "value": 1000000,
+      "unit": "items",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "database-operator",
+        "rationale": "Seed one million synthetic items across 24 shards."
+      }
+    },
+    "keyspace": {
+      "value": 1000000,
+      "unit": "keys",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Exercise one distinct key per seeded item."
+      }
+    },
+    "users": {
+      "value": 100000,
+      "unit": "users",
+      "provenance": {
+        "kind": "proposed-target",
+        "owner": "product-owner",
+        "rationale": "Distribute the synthetic items across 100,000 users."
+      }
+    },
+    "payload": {
+      "mode": "repeat",
+      "bytes": {
+        "value": 256,
+        "unit": "bytes",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Keep repeat payloads fixed at 256 bytes for comparability."
+        }
+      }
+    }
+  },
+  "profiles": [
+    {
+      "name": "write",
+      "phaseOrder": {
+        "value": 1,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review phaseOrder against runner evidence."
+        }
+      },
+      "operations": {
+        "value": 1000000,
+        "unit": "operations",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review operations against runner evidence."
+        }
+      },
+      "duration": {
+        "value": 1000000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review duration against runner evidence."
+        }
+      },
+      "rate": {
+        "value": 1000,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review rate against runner evidence."
+        }
+      },
+      "workers": {
+        "value": 32,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review workers against runner evidence."
+        }
+      },
+      "batchSize": {
+        "value": 100,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review batchSize against runner evidence."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review rpcTimeout against runner evidence."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 10,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Seed the synthetic dataset at the selected target rate. Review latencySampleEvery against runner evidence."
+        }
+      }
+    },
+    {
+      "name": "point-read",
+      "phaseOrder": {
+        "value": 2,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize bounded strong point reads. Review phaseOrder against runner evidence."
+        }
+      },
+      "operations": {
+        "value": 600000,
+        "unit": "operations",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Characterize bounded strong point reads. Review operations against runner evidence."
+        }
+      },
+      "duration": {
+        "value": 600000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Characterize bounded strong point reads. Review duration against runner evidence."
+        }
+      },
+      "rate": {
+        "value": 1000,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Characterize bounded strong point reads. Review rate against runner evidence."
+        }
+      },
+      "workers": {
+        "value": 64,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize bounded strong point reads. Review workers against runner evidence."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize bounded strong point reads. Review rpcTimeout against runner evidence."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 10,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize bounded strong point reads. Review latencySampleEvery against runner evidence."
+        }
+      }
+    },
+    {
+      "name": "scan",
+      "phaseOrder": {
+        "value": 3,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize stream completion and response limits. Review phaseOrder against runner evidence."
+        }
+      },
+      "duration": {
+        "value": 600000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Characterize stream completion and response limits. Review duration against runner evidence."
+        }
+      },
+      "rate": {
+        "value": 10,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Characterize stream completion and response limits. Review rate against runner evidence."
+        }
+      },
+      "workers": {
+        "value": 8,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize stream completion and response limits. Review workers against runner evidence."
+        }
+      },
+      "limit": {
+        "value": 1000,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize stream completion and response limits. Review limit against runner evidence."
+        }
+      },
+      "consistency": "eventual",
+      "rpcTimeout": {
+        "value": 30000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize stream completion and response limits. Review rpcTimeout against runner evidence."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Characterize stream completion and response limits. Review latencySampleEvery against runner evidence."
+        }
+      }
+    },
+    {
+      "name": "mixed",
+      "phaseOrder": {
+        "value": 4,
+        "unit": "ordinal",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review phaseOrder against runner evidence."
+        }
+      },
+      "duration": {
+        "value": 600000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review duration against runner evidence."
+        }
+      },
+      "writeRate": {
+        "value": 250,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review writeRate against runner evidence."
+        }
+      },
+      "readRate": {
+        "value": 750,
+        "unit": "operations-per-second",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "product-owner",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review readRate against runner evidence."
+        }
+      },
+      "writeWorkers": {
+        "value": 16,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review writeWorkers against runner evidence."
+        }
+      },
+      "readWorkers": {
+        "value": 48,
+        "unit": "workers",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review readWorkers against runner evidence."
+        }
+      },
+      "batchSize": {
+        "value": 100,
+        "unit": "items",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review batchSize against runner evidence."
+        }
+      },
+      "consistency": "strong",
+      "rpcTimeout": {
+        "value": 5000,
+        "unit": "milliseconds",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review rpcTimeout against runner evidence."
+        }
+      },
+      "latencySampleEvery": {
+        "value": 1,
+        "unit": "requests-per-sample",
+        "provenance": {
+          "kind": "proposed-target",
+          "owner": "database-operator",
+          "rationale": "Exercise the fixed 25/75 mixed workload. Review latencySampleEvery against runner evidence."
+        }
+      }
+    }
+  ]
+}

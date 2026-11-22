@@ -1,0 +1,85 @@
+{
+  "documentType": "rf3-acceptance-publication",
+  "schemaVersion": "1.0",
+  "contractId": "rf3.acceptance.rf3-p1.v1",
+  "bundle": {
+    "root": {
+      "path": "v1.json",
+      "digest": "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853"
+    },
+    "workload": {
+      "path": "workload-v1.json",
+      "profileId": "rf3.workload.synthetic-mixed-one-kops.v1",
+      "digest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66"
+    },
+    "topology": {
+      "path": "topology-v1.json",
+      "profileId": "rf3.topology.three-node-standard.v1",
+      "digest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+    }
+  },
+  "review": {
+    "manifest": {
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/drafts/approval-review-plan-implementation--1--publish-material/4775c160088eb62e695f3da2dbe1cdc28855aeecb058427b59297f795ded07f6/manifest.json",
+      "digest": "sha256:706b59e4729641c03de05ac8b1d4db96e78630cccb560ecb123d2eced87c6740"
+    },
+    "decisionPolicy": {
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-decision-policy-v1.json"
+    }
+  },
+  "platformInputs": {
+    "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/input-approval-plan-implementation--1--platform-d69b6f54ee47816284499670211f92456ef5e58c0a118cdf10a89313f89ccc14.json",
+    "failureDomains": [
+      "rf3q-zone-a",
+      "rf3q-zone-b",
+      "rf3q-zone-c"
+    ],
+    "storageClass": "cefasdb-rf3-durable-rwo-v1"
+  },
+  "attemptSemantics": {
+    "rootField": "defaultRule.minimumAttempts",
+    "encodedUnit": "requests",
+    "denominator": "logical-item-operations",
+    "writeAttempt": "one logical item submitted in a batch write",
+    "pointReadAttempt": "one logical point read",
+    "failedBatch": "charge every item in a failed batch unless per-item evidence proves otherwise"
+  },
+  "approvals": [
+    {
+      "role": "product-owner",
+      "approver": "github:432802 (@osvaldoandrade)",
+      "approvedAt": "2026-11-22T16:09:32.817Z",
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-product-owner-approval-v1.json",
+      "contractId": "rf3.acceptance.rf3-p1.v1",
+      "rootDigest": "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853",
+      "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
+      "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
+      "topologyProfileId": "rf3.topology.three-node-standard.v1",
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+    },
+    {
+      "role": "database-operator",
+      "approver": "github:432802 (@osvaldoandrade)",
+      "approvedAt": "2026-11-22T16:09:32.817Z",
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-database-operator-approval-v1.json",
+      "contractId": "rf3.acceptance.rf3-p1.v1",
+      "rootDigest": "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853",
+      "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
+      "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
+      "topologyProfileId": "rf3.topology.three-node-standard.v1",
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+    },
+    {
+      "role": "platform-owner",
+      "approver": "github:432802 (@osvaldoandrade)",
+      "approvedAt": "2026-11-22T16:09:32.817Z",
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-platform-owner-approval-v1.json",
+      "contractId": "rf3.acceptance.rf3-p1.v1",
+      "rootDigest": "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853",
+      "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
+      "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
+      "topologyProfileId": "rf3.topology.three-node-standard.v1",
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+    }
+  ]
+}
