@@ -3,6 +3,9 @@ package mmr_test
 import (
 	"math"
 	"math/rand"
+	"os"
+	"os/exec"
+	"runtime/debug"
 	"strconv"
 	"testing"
 	"time"
@@ -172,6 +175,21 @@ func TestRerankValidatesParameters(t *testing.T) {
 	}
 }
 
+func instrumentedLatencyBuild() bool {
+	if testing.CoverMode() != "" {
+		return true
+	}
+	info, ok := debug.ReadBuildInfo()
+	if ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "-race" && setting.Value == "true" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // TestRerankLatencyUnder1ms confirms the AC: a 1k-candidate set
 // re-ranked to a slate of 10 finishes well under 1 ms on a single
 // node. We allocate the inputs outside the timed region.
@@ -211,6 +229,23 @@ func TestRerankLatencyUnder1ms(t *testing.T) {
 		t.Fatalf("rerank: %v", err)
 	}
 	elapsed := time.Since(start)
+	// Run the complete workload with instrumentation, then measure the latency
+	// limit in the optimized build used for serving queries.
+	if instrumentedLatencyBuild() {
+		const probe = "CEFASDB_MMR_LATENCY_PROBE"
+		if os.Getenv(probe) == "1" {
+			t.Fatal("latency probe was still instrumented")
+		}
+		cmd := exec.CommandContext(t.Context(), "go", "test", "-race=false", "-cover=false", "-count=1", "-v", "-run=^"+t.Name()+"$", ".")
+		cmd.Env = append(cmd.Environ(), probe+"=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("optimized latency check failed: %v\n%s", err, out)
+		}
+		t.Logf("optimized latency check:\n%s", out)
+		return
+	}
+	t.Logf("reranked %d candidates to %d results in %s", count, slate, elapsed)
 	// 5 ms is the documented headroom in CI; the AC target on a
 	// single dev node is "sub-millisecond" and local runs come in
 	// around ~250 µs. The looser bound here keeps shared CI green
