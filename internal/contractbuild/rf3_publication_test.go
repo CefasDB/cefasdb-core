@@ -1,223 +1,288 @@
 package contractbuild
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/CefasDb/cefasdb/internal/core/rf3acceptance"
+	"github.com/CefasDb/cefasdb/internal/core/rf3environment"
 )
 
-type rf3PublicationArtifact struct {
-	Path      string
-	ProfileID string
-	Digest    string
+type rf3EvidenceVerifier struct {
+	remaining map[string][]byte
 }
 
-type rf3PublicationApproval struct {
-	Role              string
-	Approver          string
-	ApprovedAt        string
-	Evidence          string
-	ContractID        string
-	RootDigest        string
-	WorkloadProfileID string
-	WorkloadDigest    string
-	TopologyProfileID string
-	TopologyDigest    string
+func (verifier *rf3EvidenceVerifier) VerifyRF3ProtectedEvidence(
+	_ context.Context,
+	evidence RF3ProtectedEvidence,
+) ([]byte, error) {
+	document, ok := verifier.remaining[evidence.Locator]
+	if !ok {
+		return nil, fmt.Errorf("unexpected protected evidence %q", evidence.Locator)
+	}
+	delete(verifier.remaining, evidence.Locator)
+	return append([]byte(nil), document...), nil
 }
 
-type rf3PublicationDocument struct {
-	DocumentType  string
-	SchemaVersion string
-	ContractID    string
-	Bundle        struct {
-		Root     rf3PublicationArtifact
-		Workload rf3PublicationArtifact
-		Topology rf3PublicationArtifact
+func (verifier *rf3EvidenceVerifier) assertComplete(t testing.TB) {
+	t.Helper()
+	if len(verifier.remaining) != 0 {
+		t.Fatalf("unverified protected evidence = %v", verifier.remaining)
 	}
-	Review struct {
-		Manifest struct {
-			Evidence string
-			Digest   string
-		}
-		DecisionPolicy struct {
-			Evidence string
-		}
-	}
-	PlatformInputs struct {
-		Evidence       string
-		FailureDomains []string
-		StorageClass   string
-	}
-	AttemptSemantics struct {
-		RootField        string
-		EncodedUnit      string
-		Denominator      string
-		WriteAttempt     string
-		PointReadAttempt string
-		FailedBatch      string
-	}
-	Approvals []rf3PublicationApproval
+}
+
+type rf3EvidenceVerifierFunc func(
+	context.Context,
+	RF3ProtectedEvidence,
+) ([]byte, error)
+
+func (verify rf3EvidenceVerifierFunc) VerifyRF3ProtectedEvidence(
+	ctx context.Context,
+	evidence RF3ProtectedEvidence,
+) ([]byte, error) {
+	return verify(ctx, evidence)
 }
 
 func TestRF3PublicationBindsProtectedDecisionsAndFinalBundle(t *testing.T) {
 	t.Parallel()
 
-	directory := filepath.Join("..", "..", "contracts", "rf3-acceptance")
-	publication, publicationDigest := readRF3Publication(
-		t,
-		filepath.Join(directory, "publication-v1.json"),
-	)
-	const expectedPublicationDigest = "sha256:e2b1c429f2cd2031de2bed134cf962c3e3d2b3d3502c281fa1b623cc6fde2fea"
-	if publicationDigest != expectedPublicationDigest {
-		t.Fatalf("publication digest = %q, want %q", publicationDigest, expectedPublicationDigest)
-	}
-
-	bundle, err := LoadRF3AcceptanceFiles(
-		context.Background(),
-		filepath.Join(directory, "v1.json"),
-		filepath.Join(directory, "workload-v1.json"),
-		filepath.Join(directory, "topology-v1.json"),
-	)
+	files := publishedRF3Files()
+	verifier := publishedRF3EvidenceVerifier()
+	got, err := LoadRF3PublishedAcceptanceFiles(context.Background(), files, verifier)
 	if err != nil {
-		t.Fatalf("LoadRF3AcceptanceFiles() unexpected error: %v", err)
+		t.Fatalf("LoadRF3PublishedAcceptanceFiles() unexpected error: %v", err)
 	}
-
-	assertRF3PublicationIdentity(t, publication, bundle)
-	assertRF3PublicationReview(t, publication)
-	assertRF3PublicationAttemptSemantics(t, publication, bundle)
-	assertRF3PublicationApprovals(t, publication)
+	verifier.assertComplete(t)
+	assertPublishedRF3Contract(t, got)
 }
 
-func readRF3Publication(t *testing.T, path string) (rf3PublicationDocument, string) {
-	t.Helper()
+func TestLoadRF3PublishedAcceptanceFilesRequiresVerifiedEvidence(t *testing.T) {
+	t.Parallel()
 
-	data, err := os.ReadFile(path)
+	files := publishedRF3Files()
+	tests := []struct {
+		name     string
+		verifier RF3ProtectedEvidenceVerifier
+		wantErr  error
+	}{
+		{
+			name: "missing verifier",
+		},
+		{
+			name: "failed protected lookup",
+			verifier: rf3EvidenceVerifierFunc(func(
+				context.Context,
+				RF3ProtectedEvidence,
+			) ([]byte, error) {
+				return nil, errors.New("synthetic protected lookup failure")
+			}),
+			wantErr: errors.New("synthetic protected lookup failure"),
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			got, err := LoadRF3PublishedAcceptanceFiles(
+				context.Background(),
+				files,
+				test.verifier,
+			)
+			if err == nil || !reflect.DeepEqual(got, RF3PublishedAcceptanceV1{}) {
+				t.Fatalf("published acceptance = %#v, %v; want zero plus error", got, err)
+			}
+			if test.wantErr != nil && !strings.Contains(err.Error(), test.wantErr.Error()) {
+				t.Fatalf("error = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadRF3PublishedAcceptanceFilesRejectsPublicationDrift(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "..", "contracts", "rf3-acceptance", "publication-v1.json")
+	publication, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read publication: %v", err)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var publication rf3PublicationDocument
-	if err := decoder.Decode(&publication); err != nil {
-		t.Fatalf("decode publication: %v", err)
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "decision digest",
+			old:  "sha256:57c2e3335faa142886f36e66d11422dfae7606bd47db6b661ae4843976ba3049",
+			new:  "sha256:07c2e3335faa142886f36e66d11422dfae7606bd47db6b661ae4843976ba3049",
+		},
+		{
+			name: "authority pointer",
+			old:  `"authorityPointer": "/authorityRecord"`,
+			new:  `"authorityPointer": "/wrongAuthorityRecord"`,
+		},
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("decode publication trailing data: %v", err)
-	}
-	sum := sha256.Sum256(data)
-	return publication, "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func assertRF3PublicationIdentity(
-	t *testing.T,
-	publication rf3PublicationDocument,
-	bundle rf3acceptance.Bundle,
-) {
-	t.Helper()
-
-	if publication.DocumentType != "rf3-acceptance-publication" ||
-		publication.SchemaVersion != "1.0" ||
-		publication.ContractID != bundle.Acceptance().ID().String() {
-		t.Fatalf("publication identity is invalid: %#v", publication)
-	}
-	if publication.Bundle.Root.Path != "v1.json" ||
-		publication.Bundle.Root.ProfileID != "" ||
-		publication.Bundle.Root.Digest != bundle.AcceptanceDigest().String() {
-		t.Fatalf("root binding is invalid: %#v", publication.Bundle.Root)
-	}
-	if publication.Bundle.Workload.Path != "workload-v1.json" ||
-		publication.Bundle.Workload.ProfileID != bundle.Workload().ID().String() ||
-		publication.Bundle.Workload.Digest != bundle.WorkloadDigest().String() {
-		t.Fatalf("workload binding is invalid: %#v", publication.Bundle.Workload)
-	}
-	if publication.Bundle.Topology.Path != "topology-v1.json" ||
-		publication.Bundle.Topology.ProfileID != bundle.Topology().ID().String() ||
-		publication.Bundle.Topology.Digest != bundle.TopologyDigest().String() {
-		t.Fatalf("topology binding is invalid: %#v", publication.Bundle.Topology)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			tampered := strings.Replace(string(publication), test.old, test.new, 1)
+			files := copyPublishedRF3Files(t, []byte(tampered))
+			got, err := LoadRF3PublishedAcceptanceFiles(
+				context.Background(),
+				files,
+				publishedRF3EvidenceVerifier(),
+			)
+			if err == nil || !reflect.DeepEqual(got, RF3PublishedAcceptanceV1{}) {
+				t.Fatalf("published acceptance = %#v, %v; want zero plus error", got, err)
+			}
+		})
 	}
 }
 
-func assertRF3PublicationReview(t *testing.T, publication rf3PublicationDocument) {
-	t.Helper()
+func TestLoadAuthorizedRF3EnvironmentFiles(t *testing.T) {
+	t.Parallel()
 
-	const runPrefix = "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/"
-	const manifestPath = runPrefix +
-		"drafts/approval-review-plan-implementation--1--publish-material/" +
-		"4775c160088eb62e695f3da2dbe1cdc28855aeecb058427b59297f795ded07f6/manifest.json"
-	if publication.Review.Manifest.Evidence != manifestPath ||
-		publication.Review.Manifest.Digest !=
-			"sha256:706b59e4729641c03de05ac8b1d4db96e78630cccb560ecb123d2eced87c6740" {
-		t.Fatalf("review manifest binding is invalid: %#v", publication.Review.Manifest)
+	corpus := readRF3Corpus(t)
+	manifest := readRF3EnvironmentFixture(t, "valid", "v1", "manifest.json")
+	directory := t.TempDir()
+	rootPath := writeRF3File(t, directory, rf3RootName, corpus.root)
+	workloadPath := writeRF3File(t, directory, rf3WorkloadName, corpus.workload)
+	topologyPath := writeRF3File(t, directory, rf3TopologyName, corpus.topology)
+	manifestPath := writeRF3File(t, directory, rf3EnvironmentManifestName, manifest)
+	publicationPath, verifier := writeSyntheticRF3Publication(
+		t,
+		directory,
+		rootPath,
+		workloadPath,
+		topologyPath,
+	)
+
+	got, err := LoadAuthorizedRF3EnvironmentFiles(
+		context.Background(),
+		RF3AuthorizedEnvironmentFiles{
+			Published: RF3PublishedFiles{
+				RootPath:        rootPath,
+				WorkloadPath:    workloadPath,
+				TopologyPath:    topologyPath,
+				PublicationPath: publicationPath,
+			},
+			ManifestPath: manifestPath,
+		},
+		verifier,
+	)
+	if err != nil {
+		t.Fatalf("LoadAuthorizedRF3EnvironmentFiles() unexpected error: %v", err)
 	}
-	if publication.Review.DecisionPolicy.Evidence !=
-		runPrefix+"decisions/rf3-p1-decision-policy-v1.json" {
-		t.Fatalf("decision policy evidence = %q", publication.Review.DecisionPolicy.Evidence)
-	}
-	const platformEvidence = runPrefix +
-		"decisions/input-approval-plan-implementation--1--platform-" +
-		"d69b6f54ee47816284499670211f92456ef5e58c0a118cdf10a89313f89ccc14.json"
-	wantDomains := []string{"rf3q-zone-a", "rf3q-zone-b", "rf3q-zone-c"}
-	if publication.PlatformInputs.Evidence != platformEvidence ||
-		!reflect.DeepEqual(publication.PlatformInputs.FailureDomains, wantDomains) ||
-		publication.PlatformInputs.StorageClass != "cefasdb-rf3-durable-rwo-v1" {
-		t.Fatalf("platform inputs are invalid: %#v", publication.PlatformInputs)
+	verifier.assertComplete(t)
+	if reflect.DeepEqual(got, RF3AuthorizedEnvironmentV1{}) ||
+		reflect.DeepEqual(got.Environment, rf3environment.EnvironmentContractV1{}) ||
+		reflect.DeepEqual(got.Published.Bundle, rf3acceptance.Bundle{}) {
+		t.Fatalf("authorized environment is incomplete: %#v", got)
 	}
 }
 
-func assertRF3PublicationAttemptSemantics(
-	t *testing.T,
-	publication rf3PublicationDocument,
-	bundle rf3acceptance.Bundle,
-) {
+func assertPublishedRF3Contract(t testing.TB, got RF3PublishedAcceptanceV1) {
 	t.Helper()
-
-	semantics := publication.AttemptSemantics
-	if bundle.Acceptance().DefaultRule().MinimumAttempts() != 300000 ||
-		semantics.RootField != "defaultRule.minimumAttempts" ||
-		semantics.EncodedUnit != "requests" ||
-		semantics.Denominator != "logical-item-operations" ||
-		semantics.WriteAttempt != "one logical item submitted in a batch write" ||
-		semantics.PointReadAttempt != "one logical point read" ||
-		semantics.FailedBatch !=
-			"charge every item in a failed batch unless per-item evidence proves otherwise" {
-		t.Fatalf("attempt semantics are invalid: %#v", semantics)
+	const publicationDigest = "sha256:c0e288f375f710e09125a85544f0461aa4069da37ae598a7c5feb6b8c3439498"
+	if got.Publication.Digest != publicationDigest {
+		t.Fatalf("publication digest = %q, want %q", got.Publication.Digest, publicationDigest)
+	}
+	attempts := got.Publication.AttemptSemantics
+	if attempts.Denominator != rf3AttemptDenominator ||
+		attempts.WriteAttempt != rf3AttemptWrite ||
+		attempts.PointReadAttempt != rf3AttemptPointRead ||
+		attempts.FailedBatch != rf3AttemptFailedBatch {
+		t.Fatalf("attempt semantics = %#v", attempts)
+	}
+	if got.Workload.Dataset.ItemCount.Value != 1_000_000 ||
+		got.Workload.Dataset.Payload.Bytes.Value != 256 ||
+		len(got.Workload.Profiles) != 4 {
+		t.Fatalf("workload projection is incomplete: %#v", got.Workload)
+	}
+	mixed := got.Workload.Profiles[3]
+	if mixed.WriteRate == nil || mixed.WriteRate.Value != 250 ||
+		mixed.ReadRate == nil || mixed.ReadRate.Value != 750 ||
+		mixed.BatchSize == nil || mixed.BatchSize.Value != 100 {
+		t.Fatalf("mixed workload projection is incomplete: %#v", mixed)
+	}
+	variance := got.Acceptance.Variance
+	if variance.MinimumRuns.Value != 3 ||
+		variance.Tolerance.Value != 100_000 ||
+		!reflect.DeepEqual(variance.Metrics, []string{"throughput", "p99", "recovery"}) ||
+		variance.Formula != "ceil((max-min)/median*1000000)" ||
+		!reflect.DeepEqual(
+			variance.IncompleteWhen,
+			[]string{"missing-or-incomparable-set", "zero-median"},
+		) {
+		t.Fatalf("variance projection is incomplete: %#v", variance)
+	}
+	capacity := got.Acceptance.CapacityMethod
+	if capacity.Headroom.Value != 300_000 ||
+		capacity.AcceptedPeak != 1_000 ||
+		capacity.FirstProbe != 3_000 ||
+		capacity.MaximumFloorRoundedMidpoints != 7 ||
+		capacity.HeadroomFormula != "1-(acceptedPeak/safeCapacity)" ||
+		capacity.RequiredRoundedSafeCapacity != 1_429 ||
+		capacity.PassRule != "tested-passing-low-gte-1429" ||
+		capacity.IncompleteWhen == "" {
+		t.Fatalf("capacity projection is incomplete: %#v", capacity)
+	}
+	if got.Authorization.DecisionPolicy.PolicyID != rf3DecisionPolicyID ||
+		len(got.Authorization.Approvals) != 3 ||
+		len(got.Acceptance.Approvals) != 3 {
+		t.Fatalf("authorization projection is incomplete: %#v", got.Authorization)
+	}
+	if got.Acceptance.References.Workload.Digest != got.Bundle.WorkloadDigest().String() ||
+		got.Acceptance.References.Topology.Digest != got.Bundle.TopologyDigest().String() {
+		t.Fatalf("profile references do not match decoded bundle")
 	}
 }
 
-func assertRF3PublicationApprovals(t *testing.T, publication rf3PublicationDocument) {
-	t.Helper()
-	const runPrefix = "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/"
-	const rootDigest = "sha256:10004b1885b3cbbe5d75cd9431d48449d5d6305d72c925448aba13ed9ab09853"
-	const workloadDigest = "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66"
-	const topologyDigest = "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
-	roles := []string{"product-owner", "database-operator", "platform-owner"}
-	if len(publication.Approvals) != len(roles) {
-		t.Fatalf("approval count = %d, want %d", len(publication.Approvals), len(roles))
+func publishedRF3Files() RF3PublishedFiles {
+	directory := filepath.Join("..", "..", "contracts", "rf3-acceptance")
+	return RF3PublishedFiles{
+		RootPath:        filepath.Join(directory, "v1.json"),
+		WorkloadPath:    filepath.Join(directory, "workload-v1.json"),
+		TopologyPath:    filepath.Join(directory, "topology-v1.json"),
+		PublicationPath: filepath.Join(directory, "publication-v1.json"),
 	}
-	for index, role := range roles {
-		approval := publication.Approvals[index]
-		if approval.Role != role ||
-			approval.Approver != "github:432802 (@osvaldoandrade)" ||
-			approval.ApprovedAt != "2026-11-22T16:09:32.817Z" ||
-			approval.Evidence != runPrefix+"decisions/rf3-p1-"+role+"-approval-v1.json" ||
-			approval.ContractID != publication.ContractID ||
-			approval.RootDigest != rootDigest ||
-			approval.WorkloadProfileID != "rf3.workload.synthetic-mixed-one-kops.v1" ||
-			approval.WorkloadDigest != workloadDigest ||
-			approval.TopologyProfileID != "rf3.topology.three-node-standard.v1" ||
-			approval.TopologyDigest != topologyDigest {
-			t.Fatalf("approval[%d] is invalid: %#v", index, approval)
+}
+
+func publishedRF3EvidenceVerifier() *rf3EvidenceVerifier {
+	return &rf3EvidenceVerifier{
+		remaining: publishedRF3ProtectedDocuments(),
+	}
+}
+func copyPublishedRF3Files(t testing.TB, publication []byte) RF3PublishedFiles {
+	t.Helper()
+	source := publishedRF3Files()
+	directory := t.TempDir()
+	files := RF3PublishedFiles{
+		RootPath:        filepath.Join(directory, "v1.json"),
+		WorkloadPath:    filepath.Join(directory, "workload-v1.json"),
+		TopologyPath:    filepath.Join(directory, "topology-v1.json"),
+		PublicationPath: filepath.Join(directory, "publication-v1.json"),
+	}
+	for _, pair := range [][2]string{
+		{source.RootPath, files.RootPath},
+		{source.WorkloadPath, files.WorkloadPath},
+		{source.TopologyPath, files.TopologyPath},
+	} {
+		data, err := os.ReadFile(pair[0])
+		if err != nil {
+			t.Fatalf("read %s: %v", pair[0], err)
+		}
+		if err := os.WriteFile(pair[1], data, 0o600); err != nil {
+			t.Fatalf("write %s: %v", pair[1], err)
 		}
 	}
+	if err := os.WriteFile(files.PublicationPath, publication, 0o600); err != nil {
+		t.Fatalf("write publication: %v", err)
+	}
+	return files
 }

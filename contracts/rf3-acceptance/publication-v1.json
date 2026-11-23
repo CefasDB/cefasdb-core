@@ -24,7 +24,9 @@
       "digest": "sha256:706b59e4729641c03de05ac8b1d4db96e78630cccb560ecb123d2eced87c6740"
     },
     "decisionPolicy": {
-      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-decision-policy-v1.json"
+      "evidence": "codetask/automations/runs/RUN-e345cdf3-13d3-432e-8912-1f37f742825d/decisions/rf3-p1-decision-policy-v1.json",
+      "policyId": "rf3.decision-policy.rf3-p1.v1",
+      "digest": "sha256:57c2e3335faa142886f36e66d11422dfae7606bd47db6b661ae4843976ba3049"
     }
   },
   "platformInputs": {
@@ -34,7 +36,8 @@
       "rf3q-zone-b",
       "rf3q-zone-c"
     ],
-    "storageClass": "cefasdb-rf3-durable-rwo-v1"
+    "storageClass": "cefasdb-rf3-durable-rwo-v1",
+    "digest": "sha256:1a345953d6c7be8adca1b74a45868094188e3dde2a92e19eabb4c6f91a4ce082"
   },
   "attemptSemantics": {
     "rootField": "defaultRule.minimumAttempts",
@@ -55,7 +58,10 @@
       "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
       "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
       "topologyProfileId": "rf3.topology.three-node-standard.v1",
-      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78",
+      "digest": "sha256:4db83b1bb7d39f4ead7179b5b366ae97689b16f91366d3f1bcb84a82593d13ea",
+      "authorityPointer": "/authorityRecord",
+      "authorityDigest": "sha256:5a017b0a1ff25b7f54d96d55ec416d9347de8051a3e1e738ea4b782caf0f1475"
     },
     {
       "role": "database-operator",
@@ -67,7 +73,10 @@
       "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
       "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
       "topologyProfileId": "rf3.topology.three-node-standard.v1",
-      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78",
+      "digest": "sha256:607cd0d98105adb0c4a2cef8fa16bd8e7aa84e613d48cace44ac3eab983d862f",
+      "authorityPointer": "/authorityRecord",
+      "authorityDigest": "sha256:64fcdea372ec661c056132374bb13feeed4a8787a414f336d8e57f87a245eda3"
     },
     {
       "role": "platform-owner",
@@ -79,7 +88,10 @@
       "workloadProfileId": "rf3.workload.synthetic-mixed-one-kops.v1",
       "workloadDigest": "sha256:d5bba0f8c03acc85b7190a15386acaba42167d6f42825b46f0847b198a9e3d66",
       "topologyProfileId": "rf3.topology.three-node-standard.v1",
-      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78"
+      "topologyDigest": "sha256:33628e501c43019dce38209a37ca42c8cde9e56c90e23af955e2878f49e33b78",
+      "digest": "sha256:01ab42ec93219ef2bfbea0798ed5e7cbdc28bf4c5b98b0e8fee34f8cbb4b02ab",
+      "authorityPointer": "/authorityRecord",
+      "authorityDigest": "sha256:b989ff11bd44aa3230af7b361c07ab9a8b3391e88db12e1c13f9a8313eca8395"
     }
   ]
 }
