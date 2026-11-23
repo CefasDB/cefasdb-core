@@ -3,19 +3,23 @@ package client_test
 import (
 	"context"
 	"net"
+	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/CefasDb/cefasdb/internal/server"
 	"github.com/CefasDb/cefasdb/internal/catalog"
 	"github.com/CefasDb/cefasdb/internal/metrics"
+	"github.com/CefasDb/cefasdb/internal/server"
 	pebble "github.com/CefasDb/cefasdb/internal/storage/adapter/pebble"
-	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/client"
+	cefaspb "github.com/CefasDb/cefasdb/pkg/protocol"
 	"github.com/CefasDb/cefasdb/pkg/types"
 )
 
@@ -72,6 +76,88 @@ func newFixture(t *testing.T) (*client.Client, *fixture) {
 	return c, f
 }
 
+type lsiMutation func([]*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor
+
+type lsiResponseStage uint8
+
+const (
+	createLSIResponse lsiResponseStage = iota
+	describeLSIResponse
+)
+
+type incompleteLSIServer struct {
+	cefaspb.UnimplementedCefasServer
+	mu           sync.Mutex
+	descriptor   *cefaspb.TableDescriptor
+	mutateStage  lsiResponseStage
+	mutateLSIs   lsiMutation
+	putItemCalls atomic.Int64
+}
+
+func (s *incompleteLSIServer) CreateTable(
+	_ context.Context,
+	req *cefaspb.CreateTableRequest,
+) (*cefaspb.CreateTableResponse, error) {
+	s.mu.Lock()
+	s.descriptor = req.GetDescriptor_()
+	s.mu.Unlock()
+	return &cefaspb.CreateTableResponse{Descriptor_: s.returnedDescriptor(createLSIResponse)}, nil
+}
+
+func (s *incompleteLSIServer) DescribeTable(
+	context.Context,
+	*cefaspb.DescribeTableRequest,
+) (*cefaspb.DescribeTableResponse, error) {
+	return &cefaspb.DescribeTableResponse{Descriptor_: s.returnedDescriptor(describeLSIResponse)}, nil
+}
+
+func (s *incompleteLSIServer) returnedDescriptor(stage lsiResponseStage) *cefaspb.TableDescriptor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.descriptor == nil {
+		return nil
+	}
+	returned := proto.Clone(s.descriptor).(*cefaspb.TableDescriptor)
+	if s.mutateLSIs != nil && s.mutateStage == stage {
+		returned.Lsis = s.mutateLSIs(returned.GetLsis())
+	}
+	return returned
+}
+
+func (s *incompleteLSIServer) PutItem(
+	context.Context,
+	*cefaspb.PutItemRequest,
+) (*cefaspb.PutItemResponse, error) {
+	s.putItemCalls.Add(1)
+	return &cefaspb.PutItemResponse{}, nil
+}
+
+func newClientForServer(t *testing.T, apiSrv cefaspb.CefasServer) *client.Client {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	gsrv := grpc.NewServer()
+	cefaspb.RegisterCefasServer(gsrv, apiSrv)
+	go func() { _ = gsrv.Serve(ln) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := client.Dial(ctx, ln.Addr().String(), client.WithPlaintext())
+	if err != nil {
+		gsrv.Stop()
+		_ = ln.Close()
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = c.Close()
+		gsrv.GracefulStop()
+		_ = ln.Close()
+	})
+	return c
+}
+
 func sAttr(s string) types.AttributeValue { return types.AttributeValue{T: types.AttrS, S: s} }
 func nAttr(n string) types.AttributeValue { return types.AttributeValue{T: types.AttrN, N: n} }
 
@@ -122,6 +208,151 @@ func TestSDKCreateTableAndPutGet(t *testing.T) {
 	}
 	if missing != nil {
 		t.Fatalf("expected nil for missing, got %+v", missing)
+	}
+}
+
+func TestSDKTableDescriptorLSIRoundTrip(t *testing.T) {
+	c, _ := newFixture(t)
+	ctx := context.Background()
+	wantLSIs := recoveryLSIDescriptors()
+
+	created, err := c.CreateTableWithRequiredLSIs(ctx, types.TableDescriptor{
+		Name:      "recovery_lsi_transport",
+		KeySchema: types.KeySchema{PK: "tenant_id", SK: "created_at"},
+		LSIs:      wantLSIs,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	assertLSIDescriptors(t, created.LSIs, wantLSIs)
+
+	described, err := c.DescribeTable(ctx, "recovery_lsi_transport")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	assertLSIDescriptors(t, described.LSIs, wantLSIs)
+}
+
+type lsiMutationCase struct {
+	name   string
+	mutate lsiMutation
+}
+
+func TestSDKCreateTableWithRequiredLSIsStopsBeforeRowWrite(t *testing.T) {
+	stages := []struct {
+		name  string
+		stage lsiResponseStage
+	}{
+		{name: "create response", stage: createLSIResponse},
+		{name: "describe response", stage: describeLSIResponse},
+	}
+	for _, stage := range stages {
+		stage := stage
+		t.Run(stage.name, func(t *testing.T) {
+			for _, mutation := range requiredLSIMutations() {
+				mutation := mutation
+				t.Run(mutation.name, func(t *testing.T) {
+					assertRequiredLSIMutationRejected(t, stage.stage, mutation.mutate)
+				})
+			}
+		})
+	}
+}
+
+func requiredLSIMutations() []lsiMutationCase {
+	return []lsiMutationCase{
+		{name: "omits required lsi", mutate: omitLastLSI},
+		{name: "reorders required lsis", mutate: reorderLSIs},
+		{name: "changes lsi name", mutate: changeLSIName},
+		{name: "changes lsi sort key", mutate: changeLSISortKey},
+		{name: "changes projection mode", mutate: changeLSIProjectionMode},
+		{name: "changes projection include list", mutate: changeLSIProjectionInclude},
+	}
+}
+
+func omitLastLSI(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	return lsis[:len(lsis)-1]
+}
+
+func reorderLSIs(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	lsis[0], lsis[1] = lsis[1], lsis[0]
+	return lsis
+}
+
+func changeLSIName(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	lsis[0].Name = "changed_name"
+	return lsis
+}
+
+func changeLSISortKey(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	lsis[0].Sk = "changed_sort_key"
+	return lsis
+}
+
+func changeLSIProjectionMode(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	lsis[0].Projection.Mode = "ALL"
+	return lsis
+}
+
+func changeLSIProjectionInclude(lsis []*cefaspb.LSIDescriptor) []*cefaspb.LSIDescriptor {
+	lsis[0].Projection.Include = []string{"display_name"}
+	return lsis
+}
+
+func assertRequiredLSIMutationRejected(t *testing.T, stage lsiResponseStage, mutate lsiMutation) {
+	t.Helper()
+	apiSrv := &incompleteLSIServer{mutateStage: stage, mutateLSIs: mutate}
+	c := newClientForServer(t, apiSrv)
+	ctx := context.Background()
+
+	_, err := c.CreateTableWithRequiredLSIs(ctx, types.TableDescriptor{
+		Name:      "recovery_lsi_transport",
+		KeySchema: types.KeySchema{PK: "tenant_id", SK: "created_at"},
+		LSIs:      recoveryLSIDescriptors(),
+	})
+	if err == nil {
+		putErr := c.PutItem(ctx, "recovery_lsi_transport", types.Item{
+			"tenant_id":  sAttr("tenant-1"),
+			"created_at": nAttr("1"),
+		})
+		if putErr != nil {
+			t.Fatalf("put after successful create: %v", putErr)
+		}
+	}
+	if got := apiSrv.putItemCalls.Load(); got != 0 {
+		t.Fatalf("PutItem calls = %d, want 0", got)
+	}
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("status = %v, want FailedPrecondition; err = %v", status.Code(err), err)
+	}
+}
+
+func recoveryLSIDescriptors() []types.LSIDescriptor {
+	return []types.LSIDescriptor{
+		{
+			Name:       "users_by_email_v1",
+			SK:         "email",
+			Projection: types.IndexProjection{Mode: "INCLUDE", Include: nil},
+		},
+		{
+			Name:       "events_by_expiry_v1",
+			SK:         "expires_at",
+			Projection: types.IndexProjection{Mode: "KEYS_ONLY", Include: []string{}},
+		},
+	}
+}
+
+func assertLSIDescriptors(t *testing.T, got, want []types.LSIDescriptor) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("LSI count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].Name != want[i].Name || got[i].SK != want[i].SK ||
+			got[i].Projection.Mode != want[i].Projection.Mode ||
+			!slices.Equal(got[i].Projection.Include, want[i].Projection.Include) {
+			t.Fatalf("LSI %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 

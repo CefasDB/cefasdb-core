@@ -732,6 +732,7 @@ message GSIDescriptor {
   string             name        = 1;
   KeySchema          key_schema  = 2;
   repeated string    projected   = 3;
+  IndexProjection    projection  = 4;
 }
 
 message NumRange {
@@ -777,6 +778,7 @@ message TableDescriptor {
   string                          stream_status          = 11;
   repeated TextIndexDescriptor     text_indexes           = 12;
   string                          ttl_attribute          = 13;
+  repeated LSIDescriptor          lsis                   = 14;
 }
 
 // ---------- schema rpcs ----------
@@ -1640,4 +1642,15 @@ message AtomicUpdateResponse {
 message TextIndexDescriptor {
   string name = 1;
   string field = 2;
+}
+
+message IndexProjection {
+  string          mode    = 1;
+  repeated string include = 2;
+}
+
+message LSIDescriptor {
+  string          name       = 1;
+  string          sk         = 2;
+  IndexProjection projection = 3;
 }
