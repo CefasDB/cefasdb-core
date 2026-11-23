@@ -114,6 +114,26 @@ func itemFromPB(in map[string]*cefaspb.AttributeValue) types.Item {
 	return out
 }
 
+func indexProjectionToPB(projection types.IndexProjection) *cefaspb.IndexProjection {
+	if projection.Mode == "" && len(projection.Include) == 0 {
+		return nil
+	}
+	return &cefaspb.IndexProjection{
+		Mode:    projection.Mode,
+		Include: append([]string(nil), projection.Include...),
+	}
+}
+
+func indexProjectionFromPB(projection *cefaspb.IndexProjection) types.IndexProjection {
+	if projection == nil {
+		return types.IndexProjection{}
+	}
+	return types.IndexProjection{
+		Mode:    projection.GetMode(),
+		Include: append([]string(nil), projection.GetInclude()...),
+	}
+}
+
 func tdToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 	out := &cefaspb.TableDescriptor{
 		Name:                 td.Name,
@@ -133,9 +153,17 @@ func tdToPB(td types.TableDescriptor) *cefaspb.TableDescriptor {
 	}
 	for _, g := range td.GSIs {
 		out.Gsis = append(out.Gsis, &cefaspb.GSIDescriptor{
-			Name:      g.Name,
-			KeySchema: &cefaspb.KeySchema{Pk: g.KeySchema.PK, Sk: g.KeySchema.SK},
-			Projected: append([]string(nil), g.Projected...),
+			Name:       g.Name,
+			KeySchema:  &cefaspb.KeySchema{Pk: g.KeySchema.PK, Sk: g.KeySchema.SK},
+			Projected:  append([]string(nil), g.Projected...),
+			Projection: indexProjectionToPB(g.Projection),
+		})
+	}
+	for _, l := range td.LSIs {
+		out.Lsis = append(out.Lsis, &cefaspb.LSIDescriptor{
+			Name:       l.Name,
+			Sk:         l.SK,
+			Projection: indexProjectionToPB(l.Projection),
 		})
 	}
 	for _, s := range td.SpatialIndexes {
@@ -186,11 +214,22 @@ func tdFromPB(pb *cefaspb.TableDescriptor) types.TableDescriptor {
 		out.KeySchema = types.KeySchema{PK: ks.GetPk(), SK: ks.GetSk()}
 	}
 	for _, g := range pb.GetGsis() {
-		gd := types.GSIDescriptor{Name: g.GetName(), Projected: append([]string(nil), g.GetProjected()...)}
+		gd := types.GSIDescriptor{
+			Name:       g.GetName(),
+			Projected:  append([]string(nil), g.GetProjected()...),
+			Projection: indexProjectionFromPB(g.GetProjection()),
+		}
 		if gk := g.GetKeySchema(); gk != nil {
 			gd.KeySchema = types.KeySchema{PK: gk.GetPk(), SK: gk.GetSk()}
 		}
 		out.GSIs = append(out.GSIs, gd)
+	}
+	for _, l := range pb.GetLsis() {
+		out.LSIs = append(out.LSIs, types.LSIDescriptor{
+			Name:       l.GetName(),
+			SK:         l.GetSk(),
+			Projection: indexProjectionFromPB(l.GetProjection()),
+		})
 	}
 	for _, s := range pb.GetSpatialIndexes() {
 		sd := types.SpatialIndexDescriptor{
